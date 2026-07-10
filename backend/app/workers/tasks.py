@@ -259,6 +259,25 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
                     (encode({"review_score": score, "review_issues": review_issues, "rewrite_exhausted": True}), cid),
                 )
 
+        # M2: Extended review — OOC, consistency, rhythm
+        if task_type in ("review_7dim", "gen_chapter1") and cid:
+            chapter_body = context.get("body", "")
+            if not chapter_body:
+                chapter_body = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
+                chapter_body = str(chapter_body["body"]) if chapter_body else ""
+            if chapter_body:
+                for dim, dim_name in [("review.ooc", "OOC"), ("review.consistency", "一致性"), ("review.rhythm", "节奏")]:
+                    try:
+                        dim_out = complete(run_id=run_id, node_key=None, project_id=project_id,
+                                          task_type=f"review_{dim_name}", prompt_name=dim,
+                                          variables={"body": chapter_body[:3000]})
+                        db.execute(
+                            "UPDATE contents SET meta = meta || %s WHERE id = %s",
+                            (encode({f"review_{dim}_score": dim_out.get("ooc_count", dim_out.get("pacing_score", 0))}), cid),
+                        )
+                    except Exception:
+                        pass  # Non-critical — skip extended dimensions on failure
+
     db.execute(
         "UPDATE run_nodes SET status = 'succeeded', output = %s, finished_at = now() WHERE run_id = %s AND node_key = %s",
         (encode(output), run_id, node_key),
