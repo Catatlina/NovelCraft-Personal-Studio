@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -26,6 +26,10 @@ from .schemas import (
 from .workers.tasks import confirm_human, create_run
 from .api.v1.auth import router as auth_router
 from .api.v1.config import router as config_router
+from .core.logging_config import setup_logging, get_logger
+
+setup_logging()
+logger = get_logger(__name__)
 
 app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
 app.include_router(auth_router)
@@ -76,15 +80,18 @@ def healthz() -> ApiResponse:
 
 
 @app.get("/api/v1/projects")
-def list_projects() -> ApiResponse:
+def list_projects(user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
-    rows = [dict(row) for row in conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()]
+    rows = [dict(row) for row in conn.execute(
+        "SELECT p.* FROM projects p JOIN project_members pm ON p.id = pm.project_id WHERE pm.user_id = %s ORDER BY p.created_at DESC",
+        (user["id"],),
+    ).fetchall()]
     conn.close()
     return ok(rows)
 
 
 @app.post("/api/v1/projects/{project_id}/novels")
-def create_novel(project_id: str, payload: NovelCreate) -> ApiResponse:
+def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
     project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
     if project is None:
@@ -111,17 +118,27 @@ def create_novel(project_id: str, payload: NovelCreate) -> ApiResponse:
 
 
 @app.get("/api/v1/contents")
-def list_contents(project_id: str = Query(...), parent_id: str | None = None) -> ApiResponse:
+def list_contents(project_id: str = Query(...), parent_id: str | None = None,
+                  limit: int = Query(50, le=200), offset: int = Query(0, ge=0),
+                  user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
+    # Verify project membership
+    member = conn.execute(
+        "SELECT 1 FROM project_members WHERE project_id = %s AND user_id = %s",
+        (project_id, user["id"]),
+    ).fetchone()
+    if not member:
+        conn.close()
+        raise HTTPException(status_code=403, detail="not a project member")
     if parent_id is None:
         rows = conn.execute(
-            "SELECT * FROM contents WHERE project_id = %s AND parent_id IS NULL ORDER BY created_at DESC",
-            (project_id,),
-        ).fetchall()
+            "SELECT * FROM contents WHERE project_id = %s AND parent_id IS NULL ORDER BY created_at DESC LIMIT %s OFFSET %s",
+            (project_id, limit, offset),
+    ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM contents WHERE project_id = %s AND parent_id = %s ORDER BY created_at ASC",
-            (project_id, parent_id),
+            "SELECT * FROM contents WHERE project_id = %s AND parent_id = %s ORDER BY created_at ASC LIMIT %s OFFSET %s",
+            (project_id, parent_id, limit, offset),
         ).fetchall()
     items = [parse_content(dict(row)) for row in rows]
     conn.close()
@@ -201,7 +218,7 @@ async def expand_outline(novel_id: str) -> ApiResponse:
 
 
 @app.post("/api/v1/projects/{project_id}/short-stories")
-async def create_short_story(project_id: str) -> ApiResponse:
+async def create_short_story(project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Create and bootstrap a short story."""
     conn = connect()
     project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
