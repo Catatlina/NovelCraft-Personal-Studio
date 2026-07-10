@@ -22,7 +22,7 @@ from .schemas import (
     NovelCreate,
     VersionRestore,
 )
-from .workflow import EVENT_LOGS, confirm_human, create_run, emit, run_until_human_or_done, schedule_run
+from .workers.tasks import confirm_human, create_run
 from .api.v1.auth import router as auth_router
 
 app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
@@ -145,14 +145,13 @@ def update_content(content_id: str, payload: ContentUpdate) -> ApiResponse:
 
 
 @app.post("/api/v1/novels/{novel_id}/bootstrap")
-async def bootstrap_novel(novel_id: str, background_tasks: BackgroundTasks) -> ApiResponse:
+async def bootstrap_novel(novel_id: str) -> ApiResponse:
     conn = connect()
     novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone())
     conn.close()
     if novel is None:
         raise HTTPException(status_code=404, detail="novel not found")
     run_id = create_run(novel["project_id"], novel_id)
-    background_tasks.add_task(run_until_human_or_done, run_id, "n1")
     return ok({"run_id": run_id})
 
 
@@ -175,14 +174,8 @@ def get_run(run_id: str) -> ApiResponse:
 @app.get("/api/v1/runs/{run_id}/events")
 async def run_events(run_id: str):
     async def event_stream():
-        last = 0
+        import asyncio
         while True:
-            events = EVENT_LOGS.get(run_id, [])
-            for item in events[last:]:
-                last = item["id"]
-                yield f"event: {item['event']}\nid: {item['id']}\ndata: {encode(item['data'])}\n\n"
-            if events and events[-1]["event"] == "run_done":
-                break
             yield ": heartbeat\n\n"
             await asyncio.sleep(1)
 
@@ -190,14 +183,13 @@ async def run_events(run_id: str):
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/n2/confirm")
-async def confirm_title(run_id: str, payload: HumanConfirm, background_tasks: BackgroundTasks) -> ApiResponse:
+async def confirm_title(run_id: str, payload: HumanConfirm) -> ApiResponse:
     confirm_human(run_id, payload.selected_title)
-    background_tasks.add_task(run_until_human_or_done, run_id, "n3")
     return ok({"run_id": run_id, "selected_title": payload.selected_title})
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/{node_key}/retry")
-async def retry_node(run_id: str, node_key: str, background_tasks: BackgroundTasks) -> ApiResponse:
+async def retry_node(run_id: str, node_key: str) -> ApiResponse:
     conn = connect()
     conn.execute(
         "UPDATE run_nodes SET status = 'pending', output = '{}', error = NULL WHERE run_id = %s AND node_key = %s",
@@ -209,8 +201,8 @@ async def retry_node(run_id: str, node_key: str, background_tasks: BackgroundTas
     )
     conn.commit()
     conn.close()
-    emit(run_id, "node_started", {"node_key": node_key})
-    background_tasks.add_task(run_until_human_or_done, run_id, node_key)
+    from .workers.tasks import execute_bootstrap
+    execute_bootstrap.delay(run_id, node_key)
     return ok({"run_id": run_id, "node_key": node_key})
 
 
