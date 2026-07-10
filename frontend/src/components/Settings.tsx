@@ -14,10 +14,21 @@ export function Settings() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [settings, setAppSettings] = useState<AppSetting[]>([]);
   const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"data">("appsettings");
+  const [apiKey, setApiKeyLocal] = useState("");
+  const [apiUrl, setApiUrlLocal] = useState("");
+  const [model, setModelLocal] = useState("");
+  const [saved, setSaved] = useState(true);
   const [editRoute, setEditRoute] = useState<ModelRoute|null>(null);
   const [editBudget, setEditBudget] = useState<{pid:string;scope:string;limit:number}|null>(null);
   const [editSetting, setEditSetting] = useState<{key:string;value:string;description:string}|null>(null);
   const [msg, setMsg] = useState("");
+
+  // Load saved API config on mount
+  useEffect(() => {
+    import("../lib/api").then(({ getApiKey, getApiUrl, getModel }) => {
+      setApiKeyLocal(getApiKey()); setApiUrlLocal(getApiUrl()); setModelLocal(getModel());
+    });
+  }, []);
 
   useEffect(() => {
     fetch("/api/v1/admin/providers").then(r=>r.json()).then(d=>setProviders(d.data||[]));
@@ -40,10 +51,29 @@ export function Settings() {
 
   async function saveBudget() {
     if (!editBudget) return;
-    await fetch(`/api/v1/admin/budgets/${editBudget.pid}/${editBudget.scope}?limit_cny=${editBudget.limit}`, {method:"PUT"});
-    setMsg("预算已更新"); setEditBudget(null);
-    const r = await fetch("/api/v1/admin/budgets").then(r=>r.json());
-    setBudgets(r.data||[]);
+    const r = await fetch(`/api/v1/admin/budgets?project_id=${editBudget.pid}`);
+    const resp = await r.json();
+    const budgets = resp.data || [];
+    
+    if (budgets.length > 0) {
+      await fetch(`/api/v1/admin/budgets/${budgets[0].id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: editBudget.scope, limit_cny: editBudget.limit })
+      });
+    } else {
+      await fetch("/api/v1/admin/budgets", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: editBudget.pid, scope: editBudget.scope, limit_cny: editBudget.limit })
+      });
+    }
+    setEditBudget(null);
+  }
+
+  async function saveApiConfig() {
+    const { setApiKey, setApiUrl, setModel } = await import("../lib/api");
+    setApiKey(apiKey); setApiUrl(apiUrl); setModel(model);
+    setSaved(true);
+    setMsg("API 配置已保存");
   }
 
   async function saveSetting() {
@@ -73,17 +103,22 @@ export function Settings() {
           <div>
             <h3>全局系统配置</h3>
             <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-              <input placeholder="DeepSeek API Key"
-                onChange={async e => { const { setApiKey } = await import("../lib/api"); setApiKey(e.target.value); }}
+              <input placeholder="DeepSeek API Key" value={apiKey}
+                onChange={e => { setApiKeyLocal(e.target.value); setSaved(false); }}
                 style={{flex:1}} />
             </div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <input placeholder="API 地址，例 https://api.deepseek.com/v1"
-                onChange={async e => { const { setApiUrl } = await import("../lib/api"); setApiUrl(e.target.value); }}
+              <input placeholder="API 地址，例 https://api.deepseek.com/v1" value={apiUrl}
+                onChange={e => { setApiUrlLocal(e.target.value); setSaved(false); }}
                 style={{flex:1,fontSize:13}} />
-              <input placeholder="模型名，例 deepseek-chat"
-                onChange={async e => { const { setModel } = await import("../lib/api"); setModel(e.target.value); }}
+              <input placeholder="模型名，例 deepseek-chat" value={model}
+                onChange={e => { setModelLocal(e.target.value); setSaved(false); }}
                 style={{flex:1,fontSize:13}} />
+            </div>
+            <div style={{marginBottom:12}}>
+              <button className="primary" onClick={saveApiConfig} disabled={saved} style={{justifyContent:"center"}}>
+                {saved ? "✅ 已保存" : "💾 保存 API 配置"}
+              </button>
             </div>
             <table><thead><tr><th>配置项</th><th>值</th><th>说明</th><th>操作</th></tr></thead>
             <tbody>
