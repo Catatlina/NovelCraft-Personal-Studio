@@ -25,8 +25,10 @@ def translate_chapter(chapter_text: str, target_lang: str = "en") -> dict:
     try:
         from app.gateway import complete
         from app.db import connect
-        row = connect().execute("SELECT id FROM projects LIMIT 1").fetchone()
+        db = connect()
+        row = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
         pid = row["id"] if row else ""
+        db.close()
 
         # Step 1: Segment and translate
         translated = complete(

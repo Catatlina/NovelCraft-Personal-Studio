@@ -34,6 +34,7 @@ services:
     environment:
       DATABASE_URL: postgresql://novelcraft:novelcraft@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,6 +51,7 @@ services:
     environment:
       DATABASE_URL: postgresql://novelcraft:novelcraft@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
