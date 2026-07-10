@@ -8,7 +8,7 @@
 | 阶段 | 完成度 | 说明 |
 |---|---|---|
 | M1 地基+MVP | ~78% | +golden cases 8 MVP prompts(≥3) +DAG保存 |
-| M2 小说引擎 | ~58% | +workflow CRUD +DAG保存 |
+| M2 小说引擎 | ~60% | +distributed lock +auto-rewrite(≤2轮) |
 | M3 内容工作室 | ~25% | 后端骨架，热点是 LLM 幻觉 |
 | M4 发布出海 | ~15% | 发布网关只写 DB |
 | M5 协作多端 | ~15% | +PWA sw.js +移动端CSS +登出按钮 |
