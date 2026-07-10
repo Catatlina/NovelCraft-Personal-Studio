@@ -28,6 +28,7 @@ from .api.v1.auth import router as auth_router
 from .api.v1.config import router as config_router
 from .api.v1.short_story import router as short_story_router
 from .api.v1.dag_exec import router as dag_exec_router
+from .api.v1.knowledge import router as knowledge_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -45,6 +46,7 @@ app.include_router(auth_router)
 app.include_router(config_router)
 app.include_router(short_story_router)
 app.include_router(dag_exec_router)
+app.include_router(knowledge_router)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
