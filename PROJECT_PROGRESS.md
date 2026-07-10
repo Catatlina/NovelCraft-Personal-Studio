@@ -7,7 +7,7 @@
 
 | 阶段 | 完成度 | 说明 |
 |---|---|---|
-| M1 地基+MVP | ~82% | +rate limiting +access control +lifespan |
+| M1 地基+MVP | ~83% | +connection pooling (P1-3) |
 | M2 小说引擎 | ~60% | +distributed lock +auto-rewrite(≤2轮) |
 | M3 内容工作室 | ~25% | 后端骨架，热点是 LLM 幻觉 |
 | M4 发布出海 | ~15% | 发布网关只写 DB |
