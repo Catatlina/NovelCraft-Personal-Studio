@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from .config import settings
+from .core.circuit_breaker import circuit_breaker, record_failure, record_success
 from .db import connect, decode, encode, new_id, row_to_dict
 
 # Context variable for per-request API key (set by middleware from X-Api-Key header)
@@ -54,13 +55,17 @@ def complete(
         provider_name = "mock"
         model_name = "mock"
     elif provider == "deepseek" or settings.ai_provider == "deepseek" or True:
+        if not circuit_breaker("deepseek"):
+            raise ProviderError("deepseek circuit breaker open — too many failures")
         try:
             model_ = _request_model.get() or model or settings.deepseek_model
             output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
+            record_success("deepseek")
             # Dynamic provider name based on model prefix
             provider_name = "openai" if model_.startswith("gpt") else ("anthropic" if model_.startswith("claude") else "deepseek")
             model_name = model_
         except ProviderError:
+            record_failure("deepseek")
             # Try fallback chain
             route = _load_route(task_type)
             fallbacks = route.get("fallback_json", []) if route else []
