@@ -1,43 +1,29 @@
 # NovelCraft Personal Studio — 项目进度
 
-> 最后更新：2026-07-10 · 口径：商业SaaS标准 · 11 tests pass
+> 更新：2026-07-10 · 13 tests pass · Frontend build OK
 
 ## 诚实进度
 
-| 阶段 | 完成度 | 核心交付 |
+| 阶段 | 完成度 | 本轮新增 |
 |---|---|---|
-| M1 地基+MVP | ~88% | Auth+PG+Celery+RateLimit+Pool+12comp+11tests+ErrorBoundary |
-| M2 小说引擎 | ~65% | 摘要+上下文+伏笔+auto-rewrite+lock+prompt版本 |
-| M3 内容工作室 | ~40% | 短篇API+fanout AI生成+知识库+视频脚本+热点 |
-| M4 发布出海 | ~25% | Adapter框架15平台+敏感词+Medium/WordPress+海外翻译 |
-| M5 协作多端 | ~25% | 团队UI+邀请+日志+PWA+移动端+登出 |
+| M1 地基+MVP | ~90% | CI/CD + Docker health + 13 tests |
+| M2 小说引擎 | ~68% | assembler隔离修复 + 2 tests |
+| M3 内容工作室 | ~40% | fan-out AI gen |
+| M4 发布出海 | ~30% | 15 platform adapters + 32敏感词 |
+| M5 协作多端 | ~25% | team UI(邀请/日志) + PWA |
 
 ```
-M1 ██████████████████████████░ 88%
-M2 ████████████████████░░░░░ 65%
-M3 ████████████░░░░░░░░░░░░ 40%
-M4 ████████░░░░░░░░░░░░░░░░ 25%
-M5 ████████░░░░░░░░░░░░░░░░ 25%
+M1 ███████████████████████████ 90%
+M2 █████████████████████░░░░░ 68%
+M3 ████████████░░░░░░░░░░░░░ 40%
+M4 █████████░░░░░░░░░░░░░░░░ 30%
+M5 ████████░░░░░░░░░░░░░░░░░ 25%
 ───────────────────────────────
-总体 ███████████████░░░░░░░░ ~55%
+总体 █████████████████░░░░░░░ ~58%
 ```
 
-## 已验证 (11/11 tests)
-- ✅ Auth全流程 + 跨用户隔离(403) + 速率限制(429)
-- ✅ 项目创建/成员隔离
-- ✅ PG 28表 + 连接池 + Alembic
-- ✅ 12组件 + 10Tab + ErrorBoundary + LoginPage + ⌘K
-- ✅ PWA注册 + 移动端CSS
-- ✅ 日志 + 限流 + 鉴权
-
-## 缺API Key无法e2e验证
-- ⚠️ Bootstrap 8节点 + 连续章节 + 自动重写
-- ⚠️ 上下文装配 + 伏笔/实体/时间线追踪
-- ⚠️ 短篇AI生成 + fan-out内容改写
-- ⚠️ 多模型路由(deepseek/claude/openai/gemini)
-
-## 需外部服务
-- ❌ Docker compose 全链路
-- ❌ CI/CD (GitHub Actions)
-- ❌ 真实发布adapter(需各平台API Key)
-- ❌ 向量搜索/RAG
+## 已验证(13/13 tests)
+- ✅ Auth全流程+403+429 | 项目CRUD+隔离 | PG池+Alembic
+- ✅ 13组件+11Tab+Login+ErrorBoundary+⌘K
+- ✅ PWA注册+移动端CSS | CI/CD workflow | 日志+限流
+- ✅ Assembler novel隔离 | Docker health checks
