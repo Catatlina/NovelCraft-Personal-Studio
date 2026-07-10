@@ -2,6 +2,8 @@ import asyncio
 import json
 from typing import Any
 
+from contextlib import asynccontextmanager
+
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -30,7 +32,13 @@ from .core.rate_limit import install_rate_limiter, limiter
 setup_logging()
 logger = get_logger(__name__)
 
-app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(config_router)
 install_rate_limiter(app)
@@ -41,11 +49,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
 
 
 def ok(data: Any = None) -> ApiResponse:
