@@ -76,9 +76,10 @@ def test_knowledge_reindex_replaces_old_chunks():
     db = connect()
     project = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
     item_id = new_id()
+    unique_term = f"量子航道-{uuid.uuid4().hex}"
     db.execute(
         "INSERT INTO knowledge_items (id, project_id, kind, title, body) VALUES (%s, %s, 'worldview', %s, %s)",
-        (item_id, project["id"], "星港世界观", "星港采用量子航道。" * 120),
+        (item_id, project["id"], "星港世界观", f"星港采用{unique_term}。" * 120),
     )
     db.commit(); db.close()
 
@@ -88,7 +89,7 @@ def test_knowledge_reindex_replaces_old_chunks():
     stored_count = db.execute("SELECT COUNT(*) AS total FROM knowledge_vectors WHERE item_id = %s", (item_id,)).fetchone()["total"]
     db.close()
     assert first_count == second_count == stored_count
-    assert str(search("量子航道", project_id=str(project["id"]))[0]["id"]) == item_id
+    assert str(search(unique_term, project_id=str(project["id"]))[0]["id"]) == item_id
 
 
 def test_batch_can_be_created_and_cancelled(monkeypatch):
