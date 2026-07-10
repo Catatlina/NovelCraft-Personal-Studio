@@ -49,6 +49,7 @@ export default function App() {
   const [userEmail, setUserEmail] = useState("");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
+  const [characters, setCharacters] = useState<any[]>([]);
   const [chapter, setChapter] = useState<Content | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
@@ -184,7 +185,7 @@ export default function App() {
       {error && <div className="error">{error}</div>}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
-      {tab === "review" && <Review novel={novel} knowledge={knowledge} review={review} />}
+      {tab === "review" && <Review chapter={novel} characters={characters} timeline={[]} arcs={[]} />}
       {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (

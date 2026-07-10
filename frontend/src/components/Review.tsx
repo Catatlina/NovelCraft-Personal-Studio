@@ -1,48 +1,74 @@
 import React from "react";
+import { ReviewRadar } from "./ReviewRadar";
+import { CharacterCard, OutlineTree } from "./CharacterOutline";
 
 type Content = { id: string; title: string; meta: Record<string, unknown> };
-type Knowledge = { id: string; kind: string; title: string; body: string };
 
-export function Review({ novel, knowledge, review }: {
-  novel: Content | null; knowledge: Knowledge[];
-  review?: { score?: number; dimensions?: Record<string, number>; issues?: string[] };
+export function Review({ chapter, characters, timeline, arcs }: {
+  chapter: Content | null;
+  characters: any[];
+  timeline: any[];
+  arcs: any[];
 }) {
-  const sellingPoints = (novel?.meta?.selling_points as string[]) ?? [];
-  const outline = (novel?.meta?.outline as string[]) ?? [];
+  const meta = chapter?.meta || {};
+  const dims = [
+    { name: "文学性", score: (meta as any).review_literary || 75 },
+    { name: "逻辑", score: (meta as any).review_logic || 75 },
+    { name: "节奏", score: (meta as any).review_rhythm || meta.review_rhythm_score || 75 },
+    { name: "角色", score: (meta as any).review_character || 75 },
+    { name: "对话", score: (meta as any).review_dialogue || 75 },
+    { name: "描写", score: (meta as any).review_description || 75 },
+    { name: "创新", score: (meta as any).review_innovation || 75 },
+  ];
+  const totalScore = dims.reduce((s, d) => s + d.score, 0) / dims.length;
 
   return (
-    <div className="review-grid">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="panel">
-        <h2>{novel?.title ?? "小说审阅"}</h2>
-        <p style={{lineHeight:1.7,color:"var(--text-secondary)"}}>{String(novel?.meta?.synopsis ?? "等待简介...")}</p>
-        <div className="chips">{sellingPoints.map(p => <span key={p}>{p}</span>)}</div>
-        <h3>总纲</h3>
-        <ol style={{paddingLeft:20,lineHeight:1.8}}>{outline.map((item,i) => <li key={i}>{item}</li>)}</ol>
+        <h3>七维审查 {chapter ? `— 总分 ${Math.round(totalScore)}` : ""}</h3>
+        <ReviewRadar data={dims} />
       </div>
-      <div className="panel">
-        <h2>人物与世界观</h2>
-        <div className="card-list">
-          {knowledge.map(item => (
-            <article key={item.id}>
-              <small>{item.kind}</small>
-              <strong>{item.title}</strong>
-              <p style={{color:"var(--text-secondary)",lineHeight:1.6,margin:0}}>{item.body}</p>
-            </article>
+
+      {characters?.length > 0 && (
+        <div className="panel">
+          <h3>人物卡</h3>
+          {characters.map((c, i) => (
+            <CharacterCard key={i} char={c} />
           ))}
         </div>
-      </div>
-      <div className="panel">
-        <h2>七维审核</h2>
-        <div className="score">{review?.score ?? "--"}</div>
-        <div className="bars">
-          {Object.entries(review?.dimensions ?? {}).map(([name, value]) => (
-            <label key={name}><span>{name}</span><meter min={0} max={100} value={Number(value)} /><em>{value}</em></label>
+      )}
+
+      {timeline?.length > 0 && (
+        <div className="panel">
+          <h3>时间线</h3>
+          {timeline.map((e: any, i: number) => (
+            <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 13, borderBottom: "1px solid var(--border-subtle)" }}>
+              <span style={{ color: "var(--text-muted)", minWidth: 60 }}>第{e.chapter_seq}章</span>
+              <span>{e.event}</span>
+            </div>
           ))}
         </div>
-        <ul style={{lineHeight:1.7,paddingLeft:18,color:"var(--text-secondary)",marginTop:12}}>
-          {(review?.issues ?? []).map((item,i) => <li key={i}>{item}</li>)}
-        </ul>
-      </div>
+      )}
+
+      {arcs?.length > 0 && (
+        <div className="panel">
+          <h3>人物弧线</h3>
+          {arcs.map((a: any, i: number) => (
+            <div key={i} style={{ padding: "4px 0", fontSize: 13 }}>
+              <strong>{a.character}</strong>
+              <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>{a.stage}</span>
+              <span style={{ marginLeft: 8 }}>{a.goal}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {chapter && (
+        <div className="panel">
+          <h3>大纲</h3>
+          <OutlineTree nodes={(meta as any).outline || (meta as any).chapter_outlines || []} />
+        </div>
+      )}
     </div>
   );
 }
