@@ -909,6 +909,8 @@ def publish(
             if not safety["passed"]:
                 return ok({"blocked": True, "words": safety["blocked_words"]})
     result = publish_content(content_id, platform, mode)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
     return ok(result)
 
 

@@ -43,6 +43,10 @@ def alert_provider_error(task_type: str, error: str) -> None:
     send_alert(f"Provider 错误：`{task_type}` — {error[:200]}", "error")
 
 
+def alert_login_locked(email_fingerprint: str) -> None:
+    send_alert(f"登录失败次数超限：账号指纹 `{email_fingerprint}` 已锁定 15 分钟", "warning")
+
+
 def alert_task_failed(run_id: str, node_key: str, error: str) -> None:
     send_alert(f"任务失败：run `{run_id[:8]}…` node `{node_key}` — {error[:200]}", "error")
 

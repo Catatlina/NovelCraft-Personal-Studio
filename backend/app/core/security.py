@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -93,6 +94,42 @@ def revoke_refresh_token(token: str) -> None:
 def _redis_client():
     import redis
     return redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_timeout=2)
+
+
+def _login_key(email: str) -> str:
+    fingerprint = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+    return f"login_fail:{fingerprint}"
+
+
+def login_is_locked(email: str) -> bool:
+    try:
+        return int(_redis_client().get(_login_key(email)) or 0) >= 5
+    except Exception:
+        if settings.token_blacklist_fail_closed:
+            raise HTTPException(status_code=503, detail="authentication security service unavailable")
+        return False
+
+
+def record_login_failure(email: str) -> int:
+    try:
+        client = _redis_client()
+        key = _login_key(email)
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, 900)
+        return int(count)
+    except Exception:
+        if settings.token_blacklist_fail_closed:
+            raise HTTPException(status_code=503, detail="authentication security service unavailable")
+        return 0
+
+
+def clear_login_failures(email: str) -> None:
+    try:
+        _redis_client().delete(_login_key(email))
+    except Exception:
+        if settings.token_blacklist_fail_closed:
+            raise HTTPException(status_code=503, detail="authentication security service unavailable")
 
 
 def _store_refresh_jti(user_id: str, jti: str) -> None:

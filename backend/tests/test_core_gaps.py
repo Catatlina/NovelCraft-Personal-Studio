@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import uuid
+from io import BytesIO
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +18,7 @@ from app.services.knowledge_hub import (
     rebuild_item_embeddings,
     search,
 )
+from app.services.knowledge_parser import extract_document_text
 from app.services.text_metrics import count_content_chars
 
 
@@ -246,3 +249,109 @@ def test_offline_ai_mutation_replay_returns_cached_result():
         client_mutation_id=mutation_id,
     )
     assert result == expected
+
+
+def test_docx_extraction_and_project_scoped_knowledge_import():
+    from docx import Document
+
+    document = Document()
+    document.add_heading("世界规则", level=1)
+    document.add_paragraph("量子航道只能在月食期间开启。")
+    buffer = BytesIO()
+    document.save(buffer)
+    assert "量子航道" in extract_document_text(buffer.getvalue(), "world.docx")
+
+    with TestClient(app) as client:
+        owner_email = f"knowledge-owner-{uuid.uuid4().hex}@nc.dev"
+        owner = client.post("/api/v1/auth/register", json={"email": owner_email, "password": "test1234"}).json()["data"]
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        project_id = client.get("/api/v1/projects", headers=owner_headers).json()["data"][0]["id"]
+        imported = client.post(
+            f"/api/v1/knowledge/import?project_id={project_id}",
+            headers=owner_headers,
+            files={"file": ("world.docx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        )
+        assert imported.status_code == 200
+        assert imported.json()["data"]["imported"] >= 1
+        assert imported.json()["data"]["chunks"] >= 1
+
+        other_email = f"knowledge-other-{uuid.uuid4().hex}@nc.dev"
+        other = client.post("/api/v1/auth/register", json={"email": other_email, "password": "test1234"}).json()["data"]
+        rejected = client.post(
+            f"/api/v1/knowledge/import?project_id={project_id}",
+            headers={"Authorization": f"Bearer {other['access_token']}"},
+            files={"file": ("note.md", b"# blocked", "text/markdown")},
+        )
+        assert rejected.status_code == 403
+
+
+def test_login_failures_lock_account_until_counter_is_cleared():
+    from app.core.security import clear_login_failures
+
+    with TestClient(app) as client:
+        email = f"locked-{uuid.uuid4().hex}@nc.dev"
+        client.post("/api/v1/auth/register", json={"email": email, "password": "correct-password"})
+        for _ in range(5):
+            failed = client.post("/api/v1/auth/login", json={"email": email, "password": "wrong-password"})
+            assert failed.status_code == 401
+        locked = client.post("/api/v1/auth/login", json={"email": email, "password": "correct-password"})
+        assert locked.status_code == 429
+        clear_login_failures(email)
+        accepted = client.post("/api/v1/auth/login", json={"email": email, "password": "correct-password"})
+        assert accepted.status_code == 200
+
+
+def test_publish_schedule_and_analytics_are_project_scoped():
+    with TestClient(app) as client:
+        owner_email = f"publish-owner-{uuid.uuid4().hex}@nc.dev"
+        owner = client.post("/api/v1/auth/register", json={"email": owner_email, "password": "test1234"}).json()["data"]
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        project_id = client.get("/api/v1/projects", headers=owner_headers).json()["data"][0]["id"]
+        novel = client.post(
+            f"/api/v1/projects/{project_id}/novels",
+            headers=owner_headers,
+            json={"idea": "发布权限测试小说", "target_words": 100000},
+        ).json()["data"]
+        scheduled_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        scheduled = client.post(
+            "/api/v1/publish/schedule",
+            headers=owner_headers,
+            params={"content_id": novel["id"], "platform": "medium", "scheduled_at": scheduled_at},
+        )
+        assert scheduled.status_code == 200
+        assert len(client.get("/api/v1/publish/schedule", headers=owner_headers).json()["data"]) >= 1
+        assert client.get("/api/v1/analytics/roi", headers=owner_headers, params={"project_id": project_id}).status_code == 200
+
+        other_email = f"publish-other-{uuid.uuid4().hex}@nc.dev"
+        other = client.post("/api/v1/auth/register", json={"email": other_email, "password": "test1234"}).json()["data"]
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        forbidden = client.post(
+            "/api/v1/publish/schedule",
+            headers=other_headers,
+            params={"content_id": novel["id"], "platform": "medium", "scheduled_at": scheduled_at},
+        )
+        assert forbidden.status_code == 403
+        assert client.get("/api/v1/analytics/roi", headers=other_headers, params={"project_id": project_id}).status_code == 403
+
+
+def test_publish_modes_and_wordpress_target_are_restricted():
+    from app.workers.m4_tasks import _is_public_https_url
+
+    assert _is_public_https_url("http://example.com") is False
+    assert _is_public_https_url("https://127.0.0.1") is False
+    with TestClient(app) as client:
+        email = f"publish-mode-{uuid.uuid4().hex}@nc.dev"
+        registered = client.post("/api/v1/auth/register", json={"email": email, "password": "test1234"}).json()["data"]
+        headers = {"Authorization": f"Bearer {registered['access_token']}"}
+        project_id = client.get("/api/v1/projects", headers=headers).json()["data"][0]["id"]
+        novel = client.post(
+            f"/api/v1/projects/{project_id}/novels",
+            headers=headers,
+            json={"idea": "发布模式测试小说", "target_words": 100000},
+        ).json()["data"]
+        rejected = client.post(
+            "/api/v1/publish",
+            headers=headers,
+            params={"content_id": novel["id"], "platform": "kdp", "mode": "auto"},
+        )
+        assert rejected.status_code == 400

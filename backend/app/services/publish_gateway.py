@@ -31,8 +31,10 @@ def publish_content(content_id: str, platform: str, mode: str | None = None) -> 
         return {"error": f"unknown platform: {platform}"}
 
     actual_mode = mode or pub_config["mode"]
-    if actual_mode == "auto" and platform in ("wechat","toutiao","xiaohongshu","zhihu","baijia"):
-        return {"error": f"auto-publish not allowed for {platform} without explicit consent"}
+    if actual_mode not in {"manual", "semi", "auto"}:
+        return {"error": f"unknown publish mode: {actual_mode}"}
+    if actual_mode == "auto" and not pub_config["api"]:
+        return {"error": f"auto-publish is unavailable for {platform}"}
 
     db = connect()
     pid = new_id()
@@ -171,7 +173,9 @@ ADAPTERS: dict[str, PublishAdapter] = {
 
 def execute_publish(publish_id: str, content: dict, platform: str) -> dict:
     """Execute actual publishing via platform adapter."""
-    adapter = ADAPTERS.get(platform, ManualAdapter())
+    adapter = ADAPTERS.get(platform)
+    if adapter is None:
+        raise ValueError(f"unknown platform: {platform}")
     result = adapter.publish(content)
     db = connect()
     db.execute(

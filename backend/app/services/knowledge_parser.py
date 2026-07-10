@@ -1,7 +1,36 @@
 """TASK-035: Knowledge hub — PDF/Word/Markdown/Link parsing."""
 from __future__ import annotations
 
+from io import BytesIO
+from pathlib import Path
+
 from app.db import connect, new_id, encode
+
+MAX_EXTRACTED_CHARS = 2_000_000
+
+
+def extract_document_text(data: bytes, filename: str) -> str:
+    """Extract bounded text from supported UTF-8, PDF, and DOCX documents."""
+    suffix = Path(filename or "upload.txt").suffix.lower()
+    if suffix == ".pdf":
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(data))
+        if len(reader.pages) > 300:
+            raise ValueError("PDF page count exceeds 300")
+        text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    elif suffix == ".docx":
+        from docx import Document
+
+        document = Document(BytesIO(data))
+        text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    elif suffix in {".txt", ".md", ".json", ".jsonl"}:
+        text = data.decode("utf-8")
+    else:
+        raise ValueError("unsupported document type")
+    if len(text) > MAX_EXTRACTED_CHARS:
+        raise ValueError("extracted document exceeds 2,000,000 characters")
+    return text
 
 
 def parse_text_file(text: str, filename: str = "") -> list[dict]:
@@ -37,7 +66,8 @@ def store_parsed_items(items: list[dict]) -> int:
             count += 1
         except Exception:
             pass
-    db.commit(); db.close()
+    db.commit()
+    db.close()
     return count
 
 

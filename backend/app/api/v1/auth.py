@@ -11,12 +11,16 @@ from app.core.security import (
     decode_token_payload,
     get_current_user,
     hash_password,
+    login_is_locked,
+    record_login_failure,
+    clear_login_failures,
     revoke_refresh_token,
     verify_password,
 )
 from app.db import connect, new_id
 from app.core.rate_limit import limiter
 from app.config import settings
+from app.core.alerts import alert_login_locked
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -100,12 +104,19 @@ def register(request: Request, response: Response, payload: RegisterRequest = Bo
 @router.post("/login")
 @limiter.limit("10/minute")
 def login(request: Request, response: Response, payload: LoginRequest = Body(...)):
+    if login_is_locked(payload.email):
+        raise HTTPException(status_code=429, detail="account temporarily locked")
     db = connect()
     user = db.execute("SELECT * FROM users WHERE email = %s AND is_deleted = FALSE", (payload.email,)).fetchone()
     db.close()
     if user is None or not verify_password(payload.password, user["password_hash"]):
+        failure_count = record_login_failure(payload.email)
+        if failure_count >= 5:
+            import hashlib
+            alert_login_locked(hashlib.sha256(payload.email.lower().encode()).hexdigest()[:12])
         raise HTTPException(status_code=401, detail="invalid email or password")
 
+    clear_login_failures(payload.email)
     token_version = user.get("token_version", 0)
     access = create_access_token(user["id"], token_version)
     refresh = create_refresh_token(user["id"], token_version)

@@ -1,13 +1,30 @@
 """M3: Knowledge hub import/export + style similarity + daily briefing."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
 from app.services.knowledge_hub import rebuild_item_embeddings
+from app.services.knowledge_parser import extract_document_text, parse_text_file
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".jsonl", ".pdf", ".docx"}
+
+
+def _require_project_editor(project_id: str, user: dict) -> None:
+    db = connect()
+    member = db.execute(
+        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
+        (project_id, user["id"]),
+    ).fetchone()
+    db.close()
+    if not member or member["role"] not in {"owner", "editor"}:
+        raise HTTPException(status_code=403, detail="insufficient permissions")
 
 
 def _require_item_access(item_id: str, user: dict) -> dict:
@@ -34,27 +51,58 @@ def reindex_knowledge_item(item_id: str, user: dict = Depends(get_current_user))
 
 
 @router.post("/import")
-async def import_knowledge(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    """TASK-035: Import text/JSON knowledge items."""
-    text = (await file.read()).decode("utf-8", errors="replace")
-    lines = [line.strip() for line in text.split("\n") if line.strip() and not line.strip().startswith("#")]
-    db = connect()
-    count = 0
-    for line in lines[:100]:  # Cap at 100 items
+async def import_knowledge(project_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """Import a bounded document into the caller's project and index every parsed section."""
+    _require_project_editor(project_id, user)
+    filename = file.filename or "upload.txt"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=415, detail="unsupported document type")
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file exceeds 20 MB")
+    try:
+        text = extract_document_text(raw, filename)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if suffix in {".json", ".jsonl"}:
         try:
-            import json as _json
-            item = _json.loads(line) if line.startswith("{") else {"title": line[:100], "body": line, "kind": "note"}
-            db.execute(
-                "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s)",
-                (new_id(), item.get("kind", "note"), item.get("title", "unknown"),
-                 item.get("body", line), encode(item.get("meta", {}))),
-            )
-            count += 1
-        except Exception:
-            pass
+            decoded = json.loads(text) if suffix == ".json" else [json.loads(line) for line in text.splitlines() if line.strip()]
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="invalid JSON document") from exc
+        source_items = decoded if isinstance(decoded, list) else [decoded]
+        items = [
+            {
+                "title": str(item.get("title", filename))[:500],
+                "body": str(item.get("body", ""))[:50_000],
+                "kind": str(item.get("kind", "reference"))[:50],
+                "meta": item.get("meta", {}),
+            }
+            for item in source_items if isinstance(item, dict)
+        ]
+    else:
+        items = parse_text_file(text, filename)
+    items = [item for item in items[:100] if item.get("body")]
+    if not items:
+        raise HTTPException(status_code=400, detail="document contains no importable text")
+
+    db = connect()
+    item_ids = []
+    for item in items:
+        item_id = new_id()
+        db.execute(
+            "INSERT INTO knowledge_items (id, project_id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s,%s)",
+            (
+                item_id, project_id, item.get("kind", "reference"), item.get("title", filename),
+                item.get("body", ""), encode(item.get("meta", {"source_filename": filename})),
+            ),
+        )
+        item_ids.append(item_id)
     db.commit()
     db.close()
-    return {"code": 0, "message": "ok", "data": {"imported": count}}
+    chunks = sum(rebuild_item_embeddings(item_id) for item_id in item_ids)
+    return {"code": 0, "message": "ok", "data": {"imported": len(item_ids), "chunks": chunks, "item_ids": item_ids}}
 
 
 @router.get("/style-check")

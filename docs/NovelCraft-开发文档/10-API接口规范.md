@@ -963,12 +963,12 @@ Query：`actor_id?,action?,entity_type?,range?,cursor,limit`
 
 ### 5.2 文件上传约定（multipart）
 
-- 端点：`POST /api/v1/knowledge/ingest/file`（见 §4.7.3），以及未来头像/封面等。
-- `Content-Type: multipart/form-data`；字段 `file` 为二进制，`scope`/`kind`/`source_type` 为文本字段。
-- 限制：`max_upload_size = 50MB`；超限 `413 PAYLOAD_TOO_LARGE`。
-- 允许类型：`application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/markdown, text/plain`。
-- 处理：上传后入 Celery `system` 队列解析切片→写 `knowledge_items`+`knowledge_vectors`，进度经 job SSE（规划中，`/api/v1/jobs/{job_id}/events`）。
-- 安全：文件落本地加密存储（`file_ref`），不直链；解析沙箱隔离，防恶意文档。
+- 端点：`POST /api/v1/knowledge/import?project_id={id}`。
+- `Content-Type: multipart/form-data`；字段 `file` 为二进制；调用者必须是项目 Owner/Editor。
+- 限制：原文件 ≤20 MB、PDF ≤300 页、解析文本 ≤200 万字符、单文件最多写入 100 个知识条目；超限返回 413/400。
+- 允许扩展名：`.pdf, .docx, .md, .txt, .json, .jsonl`；不依赖客户端可伪造的 MIME 单独放行。
+- 处理：请求内完成受限解析，写入 `knowledge_items` 后原子重建 `knowledge_vectors`；返回 `imported/chunks/item_ids`。
+- 安全：当前版本不保存原始上传文件，只保存解析后的受限文本；不提供文件直链。
 
 ---
 
