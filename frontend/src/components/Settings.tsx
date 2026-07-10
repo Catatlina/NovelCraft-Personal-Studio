@@ -76,7 +76,14 @@ export function Settings() {
               <input placeholder="DeepSeek API Key"
                 onChange={async e => { const { setApiKey } = await import("../lib/api"); setApiKey(e.target.value); }}
                 style={{flex:1}} />
-              <button disabled style={{whiteSpace:"nowrap"}}>保存</button>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input placeholder="API 地址 (默认 https://api.deepseek.com/v1)" 
+                style={{flex:1,fontSize:13}} />
+              <select style={{width:120}}>
+                <option>deepseek-chat</option>
+                <option>deepseek-reasoner</option>
+              </select>
             </div>
             <table><thead><tr><th>配置项</th><th>值</th><th>说明</th><th>操作</th></tr></thead>
             <tbody>

@@ -11,6 +11,7 @@ import { Settings } from "./components/Settings";
 import { Studio } from "./components/Studio";
 import { PublishDashboard } from "./components/PublishDashboard";
 import { LoginPage } from "./components/LoginPage";
+import { api as baseApi } from "./lib/api";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
@@ -27,10 +28,10 @@ type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "
 
 const API = "";
 
+// Thin wrapper over lib/api.ts — adds key + auth, unwraps {data} from API response
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
-  if (!r.ok) throw new Error(await r.text());
-  return ((await r.json()) as ApiResponse<T>).data;
+  const fullResp = await baseApi<ApiResponse<T>>(path, init);
+  return fullResp.data;
 }
 
 function docToText(doc: TipTapDoc): string {
