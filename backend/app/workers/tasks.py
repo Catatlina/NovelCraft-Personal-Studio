@@ -216,6 +216,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
             "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
             (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": {"seq": 1}})),
         )
+        # M2: auto-summarize chapter
+        _summarize_and_store(db, cid, chapter.get("body", []))
 
     db.execute(
         "UPDATE run_nodes SET status = 'succeeded', output = %s, finished_at = now() WHERE run_id = %s AND node_key = %s",
@@ -227,3 +229,27 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
     )
     db.commit()
     db.close()
+
+
+def _summarize_and_store(db, chapter_id: str, body: list) -> None:
+    """M2: Generate and store chapter summary after generation."""
+    try:
+        from app.services.summarizer import summarize_chapter
+        texts = []
+        for p in body:
+            if isinstance(p, dict):
+                texts.append(p.get("text", ""))
+            elif isinstance(p, str):
+                texts.append(p)
+        text = "\n".join(texts)
+        if not text.strip():
+            return
+        result = summarize_chapter(chapter_id, text)
+        summary = result.get("summary", "")
+        if summary:
+            db.execute(
+                "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                (encode({"chapter_summary": summary}), chapter_id),
+            )
+    except Exception:
+        pass  # Non-critical, don't block the workflow

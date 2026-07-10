@@ -118,6 +118,7 @@ def init_db() -> None:
         "gen_titles", "gen_synopsis", "gen_worldview", "gen_characters",
         "gen_outline", "gen_chapter1", "review_7dim",
         "editor_polish", "editor_rewrite", "editor_continue",
+        "summarize_chapter", "summarize_volume", "summarize_book", "gen_next_chapter",
     ]
     for task_type in task_types:
         db.execute(
