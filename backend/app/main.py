@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -493,17 +493,19 @@ def daily_briefing(project_id: str) -> ApiResponse:
 
 
 @app.post("/api/v1/knowledge/style-learn")
-def style_learn(samples: list[str]) -> ApiResponse:
+async def style_learn(request: Request) -> ApiResponse:
     """M3: Learn style from sample texts."""
     from .services.style_learn import learn_style
-    return ok(learn_style(samples))
+    body = await request.json()
+    return ok(learn_style(body.get("samples", body if isinstance(body, list) else [])))
 
 
 @app.post("/api/v1/knowledge/check-similarity")
-def check_similarity(original: str, generated: str) -> ApiResponse:
+async def check_similarity(request: Request) -> ApiResponse:
     """M3: Check similarity between original and generated text."""
     from .services.style_learn import check_similarity
-    return ok(check_similarity(original, generated))
+    body = await request.json()
+    return ok(check_similarity(body.get("original",""), body.get("generated","")))
 
 
 @app.post("/api/v1/prompts/lab")
