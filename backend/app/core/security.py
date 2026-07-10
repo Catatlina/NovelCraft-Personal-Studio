@@ -36,6 +36,14 @@ def create_token(user_id: str, token_type: str = "access", expires_delta: timede
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+# Backward-compatible aliases
+def create_access_token(user_id: str) -> str:
+    return create_token(user_id, "access")
+
+def create_refresh_token(user_id: str) -> str:
+    return create_token(user_id, "refresh")
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
