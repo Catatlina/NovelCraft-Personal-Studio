@@ -49,3 +49,35 @@ class ModelRouteUpdate(BaseModel):
 
 
 AiOperation = Literal["polish", "rewrite", "continue", "expand", "condense", "deai"]
+
+
+class ContentMetaRegistry(BaseModel):
+    """FR-C1-03: Content type meta schema registry."""
+    type: str
+    required_fields: list[str] = []
+    optional_fields: list[str] = []
+
+
+CONTENT_TYPE_REGISTRY: dict[str, ContentMetaRegistry] = {
+    "novel": ContentMetaRegistry(type="novel", required_fields=["idea","genre","style"], optional_fields=["target_words","synopsis","selected_title"]),
+    "chapter": ContentMetaRegistry(type="chapter", required_fields=["seq"], optional_fields=["needs_rewrite","quality_score"]),
+    "volume": ContentMetaRegistry(type="volume", required_fields=["volume_number"], optional_fields=["summary"]),
+    "short_story": ContentMetaRegistry(type="short_story", required_fields=["idea","template"], optional_fields=["genre","style","max_words","short_score"]),
+    "wechat_article": ContentMetaRegistry(type="wechat_article", required_fields=["platform"], optional_fields=["tags","summary","cta","cover_text"]),
+    "toutiao_article": ContentMetaRegistry(type="toutiao_article", required_fields=["platform"], optional_fields=["seo_title","keywords","summary"]),
+    "xhs_note": ContentMetaRegistry(type="xhs_note", required_fields=["platform"], optional_fields=["tags","cover_text","cta"]),
+    "zhihu_answer": ContentMetaRegistry(type="zhihu_answer", required_fields=["platform"], optional_fields=["question","tags"]),
+    "xiaohongshu_video": ContentMetaRegistry(type="xiaohongshu_video", required_fields=["platform"], optional_fields=["hook_3s","scenes","cta"]),
+    "douyin_video": ContentMetaRegistry(type="douyin_video", required_fields=["platform"], optional_fields=["hook_3s","scenes","cta"]),
+    "bilibili_video": ContentMetaRegistry(type="bilibili_video", required_fields=["platform"], optional_fields=["hook_3s","scenes","cta"]),
+    "medium_article": ContentMetaRegistry(type="medium_article", required_fields=["platform"], optional_fields=["seo_title","summary","tags"]),
+}
+
+
+def validate_content_meta(content_type: str, meta: dict) -> dict:
+    """Validate meta against content type registry. Returns {valid: bool, missing: [...], extra: [...]}."""
+    registry = CONTENT_TYPE_REGISTRY.get(content_type)
+    if not registry:
+        return {"valid": True, "warning": f"unregistered type: {content_type}"}
+    missing = [f for f in registry.required_fields if f not in meta or not meta[f]]
+    return {"valid": len(missing) == 0, "missing": missing, "type": content_type}
