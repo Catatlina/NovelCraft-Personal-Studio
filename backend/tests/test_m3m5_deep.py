@@ -5,15 +5,20 @@ os.environ["NOVELCRAFT_ENV"] = "dev"
 import pytest
 
 
+import time as _time
 def _tok(tc):
-    e = f"d-{uuid.uuid4().hex[:6]}@nc.dev"
-    return tc.post("/api/v1/auth/register", json={"email": e, "password": "x"}).json()["data"]["access_token"]
+    e = f"{uuid.uuid4().hex[:10]}@nc.dev"
+    r = tc.post("/api/v1/auth/register", json={"email": e, "password": "test1234"})
+    if r.status_code == 200:
+        return r.json()["data"]["access_token"]
+    r = tc.post("/api/v1/auth/login", json={"email": "fullchain@nc.dev", "password": "test1234"})
+    return r.json()["data"]["access_token"]
 
 
 def _novel(tc, tok):
     pid = tc.get("/api/v1/projects", headers={"Authorization": f"Bearer {tok}"}).json()["data"][0]["id"]
     r = tc.post(f"/api/v1/projects/{pid}/novels", headers={"Authorization": f"Bearer {tok}"},
-                json={"idea": "x", "genre": "x", "style": "t", "target_words": 5000})
+                json={"idea": "test", "genre": "test", "style": "t", "target_words": 5000})
     return r.json()["data"]["id"]
 
 
