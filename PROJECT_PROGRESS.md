@@ -71,7 +71,7 @@ M5 协作离线多端
 |---|---|---|
 || P0 | SQLite 还未迁到 PostgreSQL + Alembic | ✅ 已完成 — 26 表骨架迁移通过，bootstrap 全链路 PG 验证 |
 | P0 | 没有认证/JWT/RBAC | ✅ 已完成 — register/login/refresh/me，bcrypt + JWT |
-| P0 | 工作流未接 Celery/Redis | 无法保证断点续跑、后台任务可靠性 |
+| P0 | 工作流未接 Celery/Redis | ✅ 已完成 — Celery worker 执行，Redis broker，断点续跑 |
 | P0 | DeepSeek 未做真实验收 | ✅ 已完成 — 8 节点全链真实 API 通过，token 追踪准确 |
 | P0 | 设计系统未成型 | UI 还只是可用原型 |
 | P0 | 缺少 Docker Compose | 不能一键部署 |
