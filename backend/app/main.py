@@ -525,3 +525,65 @@ def prompt_lab(prompt_name: str, input_text: str, models: str = "deepseek-chat")
         except Exception as e:
             results.append({"model": model, "error": str(e), "status": "error"})
     return ok({"prompt": prompt_name, "models": len(results), "results": results})
+
+
+@app.post("/api/v1/publish")
+def publish(content_id: str, platform: str, mode: str | None = None) -> ApiResponse:
+    """M4: Publish content to a platform."""
+    from .services.publish_gateway import publish_content, check_sensitive
+    conn = connect()
+    row = conn.execute("SELECT body FROM contents WHERE id = %s", (content_id,)).fetchone()
+    conn.close()
+    if row:
+        body_text = ""
+        if isinstance(row.get("body"), dict):
+            body_text = "\n".join(c.get("text","") for c in row["body"].get("content",[]))
+        if body_text:
+            safety = check_sensitive(body_text[:5000])
+            if not safety["passed"]:
+                return ok({"blocked": True, "words": safety["blocked_words"]})
+    result = publish_content(content_id, platform, mode)
+    return ok(result)
+
+
+@app.post("/api/v1/overseas/translate")
+def overseas_translate(content_id: str, target_lang: str = "en") -> ApiResponse:
+    """M4: Translate content for overseas publishing."""
+    from .services.overseas import translate_chapter
+    conn = connect()
+    row = conn.execute("SELECT body FROM contents WHERE id = %s", (content_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="content not found")
+    body_text = ""
+    if isinstance(row.get("body"), dict):
+        body_text = "\n".join(c.get("text","") for c in row["body"].get("content",[]))
+    return ok(translate_chapter(body_text[:8000], target_lang))
+
+
+@app.get("/api/v1/publish/records")
+def publish_records(content_id: str | None = None) -> ApiResponse:
+    """M4: List publish records."""
+    from .services.publish_gateway import list_publish_records
+    return ok(list_publish_records(content_id))
+
+
+@app.post("/api/v1/collaboration/invite")
+def invite_member(project_id: str, email: str, role: str = "editor") -> ApiResponse:
+    """M5: Invite a user to collaborate on a project."""
+    from .services.collaboration import invite_user
+    return ok(invite_user(project_id, email, role))
+
+
+@app.get("/api/v1/collaboration/members")
+def collaboration_members(project_id: str) -> ApiResponse:
+    """M5: List project members."""
+    from .services.collaboration import list_members
+    return ok(list_members(project_id))
+
+
+@app.get("/api/v1/collaboration/logs")
+def collaboration_logs(project_id: str) -> ApiResponse:
+    """M5: Get operation logs."""
+    from .services.collaboration import get_operation_logs
+    return ok(get_operation_logs(project_id))

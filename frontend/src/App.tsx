@@ -9,7 +9,8 @@ import { CommandPalette } from "./components/CommandPalette";
 import { DagEditor } from "./components/DagEditor";
 import { Settings } from "./components/Settings";
 import { Studio } from "./components/Studio";
-import { Code2, Settings as SettingsIcon, Workflow, Layers } from "lucide-react";
+import { PublishDashboard } from "./components/PublishDashboard";
+import { Code2, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string };
@@ -21,7 +22,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio";
+type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
 
 const API = "";
 
@@ -138,7 +139,7 @@ export default function App() {
 
   const review = run?.nodes.find(n => n.node_key === "n8")?.output as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
 
-  const titles: Record<Tab, string> = { wizard: "灵感到第一章", progress: "Bootstrap 工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室" };
+  const titles: Record<Tab, string> = { wizard: "灵感到第一章", progress: "Bootstrap 工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
@@ -152,6 +153,7 @@ export default function App() {
     { id: "dag", label: "工作流编排 → DAG 编辑器", action: () => setTab("dag") },
     { id: "settings", label: "系统设置 → AI配置/预算", action: () => setTab("settings") },
     { id: "studio", label: "内容工作室 → 短篇/自媒体/热点", action: () => setTab("studio") },
+    { id: "publish", label: "发布看板 → 出海/数据", action: () => setTab("publish") },
   ];
 
   return (
@@ -171,6 +173,7 @@ export default function App() {
       {tab === "dag" && <DagEditor />}
       {tab === "settings" && <Settings />}
       {tab === "studio" && <Studio />}
+      {tab === "publish" && <PublishDashboard />}
       <CommandPalette commands={cmdActions} />
     </Layout>
   );

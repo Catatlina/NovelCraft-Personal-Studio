@@ -419,3 +419,42 @@ def patrol_check() -> dict:
         "foreshadowing_count": len(overdue),
         "needs_rewrite_count": len(needs_rewrite),
     }
+
+
+@celery_app.task(bind=True, max_retries=2)
+def bootstrap_short_story_task(self, project_id: str, short_id: str) -> dict:
+    """M3: Generate short story from idea."""
+    from app.services.short_story import SHORT_STORY_TEMPLATES
+
+    db = connect()
+    story = row_to_dict(db.execute("SELECT * FROM contents WHERE id = %s", (short_id,)).fetchone())
+    if not story:
+        db.close()
+        return {"error": "story not found"}
+    meta = story.get("meta", {})
+    if not isinstance(meta, dict):
+        meta = {}
+    template_key = meta.get("template", "viral")
+    template = SHORT_STORY_TEMPLATES.get(template_key, SHORT_STORY_TEMPLATES["viral"])
+    context = {"idea": meta.get("idea",""), "genre": meta.get("genre",""),
+               "style": meta.get("style",""), "template": template["name"],
+               "max_words": meta.get("max_words", template["max_words"])}
+    db.close()
+
+    output = complete(run_id=None, node_key="s1", project_id=project_id,
+                     task_type="gen_short_titles", prompt_name="shortstory.gen_titles",
+                     variables=context)
+    titles = output.get("titles", [])
+    context["title"] = titles[0] if titles else "未命名短篇"
+
+    output = complete(run_id=None, node_key="s2", project_id=project_id,
+                     task_type="gen_short_story", prompt_name="shortstory.gen_story",
+                     variables=context)
+    story_out = output.get("story", {})
+    body = {"type":"doc","content":[{"type":"paragraph","text":t} for t in story_out.get("body",[])]}
+    db = connect()
+    db.execute("UPDATE contents SET title=%s, body=%s, meta=meta||%s, status=%s, updated_at=now() WHERE id=%s",
+               (story_out.get("title", context["title"]), encode(body),
+                encode({"short_score": 0, "template": template_key}), "completed", short_id))
+    db.commit(); db.close()
+    return {"status": "completed", "title": story_out.get("title", "")}
