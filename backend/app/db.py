@@ -7,8 +7,44 @@ from typing import Any
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 DB_URL = os.getenv("DATABASE_URL", "postgresql://genius@localhost/novelcraft_dev")
+
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        _pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=2, maxconn=20, dsn=DB_URL,
+        )
+    return _pool
+
+
+def connect() -> DB:
+    """Get a connection from the pool."""
+    conn = _get_pool().getconn()
+    conn.autocommit = False
+    db = DB(conn)
+    db._pool = _get_pool()
+    return db
+
+
+def putconn(db: DB) -> None:
+    """Return connection to pool."""
+    if hasattr(db, '_conn') and hasattr(db, '_pool'):
+        db._pool.putconn(db._conn)
+    elif hasattr(db, '_cur'):
+        db._cur.connection.close()
+
+
+def close_pool() -> None:
+    global _pool
+    if _pool:
+        _pool.closeall()
+        _pool = None
 
 
 def new_id(prefix: str = "") -> str:
@@ -67,7 +103,11 @@ class DB:
 
     def close(self) -> None:
         self._cur.close()
-        self._conn.close()
+        self._conn.commit()
+        try:
+            putconn(self)
+        except Exception:
+            self._conn.close()
 
     def executescript(self, sql: str) -> None:
         """For compatibility only — split on semicolons and execute each."""
@@ -75,12 +115,6 @@ class DB:
             stmt = stmt.strip()
             if stmt and not stmt.startswith("--"):
                 self._cur.execute(stmt)
-
-
-def connect() -> DB:
-    conn = psycopg2.connect(DB_URL)
-    conn.autocommit = False
-    return DB(conn)
 
 
 def init_db() -> None:
