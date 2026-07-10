@@ -6,7 +6,8 @@ import { Review } from "./components/Review";
 import { Editor } from "./components/Editor";
 import { Costs } from "./components/Costs";
 import { CommandPalette } from "./components/CommandPalette";
-import { Code2 } from "lucide-react";
+import { DagEditor } from "./components/DagEditor";
+import { Code2, Workflow } from "lucide-react";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string };
@@ -18,7 +19,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts";
+type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag";
 
 const API = "";
 
@@ -135,7 +136,7 @@ export default function App() {
 
   const review = run?.nodes.find(n => n.node_key === "n8")?.output as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
 
-  const titles: Record<Tab, string> = { wizard: "灵感到第一章", progress: "Bootstrap 工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理" };
+  const titles: Record<Tab, string> = { wizard: "灵感到第一章", progress: "Bootstrap 工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
@@ -146,6 +147,7 @@ export default function App() {
     { id: "review", label: "审阅 → 查看审核", action: () => setTab("review") },
     { id: "costs", label: "成本追踪 → AI 调用", action: () => setTab("costs") },
     { id: "prompts", label: "Prompt 管理", action: () => setTab("prompts") },
+    { id: "dag", label: "工作流编排 → DAG 编辑器", action: () => setTab("dag") },
   ];
 
   return (
@@ -156,6 +158,14 @@ export default function App() {
       {tab === "review" && <Review novel={novel} knowledge={knowledge} review={review} />}
       {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
+      {tab === "prompts" && (
+        <div className="panel"><h2>Prompt 库</h2>
+        <table><thead><tr><th>名称</th><th>版本</th><th>模型</th></tr></thead>
+        <tbody>{prompts.map((p: any) => <tr key={p.id}><td>{p.name}</td><td>{p.version}</td><td>{p.model}</td></tr>)}</tbody></table>
+        </div>
+      )}
+      {tab === "dag" && <DagEditor />}
+      <CommandPalette commands={cmdActions} />
     </Layout>
   );
 }
