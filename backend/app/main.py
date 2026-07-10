@@ -477,6 +477,14 @@ def list_knowledge(project_id: str, content_id: str | None = None) -> ApiRespons
     return ok(items)
 
 
+@app.post("/api/v1/knowledge/search")
+def search_knowledge(project_id: str, query: str = "", kind: str = "") -> ApiResponse:
+    """M3: Search knowledge hub."""
+    from .services.knowledge_hub import search
+    kinds = [kind] if kind else None
+    return ok(search(query, project_id, kinds))
+
+
 @app.post("/api/v1/knowledge/daily-briefing")
 def daily_briefing(project_id: str) -> ApiResponse:
     """M3: Generate daily content briefing from hotspots."""
