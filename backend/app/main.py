@@ -1,0 +1,365 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+
+from .db import connect, decode, encode, init_db, new_id, row_to_dict
+from .gateway import complete
+from .config import settings
+from .schemas import (
+    AiEditRequest,
+    AiOperation,
+    ApiResponse,
+    BudgetUpdate,
+    ContentUpdate,
+    HumanConfirm,
+    ModelRouteUpdate,
+    NovelCreate,
+    VersionRestore,
+)
+from .workflow import EVENT_LOGS, confirm_human, create_run, emit, run_until_human_or_done, schedule_run
+
+app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
+
+
+def ok(data: Any = None) -> ApiResponse:
+    return ApiResponse(data=data)
+
+
+def parse_content(row: dict[str, Any]) -> dict[str, Any]:
+    row["body"] = decode(row["body"], {})
+    row["meta"] = decode(row["meta"], {})
+    return row
+
+
+@app.get("/api/v1/healthz")
+def healthz() -> ApiResponse:
+    return ok({"status": "ok", "ai_provider": settings.ai_provider})
+
+
+@app.get("/api/v1/projects")
+def list_projects() -> ApiResponse:
+    conn = connect()
+    rows = [dict(row) for row in conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()]
+    conn.close()
+    return ok(rows)
+
+
+@app.post("/api/v1/projects/{project_id}/novels")
+def create_novel(project_id: str, payload: NovelCreate) -> ApiResponse:
+    conn = connect()
+    project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone())
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    novel_id = new_id("cnt")
+    title = payload.idea[:26] + ("..." if len(payload.idea) > 26 else "")
+    body = {"type": "doc", "content": []}
+    meta = payload.model_dump()
+    conn.execute(
+        """
+        INSERT INTO contents (id, project_id, type, title, body, meta, status)
+        VALUES (?, ?, 'novel', ?, ?, ?, 'draft')
+        """,
+        (novel_id, project_id, title, encode(body), encode(meta)),
+    )
+    conn.execute(
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, 'initial_idea', ?)",
+        (new_id("ver"), novel_id, encode({"title": title, "body": body, "meta": meta})),
+    )
+    conn.commit()
+    novel = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = ?", (novel_id,)).fetchone()))
+    conn.close()
+    return ok(novel)
+
+
+@app.get("/api/v1/contents")
+def list_contents(project_id: str = Query(...), parent_id: str | None = None) -> ApiResponse:
+    conn = connect()
+    if parent_id is None:
+        rows = conn.execute(
+            "SELECT * FROM contents WHERE project_id = ? AND parent_id IS NULL ORDER BY created_at DESC",
+            (project_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM contents WHERE project_id = ? AND parent_id = ? ORDER BY created_at ASC",
+            (project_id, parent_id),
+        ).fetchall()
+    items = [parse_content(dict(row)) for row in rows]
+    conn.close()
+    return ok(items)
+
+
+@app.get("/api/v1/contents/{content_id}")
+def get_content(content_id: str) -> ApiResponse:
+    conn = connect()
+    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="content not found")
+    return ok(parse_content(row))
+
+
+@app.put("/api/v1/contents/{content_id}")
+def update_content(content_id: str, payload: ContentUpdate) -> ApiResponse:
+    conn = connect()
+    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="content not found")
+    snapshot = {"title": row["title"], "body": decode(row["body"], {}), "meta": decode(row["meta"], {})}
+    conn.execute(
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, ?, ?)",
+        (new_id("ver"), content_id, payload.label, encode(snapshot)),
+    )
+    title = payload.title if payload.title is not None else row["title"]
+    body = payload.body if payload.body is not None else snapshot["body"]
+    meta = payload.meta if payload.meta is not None else snapshot["meta"]
+    conn.execute(
+        "UPDATE contents SET title = ?, body = ?, meta = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (title, encode(body), encode(meta), content_id),
+    )
+    conn.commit()
+    updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone()))
+    conn.close()
+    return ok(updated)
+
+
+@app.post("/api/v1/novels/{novel_id}/bootstrap")
+async def bootstrap_novel(novel_id: str, background_tasks: BackgroundTasks) -> ApiResponse:
+    conn = connect()
+    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (novel_id,)).fetchone())
+    conn.close()
+    if novel is None:
+        raise HTTPException(status_code=404, detail="novel not found")
+    run_id = create_run(novel["project_id"], novel_id)
+    background_tasks.add_task(run_until_human_or_done, run_id, "n1")
+    return ok({"run_id": run_id})
+
+
+@app.get("/api/v1/runs/{run_id}")
+def get_run(run_id: str) -> ApiResponse:
+    conn = connect()
+    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone())
+    if run is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="run not found")
+    nodes = [dict(row) for row in conn.execute("SELECT * FROM run_nodes WHERE run_id = ? ORDER BY node_key", (run_id,)).fetchall()]
+    for node in nodes:
+        node["output"] = decode(node["output"], {})
+    run["context"] = decode(run["context"], {})
+    run["nodes"] = nodes
+    conn.close()
+    return ok(run)
+
+
+@app.get("/api/v1/runs/{run_id}/events")
+async def run_events(run_id: str):
+    async def event_stream():
+        last = 0
+        while True:
+            events = EVENT_LOGS.get(run_id, [])
+            for item in events[last:]:
+                last = item["id"]
+                yield f"event: {item['event']}\nid: {item['id']}\ndata: {encode(item['data'])}\n\n"
+            if events and events[-1]["event"] == "run_done":
+                break
+            yield ": heartbeat\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/v1/runs/{run_id}/nodes/n2/confirm")
+async def confirm_title(run_id: str, payload: HumanConfirm, background_tasks: BackgroundTasks) -> ApiResponse:
+    confirm_human(run_id, payload.selected_title)
+    background_tasks.add_task(run_until_human_or_done, run_id, "n3")
+    return ok({"run_id": run_id, "selected_title": payload.selected_title})
+
+
+@app.post("/api/v1/runs/{run_id}/nodes/{node_key}/retry")
+async def retry_node(run_id: str, node_key: str, background_tasks: BackgroundTasks) -> ApiResponse:
+    conn = connect()
+    conn.execute(
+        "UPDATE run_nodes SET status = 'pending', output = '{}', error = NULL WHERE run_id = ? AND node_key = ?",
+        (run_id, node_key),
+    )
+    conn.execute(
+        "UPDATE workflow_runs SET status = 'running', current_node_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (node_key, run_id),
+    )
+    conn.commit()
+    conn.close()
+    emit(run_id, "node_started", {"node_key": node_key})
+    background_tasks.add_task(run_until_human_or_done, run_id, node_key)
+    return ok({"run_id": run_id, "node_key": node_key})
+
+
+@app.get("/api/v1/contents/{content_id}/versions")
+def list_versions(content_id: str) -> ApiResponse:
+    conn = connect()
+    rows = [dict(row) for row in conn.execute("SELECT * FROM versions WHERE entity_id = ? ORDER BY created_at DESC", (content_id,)).fetchall()]
+    for row in rows:
+        row["snapshot"] = decode(row["snapshot"], {})
+    conn.close()
+    return ok(rows)
+
+
+@app.post("/api/v1/contents/{content_id}/versions/restore")
+def restore_version(content_id: str, payload: VersionRestore) -> ApiResponse:
+    conn = connect()
+    version = row_to_dict(
+        conn.execute("SELECT * FROM versions WHERE id = ? AND entity_id = ?", (payload.version_id, content_id)).fetchone()
+    )
+    if version is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="version not found")
+    current = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    if current is not None:
+        snapshot = {"title": current["title"], "body": decode(current["body"], {}), "meta": decode(current["meta"], {})}
+        conn.execute(
+            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, 'before_restore', ?)",
+            (new_id("ver"), content_id, encode(snapshot)),
+        )
+    restored = decode(version["snapshot"], {})
+    conn.execute(
+        "UPDATE contents SET title = ?, body = ?, meta = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (restored.get("title", "未命名"), encode(restored.get("body", {})), encode(restored.get("meta", {})), content_id),
+    )
+    conn.commit()
+    row = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone()))
+    conn.close()
+    return ok(row)
+
+
+@app.post("/api/v1/contents/{content_id}/ai/{op}")
+def ai_edit(content_id: str, op: AiOperation, payload: AiEditRequest) -> ApiResponse:
+    conn = connect()
+    content = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    conn.close()
+    if content is None:
+        raise HTTPException(status_code=404, detail="content not found")
+    output = complete(
+        run_id=None,
+        node_key=None,
+        project_id=content["project_id"],
+        task_type=f"editor_{op}",
+        prompt_name=f"editor.{op}",
+        variables={"selection": payload.selection, "instruction": payload.instruction},
+    )
+    return ok(output)
+
+
+@app.get("/api/v1/ai-calls")
+def list_ai_calls(run_id: str | None = None) -> ApiResponse:
+    conn = connect()
+    if run_id:
+        rows = conn.execute("SELECT * FROM ai_calls WHERE run_id = ? ORDER BY created_at DESC", (run_id,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM ai_calls ORDER BY created_at DESC LIMIT 100").fetchall()
+    items = [dict(row) for row in rows]
+    for item in items:
+        item["input"] = decode(item["input"], {})
+        item["output"] = decode(item["output"], {})
+    conn.close()
+    return ok(items)
+
+
+@app.get("/api/v1/prompts")
+def list_prompts() -> ApiResponse:
+    conn = connect()
+    rows = [dict(row) for row in conn.execute("SELECT * FROM prompts ORDER BY name, version").fetchall()]
+    for row in rows:
+        row["golden_cases"] = decode(row["golden_cases"], [])
+    conn.close()
+    return ok(rows)
+
+
+@app.get("/api/v1/model-routes")
+def list_model_routes() -> ApiResponse:
+    conn = connect()
+    rows = [dict(row) for row in conn.execute("SELECT * FROM model_routes ORDER BY task_type").fetchall()]
+    for row in rows:
+        row["params"] = decode(row["params"], {})
+        row["fallback_json"] = decode(row["fallback_json"], [])
+    conn.close()
+    return ok(rows)
+
+
+@app.put("/api/v1/model-routes/{task_type}")
+def update_model_route(task_type: str, payload: ModelRouteUpdate) -> ApiResponse:
+    conn = connect()
+    conn.execute(
+        """
+        INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json)
+        VALUES (?, ?, ?, ?, ?, '[]')
+        ON CONFLICT(task_type)
+        DO UPDATE SET provider = excluded.provider, model = excluded.model, params = excluded.params, updated_at = CURRENT_TIMESTAMP
+        """,
+        (new_id("rte"), task_type, payload.provider, payload.model, encode(payload.params)),
+    )
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM model_routes WHERE task_type = ?", (task_type,)).fetchone())
+    row["params"] = decode(row["params"], {})
+    row["fallback_json"] = decode(row["fallback_json"], [])
+    conn.close()
+    return ok(row)
+
+
+@app.get("/api/v1/admin/budgets")
+def list_budgets(project_id: str) -> ApiResponse:
+    conn = connect()
+    rows = [dict(row) for row in conn.execute("SELECT * FROM budgets WHERE project_id = ? ORDER BY scope", (project_id,)).fetchall()]
+    conn.close()
+    return ok(rows)
+
+
+@app.put("/api/v1/admin/budgets/{project_id}/{scope}")
+def update_budget(project_id: str, scope: str, payload: BudgetUpdate) -> ApiResponse:
+    conn = connect()
+    conn.execute(
+        """
+        INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
+        VALUES (?, ?, ?, ?, 0)
+        ON CONFLICT(project_id, scope)
+        DO UPDATE SET limit_cny = excluded.limit_cny, updated_at = CURRENT_TIMESTAMP
+        """,
+        (new_id("bdg"), project_id, scope, payload.limit_cny),
+    )
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM budgets WHERE project_id = ? AND scope = ?", (project_id, scope)).fetchone())
+    conn.close()
+    return ok(row)
+
+
+@app.get("/api/v1/knowledge")
+def list_knowledge(project_id: str, content_id: str | None = None) -> ApiResponse:
+    conn = connect()
+    if content_id:
+        rows = conn.execute(
+            "SELECT * FROM knowledge_items WHERE project_id = ? AND content_id = ? ORDER BY created_at",
+            (project_id, content_id),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM knowledge_items WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()
+    items = [dict(row) for row in rows]
+    for item in items:
+        item["meta"] = decode(item["meta"], {})
+    conn.close()
+    return ok(items)

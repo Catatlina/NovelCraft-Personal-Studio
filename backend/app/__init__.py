@@ -1,0 +1,1 @@
+"""NovelCraft backend package."""
