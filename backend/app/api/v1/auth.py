@@ -1,7 +1,6 @@
 """Auth endpoints: register, login, refresh, logout."""
-from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.core.security import (
@@ -13,6 +12,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db import connect, new_id
+from app.core.rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -33,7 +33,8 @@ class RefreshRequest(BaseModel):
 
 
 @router.post("/register")
-def register(payload: RegisterRequest, response: Response):
+@limiter.limit("5/minute")
+def register(request: Request, payload: RegisterRequest = Body(...)):
     db = connect()
     existing = db.execute("SELECT id FROM users WHERE email = %s", (payload.email,)).fetchone()
     if existing:
@@ -72,7 +73,8 @@ def register(payload: RegisterRequest, response: Response):
 
 
 @router.post("/login")
-def login(payload: LoginRequest, response: Response):
+@limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest = Body(...)):
     db = connect()
     user = db.execute("SELECT * FROM users WHERE email = %s AND is_deleted = FALSE", (payload.email,)).fetchone()
     db.close()
@@ -89,7 +91,8 @@ def login(payload: LoginRequest, response: Response):
 
 
 @router.post("/refresh")
-def refresh_token(payload: RefreshRequest):
+@limiter.limit("30/minute")
+def refresh_token(request: Request, payload: RefreshRequest = Body(...)):
     claims = decode_token(payload.refresh_token)
     if claims.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="token is not a refresh token")

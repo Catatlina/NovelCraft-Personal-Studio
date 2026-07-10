@@ -5,7 +5,7 @@ from app.db import connect, encode, new_id
 
 ROLES = ["owner", "editor", "viewer"]
 
-def invite_user(project_id: str, email: str, role: str = "editor") -> dict:
+def invite_user(project_id: str, email: str, role: str = "editor", invited_by: str | None = None) -> dict:
     if role not in ROLES:
         return {"error": f"invalid role: {role}"}
     db = connect()
@@ -20,7 +20,7 @@ def invite_user(project_id: str, email: str, role: str = "editor") -> dict:
     )
     db.execute(
         "INSERT INTO operation_logs (id, project_id, user_id, action, target, detail) VALUES (%s,%s,%s,%s,%s,%s)",
-        (new_id(), project_id, user["id"], "invite_member", email, encode({"role": role})),
+        (new_id(), project_id, invited_by or user["id"], "invite_member", email, encode({"role": role})),
     )
     db.commit()
     db.close()

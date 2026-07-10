@@ -44,14 +44,24 @@ def publish_content(content_id: str, platform: str, mode: str | None = None) -> 
     return {"publish_id": pid, "platform": platform, "mode": actual_mode, "status": "pending"}
 
 
-def list_publish_records(content_id: str | None = None) -> list[dict]:
+def list_publish_records(content_id: str | None = None, project_ids: list[str] | None = None) -> list[dict]:
     db = connect()
     if content_id:
         rows = db.execute(
             "SELECT * FROM publish_records WHERE content_id = %s ORDER BY created_at DESC", (content_id,)
         ).fetchall()
+    elif project_ids:
+        rows = db.execute(
+            """
+            SELECT pr.* FROM publish_records pr
+            JOIN contents c ON pr.content_id = c.id
+            WHERE c.project_id = ANY(%s)
+            ORDER BY pr.created_at DESC LIMIT 50
+            """,
+            (project_ids,),
+        ).fetchall()
     else:
-        rows = db.execute("SELECT * FROM publish_records ORDER BY created_at DESC LIMIT 50").fetchall()
+        rows = []
     db.close()
     return [dict(r) for r in rows]
 

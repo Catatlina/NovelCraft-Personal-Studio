@@ -26,9 +26,12 @@ M5 █████░░░░░░░░░░░░░░░░░░░ 15%
 ## 已验证通过（有测试/手动验证）
 
 - ✅ 健康检查 /healthz
-- ✅ Auth：注册+登录+JWT（5/5 tests pass）
+- ✅ Auth：注册+登录+JWT+认证限流（9/9 tests pass）
 - ✅ 项目列表需要 token（test verified）
 - ✅ 内容列表验证项目成员资格
+- ✅ 对象级内容接口需要 token，跨项目访问被拦截
+- ✅ 协作接口按项目角色校验，邀请日志记录邀请者
+- ✅ Admin 配置接口需要登录，预算/工作流按项目成员过滤
 - ✅ PostgreSQL 28 表 + Alembic 迁移
 - ✅ 前端 10 tab 构建通过
 - ✅ Prompt registry 加载（30 prompts）
@@ -82,15 +85,19 @@ M5 █████░░░░░░░░░░░░░░░░░░░ 15%
 | P1 SQL 注入（versioned_repo）| ✅ 白名单 |
 | P1 重复 admin 端点 | ✅ 删除 76 行 |
 | P1 Docker REDIS_URL | ✅ 添加 |
+| P0 对象级内容接口越权 | ✅ get/update/bootstrap/AI/versions/run/publish 等入口已接入成员校验 |
+| P1 缺少认证限流 | ✅ slowapi 接入认证与 AI 成本敏感入口 |
+| P1 协作接口未鉴权 | ✅ invite/members/logs 接入成员校验 |
+| P1 Admin 配置接口裸奔 | ✅ providers/model-routes/settings/budgets/workflows 接入鉴权或成员过滤 |
 
 ## 仍需要做的事
 
 - [ ] **轮换 DeepSeek API Key**（去控制台作废旧 Key）
 - [ ] 用新 Key 做一次完整 Bootstrap 端到端验证
 - [ ] Docker compose 全链路验证
-- [ ] 前端登录页面
+- [x] 前端登录页面
 - [ ] CI/CD（GitHub Actions）
-- [ ] 限流（slowapi）
+- [x] 限流（slowapi）
 - [ ] 连接池（替换裸 psycopg2 connect）
 - [ ] 向量搜索实现
 - [ ] 真实发布网关（从 1 个平台开始）

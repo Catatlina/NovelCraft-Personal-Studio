@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import json
 from typing import Any
@@ -27,6 +25,7 @@ from .workers.tasks import confirm_human, create_run
 from .api.v1.auth import router as auth_router
 from .api.v1.config import router as config_router
 from .core.logging_config import setup_logging, get_logger
+from .core.rate_limit import install_rate_limiter, limiter
 
 setup_logging()
 logger = get_logger(__name__)
@@ -34,6 +33,7 @@ logger = get_logger(__name__)
 app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
 app.include_router(auth_router)
 app.include_router(config_router)
+install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -56,6 +56,46 @@ def parse_content(row: dict[str, Any]) -> dict[str, Any]:
     row["body"] = decode(row["body"], {})
     row["meta"] = decode(row["meta"], {})
     return row
+
+
+def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
+    member = conn.execute(
+        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
+        (project_id, user["id"]),
+    ).fetchone()
+    if not member:
+        raise HTTPException(status_code=403, detail="not a project member")
+    if roles and member["role"] not in roles:
+        raise HTTPException(status_code=403, detail="insufficient permissions")
+    return dict(member)
+
+
+def load_content_for_user(content_id: str, user: dict, roles: set[str] | None = None) -> tuple[Any, dict]:
+    conn = connect()
+    content = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
+    if content is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="content not found")
+    try:
+        ensure_project_member(conn, content["project_id"], user, roles)
+    except Exception:
+        conn.close()
+        raise
+    return conn, content
+
+
+def load_run_for_user(run_id: str, user: dict, roles: set[str] | None = None) -> tuple[Any, dict]:
+    conn = connect()
+    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
+    if run is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        ensure_project_member(conn, run["project_id"], user, roles)
+    except Exception:
+        conn.close()
+        raise
+    return conn, run
 
 
 @app.get("/api/v1/healthz")
@@ -113,7 +153,9 @@ def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get
     conn = connect()
     project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
     if project is None:
+        conn.close()
         raise HTTPException(status_code=404, detail="project not found")
+    ensure_project_member(conn, project_id, user, {"owner", "editor"})
     novel_id = new_id("cnt")
     title = payload.idea[:26] + ("..." if len(payload.idea) > 26 else "")
     body = {"type": "doc", "content": []}
@@ -164,22 +206,15 @@ def list_contents(project_id: str = Query(...), parent_id: str | None = None,
 
 
 @app.get("/api/v1/contents/{content_id}")
-def get_content(content_id: str) -> ApiResponse:
-    conn = connect()
-    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
+def get_content(content_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, row = load_content_for_user(content_id, user)
     conn.close()
-    if row is None:
-        raise HTTPException(status_code=404, detail="content not found")
     return ok(parse_content(row))
 
 
 @app.put("/api/v1/contents/{content_id}")
-def update_content(content_id: str, payload: ContentUpdate) -> ApiResponse:
-    conn = connect()
-    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
-    if row is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="content not found")
+def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, row = load_content_for_user(content_id, user, {"owner", "editor"})
     snapshot = {"title": row["title"], "body": decode(row["body"], {}), "meta": decode(row["meta"], {})}
     conn.execute(
         "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s ,%s, %s)",
@@ -199,50 +234,52 @@ def update_content(content_id: str, payload: ContentUpdate) -> ApiResponse:
 
 
 @app.post("/api/v1/novels/{novel_id}/bootstrap")
-async def bootstrap_novel(novel_id: str) -> ApiResponse:
-    conn = connect()
-    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone())
+@limiter.limit("10/minute")
+async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
     conn.close()
-    if novel is None:
-        raise HTTPException(status_code=404, detail="novel not found")
+    if novel["type"] != "novel":
+        raise HTTPException(status_code=400, detail="content is not a novel")
     run_id = create_run(novel["project_id"], novel_id)
     return ok({"run_id": run_id})
 
 
 @app.post("/api/v1/novels/{novel_id}/continue")
-async def continue_novel(novel_id: str) -> ApiResponse:
+@limiter.limit("10/minute")
+async def continue_novel(request: Request, novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M2: Generate next chapter for an existing novel."""
-    conn = connect()
-    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s AND type = 'novel'", (novel_id,)).fetchone())
+    conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
     conn.close()
-    if novel is None:
-        raise HTTPException(status_code=404, detail="novel not found")
+    if novel["type"] != "novel":
+        raise HTTPException(status_code=400, detail="content is not a novel")
     from .workers.tasks import gen_next_chapter_task
     result = gen_next_chapter_task.delay(novel_id, novel["project_id"])
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
 
 
 @app.post("/api/v1/novels/{novel_id}/expand-outline")
-async def expand_outline(novel_id: str) -> ApiResponse:
+@limiter.limit("10/minute")
+async def expand_outline(request: Request, novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M2: Expand volume outline into chapter-level outlines."""
-    conn = connect()
-    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s AND type = 'novel'", (novel_id,)).fetchone())
+    conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
     conn.close()
-    if novel is None:
-        raise HTTPException(status_code=404, detail="novel not found")
+    if novel["type"] != "novel":
+        raise HTTPException(status_code=400, detail="content is not a novel")
     from .workers.tasks import expand_outline_task
     result = expand_outline_task.delay(novel_id, novel["project_id"])
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
 
 
 @app.post("/api/v1/projects/{project_id}/short-stories")
-async def create_short_story(project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+@limiter.limit("10/minute")
+async def create_short_story(request: Request, project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Create and bootstrap a short story."""
     conn = connect()
     project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
     if project is None:
         conn.close()
         raise HTTPException(status_code=404, detail="project not found")
+    ensure_project_member(conn, project_id, user, {"owner", "editor"})
     sid = new_id()
     conn.execute(
         "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -256,14 +293,14 @@ async def create_short_story(project_id: str, user: dict = Depends(get_current_u
 
 
 @app.post("/api/v1/contents/{content_id}/fanout")
-async def fanout_content(content_id: str, platforms: str = "wechat,toutiao,xiaohongshu") -> ApiResponse:
+async def fanout_content(
+    content_id: str,
+    platforms: str = "wechat,toutiao,xiaohongshu",
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M3: Fan-out source content to multiple social platforms."""
     from app.services.social_media import PLATFORMS
-    conn = connect()
-    source = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
-    if source is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="content not found")
+    conn, source = load_content_for_user(content_id, user, {"owner", "editor"})
 
     platform_list = [p.strip() for p in platforms.split(",") if p.strip() in PLATFORMS]
     results = []
@@ -286,17 +323,20 @@ async def fanout_content(content_id: str, platforms: str = "wechat,toutiao,xiaoh
 
 
 @app.post("/api/v1/contents/{content_id}/video-script")
-async def generate_video_script(content_id: str, platform: str = "douyin") -> ApiResponse:
+@limiter.limit("20/minute")
+async def generate_video_script(
+    request: Request,
+    content_id: str,
+    platform: str = "douyin",
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M3: Generate short video script from content."""
     from app.services.social_media import VIDEO_PLATFORMS
     if platform not in VIDEO_PLATFORMS:
         raise HTTPException(status_code=400, detail=f"unknown platform: {platform}")
     p = VIDEO_PLATFORMS[platform]
-    conn = connect()
-    source = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
+    conn, source = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
-    if source is None:
-        raise HTTPException(status_code=404, detail="content not found")
     # Generate via AI
     from .gateway import complete
     body_text = ""
@@ -309,12 +349,8 @@ async def generate_video_script(content_id: str, platform: str = "douyin") -> Ap
 
 
 @app.get("/api/v1/runs/{run_id}")
-def get_run(run_id: str) -> ApiResponse:
-    conn = connect()
-    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
-    if run is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="run not found")
+def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, run = load_run_for_user(run_id, user)
     nodes = [dict(row) for row in conn.execute("SELECT * FROM run_nodes WHERE run_id = %s ORDER BY node_key", (run_id,)).fetchall()]
     for node in nodes:
         node["output"] = decode(node["output"], {})
@@ -325,7 +361,10 @@ def get_run(run_id: str) -> ApiResponse:
 
 
 @app.get("/api/v1/runs/{run_id}/events")
-async def run_events(run_id: str):
+async def run_events(run_id: str, user: dict = Depends(get_current_user)):
+    conn, _run = load_run_for_user(run_id, user)
+    conn.close()
+
     async def event_stream():
         import asyncio
         while True:
@@ -348,14 +387,16 @@ async def run_events(run_id: str):
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/n2/confirm")
-async def confirm_title(run_id: str, payload: HumanConfirm) -> ApiResponse:
+async def confirm_title(run_id: str, payload: HumanConfirm, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, _run = load_run_for_user(run_id, user, {"owner", "editor"})
+    conn.close()
     confirm_human(run_id, payload.selected_title)
     return ok({"run_id": run_id, "selected_title": payload.selected_title})
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/{node_key}/retry")
-async def retry_node(run_id: str, node_key: str) -> ApiResponse:
-    conn = connect()
+async def retry_node(run_id: str, node_key: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, _run = load_run_for_user(run_id, user, {"owner", "editor"})
     conn.execute(
         "UPDATE run_nodes SET status = 'pending', output = '{}', error = NULL WHERE run_id = %s AND node_key = %s",
         (run_id, node_key),
@@ -372,8 +413,8 @@ async def retry_node(run_id: str, node_key: str) -> ApiResponse:
 
 
 @app.get("/api/v1/contents/{content_id}/versions")
-def list_versions(content_id: str) -> ApiResponse:
-    conn = connect()
+def list_versions(content_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, _content = load_content_for_user(content_id, user)
     rows = [dict(row) for row in conn.execute("SELECT * FROM versions WHERE entity_id = %s ORDER BY created_at DESC", (content_id,)).fetchall()]
     for row in rows:
         row["snapshot"] = decode(row["snapshot"], {})
@@ -382,8 +423,8 @@ def list_versions(content_id: str) -> ApiResponse:
 
 
 @app.post("/api/v1/contents/{content_id}/versions/restore")
-def restore_version(content_id: str, payload: VersionRestore) -> ApiResponse:
-    conn = connect()
+def restore_version(content_id: str, payload: VersionRestore, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, _content = load_content_for_user(content_id, user, {"owner", "editor"})
     version = row_to_dict(
         conn.execute("SELECT * FROM versions WHERE id = %s AND entity_id = %s", (payload.version_id, content_id)).fetchone()
     )
@@ -409,12 +450,16 @@ def restore_version(content_id: str, payload: VersionRestore) -> ApiResponse:
 
 
 @app.post("/api/v1/contents/{content_id}/ai/{op}")
-def ai_edit(content_id: str, op: AiOperation, payload: AiEditRequest) -> ApiResponse:
-    conn = connect()
-    content = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
+@limiter.limit("30/minute")
+def ai_edit(
+    request: Request,
+    content_id: str,
+    op: AiOperation,
+    payload: AiEditRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
-    if content is None:
-        raise HTTPException(status_code=404, detail="content not found")
     output = complete(
         run_id=None,
         node_key=None,
@@ -427,12 +472,26 @@ def ai_edit(content_id: str, op: AiOperation, payload: AiEditRequest) -> ApiResp
 
 
 @app.get("/api/v1/ai-calls")
-def list_ai_calls(run_id: str | None = None) -> ApiResponse:
+def list_ai_calls(run_id: str | None = None, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
     if run_id:
+        run = row_to_dict(conn.execute("SELECT project_id FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
+        if run is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="run not found")
+        ensure_project_member(conn, run["project_id"], user)
         rows = conn.execute("SELECT * FROM ai_calls WHERE run_id = %s ORDER BY created_at DESC", (run_id,)).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM ai_calls ORDER BY created_at DESC LIMIT 100").fetchall()
+        rows = conn.execute(
+            """
+            SELECT ac.* FROM ai_calls ac
+            LEFT JOIN workflow_runs wr ON ac.run_id = wr.id
+            JOIN project_members pm ON wr.project_id = pm.project_id
+            WHERE pm.user_id = %s
+            ORDER BY ac.created_at DESC LIMIT 100
+            """,
+            (user["id"],),
+        ).fetchall()
     items = [dict(row) for row in rows]
     for item in items:
         item["input"] = decode(item["input"], {})
@@ -442,7 +501,7 @@ def list_ai_calls(run_id: str | None = None) -> ApiResponse:
 
 
 @app.get("/api/v1/prompts")
-def list_prompts() -> ApiResponse:
+def list_prompts(user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
     rows = [dict(row) for row in conn.execute("SELECT * FROM prompts ORDER BY name, version").fetchall()]
     for row in rows:
@@ -452,7 +511,7 @@ def list_prompts() -> ApiResponse:
 
 
 @app.get("/api/v1/model-routes")
-def list_model_routes() -> ApiResponse:
+def list_model_routes(user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
     rows = [dict(row) for row in conn.execute("SELECT * FROM model_routes ORDER BY task_type").fetchall()]
     for row in rows:
@@ -463,7 +522,7 @@ def list_model_routes() -> ApiResponse:
 
 
 @app.put("/api/v1/model-routes/{task_type}")
-def update_model_route(task_type: str, payload: ModelRouteUpdate) -> ApiResponse:
+def update_model_route(task_type: str, payload: ModelRouteUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
     conn.execute(
         """
@@ -483,16 +542,18 @@ def update_model_route(task_type: str, payload: ModelRouteUpdate) -> ApiResponse
 
 
 @app.get("/api/v1/admin/budgets")
-def list_budgets(project_id: str) -> ApiResponse:
+def list_budgets(project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
+    ensure_project_member(conn, project_id, user)
     rows = [dict(row) for row in conn.execute("SELECT * FROM budgets WHERE project_id = %s ORDER BY scope", (project_id,)).fetchall()]
     conn.close()
     return ok(rows)
 
 
 @app.put("/api/v1/admin/budgets/{project_id}/{scope}")
-def update_budget(project_id: str, scope: str, payload: BudgetUpdate) -> ApiResponse:
+def update_budget(project_id: str, scope: str, payload: BudgetUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
+    ensure_project_member(conn, project_id, user, {"owner"})
     conn.execute(
         """
         INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
@@ -509,8 +570,13 @@ def update_budget(project_id: str, scope: str, payload: BudgetUpdate) -> ApiResp
 
 
 @app.get("/api/v1/knowledge")
-def list_knowledge(project_id: str, content_id: str | None = None) -> ApiResponse:
+def list_knowledge(
+    project_id: str,
+    content_id: str | None = None,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     conn = connect()
+    ensure_project_member(conn, project_id, user)
     if content_id:
         rows = conn.execute(
             "SELECT * FROM knowledge_items WHERE project_id = %s AND content_id = %s ORDER BY created_at",
@@ -526,49 +592,78 @@ def list_knowledge(project_id: str, content_id: str | None = None) -> ApiRespons
 
 
 @app.post("/api/v1/knowledge/search")
-def search_knowledge(project_id: str, query: str = "", kind: str = "") -> ApiResponse:
+def search_knowledge(
+    project_id: str,
+    query: str = "",
+    kind: str = "",
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M3: Search knowledge hub."""
+    conn = connect()
+    ensure_project_member(conn, project_id, user)
+    conn.close()
     from .services.knowledge_hub import search
     kinds = [kind] if kind else None
     return ok(search(query, project_id, kinds))
 
 
 @app.post("/api/v1/knowledge/daily-briefing")
-def daily_briefing(project_id: str) -> ApiResponse:
+@limiter.limit("10/minute")
+def daily_briefing(request: Request, project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Generate daily content briefing from hotspots."""
+    conn = connect()
+    ensure_project_member(conn, project_id, user, {"owner", "editor"})
+    conn.close()
     from .services.hotspot import generate_daily_briefing
     return ok(generate_daily_briefing(project_id))
 
 
 @app.post("/api/v1/knowledge/style-learn")
-async def style_learn(request: Request) -> ApiResponse:
+async def style_learn(request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Learn style from sample texts."""
     from .services.style_learn import learn_style
     body = await request.json()
+    project_id = body.get("project_id") if isinstance(body, dict) else None
+    if project_id:
+        conn = connect()
+        ensure_project_member(conn, project_id, user, {"owner", "editor"})
+        conn.close()
     return ok(learn_style(body.get("samples", body if isinstance(body, list) else [])))
 
 
 @app.post("/api/v1/knowledge/check-similarity")
-async def check_similarity(request: Request) -> ApiResponse:
+async def check_similarity(request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Check similarity between original and generated text."""
     from .services.style_learn import check_similarity
     body = await request.json()
+    project_id = body.get("project_id") if isinstance(body, dict) else None
+    if project_id:
+        conn = connect()
+        ensure_project_member(conn, project_id, user)
+        conn.close()
     return ok(check_similarity(body.get("original",""), body.get("generated","")))
 
 
 @app.post("/api/v1/prompts/lab")
-def prompt_lab(prompt_name: str, input_text: str, models: str = "deepseek-chat") -> ApiResponse:
+@limiter.limit("20/minute")
+def prompt_lab(
+    request: Request,
+    prompt_name: str,
+    input_text: str,
+    project_id: str,
+    models: str = "deepseek-chat",
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M3: Prompt lab — run same input against multiple models and compare."""
     from .gateway import complete
     conn = connect()
-    row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
-    pid = row["id"] if row else ""
+    ensure_project_member(conn, project_id, user, {"owner", "editor"})
     conn.close()
     model_list = [m.strip() for m in models.split(",")]
     results = []
     for model in model_list:
         try:
-            output = complete(run_id=None, node_key=None, project_id=pid,
+            output = complete(run_id=None, node_key=None, project_id=project_id,
                             task_type="prompt_lab", prompt_name=prompt_name,
                             variables={"input": input_text, "model": model})
             results.append({"model": model, "output": output, "status": "ok"})
@@ -578,10 +673,17 @@ def prompt_lab(prompt_name: str, input_text: str, models: str = "deepseek-chat")
 
 
 @app.post("/api/v1/publish")
-def publish(content_id: str, platform: str, mode: str | None = None) -> ApiResponse:
+@limiter.limit("20/minute")
+def publish(
+    request: Request,
+    content_id: str,
+    platform: str,
+    mode: str | None = None,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M4: Publish content to a platform."""
     from .services.publish_gateway import publish_content, check_sensitive
-    conn = connect()
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     row = conn.execute("SELECT body FROM contents WHERE id = %s", (content_id,)).fetchone()
     conn.close()
     if row:
@@ -597,10 +699,16 @@ def publish(content_id: str, platform: str, mode: str | None = None) -> ApiRespo
 
 
 @app.post("/api/v1/overseas/translate")
-def overseas_translate(content_id: str, target_lang: str = "en") -> ApiResponse:
+@limiter.limit("20/minute")
+def overseas_translate(
+    request: Request,
+    content_id: str,
+    target_lang: str = "en",
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M4: Translate content for overseas publishing."""
     from .services.overseas import translate_chapter
-    conn = connect()
+    conn, _content = load_content_for_user(content_id, user, {"owner", "editor"})
     row = conn.execute("SELECT body FROM contents WHERE id = %s", (content_id,)).fetchone()
     conn.close()
     if not row:
@@ -612,28 +720,52 @@ def overseas_translate(content_id: str, target_lang: str = "en") -> ApiResponse:
 
 
 @app.get("/api/v1/publish/records")
-def publish_records(content_id: str | None = None) -> ApiResponse:
+def publish_records(content_id: str | None = None, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M4: List publish records."""
     from .services.publish_gateway import list_publish_records
-    return ok(list_publish_records(content_id))
+    if content_id:
+        conn, _content = load_content_for_user(content_id, user)
+        conn.close()
+        return ok(list_publish_records(content_id))
+    conn = connect()
+    project_ids = [
+        row["project_id"]
+        for row in conn.execute("SELECT project_id FROM project_members WHERE user_id = %s", (user["id"],)).fetchall()
+    ]
+    conn.close()
+    return ok(list_publish_records(project_ids=project_ids))
 
 
 @app.post("/api/v1/collaboration/invite")
-def invite_member(project_id: str, email: str, role: str = "editor") -> ApiResponse:
+def invite_member(
+    project_id: str,
+    email: str,
+    role: str = "editor",
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
     """M5: Invite a user to collaborate on a project."""
     from .services.collaboration import invite_user
-    return ok(invite_user(project_id, email, role))
+    conn = connect()
+    ensure_project_member(conn, project_id, user, {"owner"})
+    conn.close()
+    return ok(invite_user(project_id, email, role, invited_by=user["id"]))
 
 
 @app.get("/api/v1/collaboration/members")
-def collaboration_members(project_id: str) -> ApiResponse:
+def collaboration_members(project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M5: List project members."""
     from .services.collaboration import list_members
+    conn = connect()
+    ensure_project_member(conn, project_id, user)
+    conn.close()
     return ok(list_members(project_id))
 
 
 @app.get("/api/v1/collaboration/logs")
-def collaboration_logs(project_id: str) -> ApiResponse:
+def collaboration_logs(project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M5: Get operation logs."""
     from .services.collaboration import get_operation_logs
+    conn = connect()
+    ensure_project_member(conn, project_id, user)
+    conn.close()
     return ok(get_operation_logs(project_id))

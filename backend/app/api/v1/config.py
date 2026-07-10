@@ -1,12 +1,37 @@
 """AI Configuration API — manage providers, models, API keys, budgets."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import os
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import connect, encode, decode, new_id
+from app.core.security import get_current_user
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
+    if allowed and user["email"].lower() in allowed:
+        return user
+    if not allowed and os.getenv("NOVELCRAFT_ENV", "").startswith("dev"):
+        return user
+    raise HTTPException(status_code=403, detail="admin access required")
+
+
+def ensure_project_member(project_id: str, user: dict, roles: set[str] | None = None) -> None:
+    db = connect()
+    member = db.execute(
+        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
+        (project_id, user["id"]),
+    ).fetchone()
+    db.close()
+    if not member:
+        raise HTTPException(status_code=403, detail="not a project member")
+    if roles and member["role"] not in roles:
+        raise HTTPException(status_code=403, detail="insufficient permissions")
 
 
 class ProviderSettings(BaseModel):
@@ -24,11 +49,10 @@ class ModelRouteUpdate(BaseModel):
 
 
 @router.get("/providers")
-def list_providers():
+def list_providers(user: dict = Depends(get_current_user)):
     """List all configured AI providers with masked keys."""
-    import os
     providers = [
-        {"name": "deepseek", "key_configured": bool(os.getenv("DEEPSEEK_API_KEY","") or "sk-" in open("/Users/genius/NovelCraft Personal Studio/backend/app/config.py").read()),
+        {"name": "deepseek", "key_configured": bool(os.getenv("DEEPSEEK_API_KEY","")),
          "base_url": "https://api.deepseek.com", "default_model": "deepseek-chat"},
         {"name": "claude", "key_configured": bool(os.getenv("CLAUDE_API_KEY","")),
          "base_url": "https://api.anthropic.com", "default_model": "claude-sonnet-4-20250514"},
@@ -41,7 +65,7 @@ def list_providers():
 
 
 @router.get("/model-routes")
-def list_routes():
+def list_routes(user: dict = Depends(get_current_user)):
     db = connect()
     rows = db.execute("SELECT * FROM model_routes ORDER BY task_type").fetchall()
     db.close()
@@ -55,7 +79,7 @@ def list_routes():
 
 
 @router.put("/model-routes/{task_type}")
-def update_route(task_type: str, payload: ModelRouteUpdate):
+def update_route(task_type: str, payload: ModelRouteUpdate, user: dict = Depends(require_admin)):
     db = connect()
     db.execute(
         """INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json)
@@ -75,18 +99,35 @@ def update_route(task_type: str, payload: ModelRouteUpdate):
 
 
 @router.get("/budgets")
-def list_budgets(project_id: str = ""):
+def list_budgets(project_id: str = "", user: dict = Depends(get_current_user)):
     db = connect()
     if project_id:
+        db.close()
+        ensure_project_member(project_id, user)
+        db = connect()
         rows = db.execute("SELECT * FROM budgets WHERE project_id = %s ORDER BY scope", (project_id,)).fetchall()
     else:
-        rows = db.execute("SELECT * FROM budgets ORDER BY project_id, scope").fetchall()
+        rows = db.execute(
+            """
+            SELECT b.* FROM budgets b
+            JOIN project_members pm ON b.project_id = pm.project_id
+            WHERE pm.user_id = %s
+            ORDER BY b.project_id, b.scope
+            """,
+            (user["id"],),
+        ).fetchall()
     db.close()
     return {"code": 0, "message": "ok", "data": [dict(r) for r in rows]}
 
 
 @router.put("/budgets/{project_id}/{scope}")
-def update_budget(project_id: str, scope: str, limit_cny: float = 2.0):
+def update_budget(
+    project_id: str,
+    scope: str,
+    limit_cny: float = 2.0,
+    user: dict = Depends(get_current_user),
+):
+    ensure_project_member(project_id, user, {"owner"})
     db = connect()
     db.execute(
         """INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
@@ -101,7 +142,7 @@ def update_budget(project_id: str, scope: str, limit_cny: float = 2.0):
 
 
 @router.get("/prompts")
-def list_prompts():
+def list_prompts(user: dict = Depends(get_current_user)):
     db = connect()
     rows = db.execute("SELECT * FROM prompts ORDER BY name, version DESC").fetchall()
     db.close()
@@ -114,7 +155,7 @@ def list_prompts():
 
 
 @router.get("/settings")
-def list_settings():
+def list_settings(user: dict = Depends(require_admin)):
     """Read all settings (keys masked)."""
     db = connect()
     rows = db.execute("SELECT key, value, description, updated_at FROM settings ORDER BY key").fetchall()
@@ -129,7 +170,7 @@ def list_settings():
 
 
 @router.put("/settings/{key}")
-def update_setting(key: str, value: str) -> dict:
+def update_setting(key: str, value: str, user: dict = Depends(require_admin)) -> dict:
     """Update a single setting."""
     db = connect()
     db.execute(
@@ -146,7 +187,7 @@ def update_setting(key: str, value: str) -> dict:
 
 
 @router.get("/env-check")
-def env_check():
+def env_check(user: dict = Depends(require_admin)):
     """Check which env vars are configured vs DB settings."""
     import os
     db = connect()
@@ -167,18 +208,38 @@ def env_check():
 
 
 @router.get("/workflows")
-def list_workflows(project_id: str = ""):
+def list_workflows(project_id: str = "", user: dict = Depends(get_current_user)):
     db = connect()
     if project_id:
+        db.close()
+        ensure_project_member(project_id, user)
+        db = connect()
         rows = db.execute("SELECT * FROM workflows WHERE project_id = %s ORDER BY created_at DESC", (project_id,)).fetchall()
     else:
-        rows = db.execute("SELECT * FROM workflows ORDER BY created_at DESC LIMIT 20").fetchall()
+        rows = db.execute(
+            """
+            SELECT w.* FROM workflows w
+            JOIN project_members pm ON w.project_id = pm.project_id
+            WHERE pm.user_id = %s
+            ORDER BY w.created_at DESC LIMIT 20
+            """,
+            (user["id"],),
+        ).fetchall()
     db.close()
     return {"code": 0, "message": "ok", "data": [dict(r) for r in rows]}
 
 
 @router.put("/workflows/{name}")
-def save_workflow(name: str, nodes: list[dict], project_id: str = ""):
+def save_workflow(
+    name: str,
+    nodes: list[dict],
+    project_id: str = "",
+    user: dict = Depends(get_current_user),
+):
+    if project_id:
+        ensure_project_member(project_id, user, {"owner", "editor"})
+    else:
+        require_admin(user)
     db = connect()
     db.execute(
         """INSERT INTO workflows (id, project_id, name, config)
