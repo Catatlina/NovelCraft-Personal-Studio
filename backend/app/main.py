@@ -277,7 +277,10 @@ async def continue_novel(request: Request, novel_id: str, user: dict = Depends(g
     if novel["type"] != "novel":
         raise HTTPException(status_code=400, detail="content is not a novel")
     from .workers.tasks import gen_next_chapter_task
-    result = gen_next_chapter_task.delay(novel_id, novel["project_id"])
+    result = gen_next_chapter_task.delay(novel_id, novel["project_id"],
+                                         api_key=request.headers.get("X-Api-Key", ""),
+                                         api_url=request.headers.get("X-Api-Base-Url", ""),
+                                         model=request.headers.get("X-Model", ""))
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
 
 
@@ -428,10 +431,13 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/n2/confirm")
-async def confirm_title(run_id: str, payload: HumanConfirm, user: dict = Depends(get_current_user)) -> ApiResponse:
+async def confirm_title(request: Request, run_id: str, payload: HumanConfirm, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, _run = load_run_for_user(run_id, user, {"owner", "editor"})
     conn.close()
-    confirm_human(run_id, payload.selected_title)
+    confirm_human(run_id, payload.selected_title,
+                  api_key=request.headers.get("X-Api-Key", ""),
+                  api_url=request.headers.get("X-Api-Base-Url", ""),
+                  model=request.headers.get("X-Model", ""))
     return ok({"run_id": run_id, "selected_title": payload.selected_title})
 
 

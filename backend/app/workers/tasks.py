@@ -136,7 +136,8 @@ def create_run(project_id: str, novel_id: str,
     return run_id
 
 
-def confirm_human(run_id: str, selected_title: str) -> None:
+def confirm_human(run_id: str, selected_title: str,
+                  api_key: str = "", api_url: str = "", model: str = "") -> None:
     """Confirm human node selection and continue workflow."""
     db = connect()
     run = db.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone()
@@ -156,7 +157,7 @@ def confirm_human(run_id: str, selected_title: str) -> None:
     )
     db.commit()
     db.close()
-    execute_bootstrap.delay(run_id, "n3")
+    execute_bootstrap.delay(run_id, "n3", api_key, api_url, model)
 
 
 def _mark_node(run_id: str, node_key: str, status: str, error: str) -> None:
@@ -295,11 +296,20 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 
 
 @celery_app.task(bind=True, max_retries=2)
-def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
-    """M2: Generate the next chapter using context assembler."""
+def gen_next_chapter_task(self, novel_id: str, project_id: str,
+                           api_key: str = "", api_url: str = "", model: str = "") -> dict:
+    """M2: Generate the next chapter using context assembler (with distributed lock)."""
     from app.services.assembler import ContextAssembler
     from app.services.entity_tracker import extract_and_store
+    from app.gateway import _request_api_key, _request_api_base_url, _request_model
     from .lock import acquire_lock, release_lock
+
+    if api_key:
+        _request_api_key.set(api_key)
+    if api_url:
+        _request_api_base_url.set(api_url)
+    if model:
+        _request_model.set(model)
 
     lock_key = f"lock:novel:{novel_id}:gen_chapter"
     if not acquire_lock(lock_key):
