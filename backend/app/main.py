@@ -197,6 +197,26 @@ async def expand_outline(novel_id: str) -> ApiResponse:
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
 
 
+@app.post("/api/v1/projects/{project_id}/short-stories")
+async def create_short_story(project_id: str) -> ApiResponse:
+    """M3: Create and bootstrap a short story."""
+    conn = connect()
+    project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
+    if project is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="project not found")
+    sid = new_id()
+    conn.execute(
+        "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (sid, project_id, "short_story", "新短篇", encode({"type":"doc","content":[]}),
+         encode({"idea": "请基于灵感创作", "template": "viral", "genre": "都市", "style": "现代"}), "draft"),
+    )
+    conn.commit(); conn.close()
+    from .workers.tasks import bootstrap_short_story_task
+    result = bootstrap_short_story_task.delay(project_id, sid)
+    return ok({"short_id": sid, "task_id": result.id, "status": "dispatched"})
+
+
 @app.get("/api/v1/runs/{run_id}")
 def get_run(run_id: str) -> ApiResponse:
     conn = connect()

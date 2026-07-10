@@ -26,6 +26,10 @@ PROMPT_SEEDS = [
     ("narrative.expand_outline", "1.0.0", "deepseek", "将卷纲展开为逐章细纲。卷纲：$volume\\n每卷$chapters_per_volume章。输出JSON: {\\\"chapters\\\":[{\\\"title\\\":\\\"\\\",\\\"outline\\\":\\\"\\\"}]}"),
     ("narrative.extract_timeline", "1.0.0", "deepseek", "提取本章时间线事件。$instructions\\n$body\\n输出JSON: {\\\"events\\\":[{\\\"event\\\":\\\"事件描述\\\"}]}"),
     ("narrative.extract_arcs", "1.0.0", "deepseek", "提取人物弧线进展。$instructions\\n$body\\n输出JSON: {\\\"arcs\\\":[{\\\"character\\\":\\\"人物名\\\",\\\"stage\\\":\\\"弧线阶段\\\",\\\"goal\\\":\\\"目标\\\"}]}"),
+    # M3: short story
+    ("shortstory.gen_titles", "1.0.0", "deepseek", "为短篇创意生成3个标题。\\n灵感：$idea\\n题材：$genre\\n模板：$template\\n输出JSON: {\\\"titles\\\":[\\\"标题1\\\",\\\"标题2\\\",\\\"标题3\\\"]}"),
+    ("shortstory.gen_story", "1.0.0", "deepseek", "按「$template」模板写短篇。\\n标题：$title\\n灵感：$idea\\n风格：$style\\n字数：$max_words字以内\\n输出JSON: {\\\"story\\\":{\\\"title\\\":\\\"\\\",\\\"body\\\":[\\\"段落\\\"]}}"),
+    ("shortstory.review", "1.0.0", "deepseek", "审核短篇质量。\\n输出JSON: {\\\"score\\\":80,\\\"hooks\\\":\\\"开头评价\\\",\\\"pacing\\\":\\\"节奏评价\\\",\\\"ending\\\":\\\"结尾评价\\\",\\\"issues\\\":[\\\"问题\\\"]}"),
 ]
 
 
