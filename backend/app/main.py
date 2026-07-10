@@ -816,3 +816,15 @@ def collaboration_logs(project_id: str, user: dict = Depends(get_current_user)) 
     ensure_project_member(conn, project_id, user)
     conn.close()
     return ok(get_operation_logs(project_id))
+
+
+@app.get("/api/v1/novels/{novel_id}/foreshadowings")
+def list_foreshadowings(novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """TASK-018: List foreshadowings for a novel."""
+    conn, _ = load_content_for_user(novel_id, user)
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM foreshadowings WHERE chapter_id IN (SELECT id FROM contents WHERE parent_id = %s) ORDER BY created_at DESC",
+        (novel_id,)
+    ).fetchall()]
+    conn.close()
+    return ok(rows)
