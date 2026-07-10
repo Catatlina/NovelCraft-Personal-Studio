@@ -122,10 +122,12 @@ class DB:
 
 def init_db() -> None:
     """Ensure seed data exists (tables already created by Alembic)."""
+    from .config import settings
+
     db = connect()
     existing = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
-    if existing is None:
-        # Create default user
+    if existing is None and settings.environment.lower() == "development":
+        # Development convenience only. Production must never get a known password.
         user_id = new_id()
         from .core.security import hash_password
         db.execute(
@@ -140,6 +142,26 @@ def init_db() -> None:
         db.execute(
             "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s, %s, %s, %s, %s)",
             (new_id("bdg"), project_id, "bootstrap", 2.0, 0),
+        )
+    # Keep project ownership and authorization membership consistent, including
+    # databases created by older builds that omitted the owner membership row.
+    missing_owners = db.execute(
+        """
+        SELECT p.id AS project_id, p.owner_id
+        FROM projects p
+        LEFT JOIN project_members pm
+          ON pm.project_id = p.id AND pm.user_id = p.owner_id
+        WHERE p.owner_id IS NOT NULL AND pm.id IS NULL
+        """
+    ).fetchall()
+    for owner in missing_owners:
+        db.execute(
+            """
+            INSERT INTO project_members (id, project_id, user_id, role)
+            VALUES (%s, %s, %s, 'owner')
+            ON CONFLICT(project_id, user_id) DO NOTHING
+            """,
+            (new_id(), owner["project_id"], owner["owner_id"]),
         )
     from .prompt_registry import PROMPT_SEEDS
     GOLDEN_CASES = {

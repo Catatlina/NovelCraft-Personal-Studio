@@ -99,7 +99,7 @@ services:
     depends_on:
       - api
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:5173"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173"]
       interval: 10s
       timeout: 3s
       retries: 3

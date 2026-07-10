@@ -1,4 +1,5 @@
 import json
+import os
 import secrets
 from typing import Any
 
@@ -163,7 +164,10 @@ def healthz() -> ApiResponse:
         checks["database"] = f"error: {e}"
     try:
         import redis
-        r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
+        r = redis.Redis.from_url(
+            os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            socket_connect_timeout=2,
+        )
         r.ping()
         r.close()
         checks["redis"] = "ok"
