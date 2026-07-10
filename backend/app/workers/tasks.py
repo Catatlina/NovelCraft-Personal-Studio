@@ -84,11 +84,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "n1") -> dict:
             return {"status": "pending_provider", "node_key": node_key}
         except Exception as exc:
             _mark_node(run_id, node_key, "failed", str(exc))
-            try:
-                self.retry(exc=exc)
-            except Exception:
-                pass
-            return {"status": "failed", "node_key": node_key, "error": str(exc)}
+            raise self.retry(exc=exc, countdown=5)
 
         _persist_output(run_id, node_key, task_type or "", output)
 

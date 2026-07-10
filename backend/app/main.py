@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
@@ -295,6 +296,18 @@ async def run_events(run_id: str):
         while True:
             yield ": heartbeat\n\n"
             await asyncio.sleep(1)
+            # Check if run completed and close stream
+            conn = connect()
+            row = conn.execute(
+                "SELECT status, nodes FROM workflow_runs WHERE id = %s", (run_id,)
+            ).fetchone()
+            conn.close()
+            if row and row["status"] in ("succeeded", "failed", "cancelled"):
+                nodes = decode(row["nodes"], [])
+                for n in nodes:
+                    yield f"data: {json.dumps(n)}\n\n"
+                yield "data: {\"status\": \"completed\"}\n\n"
+                break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -38,18 +38,22 @@ def complete(
     estimated_cost = _estimate_cost(variables, {"prompt": prompt_text})
     _assert_budget(project_id, "bootstrap", estimated_cost)
 
-    if provider in ("deepseek", "mock") or (settings.ai_provider == "deepseek" and settings.deepseek_api_key):
+    prompt_tokens, completion_tokens = 0, 0  # default
+
+    # Route to provider
+    if provider == "mock":
+        if not os.getenv("NOVELCRAFT_ENV", "").startswith("dev"):
+            raise ProviderError("mock provider not allowed in production")
+        output = _mock_output(task_type, variables)
+        provider_name = "mock"
+        model_name = "mock"
+    elif provider == "deepseek" or settings.ai_provider == "deepseek":
         try:
-            if provider == "deepseek":
-                output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
-            else:
-                output = _mock_output(task_type, variables)
-                prompt_tokens = max(80, len(prompt_text) // 3)
-                completion_tokens = max(120, len(encode(output)) // 3)
-            provider_name = provider if provider != "mock" else "deepseek"
+            output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
+            provider_name = "deepseek"
             model_name = model or settings.deepseek_model
         except ProviderError:
-            # Fallback chain
+            # Try fallback chain
             route = _load_route(task_type)
             fallbacks = route.get("fallback_json", []) if route else []
             if isinstance(fallbacks, str):
@@ -61,17 +65,25 @@ def complete(
                 except Exception:
                     continue
             else:
-                output = _mock_output(task_type, variables)
-                provider_name = "mock-fallback"
-                model_name = "mock"
-                prompt_tokens = max(80, len(prompt_text) // 3)
-                completion_tokens = max(120, len(encode(output)) // 3)
+                raise ProviderError(f"deepseek failed and all fallbacks exhausted for {task_type}")
+    elif provider in ("claude", "openai", "gemini"):
+        try:
+            output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(
+                {"provider": provider, "model": model or ""}, task_type, prompt_text, variables, params
+            )
+        except Exception:
+            route = _load_route(task_type)
+            fallbacks = route.get("fallback_json", []) if route else []
+            for fb in fallbacks:
+                try:
+                    output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
+                    break
+                except Exception:
+                    continue
+            else:
+                raise ProviderError(f"provider {provider} failed and all fallbacks exhausted for {task_type}")
     else:
-        output = _mock_output(task_type, variables)
-        provider_name = PROVIDER
-        model_name = MODEL
-        prompt_tokens = max(80, len(prompt_text) // 3)
-        completion_tokens = max(120, len(encode(output)) // 3)
+        raise ProviderError(f"unsupported provider: {provider}")
 
     latency_ms = int((time.perf_counter() - start) * 1000) + 60
     cost_cny = round((prompt_tokens + completion_tokens) * 0.000002, 4)
