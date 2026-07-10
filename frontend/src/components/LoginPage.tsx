@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { LogIn, UserPlus, Key, Eye, EyeOff } from "lucide-react";
+import { api } from "../lib/api";
 
 type Props = { onLogin: (token: string, email: string) => void };
 
@@ -13,99 +14,60 @@ export function LoginPage({ onLogin }: Props) {
 
   async function submit() {
     if (!email.includes("@") || password.length < 6) {
-      setError("请输入有效邮箱（≥6位密码）");
+      setError(mode === "register" ? "密码至少6位" : "请输入正确邮箱和密码");
       return;
     }
     setBusy(true); setError("");
     try {
       const path = mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
-      const r = await fetch(path, {
+      const data = await api<{ code: number; message: string; data?: { token: string } }>(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({email, password}),
+        body: JSON.stringify({ email, password }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.detail || d.message || "请求失败");
-      const token = d.data?.access_token;
-      if (token) onLogin(token, email);
-      else throw new Error("未收到 token");
-    } catch (e: any) {
-      setError(e.message);
-    } finally { setBusy(false); }
+      if (data.code === 0 && data.data?.token) {
+        const t = data.data.token;
+        sessionStorage.setItem("nc_token", t);
+        onLogin(t, email);
+      } else {
+        setError(data.message || "操作失败");
+      }
+    } catch {
+      setError("网络错误，请检查后端是否运行");
+    }
+    setBusy(false);
   }
 
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)"
-    }}>
-      <div style={{
-        width: 380, maxWidth: "90vw", padding: 32,
-        background: "var(--bg-surface)", borderRadius: 16,
-        border: "1px solid var(--border-subtle)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-      }}>
-        <h1 style={{ textAlign: "center", marginBottom: 4, fontSize: 24 }}>
-          📖 NovelCraft
-        </h1>
-        <p style={{ textAlign: "center", color: "var(--text-muted)", marginBottom: 24, fontSize: 14 }}>
-          Personal Studio
-        </p>
-
-        {error && (
-          <div style={{
-            padding: "8px 12px", marginBottom: 12, borderRadius: 8,
-            background: "rgba(255,107,53,0.1)", border: "1px solid var(--warning)",
-            color: "var(--warning)", fontSize: 13,
-          }}>{error}</div>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, fontWeight: 600 }}>
-            邮箱
-            <input
-              value={email} onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com" type="email"
-              autoComplete="email"
-            />
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, fontWeight: 600 }}>
-            密码
-            <div style={{ position: "relative" }}>
-              <input
-                value={password} onChange={e => setPassword(e.target.value)}
-                type={showPw ? "text" : "password"} placeholder="至少6位"
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
-                style={{ paddingRight: 40 }}
-              />
-              <button
-                onClick={() => setShowPw(!showPw)}
-                style={{
-                  position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                  border: "none", background: "none", color: "var(--text-muted)", cursor: "pointer", padding: 4,
-                }}
-              >
-                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </label>
-
-          <button
-            className="primary" onClick={submit} disabled={busy}
-            style={{ marginTop: 4, width: "100%", justifyContent: "center" }}
-          >
-            {busy ? "..." : mode === "login" ? <><LogIn size={16} /> 登录</> : <><UserPlus size={16} /> 注册</>}
+    <div style={{ display:"flex", justifyContent:"center", alignItems:"center", minHeight:"100vh" }}>
+      <div className="panel" style={{ maxWidth:400, width:"100%" }}>
+        <h2 style={{ textAlign:"center", marginBottom:16 }}>{mode === "login" ? "登录" : "注册"}</h2>
+        {error && <div style={{ color:"var(--warning)", marginBottom:12, fontSize:14 }}>{error}</div>}
+        <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+          <input type="email" placeholder="邮箱" value={email} onChange={e => setEmail(e.target.value)} />
+          <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+            <input type={showPw ? "text" : "password"} placeholder="密码" value={password}
+              onChange={e => setPassword(e.target.value)} style={{ flex:1 }}
+              onKeyDown={e => e.key === "Enter" && submit()} />
+            <button type="button" onClick={() => setShowPw(!showPw)} style={{ padding:"4px 8px", background:"none", border:"none", cursor:"pointer" }}>
+              {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          <button className="primary" onClick={submit} disabled={busy} style={{ justifyContent:"center" }}>
+            {busy ? "处理中..." : (mode === "login" ? <><LogIn size={16} /> 登录</> : <><UserPlus size={16} /> 注册</>)}
           </button>
         </div>
-
-        <div style={{ textAlign: "center", marginTop: 16 }}>
-          <button
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
-            style={{ border: "none", background: "none", color: "var(--brand-500)", cursor: "pointer", fontSize: 13 }}
-          >
-            {mode === "login" ? "没有账号？注册 →" : "已有账号？登录 →"}
+        <div style={{ marginTop:16, textAlign:"center" }}>
+          <button className="primary" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} style={{ justifyContent:"center" }}>
+            {mode === "login" ? <><UserPlus size={14} /> 没有账号？注册</> : <><LogIn size={14} /> 已有账号？登录</>}
           </button>
+        </div>
+        <hr style={{ margin:"16px 0", borderColor:"var(--border-subtle)" }} />
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <Key size={14} style={{ color:"var(--text-muted)" }} />
+          <input placeholder="DeepSeek API Key (可选)"
+            onChange={async e => { const { setApiKey } = await import("../lib/api"); setApiKey(e.target.value); }}
+            style={{ flex:1, fontSize:13 }} />
         </div>
       </div>
     </div>

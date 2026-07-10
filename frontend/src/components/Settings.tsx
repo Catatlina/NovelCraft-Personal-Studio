@@ -72,7 +72,6 @@ export function Settings() {
         {subtab==="appsettings" && (
           <div>
             <h3>全局系统配置</h3>
-            <p style={{color:"var(--text-muted)",fontSize:13,marginBottom:12}}>所有配置项均可编辑。API Key 类存储在数据库中，支持环境变量降级。修改后即时生效。</p>
             <table><thead><tr><th>配置项</th><th>值</th><th>说明</th><th>操作</th></tr></thead>
             <tbody>
               {settings.map((s:AppSetting) => (
