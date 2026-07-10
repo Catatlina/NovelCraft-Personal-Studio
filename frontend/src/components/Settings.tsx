@@ -72,6 +72,12 @@ export function Settings() {
         {subtab==="appsettings" && (
           <div>
             <h3>全局系统配置</h3>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
+              <input placeholder="DeepSeek API Key"
+                onChange={async e => { const { setApiKey } = await import("../lib/api"); setApiKey(e.target.value); }}
+                style={{flex:1}} />
+              <button disabled style={{whiteSpace:"nowrap"}}>保存</button>
+            </div>
             <table><thead><tr><th>配置项</th><th>值</th><th>说明</th><th>操作</th></tr></thead>
             <tbody>
               {settings.map((s:AppSetting) => (

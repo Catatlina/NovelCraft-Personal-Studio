@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { LogIn, UserPlus, Key, Eye, EyeOff } from "lucide-react";
+import { LogIn, UserPlus, Eye, EyeOff } from "lucide-react";
 import { api } from "../lib/api";
 
 type Props = { onLogin: (token: string, email: string) => void };
@@ -61,13 +61,6 @@ export function LoginPage({ onLogin }: Props) {
           <button className="primary" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} style={{ justifyContent:"center" }}>
             {mode === "login" ? <><UserPlus size={14} /> 没有账号？注册</> : <><LogIn size={14} /> 已有账号？登录</>}
           </button>
-        </div>
-        <hr style={{ margin:"16px 0", borderColor:"var(--border-subtle)" }} />
-        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          <Key size={14} style={{ color:"var(--text-muted)" }} />
-          <input placeholder="DeepSeek API Key (可选)"
-            onChange={async e => { const { setApiKey } = await import("../lib/api"); setApiKey(e.target.value); }}
-            style={{ flex:1, fontSize:13 }} />
         </div>
       </div>
     </div>
