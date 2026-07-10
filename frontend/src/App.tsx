@@ -142,7 +142,7 @@ export default function App() {
   const titles: Record<Tab, string> = { wizard: "灵感到第一章", progress: "Bootstrap 工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
-  useEffect(() => { api<any[]>("/api/v1/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
+  useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
   const cmdActions = [
     { id: "wizard", label: "创作向导 → 新建小说", action: () => setTab("wizard") },
     { id: "progress", label: "生成进度 → 查看工作流", action: () => setTab("progress") },
