@@ -73,9 +73,9 @@ M5 协作离线多端
 | P0 | 没有认证/JWT/RBAC | ✅ 已完成 — register/login/refresh/me，bcrypt + JWT |
 | P0 | 工作流未接 Celery/Redis | ✅ 已完成 — Celery worker 执行，Redis broker，断点续跑 |
 | P0 | DeepSeek 未做真实验收 | ✅ 已完成 — 8 节点全链真实 API 通过，token 追踪准确 |
-| P0 | 设计系统未成型 | UI 还只是可用原型 |
-| P0 | 缺少 Docker Compose | 不能一键部署 |
-| P0 | 缺少备份与告警 | 不满足 M1 运维门禁 |
+| P0 | 设计系统未成型 | ✅ 已完成 — 暗色原生 + tokens + 6 组件，亮色切换 |
+| P0 | 缺少 Docker Compose | ✅ 已完成 — pg/redis/api/worker/frontend 一键启动 |
+| P0 | 缺少备份与告警 | ⏳ 后续版本 |
 
 ## 下一步建议
 
