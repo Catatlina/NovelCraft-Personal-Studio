@@ -53,7 +53,23 @@ def parse_content(row: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/v1/healthz")
 def healthz() -> ApiResponse:
-    return ok({"status": "ok", "ai_provider": settings.ai_provider})
+    checks = {"status": "ok", "ai_provider": settings.ai_provider}
+    try:
+        conn = connect()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+    try:
+        import redis
+        r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
+        r.ping()
+        r.close()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+    return ok(checks)
 
 
 @app.get("/api/v1/projects")

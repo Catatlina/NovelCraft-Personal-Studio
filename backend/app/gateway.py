@@ -9,6 +9,7 @@ from typing import Any
 from .config import settings
 from .db import connect, decode, encode, new_id, row_to_dict
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
+from .core.alerts import alert_budget, alert_provider_error
 
 
 MODEL = "mock-deepseek-chat"
@@ -136,6 +137,7 @@ def _assert_budget(project_id: str, scope: str, estimated_cost: float) -> None:
     )
     conn.close()
     if budget and float(budget["spent_cny"]) + estimated_cost > float(budget["limit_cny"]):
+        alert_budget(project_id, "bootstrap", float(budget["spent_cny"]), float(budget["limit_cny"]))
         raise BudgetExceeded(f"{scope} budget exceeded")
 
 
@@ -170,6 +172,7 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
         with urllib.request.urlopen(request, timeout=settings.request_timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError) as exc:
+        alert_provider_error(task_type, str(exc))
         raise ProviderError(f"deepseek request failed: {exc}") from exc
     content = payload["choices"][0]["message"]["content"]
     usage = payload.get("usage", {})
