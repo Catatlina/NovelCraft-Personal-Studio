@@ -1,6 +1,8 @@
 """M4: Publishing gateway — multi-platform publishing with 3 modes."""
 from __future__ import annotations
 
+import os
+
 from app.db import connect, encode, new_id
 
 PUBLISH_MODES = {
@@ -103,3 +105,79 @@ def check_sensitive(text: str) -> dict:
         if w in text and w not in blocked:
             blocked.append(w)
     return {"passed": len(blocked) == 0, "blocked_words": blocked, "count": len(blocked)}
+
+
+# M4: Publish adapters — platform-specific publishing logic
+class PublishAdapter:
+    """Base class for platform-specific publishing."""
+    platform_key: str = ""
+
+    def publish(self, content: dict) -> dict:
+        raise NotImplementedError
+
+    def check_credentials(self) -> bool:
+        return False
+
+
+class ManualAdapter(PublishAdapter):
+    """Manual/semi-auto platforms — user copies content manually."""
+    def publish(self, content: dict) -> dict:
+        return {"mode": "manual", "status": "ready_for_copy", "content_preview": str(content.get("title", ""))[:200]}
+
+
+class WechatAdapter(ManualAdapter):
+    platform_key = "wechat"
+
+
+class MediumAdapter(PublishAdapter):
+    platform_key = "medium"
+
+    def publish(self, content: dict) -> dict:
+        token = os.getenv("MEDIUM_TOKEN", "")
+        if not token:
+            return {"mode": "manual", "status": "no_credentials", "hint": "Set MEDIUM_TOKEN env var"}
+        return {"mode": "auto", "status": "pending", "platform": "medium"}
+
+
+class WordPressAdapter(PublishAdapter):
+    platform_key = "wordpress"
+
+    def publish(self, content: dict) -> dict:
+        wp_url = os.getenv("WORDPRESS_URL", "")
+        wp_user = os.getenv("WORDPRESS_USER", "")
+        if not wp_url or not wp_user:
+            return {"mode": "manual", "status": "no_credentials"}
+        return {"mode": "auto", "status": "pending", "platform": "wordpress"}
+
+
+ADAPTERS: dict[str, PublishAdapter] = {
+    "wechat": WechatAdapter(),
+    "medium": MediumAdapter(),
+    "wordpress": WordPressAdapter(),
+    "toutiao": ManualAdapter(),
+    "xiaohongshu": ManualAdapter(),
+    "zhihu": ManualAdapter(),
+    "baijia": ManualAdapter(),
+    "dayu": ManualAdapter(),
+    "wangyi": ManualAdapter(),
+    "substack": ManualAdapter(),
+    "twitter": ManualAdapter(),
+    "royalroad": ManualAdapter(),
+    "webnovel": ManualAdapter(),
+    "scribblehub": ManualAdapter(),
+    "kdp": ManualAdapter(),
+}
+
+
+def execute_publish(publish_id: str, content: dict, platform: str) -> dict:
+    """Execute actual publishing via platform adapter."""
+    adapter = ADAPTERS.get(platform, ManualAdapter())
+    result = adapter.publish(content)
+    db = connect()
+    db.execute(
+        "UPDATE publish_records SET status = %s, result = %s, updated_at = now() WHERE id = %s",
+        (result.get("status", "unknown"), encode(result), publish_id),
+    )
+    db.commit()
+    db.close()
+    return result

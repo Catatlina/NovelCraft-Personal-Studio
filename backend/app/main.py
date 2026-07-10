@@ -307,16 +307,33 @@ async def fanout_content(
     from app.services.social_media import PLATFORMS
     conn, source = load_content_for_user(content_id, user, {"owner", "editor"})
 
+    # Extract source text
+    src_body = source.get("body", {})
+    src_text = ""
+    if isinstance(src_body, dict) and src_body.get("content"):
+        src_text = "\n".join(c.get("text", "") for c in src_body["content"] if isinstance(c, dict))
+
     platform_list = [p.strip() for p in platforms.split(",") if p.strip() in PLATFORMS]
     results = []
     for pkey in platform_list:
         p = PLATFORMS[pkey]
         derived_id = new_id()
+        # Generate platform-specific content via AI
+        try:
+            output = complete(
+                run_id=None, node_key=None, project_id=source["project_id"],
+                task_type=f"fanout_{pkey}", prompt_name="editor.rewrite",
+                variables={"selection": src_text[:3000], "instruction": f"改写为{p['name']}格式: {p['style']}"},
+            )
+            body = {"type": "doc", "content": [{"type": "paragraph", "text": output.get("text", src_text[:500])}]}
+        except Exception:
+            body = {"type": "doc", "content": [{"type": "paragraph", "text": src_text[:500]}]}
+
         conn.execute(
             "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (derived_id, source["project_id"], content_id, p["type"],
-             source["title"] + f" ({p['name']}版)", encode({"type":"doc","content":[]}),
-             encode({"platform": pkey, "source_id": content_id}), "draft"),
+             source["title"] + f" ({p['name']}版)", encode(body),
+             encode({"platform": pkey, "source_id": content_id, "style": p["style"]}), "draft"),
         )
         conn.execute(
             "INSERT INTO derivations (id, source_content_id, derived_content_id) VALUES (%s,%s,%s)",
