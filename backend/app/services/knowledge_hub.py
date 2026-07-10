@@ -62,7 +62,8 @@ def rebuild_item_embeddings(item_id: str) -> int:
             "INSERT INTO knowledge_vectors (id, item_id, chunk_no, embedding, chunk_text) VALUES (%s, %s, %s, %s::vector, %s)",
             (new_id(), item_id, chunk_no, _vector_literal(_local_embedding(chunk)), chunk),
         )
-    db.commit(); db.close()
+    db.commit()
+    db.close()
     return len(chunks)
 
 

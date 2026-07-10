@@ -157,6 +157,7 @@ def confirm_human(run_id: str, selected_title: str,
     )
     db.commit()
     db.close()
+    db.close()
     execute_bootstrap.delay(run_id, "n3", api_key, api_url, model)
 
 
@@ -335,8 +336,6 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
                            api_key: str = "", api_url: str = "", model: str = "") -> dict:
     """M2: Generate the next chapter using context assembler (with distributed lock)."""
-    from app.services.assembler import ContextAssembler
-    from app.services.entity_tracker import extract_and_store
     from app.gateway import _request_api_key, _request_api_base_url, _request_model
     from .lock import acquire_lock, release_lock
 
@@ -350,7 +349,16 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
     lock_key = f"lock:novel:{novel_id}:gen_chapter"
     if not acquire_lock(lock_key):
         return {"status": "skipped", "reason": "another generation in progress"}
+    try:
+        return _generate_next_chapter_unlocked(novel_id, project_id)
+    finally:
+        release_lock(lock_key)
 
+
+def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
+    """Generate one chapter. The caller owns the per-novel distributed lock."""
+    from app.services.assembler import ContextAssembler
+    from app.services.entity_tracker import extract_and_store
     db = connect()
     # Find last chapter seq
     last = db.execute(
@@ -388,6 +396,7 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
         (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta})),
     )
     db.commit()
+    db.close()
 
     # Extract entity states
     extract_and_store(cid, novel_id, text)
@@ -402,10 +411,10 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
     update_arcs(novel_id, text)
 
     # Summarize
+    db = connect()
     _summarize_and_store(db, cid, chapter.get("body", []))
 
     db.close()
-    release_lock(lock_key)
     return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq}
 
 
@@ -424,25 +433,37 @@ def batch_generate_chapters_task(
         db.close()
         return {"status": "error", "message": "batch not found"}
     db.execute("UPDATE generation_batches SET status = 'running', updated_at = now() WHERE id = %s", (batch_id,))
-    db.commit(); db.close()
+    db.commit()
+    db.close()
 
-    for _ in range(batch["requested_count"]):
+    try:
+        for _ in range(batch["requested_count"]):
+            db = connect()
+            state = db.execute("SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
+            db.close()
+            if not state or state["cancel_requested"]:
+                return {"status": "cancelled", "batch_id": batch_id}
+            result = gen_next_chapter_task.run(batch["novel_id"], batch["project_id"], api_key, api_url, model)
+            if result.get("status") == "skipped":
+                raise RuntimeError(result.get("reason", "chapter generation skipped"))
+            db = connect()
+            db.execute(
+                "UPDATE generation_batches SET completed_count = completed_count + 1, updated_at = now() WHERE id = %s",
+                (batch_id,),
+            )
+            db.commit()
+            db.close()
+    except Exception:
         db = connect()
-        state = db.execute("SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
+        db.execute("UPDATE generation_batches SET status = 'failed', updated_at = now() WHERE id = %s", (batch_id,))
+        db.commit()
         db.close()
-        if not state or state["cancel_requested"]:
-            return {"status": "cancelled", "batch_id": batch_id}
-        gen_next_chapter_task.run(batch["novel_id"], batch["project_id"], api_key, api_url, model)
-        db = connect()
-        db.execute(
-            "UPDATE generation_batches SET completed_count = completed_count + 1, updated_at = now() WHERE id = %s",
-            (batch_id,),
-        )
-        db.commit(); db.close()
+        raise
 
     db = connect()
     db.execute("UPDATE generation_batches SET status = 'succeeded', updated_at = now() WHERE id = %s", (batch_id,))
-    db.commit(); db.close()
+    db.commit()
+    db.close()
     return {"status": "succeeded", "batch_id": batch_id, "completed_count": batch["requested_count"]}
 
 
@@ -459,7 +480,6 @@ def expand_outline_task(novel_id: str, project_id: str) -> dict:
     if not outline:
         return {"error": "no outline to expand"}
 
-    outline_text = "\n".join(str(o) for o in outline)
     chapters = []
     for vol_idx, vol_line in enumerate(outline):
         output = complete(
@@ -577,5 +597,6 @@ def bootstrap_short_story_task(self, project_id: str, short_id: str) -> dict:
     db.execute("UPDATE contents SET title=%s, body=%s, meta=meta||%s, status=%s, updated_at=now() WHERE id=%s",
                (story_out.get("title", context["title"]), encode(body),
                 encode({"short_score": 0, "template": template_key}), "completed", short_id))
-    db.commit(); db.close()
+    db.commit()
+    db.close()
     return {"status": "completed", "title": story_out.get("title", "")}

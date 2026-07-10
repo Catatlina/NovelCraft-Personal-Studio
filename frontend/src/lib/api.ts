@@ -29,13 +29,19 @@ async function tryRefreshToken(): Promise<boolean> {
       credentials: "include",
       headers: csrf ? { "X-CSRF-Token": csrf } : undefined,
     }).then(async response => {
-      if (!response.ok) return false;
+      if (!response.ok) {
+        sessionStorage.removeItem("nc_token");
+        return false;
+      }
       const body = await response.json();
       const token = body?.data?.access_token;
       if (!token) return false;
       sessionStorage.setItem("nc_token", token);
       return true;
-    }).catch(() => false).finally(() => { refreshInFlight = null; });
+    }).catch(() => {
+      sessionStorage.removeItem("nc_token");
+      return false;
+    }).finally(() => { refreshInFlight = null; });
   }
   return refreshInFlight;
 }

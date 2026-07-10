@@ -1,11 +1,10 @@
-import asyncio
 import json
 import secrets
 from typing import Any
 
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.responses import JSONResponse
@@ -351,15 +350,26 @@ async def batch_generate_chapters(
     conn.commit()
     conn.close()
     from .workers.tasks import batch_generate_chapters_task
-    task = batch_generate_chapters_task.delay(
-        batch_id,
-        api_key=request.headers.get("X-Api-Key", ""),
-        api_url=request.headers.get("X-Api-Base-Url", ""),
-        model=request.headers.get("X-Model", ""),
-    )
+    try:
+        task = batch_generate_chapters_task.delay(
+            batch_id,
+            api_key=request.headers.get("X-Api-Key", ""),
+            api_url=request.headers.get("X-Api-Base-Url", ""),
+            model=request.headers.get("X-Model", ""),
+        )
+    except Exception as exc:
+        conn = connect()
+        conn.execute(
+            "UPDATE generation_batches SET status = 'failed', updated_at = now() WHERE id = %s",
+            (batch_id,),
+        )
+        conn.commit()
+        conn.close()
+        raise HTTPException(status_code=503, detail="generation queue unavailable") from exc
     conn = connect()
     conn.execute("UPDATE generation_batches SET celery_task_id = %s WHERE id = %s", (task.id, batch_id))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return ok({"batch_id": batch_id, "task_id": task.id, "status": "pending"})
 
 
@@ -383,11 +393,15 @@ def cancel_generation_batch(batch_id: str, user: dict = Depends(get_current_user
         conn.close()
         raise HTTPException(status_code=404, detail="batch not found")
     ensure_project_member(conn, batch["project_id"], user, {"owner", "editor"})
+    if batch["status"] in {"succeeded", "failed", "cancelled"}:
+        conn.close()
+        return ok({"batch_id": batch_id, "status": batch["status"]})
     conn.execute(
         "UPDATE generation_batches SET cancel_requested = TRUE, status = 'cancelled', updated_at = now() WHERE id = %s",
         (batch_id,),
     )
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return ok({"batch_id": batch_id, "status": "cancelled"})
 
 
@@ -407,7 +421,8 @@ async def create_short_story(request: Request, project_id: str, user: dict = Dep
         (sid, project_id, "short_story", "新短篇", encode({"type":"doc","content":[]}),
          encode({"idea": "请基于灵感创作", "template": "viral", "genre": "都市", "style": "现代"}), "draft"),
     )
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     from .workers.tasks import bootstrap_short_story_task
     result = bootstrap_short_story_task.delay(project_id, sid)
     return ok({"short_id": sid, "task_id": result.id, "status": "dispatched"})
@@ -456,7 +471,8 @@ async def fanout_content(
             (new_id(), content_id, derived_id),
         )
         results.append({"platform": pkey, "type": p["type"], "derived_id": derived_id})
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return ok({"fanout_count": len(results), "items": results})
 
 

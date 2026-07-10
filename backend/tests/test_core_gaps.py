@@ -44,6 +44,7 @@ def test_refresh_cookie_requires_csrf_and_rotates():
         csrf = client.cookies.get("csrf_token")
         assert old_refresh and csrf
         assert "HttpOnly" in registered.headers.get("set-cookie", "")
+        assert "refresh_token" not in registered.json()["data"]
 
         rejected = client.post("/api/v1/auth/refresh")
         assert rejected.status_code == 403
@@ -81,7 +82,8 @@ def test_knowledge_reindex_replaces_old_chunks():
         "INSERT INTO knowledge_items (id, project_id, kind, title, body) VALUES (%s, %s, 'worldview', %s, %s)",
         (item_id, project["id"], "星港世界观", f"星港采用{unique_term}。" * 120),
     )
-    db.commit(); db.close()
+    db.commit()
+    db.close()
 
     first_count = rebuild_item_embeddings(item_id)
     second_count = rebuild_item_embeddings(item_id)
@@ -122,3 +124,21 @@ def test_batch_can_be_created_and_cancelled(monkeypatch):
         state = client.get(f"/api/v1/generation-batches/{batch_id}", headers=headers).json()["data"]
         assert state["status"] == "cancelled"
         assert state["cancel_requested"] is True
+
+
+def test_chapter_generation_releases_lock_on_failure(monkeypatch):
+    from app.workers import lock
+    from app.workers import tasks
+
+    released: list[str] = []
+    monkeypatch.setattr(lock, "acquire_lock", lambda key: True)
+    monkeypatch.setattr(lock, "release_lock", lambda key: released.append(key))
+    monkeypatch.setattr(tasks, "_generate_next_chapter_unlocked", lambda *_args: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    try:
+        tasks.gen_next_chapter_task.run("novel-id", "project-id")
+    except RuntimeError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("generation failure was not propagated")
+    assert released == ["lock:novel:novel-id:gen_chapter"]

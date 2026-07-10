@@ -37,7 +37,7 @@ def reindex_knowledge_item(item_id: str, user: dict = Depends(get_current_user))
 async def import_knowledge(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """TASK-035: Import text/JSON knowledge items."""
     text = (await file.read()).decode("utf-8", errors="replace")
-    lines = [l.strip() for l in text.split("\n") if l.strip() and not l.strip().startswith("#")]
+    lines = [line.strip() for line in text.split("\n") if line.strip() and not line.strip().startswith("#")]
     db = connect()
     count = 0
     for line in lines[:100]:  # Cap at 100 items
@@ -52,7 +52,8 @@ async def import_knowledge(file: UploadFile = File(...), user: dict = Depends(ge
             count += 1
         except Exception:
             pass
-    db.commit(); db.close()
+    db.commit()
+    db.close()
     return {"code": 0, "message": "ok", "data": {"imported": count}}
 
 

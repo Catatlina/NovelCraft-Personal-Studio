@@ -2,7 +2,7 @@
 
 import secrets
 
-from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.core.security import (
@@ -86,6 +86,7 @@ def register(request: Request, response: Response, payload: RegisterRequest = Bo
         (new_id(), project_id, "bootstrap", 2.0, 0),
     )
     db.commit()
+    db.close()
 
     access = create_access_token(user_id, 0)
     refresh = create_refresh_token(user_id, 0)
@@ -93,7 +94,6 @@ def register(request: Request, response: Response, payload: RegisterRequest = Bo
     return {"code": 0, "message": "ok", "data": {
         "user": {"id": user_id, "email": payload.email, "display_name": payload.display_name},
         "access_token": access,
-        "refresh_token": refresh,
     }}
 
 
@@ -113,7 +113,6 @@ def login(request: Request, response: Response, payload: LoginRequest = Body(...
     return {"code": 0, "message": "ok", "data": {
         "user": {"id": user["id"], "email": user["email"], "display_name": user["display_name"]},
         "access_token": access,
-        "refresh_token": refresh,
     }}
 
 
