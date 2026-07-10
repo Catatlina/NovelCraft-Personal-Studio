@@ -12,6 +12,7 @@ import { Studio } from "./components/Studio";
 import { PublishDashboard } from "./components/PublishDashboard";
 import { LoginPage } from "./components/LoginPage";
 import { api as baseApi } from "./lib/api";
+import { cacheGet, cacheSet } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
@@ -65,7 +66,15 @@ export default function App() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<{ id: string; name: string }[]>("/api/v1/projects").then(p => setProject(p[0] ?? null)).catch(e => setError(String(e)));
+    // Try offline cache first
+    cacheGet<{ id: string; name: string }[]>("projects").then(cached => {
+      if (cached?.length) setProject(cached[0]);
+    });
+    // Then fetch from API
+    api<{ id: string; name: string }[]>("/api/v1/projects").then(p => {
+      setProject(p[0] ?? null);
+      cacheSet("projects", p);
+    }).catch(e => setError(String(e)));
   }, []);
 
   useEffect(() => {
