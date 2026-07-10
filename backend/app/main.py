@@ -1,5 +1,6 @@
 import asyncio
 import json
+import secrets
 from typing import Any
 
 from contextlib import asynccontextmanager
@@ -7,6 +8,8 @@ from contextlib import asynccontextmanager
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
@@ -56,11 +59,27 @@ app.include_router(overseas_router)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def csrf_guard(request: Request, call_next):
+    """Protect unsafe requests authenticated by the refresh cookie."""
+    public_auth_paths = {"/api/v1/auth/login", "/api/v1/auth/register"}
+    if (
+        request.method not in {"GET", "HEAD", "OPTIONS"}
+        and request.url.path not in public_auth_paths
+        and request.cookies.get("refresh_token")
+    ):
+        cookie_token = request.cookies.get("csrf_token")
+        header_token = request.headers.get("X-CSRF-Token")
+        if not cookie_token or not header_token or not secrets.compare_digest(cookie_token, header_token):
+            return JSONResponse({"code": "CSRF_FAILED", "message": "CSRF 校验失败", "data": None}, status_code=403)
+    return await call_next(request)
 
 # Middleware: capture X-Api-* headers for this request
 @app.middleware("http")
@@ -87,6 +106,10 @@ def parse_content(row: dict[str, Any]) -> dict[str, Any]:
     row["body"] = decode(row["body"], {})
     row["meta"] = decode(row["meta"], {})
     return row
+
+
+class BatchChapterRequest(BaseModel):
+    chapter_count: int = Field(default=10, ge=1, le=50)
 
 
 def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
@@ -305,6 +328,67 @@ async def expand_outline(request: Request, novel_id: str, user: dict = Depends(g
     from .workers.tasks import expand_outline_task
     result = expand_outline_task.delay(novel_id, novel["project_id"])
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
+
+
+@app.post("/api/v1/novels/{novel_id}/chapters/batch")
+@limiter.limit("5/minute")
+async def batch_generate_chapters(
+    request: Request,
+    novel_id: str,
+    payload: BatchChapterRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Queue 1-50 chapters and persist cancellation/progress state."""
+    conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
+    if novel["type"] != "novel":
+        conn.close()
+        raise HTTPException(status_code=400, detail="content is not a novel")
+    batch_id = new_id()
+    conn.execute(
+        "INSERT INTO generation_batches (id, project_id, novel_id, requested_count) VALUES (%s, %s, %s, %s)",
+        (batch_id, novel["project_id"], novel_id, payload.chapter_count),
+    )
+    conn.commit()
+    conn.close()
+    from .workers.tasks import batch_generate_chapters_task
+    task = batch_generate_chapters_task.delay(
+        batch_id,
+        api_key=request.headers.get("X-Api-Key", ""),
+        api_url=request.headers.get("X-Api-Base-Url", ""),
+        model=request.headers.get("X-Model", ""),
+    )
+    conn = connect()
+    conn.execute("UPDATE generation_batches SET celery_task_id = %s WHERE id = %s", (task.id, batch_id))
+    conn.commit(); conn.close()
+    return ok({"batch_id": batch_id, "task_id": task.id, "status": "pending"})
+
+
+@app.get("/api/v1/generation-batches/{batch_id}")
+def get_generation_batch(batch_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn = connect()
+    batch = row_to_dict(conn.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone())
+    if not batch:
+        conn.close()
+        raise HTTPException(status_code=404, detail="batch not found")
+    ensure_project_member(conn, batch["project_id"], user)
+    conn.close()
+    return ok(batch)
+
+
+@app.post("/api/v1/generation-batches/{batch_id}/cancel")
+def cancel_generation_batch(batch_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn = connect()
+    batch = row_to_dict(conn.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone())
+    if not batch:
+        conn.close()
+        raise HTTPException(status_code=404, detail="batch not found")
+    ensure_project_member(conn, batch["project_id"], user, {"owner", "editor"})
+    conn.execute(
+        "UPDATE generation_batches SET cancel_requested = TRUE, status = 'cancelled', updated_at = now() WHERE id = %s",
+        (batch_id,),
+    )
+    conn.commit(); conn.close()
+    return ok({"batch_id": batch_id, "status": "cancelled"})
 
 
 @app.post("/api/v1/projects/{project_id}/short-stories")

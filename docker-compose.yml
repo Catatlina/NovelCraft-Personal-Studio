@@ -35,6 +35,12 @@ services:
       DATABASE_URL: postgresql://novelcraft:novelcraft@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       REDIS_URL: redis://redis:6379/0
+      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-development}
+      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      TOKEN_BLACKLIST_FAIL_CLOSED: ${TOKEN_BLACKLIST_FAIL_CLOSED:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +63,10 @@ services:
       DATABASE_URL: postgresql://novelcraft:novelcraft@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       REDIS_URL: redis://redis:6379/0
+      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-development}
+      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TOKEN_BLACKLIST_FAIL_CLOSED: ${TOKEN_BLACKLIST_FAIL_CLOSED:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,6 +74,20 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+
+  flower:
+    image: mher/flower:2.0
+    command:
+      - celery
+      - --broker=redis://redis:6379/0
+      - flower
+      - --port=5555
+      - --basic_auth=${FLOWER_USER:?Set FLOWER_USER}:${FLOWER_PASSWORD:?Set FLOWER_PASSWORD}
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
 
   frontend:
     build: ./frontend

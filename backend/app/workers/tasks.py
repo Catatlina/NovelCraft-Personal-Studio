@@ -176,6 +176,7 @@ def _mark_node(run_id: str, node_key: str, status: str, error: str) -> None:
 
 def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) -> None:
     db = connect()
+    knowledge_ids_to_reindex: list[str] = []
     run = db.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone()
     if run is None:
         db.close()
@@ -195,16 +196,20 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
             db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), novel_id))
     elif task_type == "gen_worldview":
         wv = output.get("worldview", {})
+        knowledge_id = new_id()
         db.execute(
             "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (new_id(), run["project_id"], novel_id, "worldview", wv.get("name", ""), "\n".join(wv.get("rules", [])), encode(wv)),
+            (knowledge_id, run["project_id"], novel_id, "worldview", wv.get("name", ""), "\n".join(wv.get("rules", [])), encode(wv)),
         )
+        knowledge_ids_to_reindex.append(knowledge_id)
     elif task_type == "gen_characters":
         for c in output.get("characters", []):
+            knowledge_id = new_id()
             db.execute(
                 "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (new_id(), run["project_id"], novel_id, "character", c.get("name", ""), c.get("arc", ""), encode(c)),
+                (knowledge_id, run["project_id"], novel_id, "character", c.get("name", ""), c.get("arc", ""), encode(c)),
             )
+            knowledge_ids_to_reindex.append(knowledge_id)
     elif task_type == "gen_outline":
         meta = db.execute("SELECT meta FROM contents WHERE id = %s", (novel_id,)).fetchone()
         if meta:
@@ -212,17 +217,20 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
             m["outline"] = output.get("outline", [])
             db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), novel_id))
     elif task_type == "gen_chapter1":
+        from app.services.text_metrics import count_content_chars
         chapter = output.get("chapter", {})
         body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
+        chapter_text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
+        chapter_meta = {"seq": 1, "word_count": count_content_chars(chapter_text)}
         cid = new_id()
         db.execute(
             "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            (cid, run["project_id"], novel_id, "chapter", chapter.get("title", ""), encode(body), encode({"seq": 1}), "reviewed"),
+            (cid, run["project_id"], novel_id, "chapter", chapter.get("title", ""), encode(body), encode(chapter_meta), "reviewed"),
         )
         context["chapter_id"] = cid
         db.execute(
             "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
-            (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": {"seq": 1}})),
+            (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta})),
         )
         # M2: auto-summarize chapter
         _summarize_and_store(db, cid, chapter.get("body", []))
@@ -248,10 +256,12 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
                                  variables=gen_context)
                 chapter = output.get("chapter", {})
                 body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
+                rewritten_text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
                 db.execute(
                     "UPDATE contents SET title = %s, body = %s, meta = meta || %s, status = 'draft', updated_at = now() WHERE id = %s",
                     (chapter.get("title", context.get("title", "")), encode(body),
-                     encode({"review_score": score, "rewrite_count": rewrite_count + 1, "review_issues": review_issues}), cid),
+                     encode({"review_score": score, "rewrite_count": rewrite_count + 1,
+                             "review_issues": review_issues, "word_count": count_content_chars(rewritten_text)}), cid),
                 )
             else:
                 db.execute(
@@ -288,6 +298,13 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
     )
     db.commit()
     db.close()
+    if knowledge_ids_to_reindex:
+        from app.services.knowledge_hub import rebuild_item_embeddings
+        for knowledge_id in knowledge_ids_to_reindex:
+            try:
+                rebuild_item_embeddings(knowledge_id)
+            except Exception:
+                pass  # Search retains lexical fallback; generation must not be rolled back.
 
 
 def _summarize_and_store(db, chapter_id: str, body: list) -> None:
@@ -359,18 +376,20 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
     cid = new_id()
 
     db = connect()
+    from app.services.text_metrics import count_content_chars
+    text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
+    chapter_meta = {"seq": next_seq, "word_count": count_content_chars(text)}
     db.execute(
         "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-        (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"), encode(body), encode({"seq": next_seq}), "draft"),
+        (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"), encode(body), encode(chapter_meta), "draft"),
     )
     db.execute(
         "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
-        (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": {"seq": next_seq}})),
+        (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta})),
     )
     db.commit()
 
     # Extract entity states
-    text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
     extract_and_store(cid, novel_id, text)
 
     # Extract foreshadowing
@@ -388,6 +407,43 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
     db.close()
     release_lock(lock_key)
     return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq}
+
+
+@celery_app.task(bind=True, max_retries=1)
+def batch_generate_chapters_task(
+    self,
+    batch_id: str,
+    api_key: str = "",
+    api_url: str = "",
+    model: str = "",
+) -> dict:
+    """Generate a persisted batch and observe cancellation between chapters."""
+    db = connect()
+    batch = db.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
+    if not batch:
+        db.close()
+        return {"status": "error", "message": "batch not found"}
+    db.execute("UPDATE generation_batches SET status = 'running', updated_at = now() WHERE id = %s", (batch_id,))
+    db.commit(); db.close()
+
+    for _ in range(batch["requested_count"]):
+        db = connect()
+        state = db.execute("SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
+        db.close()
+        if not state or state["cancel_requested"]:
+            return {"status": "cancelled", "batch_id": batch_id}
+        gen_next_chapter_task.run(batch["novel_id"], batch["project_id"], api_key, api_url, model)
+        db = connect()
+        db.execute(
+            "UPDATE generation_batches SET completed_count = completed_count + 1, updated_at = now() WHERE id = %s",
+            (batch_id,),
+        )
+        db.commit(); db.close()
+
+    db = connect()
+    db.execute("UPDATE generation_batches SET status = 'succeeded', updated_at = now() WHERE id = %s", (batch_id,))
+    db.commit(); db.close()
+    return {"status": "succeeded", "batch_id": batch_id, "completed_count": batch["requested_count"]}
 
 
 @celery_app.task

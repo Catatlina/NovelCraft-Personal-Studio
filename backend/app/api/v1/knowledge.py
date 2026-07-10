@@ -5,8 +5,32 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
+from app.services.knowledge_hub import rebuild_item_embeddings
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+
+
+def _require_item_access(item_id: str, user: dict) -> dict:
+    db = connect()
+    item = db.execute("SELECT * FROM knowledge_items WHERE id = %s AND is_deleted = FALSE", (item_id,)).fetchone()
+    if not item:
+        db.close()
+        raise HTTPException(status_code=404, detail="knowledge item not found")
+    member = db.execute(
+        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
+        (item.get("project_id"), user["id"]),
+    ).fetchone()
+    db.close()
+    if not member or member["role"] not in {"owner", "editor"}:
+        raise HTTPException(status_code=403, detail="insufficient permissions")
+    return item
+
+
+@router.post("/{item_id}/reindex")
+def reindex_knowledge_item(item_id: str, user: dict = Depends(get_current_user)):
+    _require_item_access(item_id, user)
+    count = rebuild_item_embeddings(item_id)
+    return {"code": 0, "message": "ok", "data": {"item_id": item_id, "chunks": count}}
 
 
 @router.post("/import")

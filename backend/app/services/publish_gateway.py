@@ -57,7 +57,7 @@ def list_publish_records(content_id: str | None = None, project_ids: list[str] |
             """
             SELECT pr.* FROM publish_records pr
             JOIN contents c ON pr.content_id = c.id
-            WHERE c.project_id = ANY(%s)
+            WHERE c.project_id = ANY(%s::uuid[])
             ORDER BY pr.created_at DESC LIMIT 50
             """,
             (project_ids,),

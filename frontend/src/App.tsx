@@ -45,7 +45,7 @@ function textToDoc(text: string): TipTapDoc {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("wizard");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => sessionStorage.getItem("nc_token") || "");
   const [userEmail, setUserEmail] = useState("");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
@@ -67,6 +67,7 @@ export default function App() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!token) return;
     // Try offline cache first
     cacheGet<{ id: string; name: string }[]>("projects").then(cached => {
       if (cached?.length) setProject(cached[0]);
@@ -76,7 +77,7 @@ export default function App() {
       setProject(p[0] ?? null);
       cacheSet("projects", p);
     }).catch(e => setError(String(e)));
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (!run) return;
@@ -178,7 +179,16 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  (window as any).__ncLogout = () => { setToken(""); setUserEmail(""); };
+  (window as any).__ncLogout = async () => {
+    try {
+      await baseApi("/api/v1/auth/logout", { method: "POST" });
+    } finally {
+      sessionStorage.removeItem("nc_token");
+      setToken("");
+      setUserEmail("");
+      setProject(null);
+    }
+  };
 
   return (
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
