@@ -21,7 +21,7 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
-    imports=["app.workers.tasks", "app.workers.m3_tasks"],
+    imports=["app.workers.tasks", "app.workers.m3_tasks", "app.workers.m4_tasks"],
     beat_schedule={
         "auto-serial-check": {
             "task": "app.workers.tasks.auto_serial_check",
