@@ -164,3 +164,29 @@ def env_check():
             "effective_source": "env" if env_key else ("db" if db_val else "none"),
         })
     return {"code": 0, "message": "ok", "data": checks}
+
+
+@router.get("/workflows")
+def list_workflows(project_id: str = ""):
+    db = connect()
+    if project_id:
+        rows = db.execute("SELECT * FROM workflows WHERE project_id = %s ORDER BY created_at DESC", (project_id,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM workflows ORDER BY created_at DESC LIMIT 20").fetchall()
+    db.close()
+    return {"code": 0, "message": "ok", "data": [dict(r) for r in rows]}
+
+
+@router.put("/workflows/{name}")
+def save_workflow(name: str, nodes: list[dict], project_id: str = ""):
+    db = connect()
+    db.execute(
+        """INSERT INTO workflows (id, project_id, name, config)
+           VALUES (%s, %s, %s, %s)
+           ON CONFLICT(project_id, name) DO UPDATE SET config=EXCLUDED.config, updated_at=now()""",
+        (new_id(), project_id or None, name, encode({"nodes": nodes})),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM workflows WHERE name = %s", (name,)).fetchone()
+    db.close()
+    return {"code": 0, "message": "ok", "data": dict(row or {})}

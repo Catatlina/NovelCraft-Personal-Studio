@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowRight, Settings, User, Zap, GitBranch, Plus, X } from "lucide-react";
+import { ArrowRight, Save, Settings, User, Zap, GitBranch, Plus, X } from "lucide-react";
 
 type WFNode = { key: string; kind: "agent"|"human"|"tool"|"branch"; agent?: string; title: string; task?: string };
 const NODE_COLORS: Record<string, string> = { agent: "var(--brand-500)", human: "var(--warning)", tool: "var(--info)", branch: "var(--success)" };
@@ -12,6 +12,7 @@ export function DagEditor() {
     { key: "n3", kind: "agent", agent: "StoryArchitect", title: "生成简介", task: "gen_synopsis" },
   ]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = useState("");
 
   function addNode() {
     const key = `n${nodes.length + 1}`;
@@ -24,6 +25,18 @@ export function DagEditor() {
 
   function removeNode(key: string) { setNodes(nodes.filter(n => n.key !== key)); }
 
+  async function saveWorkflow() {
+    try {
+      const r = await fetch("/api/v1/admin/workflows/bootstrap", {
+        method: "PUT", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({nodes, project_id:""}),
+      });
+      if (r.ok) setSaveMsg("✅ 已保存");
+      else setSaveMsg("❌ 保存失败");
+    } catch { setSaveMsg("❌ 网络错误"); }
+    setTimeout(() => setSaveMsg(""), 2000);
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16 }}>
       <div className="panel" style={{ minHeight: 400 }}>
@@ -31,6 +44,7 @@ export function DagEditor() {
           <GitBranch size={18} />
           <h2 style={{ margin: 0, fontSize: 16 }}>工作流 DAG</h2>
           <button onClick={addNode} style={{ marginLeft: "auto" }}><Plus size={14} />添加节点</button>
+          <button onClick={saveWorkflow} style={{ marginLeft: 8 }}><Save size={14} />保存{saveMsg && <small style={{marginLeft:4}}>{saveMsg}</small>}</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 0, alignItems: "center" }}>
           {nodes.map((node, i) => (

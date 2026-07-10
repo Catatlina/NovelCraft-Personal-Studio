@@ -105,14 +105,25 @@ def init_db() -> None:
             (new_id("bdg"), project_id, "bootstrap", 2.0, 0),
         )
     from .prompt_registry import PROMPT_SEEDS
+    GOLDEN_CASES = {
+        "bootstrap.gen_titles": [{"idea":"AI觉醒","genre":"科幻","expected_titles":3},{"idea":"重生80年代","genre":"都市","expected_titles":3},{"idea":"修仙废柴逆袭","genre":"仙侠","expected_titles":3}],
+        "bootstrap.gen_synopsis": [{"title":"测试","genre":"科幻","expected_length":200}]*3,
+        "bootstrap.gen_worldview": [{"title":"测试","genre":"科幻","expected_elements":["科技体系"]}]*3,
+        "bootstrap.gen_characters": [{"title":"测试","genre":"科幻","min_characters":3}]*3,
+        "bootstrap.gen_outline": [{"title":"测试","genre":"科幻","expected_volumes":3}]*3,
+        "bootstrap.gen_chapter1": [{"title":"测试","style":"硬核","min_words":500}]*3,
+        "bootstrap.review_7dim": [{"expected_dimensions":7,"min_score":60}]*3,
+        "editor.polish": [{"input":"他走在街上。","preserves_meaning":True}]*3,
+    }
     for name, version, model, template in PROMPT_SEEDS:
+        cases = GOLDEN_CASES.get(name, [{"input": {}, "expected_shape": "json"}])
         db.execute(
             """
             INSERT INTO prompts (id, name, version, model, template, golden_cases)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT(name, version, model) DO NOTHING
             """,
-            (new_id("prm"), name, version, model, template, encode([{"input": {}, "expected_shape": "json"}])),
+            (new_id("prm"), name, version, model, template, encode(cases)),
         )
     task_types = [
         "gen_titles", "gen_synopsis", "gen_worldview", "gen_characters",
