@@ -64,7 +64,7 @@ def list_projects() -> ApiResponse:
 @app.post("/api/v1/projects/{project_id}/novels")
 def create_novel(project_id: str, payload: NovelCreate) -> ApiResponse:
     conn = connect()
-    project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone())
+    project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     novel_id = new_id("cnt")
@@ -74,16 +74,16 @@ def create_novel(project_id: str, payload: NovelCreate) -> ApiResponse:
     conn.execute(
         """
         INSERT INTO contents (id, project_id, type, title, body, meta, status)
-        VALUES (?, ?, 'novel', ?, ?, ?, 'draft')
+        VALUES (%s, %s, 'novel', %s ,%s, %s, 'draft')
         """,
         (novel_id, project_id, title, encode(body), encode(meta)),
     )
     conn.execute(
-        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, 'initial_idea', ?)",
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'initial_idea', %s)",
         (new_id("ver"), novel_id, encode({"title": title, "body": body, "meta": meta})),
     )
     conn.commit()
-    novel = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = ?", (novel_id,)).fetchone()))
+    novel = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone()))
     conn.close()
     return ok(novel)
 
@@ -93,12 +93,12 @@ def list_contents(project_id: str = Query(...), parent_id: str | None = None) ->
     conn = connect()
     if parent_id is None:
         rows = conn.execute(
-            "SELECT * FROM contents WHERE project_id = ? AND parent_id IS NULL ORDER BY created_at DESC",
+            "SELECT * FROM contents WHERE project_id = %s AND parent_id IS NULL ORDER BY created_at DESC",
             (project_id,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM contents WHERE project_id = ? AND parent_id = ? ORDER BY created_at ASC",
+            "SELECT * FROM contents WHERE project_id = %s AND parent_id = %s ORDER BY created_at ASC",
             (project_id, parent_id),
         ).fetchall()
     items = [parse_content(dict(row)) for row in rows]
@@ -109,7 +109,7 @@ def list_contents(project_id: str = Query(...), parent_id: str | None = None) ->
 @app.get("/api/v1/contents/{content_id}")
 def get_content(content_id: str) -> ApiResponse:
     conn = connect()
-    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
     conn.close()
     if row is None:
         raise HTTPException(status_code=404, detail="content not found")
@@ -119,24 +119,24 @@ def get_content(content_id: str) -> ApiResponse:
 @app.put("/api/v1/contents/{content_id}")
 def update_content(content_id: str, payload: ContentUpdate) -> ApiResponse:
     conn = connect()
-    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    row = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="content not found")
     snapshot = {"title": row["title"], "body": decode(row["body"], {}), "meta": decode(row["meta"], {})}
     conn.execute(
-        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, ?, ?)",
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s ,%s, %s)",
         (new_id("ver"), content_id, payload.label, encode(snapshot)),
     )
     title = payload.title if payload.title is not None else row["title"]
     body = payload.body if payload.body is not None else snapshot["body"]
     meta = payload.meta if payload.meta is not None else snapshot["meta"]
     conn.execute(
-        "UPDATE contents SET title = ?, body = ?, meta = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE contents SET title = %s, body = %s, meta = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (title, encode(body), encode(meta), content_id),
     )
     conn.commit()
-    updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone()))
+    updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone()))
     conn.close()
     return ok(updated)
 
@@ -144,7 +144,7 @@ def update_content(content_id: str, payload: ContentUpdate) -> ApiResponse:
 @app.post("/api/v1/novels/{novel_id}/bootstrap")
 async def bootstrap_novel(novel_id: str, background_tasks: BackgroundTasks) -> ApiResponse:
     conn = connect()
-    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (novel_id,)).fetchone())
+    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone())
     conn.close()
     if novel is None:
         raise HTTPException(status_code=404, detail="novel not found")
@@ -156,11 +156,11 @@ async def bootstrap_novel(novel_id: str, background_tasks: BackgroundTasks) -> A
 @app.get("/api/v1/runs/{run_id}")
 def get_run(run_id: str) -> ApiResponse:
     conn = connect()
-    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone())
+    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
     if run is None:
         conn.close()
         raise HTTPException(status_code=404, detail="run not found")
-    nodes = [dict(row) for row in conn.execute("SELECT * FROM run_nodes WHERE run_id = ? ORDER BY node_key", (run_id,)).fetchall()]
+    nodes = [dict(row) for row in conn.execute("SELECT * FROM run_nodes WHERE run_id = %s ORDER BY node_key", (run_id,)).fetchall()]
     for node in nodes:
         node["output"] = decode(node["output"], {})
     run["context"] = decode(run["context"], {})
@@ -197,11 +197,11 @@ async def confirm_title(run_id: str, payload: HumanConfirm, background_tasks: Ba
 async def retry_node(run_id: str, node_key: str, background_tasks: BackgroundTasks) -> ApiResponse:
     conn = connect()
     conn.execute(
-        "UPDATE run_nodes SET status = 'pending', output = '{}', error = NULL WHERE run_id = ? AND node_key = ?",
+        "UPDATE run_nodes SET status = 'pending', output = '{}', error = NULL WHERE run_id = %s AND node_key = %s",
         (run_id, node_key),
     )
     conn.execute(
-        "UPDATE workflow_runs SET status = 'running', current_node_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE workflow_runs SET status = 'running', current_node_key = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (node_key, run_id),
     )
     conn.commit()
@@ -214,7 +214,7 @@ async def retry_node(run_id: str, node_key: str, background_tasks: BackgroundTas
 @app.get("/api/v1/contents/{content_id}/versions")
 def list_versions(content_id: str) -> ApiResponse:
     conn = connect()
-    rows = [dict(row) for row in conn.execute("SELECT * FROM versions WHERE entity_id = ? ORDER BY created_at DESC", (content_id,)).fetchall()]
+    rows = [dict(row) for row in conn.execute("SELECT * FROM versions WHERE entity_id = %s ORDER BY created_at DESC", (content_id,)).fetchall()]
     for row in rows:
         row["snapshot"] = decode(row["snapshot"], {})
     conn.close()
@@ -225,25 +225,25 @@ def list_versions(content_id: str) -> ApiResponse:
 def restore_version(content_id: str, payload: VersionRestore) -> ApiResponse:
     conn = connect()
     version = row_to_dict(
-        conn.execute("SELECT * FROM versions WHERE id = ? AND entity_id = ?", (payload.version_id, content_id)).fetchone()
+        conn.execute("SELECT * FROM versions WHERE id = %s AND entity_id = %s", (payload.version_id, content_id)).fetchone()
     )
     if version is None:
         conn.close()
         raise HTTPException(status_code=404, detail="version not found")
-    current = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    current = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
     if current is not None:
         snapshot = {"title": current["title"], "body": decode(current["body"], {}), "meta": decode(current["meta"], {})}
         conn.execute(
-            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, 'before_restore', ?)",
+            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'before_restore', %s)",
             (new_id("ver"), content_id, encode(snapshot)),
         )
     restored = decode(version["snapshot"], {})
     conn.execute(
-        "UPDATE contents SET title = ?, body = ?, meta = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE contents SET title = %s, body = %s, meta = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (restored.get("title", "未命名"), encode(restored.get("body", {})), encode(restored.get("meta", {})), content_id),
     )
     conn.commit()
-    row = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone()))
+    row = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone()))
     conn.close()
     return ok(row)
 
@@ -251,7 +251,7 @@ def restore_version(content_id: str, payload: VersionRestore) -> ApiResponse:
 @app.post("/api/v1/contents/{content_id}/ai/{op}")
 def ai_edit(content_id: str, op: AiOperation, payload: AiEditRequest) -> ApiResponse:
     conn = connect()
-    content = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (content_id,)).fetchone())
+    content = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
     conn.close()
     if content is None:
         raise HTTPException(status_code=404, detail="content not found")
@@ -270,7 +270,7 @@ def ai_edit(content_id: str, op: AiOperation, payload: AiEditRequest) -> ApiResp
 def list_ai_calls(run_id: str | None = None) -> ApiResponse:
     conn = connect()
     if run_id:
-        rows = conn.execute("SELECT * FROM ai_calls WHERE run_id = ? ORDER BY created_at DESC", (run_id,)).fetchall()
+        rows = conn.execute("SELECT * FROM ai_calls WHERE run_id = %s ORDER BY created_at DESC", (run_id,)).fetchall()
     else:
         rows = conn.execute("SELECT * FROM ai_calls ORDER BY created_at DESC LIMIT 100").fetchall()
     items = [dict(row) for row in rows]
@@ -308,14 +308,14 @@ def update_model_route(task_type: str, payload: ModelRouteUpdate) -> ApiResponse
     conn.execute(
         """
         INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json)
-        VALUES (?, ?, ?, ?, ?, '[]')
+        VALUES (%s, %s, %s ,%s, %s, '[]')
         ON CONFLICT(task_type)
         DO UPDATE SET provider = excluded.provider, model = excluded.model, params = excluded.params, updated_at = CURRENT_TIMESTAMP
         """,
         (new_id("rte"), task_type, payload.provider, payload.model, encode(payload.params)),
     )
     conn.commit()
-    row = dict(conn.execute("SELECT * FROM model_routes WHERE task_type = ?", (task_type,)).fetchone())
+    row = dict(conn.execute("SELECT * FROM model_routes WHERE task_type = %s", (task_type,)).fetchone())
     row["params"] = decode(row["params"], {})
     row["fallback_json"] = decode(row["fallback_json"], [])
     conn.close()
@@ -325,7 +325,7 @@ def update_model_route(task_type: str, payload: ModelRouteUpdate) -> ApiResponse
 @app.get("/api/v1/admin/budgets")
 def list_budgets(project_id: str) -> ApiResponse:
     conn = connect()
-    rows = [dict(row) for row in conn.execute("SELECT * FROM budgets WHERE project_id = ? ORDER BY scope", (project_id,)).fetchall()]
+    rows = [dict(row) for row in conn.execute("SELECT * FROM budgets WHERE project_id = %s ORDER BY scope", (project_id,)).fetchall()]
     conn.close()
     return ok(rows)
 
@@ -336,14 +336,14 @@ def update_budget(project_id: str, scope: str, payload: BudgetUpdate) -> ApiResp
     conn.execute(
         """
         INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
-        VALUES (?, ?, ?, ?, 0)
+        VALUES (%s, %s, %s ,%s, 0)
         ON CONFLICT(project_id, scope)
         DO UPDATE SET limit_cny = excluded.limit_cny, updated_at = CURRENT_TIMESTAMP
         """,
         (new_id("bdg"), project_id, scope, payload.limit_cny),
     )
     conn.commit()
-    row = dict(conn.execute("SELECT * FROM budgets WHERE project_id = ? AND scope = ?", (project_id, scope)).fetchone())
+    row = dict(conn.execute("SELECT * FROM budgets WHERE project_id = %s AND scope = %s", (project_id, scope)).fetchone())
     conn.close()
     return ok(row)
 
@@ -353,11 +353,11 @@ def list_knowledge(project_id: str, content_id: str | None = None) -> ApiRespons
     conn = connect()
     if content_id:
         rows = conn.execute(
-            "SELECT * FROM knowledge_items WHERE project_id = ? AND content_id = ? ORDER BY created_at",
+            "SELECT * FROM knowledge_items WHERE project_id = %s AND content_id = %s ORDER BY created_at",
             (project_id, content_id),
         ).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM knowledge_items WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()
+        rows = conn.execute("SELECT * FROM knowledge_items WHERE project_id = %s ORDER BY created_at", (project_id,)).fetchall()
     items = [dict(row) for row in rows]
     for item in items:
         item["meta"] = decode(item["meta"], {})

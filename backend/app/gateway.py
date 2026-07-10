@@ -57,7 +57,7 @@ def complete(
         INSERT INTO ai_calls (
             id, run_id, node_key, provider, model, prompt_name, task_type,
             input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s)
         """,
         (
             new_id("call"),
@@ -79,9 +79,9 @@ def complete(
     conn.execute(
         """
         INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
-        VALUES (?, ?, 'bootstrap', 2.0, ?)
+        VALUES (%s, %s, 'bootstrap', 2.0, %s)
         ON CONFLICT(project_id, scope)
-        DO UPDATE SET spent_cny = spent_cny + excluded.spent_cny, updated_at = CURRENT_TIMESTAMP
+        DO UPDATE SET spent_cny = budgets.spent_cny + excluded.spent_cny, updated_at = CURRENT_TIMESTAMP
         """,
         (new_id("bdg"), project_id, cost_cny),
     )
@@ -98,7 +98,7 @@ def _load_prompt_and_route(
     conn = connect()
     route = row_to_dict(
         conn.execute(
-            "SELECT * FROM model_routes WHERE task_type = ? AND is_active = 1",
+            "SELECT * FROM model_routes WHERE task_type = %s AND is_active = TRUE",
             (task_type,),
         ).fetchone()
     )
@@ -109,7 +109,7 @@ def _load_prompt_and_route(
         conn.execute(
             """
             SELECT * FROM prompts
-            WHERE name = ? AND is_active = 1
+            WHERE name = %s AND is_active = TRUE
             ORDER BY created_at DESC
             LIMIT 1
             """,
@@ -130,12 +130,12 @@ def _assert_budget(project_id: str, scope: str, estimated_cost: float) -> None:
     conn = connect()
     budget = row_to_dict(
         conn.execute(
-            "SELECT * FROM budgets WHERE project_id = ? AND scope = ?",
+            "SELECT * FROM budgets WHERE project_id = %s AND scope = %s",
             (project_id, scope),
         ).fetchone()
     )
     conn.close()
-    if budget and budget["spent_cny"] + estimated_cost > budget["limit_cny"]:
+    if budget and float(budget["spent_cny"]) + estimated_cost > float(budget["limit_cny"]):
         raise BudgetExceeded(f"{scope} budget exceeded")
 
 

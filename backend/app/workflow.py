@@ -34,20 +34,20 @@ def emit(run_id: str, event: str, data: dict[str, Any]) -> None:
 def create_run(project_id: str, novel_id: str) -> str:
     run_id = new_id("run")
     conn = connect()
-    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = ?", (novel_id,)).fetchone())
+    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone())
     if novel is None:
         raise ValueError("novel not found")
     context = {"novel_id": novel_id, "idea": decode(novel["meta"]).get("idea", ""), **decode(novel["meta"])}
     conn.execute(
         """
         INSERT INTO workflow_runs (id, project_id, novel_id, workflow_key, status, current_node_key, context)
-        VALUES (?, ?, ?, 'bootstrap', 'running', 'n1', ?)
+        VALUES (%s, %s, %s, 'bootstrap', 'running', 'n1', %s)
         """,
         (run_id, project_id, novel_id, encode(context)),
     )
     for node_key, kind, agent, title, _task_type in BOOTSTRAP_NODES:
         conn.execute(
-            "INSERT INTO run_nodes (id, run_id, node_key, kind, agent, title) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO run_nodes (id, run_id, node_key, kind, agent, title) VALUES (%s, %s, %s ,%s, %s, %s)",
             (new_id("node"), run_id, node_key, kind, agent, title),
         )
     conn.commit()
@@ -66,11 +66,11 @@ async def run_until_human_or_done(run_id: str, start_key: str) -> None:
         conn = connect()
         node = row_to_dict(
             conn.execute(
-                "SELECT * FROM run_nodes WHERE run_id = ? AND node_key = ?",
+                "SELECT * FROM run_nodes WHERE run_id = %s AND node_key = %s",
                 (run_id, node_key),
             ).fetchone()
         )
-        run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone())
+        run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
         if node is None or run is None:
             conn.close()
             return
@@ -79,11 +79,11 @@ async def run_until_human_or_done(run_id: str, start_key: str) -> None:
             continue
         if kind == "human":
             conn.execute(
-                "UPDATE run_nodes SET status = 'waiting_human', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE run_id = ? AND node_key = ?",
+                "UPDATE run_nodes SET status = 'waiting_human', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE run_id = %s AND node_key = %s",
                 (run_id, node_key),
             )
             conn.execute(
-                "UPDATE workflow_runs SET status = 'waiting_human', current_node_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE workflow_runs SET status = 'waiting_human', current_node_key = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                 (node_key, run_id),
             )
             context = decode(run["context"])
@@ -105,12 +105,12 @@ async def run_until_human_or_done(run_id: str, start_key: str) -> None:
             """
             UPDATE run_nodes
             SET status = 'running', attempt = attempt + 1, started_at = CURRENT_TIMESTAMP
-            WHERE run_id = ? AND node_key = ?
+            WHERE run_id = %s AND node_key = %s
             """,
             (run_id, node_key),
         )
         conn.execute(
-            "UPDATE workflow_runs SET status = 'running', current_node_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE workflow_runs SET status = 'running', current_node_key = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
             (node_key, run_id),
         )
         conn.commit()
@@ -140,7 +140,7 @@ async def run_until_human_or_done(run_id: str, start_key: str) -> None:
 
     conn = connect()
     conn.execute(
-        "UPDATE workflow_runs SET status = 'succeeded', current_node_key = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE workflow_runs SET status = 'succeeded', current_node_key = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (run_id,),
     )
     conn.commit()
@@ -151,11 +151,11 @@ async def run_until_human_or_done(run_id: str, start_key: str) -> None:
 async def mark_node_pending(run_id: str, node_key: str, status: str, error: str) -> None:
     conn = connect()
     conn.execute(
-        "UPDATE run_nodes SET status = ?, error = ?, finished_at = CURRENT_TIMESTAMP WHERE run_id = ? AND node_key = ?",
+        "UPDATE run_nodes SET status = %s, error = %s, finished_at = CURRENT_TIMESTAMP WHERE run_id = %s AND node_key = %s",
         (status, error, run_id, node_key),
     )
     conn.execute(
-        "UPDATE workflow_runs SET status = ?, current_node_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE workflow_runs SET status = %s, current_node_key = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (status, node_key, run_id),
     )
     conn.commit()
@@ -164,7 +164,7 @@ async def mark_node_pending(run_id: str, node_key: str, status: str, error: str)
 
 async def persist_node_output(run_id: str, node_key: str, task_type: str, output: dict[str, Any]) -> None:
     conn = connect()
-    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone())
+    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
     if run is None:
         conn.close()
         return
@@ -175,12 +175,12 @@ async def persist_node_output(run_id: str, node_key: str, task_type: str, output
     if task_type == "gen_titles":
         context["title_candidates"] = output["title_candidates"]
     elif task_type == "gen_synopsis":
-        meta = decode(conn.execute("SELECT meta FROM contents WHERE id = ?", (novel_id,)).fetchone()["meta"])
+        meta = decode(conn.execute("SELECT meta FROM contents WHERE id = %s", (novel_id,)).fetchone()["meta"])
         meta.update({"synopsis": output["synopsis"], "selling_points": output["selling_points"]})
-        conn.execute("UPDATE contents SET meta = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (encode(meta), novel_id))
+        conn.execute("UPDATE contents SET meta = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (encode(meta), novel_id))
     elif task_type == "gen_worldview":
         conn.execute(
-            "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (%s, %s, %s ,%s, %s ,%s, %s)",
             (
                 new_id("knw"),
                 run["project_id"],
@@ -194,7 +194,7 @@ async def persist_node_output(run_id: str, node_key: str, task_type: str, output
     elif task_type == "gen_characters":
         for character in output["characters"]:
             conn.execute(
-                "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (%s, %s, %s ,%s, %s ,%s, %s)",
                 (
                     new_id("knw"),
                     run["project_id"],
@@ -206,9 +206,9 @@ async def persist_node_output(run_id: str, node_key: str, task_type: str, output
                 ),
             )
     elif task_type == "gen_outline":
-        meta = decode(conn.execute("SELECT meta FROM contents WHERE id = ?", (novel_id,)).fetchone()["meta"])
+        meta = decode(conn.execute("SELECT meta FROM contents WHERE id = %s", (novel_id,)).fetchone()["meta"])
         meta["outline"] = output["outline"]
-        conn.execute("UPDATE contents SET meta = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (encode(meta), novel_id))
+        conn.execute("UPDATE contents SET meta = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (encode(meta), novel_id))
     elif task_type == "gen_chapter1":
         chapter = output["chapter"]
         body = {"type": "doc", "content": [{"type": "paragraph", "text": text} for text in chapter["body"]]}
@@ -216,22 +216,22 @@ async def persist_node_output(run_id: str, node_key: str, task_type: str, output
         conn.execute(
             """
             INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status)
-            VALUES (?, ?, ?, 'chapter', ?, ?, ?, 'reviewed')
+            VALUES (%s, %s, %s, 'chapter', %s ,%s, %s, 'reviewed')
             """,
             (chapter_id, run["project_id"], novel_id, chapter["title"], encode(body), encode({"seq": 1})),
         )
         context["chapter_id"] = chapter_id
         conn.execute(
-            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (?, 'content', ?, 'ai_generate', ?)",
+            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
             (new_id("ver"), chapter_id, encode({"title": chapter["title"], "body": body, "meta": {"seq": 1}})),
         )
 
     conn.execute(
-        "UPDATE run_nodes SET status = 'succeeded', output = ?, finished_at = CURRENT_TIMESTAMP WHERE run_id = ? AND node_key = ?",
+        "UPDATE run_nodes SET status = 'succeeded', output = %s, finished_at = CURRENT_TIMESTAMP WHERE run_id = %s AND node_key = %s",
         (encode(output), run_id, node_key),
     )
     conn.execute(
-        "UPDATE workflow_runs SET context = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE workflow_runs SET context = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (encode(context), run_id),
     )
     conn.commit()
@@ -240,23 +240,23 @@ async def persist_node_output(run_id: str, node_key: str, task_type: str, output
 
 def confirm_human(run_id: str, selected_title: str) -> None:
     conn = connect()
-    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone())
+    run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
     if run is None:
         conn.close()
         raise ValueError("run not found")
     context = decode(run["context"])
     context["selected_title"] = selected_title
-    conn.execute("UPDATE contents SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (selected_title, run["novel_id"]))
+    conn.execute("UPDATE contents SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (selected_title, run["novel_id"]))
     conn.execute(
         """
         UPDATE run_nodes
-        SET status = 'succeeded', output = ?, finished_at = CURRENT_TIMESTAMP
-        WHERE run_id = ? AND node_key = 'n2'
+        SET status = 'succeeded', output = %s, finished_at = CURRENT_TIMESTAMP
+        WHERE run_id = %s AND node_key = 'n2'
         """,
         (encode({"selected_title": selected_title}), run_id),
     )
     conn.execute(
-        "UPDATE workflow_runs SET status = 'running', current_node_key = 'n3', context = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE workflow_runs SET status = 'running', current_node_key = 'n3', context = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (encode(context), run_id),
     )
     conn.commit()

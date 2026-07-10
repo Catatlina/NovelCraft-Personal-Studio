@@ -15,3 +15,5 @@ frontend/*.tsbuildinfo
 # Local logs
 logs/
 *.log
+__pycache__/
+*.pyc

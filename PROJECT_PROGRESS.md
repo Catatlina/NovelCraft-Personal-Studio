@@ -8,7 +8,7 @@
 
 | 阶段 | 名称 | 状态 | 完成度 | 说明 |
 |---|---|---:|---:|---|
-| M1 | 地基 + MVP | 进行中 | 32% | 已完成可运行垂直骨架，尚未达到正式 M1 门禁 |
+| M1 | 地基 + MVP | 进行中 | 45% | PostgreSQL迁移完成，bootstrap全链路跑通 |
 | M2 | 小说引擎完全体 | 未开始 | 0% | 依赖 M1 正式完成 |
 | M3 | 内容工作室 | 未开始 | 0% | 短篇、自媒体、知识库、热点系统 |
 | M4 | 发布、数据、出海 | 未开始 | 0% | 发布网关、数据回流、ROI、出海工作流 |
@@ -41,10 +41,10 @@ M5 协作离线多端
 | 工程初始化 | 工程基线 | 已完成 | 100% | Git 仓库、前后端目录、README、GitHub 远端 |
 | 前端工作台骨架 | TASK-011~013 部分 | 已完成 | 55% | 创作向导、进度、审阅、编辑器、成本页 |
 | 后端 API 骨架 | TASK-003/005/008/009 部分 | 已完成 | 45% | FastAPI `/api/v1`、内容、版本、运行、追踪接口 |
-| 统一内容模型 | TASK-003 部分 | 进行中 | 35% | SQLite 中已有 `contents`，未迁 PostgreSQL/Alembic |
-| 版本系统 | TASK-005 部分 | 进行中 | 30% | 已有保存快照和恢复，未做 diff/版本树/清理任务 |
-| AI Gateway | TASK-006 部分 | 进行中 | 40% | mock Provider、DeepSeek 预留、预算熔断、调用追踪 |
-| Prompt 库 | TASK-007 部分 | 进行中 | 25% | Prompt seed 和模型路由 seed，未做 golden case CI |
+|| 统一内容模型 | TASK-003 部分 | 进行中 | 75% | PostgreSQL 26 表骨架已建，Alembic 迁移通过，content CRUD 正常 |
+|| 版本系统 | TASK-005 部分 | 进行中 | 40% | 快照/恢复已工作，版本树 parent_version_id 已建表 |
+|| AI Gateway | TASK-006 部分 | 进行中 | 45% | mock + DeepSeek 预留，预算熔断生效，ai_calls 追踪正常 |
+|| Prompt 库 | TASK-007 部分 | 进行中 | 30% | Prompt/model_routes seed 已入库 PostgreSQL |
 | 工作流引擎 v0 | TASK-008 部分 | 进行中 | 45% | bootstrap 线性链 + human 节点，未接 Celery/断点强化 |
 | bootstrap 八节点 | TASK-009 部分 | 进行中 | 60% | 灵感到第一章链路已跑通，当前仍是 mock AI |
 | SSE 进度 | TASK-010 部分 | 进行中 | 35% | 基础事件流已实现，未做断线续传和 Redis |
@@ -69,7 +69,7 @@ M5 协作离线多端
 
 | 优先级 | 缺口 | 影响 |
 |---|---|---|
-| P0 | SQLite 还未迁到 PostgreSQL + Alembic | 不能进入正式 M1 数据库门禁 |
+|| P0 | SQLite 还未迁到 PostgreSQL + Alembic | ✅ 已完成 — 26 表骨架迁移通过，bootstrap 全链路 PG 验证 |
 | P0 | 没有认证/JWT/RBAC | 还不是可部署的个人工作台 |
 | P0 | 工作流未接 Celery/Redis | 无法保证断点续跑、后台任务可靠性 |
 | P0 | DeepSeek 未做真实验收 | 当前生成内容仍是 mock |
@@ -97,3 +97,5 @@ M5 协作离线多端
 | 2026-07-10 | GitHub 推送 | 通过 |
 | 2026-07-10 | V2.1 定案文档入库 | 通过 |
 | 2026-07-10 | 历史文档归档入库 | 通过 |
+| 2026-07-10 | PostgreSQL 26 表迁移 | 通过，Alembic upgrade/downgrade OK |
+| 2026-07-10 | bootstrap 全链路 PG 验证 | 通过，8 节点全 succeeded，7 AI calls，¥0.0028 |
