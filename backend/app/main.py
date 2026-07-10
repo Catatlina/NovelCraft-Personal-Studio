@@ -217,6 +217,59 @@ async def create_short_story(project_id: str) -> ApiResponse:
     return ok({"short_id": sid, "task_id": result.id, "status": "dispatched"})
 
 
+@app.post("/api/v1/contents/{content_id}/fanout")
+async def fanout_content(content_id: str, platforms: str = "wechat,toutiao,xiaohongshu") -> ApiResponse:
+    """M3: Fan-out source content to multiple social platforms."""
+    from app.services.social_media import PLATFORMS
+    conn = connect()
+    source = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
+    if source is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="content not found")
+
+    platform_list = [p.strip() for p in platforms.split(",") if p.strip() in PLATFORMS]
+    results = []
+    for pkey in platform_list:
+        p = PLATFORMS[pkey]
+        derived_id = new_id()
+        conn.execute(
+            "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (derived_id, source["project_id"], content_id, p["type"],
+             source["title"] + f" ({p['name']}版)", encode({"type":"doc","content":[]}),
+             encode({"platform": pkey, "source_id": content_id}), "draft"),
+        )
+        conn.execute(
+            "INSERT INTO derivations (id, source_content_id, derived_content_id) VALUES (%s,%s,%s)",
+            (new_id(), content_id, derived_id),
+        )
+        results.append({"platform": pkey, "type": p["type"], "derived_id": derived_id})
+    conn.commit(); conn.close()
+    return ok({"fanout_count": len(results), "items": results})
+
+
+@app.post("/api/v1/contents/{content_id}/video-script")
+async def generate_video_script(content_id: str, platform: str = "douyin") -> ApiResponse:
+    """M3: Generate short video script from content."""
+    from app.services.social_media import VIDEO_PLATFORMS
+    if platform not in VIDEO_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"unknown platform: {platform}")
+    p = VIDEO_PLATFORMS[platform]
+    conn = connect()
+    source = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
+    conn.close()
+    if source is None:
+        raise HTTPException(status_code=404, detail="content not found")
+    # Generate via AI
+    from .gateway import complete
+    body_text = ""
+    if isinstance(source.get("body"), dict):
+        body_text = "\n".join(c.get("text","") for c in source["body"].get("content",[]))
+    output = complete(run_id=None, node_key=None, project_id=source["project_id"],
+                      task_type="gen_video_script", prompt_name="social.gen_video",
+                      variables={"body": body_text[:3000], "platform": p["name"], "style": p["style"], "max_duration": p["max_duration"]})
+    return ok({"platform": platform, "script": output})
+
+
 @app.get("/api/v1/runs/{run_id}")
 def get_run(run_id: str) -> ApiResponse:
     conn = connect()
@@ -420,3 +473,10 @@ def list_knowledge(project_id: str, content_id: str | None = None) -> ApiRespons
         item["meta"] = decode(item["meta"], {})
     conn.close()
     return ok(items)
+
+
+@app.post("/api/v1/knowledge/daily-briefing")
+def daily_briefing(project_id: str) -> ApiResponse:
+    """M3: Generate daily content briefing from hotspots."""
+    from .services.hotspot import generate_daily_briefing
+    return ok(generate_daily_briefing(project_id))

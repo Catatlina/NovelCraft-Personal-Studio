@@ -123,6 +123,7 @@ def init_db() -> None:
         "gen_next_chapter", "extract_entities", "extract_foreshadowing", "expand_outline",
         "extract_timeline", "extract_arcs",
         "gen_short_titles", "gen_short_story", "review_short",
+        "gen_video_script", "fetch_hotspots", "gen_daily_brief",
     ]
     for task_type in task_types:
         db.execute(

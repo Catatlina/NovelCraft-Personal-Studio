@@ -30,6 +30,10 @@ PROMPT_SEEDS = [
     ("shortstory.gen_titles", "1.0.0", "deepseek", "为短篇创意生成3个标题。\\n灵感：$idea\\n题材：$genre\\n模板：$template\\n输出JSON: {\\\"titles\\\":[\\\"标题1\\\",\\\"标题2\\\",\\\"标题3\\\"]}"),
     ("shortstory.gen_story", "1.0.0", "deepseek", "按「$template」模板写短篇。\\n标题：$title\\n灵感：$idea\\n风格：$style\\n字数：$max_words字以内\\n输出JSON: {\\\"story\\\":{\\\"title\\\":\\\"\\\",\\\"body\\\":[\\\"段落\\\"]}}"),
     ("shortstory.review", "1.0.0", "deepseek", "审核短篇质量。\\n输出JSON: {\\\"score\\\":80,\\\"hooks\\\":\\\"开头评价\\\",\\\"pacing\\\":\\\"节奏评价\\\",\\\"ending\\\":\\\"结尾评价\\\",\\\"issues\\\":[\\\"问题\\\"]}"),
+    # M3: social media
+    ("social.gen_video", "1.0.0", "deepseek", "生成$platform短视频脚本(≤$max_duration秒)。\\n风格：$style\\n内容：$body\\n输出JSON: {\\\"hook_3s\\\":\\\"\\\",\\\"scenes\\\":[{\\\"duration\\\":5,\\\"visual\\\":\\\"\\\",\\\"audio\\\":\\\"\\\"}],\\\"title\\\":\\\"\\\",\\\"cta\\\":\\\"\\\"}"),
+    ("social.fetch_hotspots", "1.0.0", "deepseek", "列出当前最热门的5个话题。输出JSON: {\\\"topics\\\":[{\\\"title\\\":\\\"\\\",\\\"category\\\":\\\"\\\",\\\"score\\\":85,\\\"angle\\\":\\\"\\\"}]}"),
+    ("social.gen_daily_brief", "1.0.0", "deepseek", "根据话题生成每日内容简报。话题：$topic\\n角度：$angle\\n输出JSON: {\\\"wechat_draft\\\":\\\"公众号草稿\\\",\\\"toutiao_draft\\\":\\\"头条草稿\\\",\\\"xhs_draft\\\":\\\"小红书草稿\\\"}"),
 ]
 
 
