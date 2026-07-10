@@ -177,7 +177,7 @@ def _load_prompt_and_route(
             """
             SELECT * FROM prompts
             WHERE name = %s AND is_active = TRUE
-            ORDER BY created_at DESC
+            ORDER BY string_to_array(version, '.')::int[] DESC, created_at DESC
             LIMIT 1
             """,
             (prompt_name,),
