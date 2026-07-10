@@ -120,3 +120,18 @@ def test_content_object_endpoints_block_cross_project_access(client: TestClient)
     assert client.get(f"/api/v1/contents/{novel_id}", headers=headers).status_code == 403
     assert client.put(f"/api/v1/contents/{novel_id}", headers=headers, json={"title": "x"}).status_code == 403
     assert client.post(f"/api/v1/novels/{novel_id}/bootstrap", headers=headers).status_code == 403
+
+
+def test_create_project(client: TestClient):
+    token, _ = _register_user(client, "creator")
+    headers = {"Authorization": f"Bearer {token}"}
+    r = client.post("/api/v1/projects?name=测试项目", headers=headers)
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["name"] == "测试项目"
+    assert "id" in data
+
+
+def test_create_project_requires_auth(client: TestClient):
+    r = client.post("/api/v1/projects?name=test")
+    assert r.status_code == 401
