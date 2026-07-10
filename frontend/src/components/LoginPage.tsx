@@ -20,13 +20,13 @@ export function LoginPage({ onLogin }: Props) {
     setBusy(true); setError("");
     try {
       const path = mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
-      const data = await api<{ code: number; message: string; data?: { token: string } }>(path, {
+      const data = await api<{ code: number; message: string; data?: { access_token: string } }>(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({ email, password }),
       });
-      if (data.code === 0 && data.data?.token) {
-        const t = data.data.token;
+      if (data.code === 0 && data.data?.access_token) {
+        const t = data.data.access_token;
         sessionStorage.setItem("nc_token", t);
         onLogin(t, email);
       } else {
