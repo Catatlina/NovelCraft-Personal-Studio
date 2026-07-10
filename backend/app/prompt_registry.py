@@ -15,11 +15,15 @@ PROMPT_SEEDS = [
     ("editor.polish", "1.0.0", "mock", "请润色选中文本，保持含义和风格。\\n$selection"),
     ("editor.rewrite", "1.0.0", "mock", "请按要求改写选中文本。\\n要求：$instruction\\n$selection"),
     ("editor.continue", "1.0.0", "mock", "请续写选中文本。\\n要求：$instruction\\n$selection"),
+    ("editor.expand", "1.0.0", "deepseek", "请扩写以下文本，增加细节、场景和心理描写。\\n$selection"),
+    ("editor.condense", "1.0.0", "deepseek", "请缩写以下文本，保留核心情节，删除冗余。\\n$selection"),
+    ("editor.deai", "1.0.0", "deepseek", "请去除以下文本的AI味，让它读起来像真人写的。\\n$selection"),
     # M2: narrative engine
     ("narrative.summarize_chapter", "1.0.0", "deepseek", "总结章节内容。$instructions\\n\\n$body"),
     ("narrative.summarize_volume", "1.0.0", "deepseek", "汇总卷内容。$instructions\\n\\n$body"),
     ("narrative.summarize_book", "1.0.0", "deepseek", "总结全书状态。$instructions\\n\\n$body"),
     ("narrative.gen_next_chapter", "1.0.0", "deepseek", "根据上下文写下一章。\\n$context\\n\\n请输出JSON: {\\\"chapter\\\":{\\\"title\\\":\\\"\\\",\\\"body\\\":[\\\"段落\\\"]}}"),
+    ("narrative.expand_outline", "1.0.0", "deepseek", "将卷纲展开为逐章细纲。卷纲：$volume\\n每卷$chapters_per_volume章。输出JSON: {\\\"chapters\\\":[{\\\"title\\\":\\\"\\\",\\\"outline\\\":\\\"\\\"}]}"),
 ]
 
 

@@ -38,38 +38,32 @@ def complete(
     estimated_cost = _estimate_cost(variables, {"prompt": prompt_text})
     _assert_budget(project_id, "bootstrap", estimated_cost)
 
-    if provider == "deepseek" or (settings.ai_provider == "deepseek" and settings.deepseek_api_key):
+    if provider in ("deepseek", "mock") or (settings.ai_provider == "deepseek" and settings.deepseek_api_key):
         try:
-            output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
-            provider_name = "deepseek"
+            if provider == "deepseek":
+                output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
+            else:
+                output = _mock_output(task_type, variables)
+                prompt_tokens = max(80, len(prompt_text) // 3)
+                completion_tokens = max(120, len(encode(output)) // 3)
+            provider_name = provider if provider != "mock" else "deepseek"
             model_name = model or settings.deepseek_model
         except ProviderError:
-            # Fallback chain: try alternatives from model_routes
+            # Fallback chain
             route = _load_route(task_type)
             fallbacks = route.get("fallback_json", []) if route else []
             if isinstance(fallbacks, str):
                 fallbacks = json.loads(fallbacks)
             for fb in fallbacks:
                 try:
-                    fb_provider = fb.get("provider", "deepseek")
-                    fb_model = fb.get("model", "deepseek-chat")
-                    if fb_provider == "deepseek":
-                        output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, fb_model, params)
-                    else:
-                        # Unknown provider → mock fallback
-                        output = _mock_output(task_type, variables)
-                        prompt_tokens = max(80, len(prompt_text) // 3)
-                        completion_tokens = max(120, len(encode(output)) // 3)
-                    provider_name = fb_provider
-                    model_name = fb_model
+                    output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
                     break
                 except Exception:
                     continue
             else:
-                # All fallbacks failed → mock
                 output = _mock_output(task_type, variables)
                 provider_name = "mock-fallback"
-                model_name = "mock-deepseek-chat"
+                model_name = "mock"
                 prompt_tokens = max(80, len(prompt_text) // 3)
                 completion_tokens = max(120, len(encode(output)) // 3)
     else:
@@ -119,6 +113,26 @@ def complete(
     conn.commit()
     conn.close()
     return output
+
+
+def _try_fallback(fb: dict, task_type: str, prompt_text: str, variables: dict, params: dict) -> tuple:
+    """Try a fallback provider. Returns (output, prompt_tokens, completion_tokens, provider_name, model_name)."""
+    fb_provider = fb.get("provider", "deepseek")
+    fb_model = fb.get("model", "deepseek-chat")
+    if fb_provider == "deepseek":
+        output, pt, ct = _deepseek_complete(task_type, prompt_text, fb_model, params)
+    elif fb_provider in ("claude", "openai", "gemini"):
+        from .ai.providers import PROVIDERS
+        fn = PROVIDERS.get(fb_provider)
+        if fn:
+            output, pt, ct = fn(prompt_text, fb_model, params)
+        else:
+            raise ProviderError(f"unknown provider: {fb_provider}")
+    else:
+        output = _mock_output(task_type, variables)
+        pt = max(80, len(prompt_text) // 3)
+        ct = max(120, len(encode(output)) // 3)
+    return output, pt, ct, fb_provider, fb_model
 
 
 def _load_route(task_type: str) -> dict | None:
@@ -301,6 +315,13 @@ def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:
             text = selection + "\n\n他把墨晶握在掌心，忽然听见城市深处传来潮水般的翻页声。"
         elif task_type == "editor_rewrite":
             text = f"改写版：{selection.strip()}（更强调冲突与画面，{instruction or '保持原意'}。）"
+        elif task_type == "editor_expand":
+            text = f"{selection.strip()}\n\n（扩写）周围的一切都在诉说着不为人知的秘密。空气里弥漫着墨晶的微光，每一次呼吸都像在吸入远古的记忆。他感到自己的心跳与城市的脉搏渐渐同步。"
+        elif task_type == "editor_condense":
+            sentences = selection.strip().split("。")
+            text = "。".join(sentences[:max(1, len(sentences)//2)]) + "。"
+        elif task_type == "editor_deai":
+            text = selection.strip().replace("值得注意的是", "").replace("综上所述", "").replace("首先", "").replace("其次", "").replace("最后", "")
         else:
             text = f"润色版：{selection.strip()}（语言更顺，节奏更稳。）"
         return {"text": text}

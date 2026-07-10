@@ -321,6 +321,40 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
 
 
 @celery_app.task
+def expand_outline_task(novel_id: str, project_id: str) -> dict:
+    """M2: Expand volume outline into chapter-level outlines."""
+    db = connect()
+    meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (novel_id,)).fetchone()
+    db.close()
+    if not meta_row:
+        return {"error": "novel not found"}
+    meta = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
+    outline = meta.get("outline", [])
+    if not outline:
+        return {"error": "no outline to expand"}
+
+    outline_text = "\n".join(str(o) for o in outline)
+    chapters = []
+    for vol_idx, vol_line in enumerate(outline):
+        output = complete(
+            run_id=None, node_key=None, project_id=project_id,
+            task_type="expand_outline", prompt_name="narrative.expand_outline",
+            variables={"volume": vol_line, "volume_num": vol_idx + 1, "chapters_per_volume": 10},
+        )
+        for ch in output.get("chapters", []):
+            chapters.append({"volume": vol_idx + 1, "seq": len(chapters) + 1, "title": ch.get("title", ""), "outline": ch.get("outline", "")})
+
+    db = connect()
+    db.execute(
+        "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+        (encode({"chapter_outlines": chapters}), novel_id),
+    )
+    db.commit()
+    db.close()
+    return {"chapters": len(chapters), "sample": chapters[:3]}
+
+
+@celery_app.task
 def auto_serial_check() -> dict:
     """M2 beat: check for novels with auto-serial enabled and generate next chapter."""
     db = connect()

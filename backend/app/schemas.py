@@ -48,4 +48,4 @@ class ModelRouteUpdate(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-AiOperation = Literal["polish", "rewrite", "continue"]
+AiOperation = Literal["polish", "rewrite", "continue", "expand", "condense", "deai"]
