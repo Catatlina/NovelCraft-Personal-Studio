@@ -4,10 +4,14 @@ import json
 import time
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from typing import Any
 
 from .config import settings
 from .db import connect, decode, encode, new_id, row_to_dict
+
+# Context variable for per-request API key (set by middleware from X-Api-Key header)
+_request_api_key: ContextVar[str | None] = ContextVar("request_api_key", default=None)
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
 from .core.alerts import alert_budget, alert_provider_error
 
@@ -214,7 +218,8 @@ def _estimate_cost(variables: dict[str, Any], output_hint: dict[str, Any]) -> fl
 
 
 def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any]:
-    if not settings.deepseek_api_key:
+    api_key = _request_api_key.get() or settings.deepseek_api_key
+    if not api_key:
         raise ProviderError("DEEPSEEK_API_KEY is not configured")
     body = {
         "model": model,
@@ -230,7 +235,7 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
         data=json.dumps(body).encode("utf-8"),
         method="POST",
         headers={
-            "Authorization": f"Bearer {settings.deepseek_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
     )

@@ -46,11 +46,21 @@ app.include_router(short_story_router)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware: capture X-Api-Key header for this request
+@app.middleware("http")
+async def capture_api_key(request: Request, call_next):
+    from app.gateway import _request_api_key
+    key = request.headers.get("X-Api-Key")
+    if key:
+        _request_api_key.set(key)
+    response = await call_next(request)
+    return response
 
 
 def ok(data: Any = None) -> ApiResponse:
