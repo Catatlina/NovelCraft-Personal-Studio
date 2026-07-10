@@ -480,3 +480,38 @@ def daily_briefing(project_id: str) -> ApiResponse:
     """M3: Generate daily content briefing from hotspots."""
     from .services.hotspot import generate_daily_briefing
     return ok(generate_daily_briefing(project_id))
+
+
+@app.post("/api/v1/knowledge/style-learn")
+def style_learn(samples: list[str]) -> ApiResponse:
+    """M3: Learn style from sample texts."""
+    from .services.style_learn import learn_style
+    return ok(learn_style(samples))
+
+
+@app.post("/api/v1/knowledge/check-similarity")
+def check_similarity(original: str, generated: str) -> ApiResponse:
+    """M3: Check similarity between original and generated text."""
+    from .services.style_learn import check_similarity
+    return ok(check_similarity(original, generated))
+
+
+@app.post("/api/v1/prompts/lab")
+def prompt_lab(prompt_name: str, input_text: str, models: str = "deepseek-chat") -> ApiResponse:
+    """M3: Prompt lab — run same input against multiple models and compare."""
+    from .gateway import complete
+    conn = connect()
+    row = conn.execute("SELECT id FROM projects LIMIT 1").fetchone()
+    pid = row["id"] if row else ""
+    conn.close()
+    model_list = [m.strip() for m in models.split(",")]
+    results = []
+    for model in model_list:
+        try:
+            output = complete(run_id=None, node_key=None, project_id=pid,
+                            task_type="prompt_lab", prompt_name=prompt_name,
+                            variables={"input": input_text, "model": model})
+            results.append({"model": model, "output": output, "status": "ok"})
+        except Exception as e:
+            results.append({"model": model, "error": str(e), "status": "error"})
+    return ok({"prompt": prompt_name, "models": len(results), "results": results})
