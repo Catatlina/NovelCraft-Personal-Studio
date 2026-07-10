@@ -287,7 +287,7 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
     output = complete(
         run_id=None, node_key=None, project_id=project_id,
         task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
-        variables={"context": context},
+        variables={"context": context, "context_length": len(context), "assembled_layers": list(assembler.layers_built.keys())},
     )
 
     chapter = output.get("chapter", {})
@@ -407,6 +407,11 @@ def patrol_check() -> dict:
         issues.append(f"{len(needs_rewrite)} chapters need rewrite")
     if orphans:
         issues.append(f"{len(orphans)} orphan chapters")
+
+    # Send alerts for issues
+    if issues:
+        from app.core.alerts import send_alert
+        send_alert("巡检发现问题:\\n" + "\\n".join(f"• {i}" for i in issues), "warning")
 
     return {
         "status": "ok" if not issues else "issues_found",
