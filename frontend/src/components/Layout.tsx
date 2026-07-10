@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Check, CircleDollarSign, Code2, FileText, GitBranch, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
+import { Check, CircleDollarSign, Code2, FileText, GitBranch, Layers, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
 
-type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings";
+type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio";
 
 export function Layout({ tab, setTab, title, runStatus, children }: {
   tab: Tab; setTab: (t: Tab) => void; title: string;
@@ -25,6 +25,7 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
           <TabBtn icon={<Code2 size={18} />} active={tab==="prompts"} label="Prompt" onClick={()=>setTab("prompts")} />
           <TabBtn icon={<Workflow size={18} />} active={tab==="dag"} label="工作流" onClick={()=>setTab("dag")} />
           <TabBtn icon={<Settings size={18} />} active={tab==="settings"} label="设置" onClick={()=>setTab("settings")} />
+          <TabBtn icon={<Layers size={18} />} active={tab==="studio"} label="工作室" onClick={()=>setTab("studio")} />
         </nav>
         <div className="theme-toggle">
           <button onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}{theme==="dark"?"亮色":"暗色"}</button>

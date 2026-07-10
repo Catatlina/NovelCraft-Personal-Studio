@@ -1,0 +1,137 @@
+import React, { useState } from "react";
+import { BookOpen, Share2, Database, TrendingUp, Play, Loader2 } from "lucide-react";
+
+const API = "";
+
+export function Studio() {
+  const [tab, setTab] = useState<"short"|"social"|"knowledge"|"hotspot">("short");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  // Short story
+  const [template, setTemplate] = useState("viral");
+  const [idea, setIdea] = useState("");
+
+  // Knowledge
+  const [kQuery, setKQuery] = useState("");
+  const [kKind, setKKind] = useState("");
+  const [kResults, setKResults] = useState<any[]>([]);
+
+  // Hotspot
+  const [hotspots, setHotspots] = useState<any[]>([]);
+  const [briefing, setBriefing] = useState<any>(null);
+
+  async function callApi(path: string, method = "GET", body?: any) {
+    const r = await fetch(`${API}${path}`, {
+      method, headers: body ? {"Content-Type":"application/json"} : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return r.json();
+  }
+
+  async function createShortStory() {
+    setBusy(true);
+    const r = await fetch("/api/v1/projects/" + (await (await fetch("/api/v1/projects")).json()).data[0].id + "/short-stories", {method:"POST"});
+    setResult(await r.json());
+    setBusy(false);
+    setMsg("短篇已创建！查看审阅页");
+  }
+
+  async function searchKnowledge() {
+    const r = await fetch("/api/v1/projects").then(r=>r.json());
+    const pid = r.data[0].id;
+    const params = new URLSearchParams({project_id: pid, query: kQuery});
+    if (kKind) params.append("kind", kKind);
+    const res = await fetch(`/api/v1/knowledge/search?${params}`, {method:"POST"});
+    setKResults((await res.json()).data || []);
+  }
+
+  async function fetchHotspots() {
+    const r = await fetch("/api/v1/projects").then(r=>r.json());
+    const pid = r.data[0].id;
+    const res = await fetch(`/api/v1/knowledge/daily-briefing?project_id=${pid}`, {method:"POST"});
+    const data = (await res.json()).data || {};
+    setHotspots(data.topics || []);
+    setBriefing(data);
+  }
+
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"180px 1fr",gap:16,minHeight:400}}>
+      <div className="panel" style={{display:"flex",flexDirection:"column",gap:4}}>
+        <button className={tab==="short"?"active":""} onClick={()=>setTab("short")} style={{justifyContent:"flex-start"}}><BookOpen size={16}/> 短篇创作</button>
+        <button className={tab==="social"?"active":""} onClick={()=>setTab("social")} style={{justifyContent:"flex-start"}}><Share2 size={16}/> 自媒体</button>
+        <button className={tab==="knowledge"?"active":""} onClick={()=>setTab("knowledge")} style={{justifyContent:"flex-start"}}><Database size={16}/> 知识库</button>
+        <button className={tab==="hotspot"?"active":""} onClick={()=>setTab("hotspot")} style={{justifyContent:"flex-start"}}><TrendingUp size={16}/> 热点</button>
+      </div>
+
+      <div className="panel">
+        {msg && <div className="error" style={{background:"#1a3a28",color:"var(--success)",marginBottom:8}}>{msg}<button onClick={()=>setMsg("")} style={{float:"right",border:"none",background:"none",color:"var(--success)"}}>×</button></div>}
+
+        {tab === "short" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <h2>短篇创作</h2>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <label style={{fontWeight:600,fontSize:14}}>模板:</label>
+              <select value={template} onChange={e=>setTemplate(e.target.value)}>
+                {["flash","emotional","suspense","viral","dialogue"].map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <textarea value={idea} onChange={e=>setIdea(e.target.value)} placeholder="输入创意灵感..." rows={3} />
+            <button className="primary" onClick={createShortStory} disabled={busy} style={{width:"fit-content"}}>
+              {busy?<Loader2 className="spin" size={16}/>:<Play size={16}/>}生成短篇
+            </button>
+            {result && <pre style={{fontSize:12,color:"var(--text-muted)"}}>{JSON.stringify(result,null,2)}</pre>}
+          </div>
+        )}
+
+        {tab === "social" && (
+          <div>
+            <h2>自媒体平台</h2>
+            <p style={{color:"var(--text-muted)"}}>10 个平台类型、一稿多平台 Fan-out、短视频脚本生成。</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
+              {["wechat","toutiao","xiaohongshu","zhihu","baijia","dayu","wangyi","medium","substack","twitter"].map(p=>(
+                <div key={p} style={{padding:"8px 12px",border:"1px solid var(--border-subtle)",borderRadius:8,fontSize:14}}>{p}</div>
+              ))}
+            </div>
+            <p style={{marginTop:12,color:"var(--text-muted)",fontSize:13}}>使用 API: POST /contents/{'{id}'}/fanout?platforms=wechat,toutiao,xiaohongshu</p>
+          </div>
+        )}
+
+        {tab === "knowledge" && (
+          <div>
+            <h2>知识库检索</h2>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input value={kQuery} onChange={e=>setKQuery(e.target.value)} placeholder="搜索关键词..." style={{flex:1}} />
+              <select value={kKind} onChange={e=>setKKind(e.target.value)}>
+                <option value="">全部类型</option>
+                {["character","worldview","hotspot","article","prompt_ref","golden_line","title","platform_rule"].map(k=><option key={k}>{k}</option>)}
+              </select>
+              <button className="primary" onClick={searchKnowledge}>搜索</button>
+            </div>
+            {kResults.map((item:any)=><div key={item.id} style={{padding:"8px 0",borderBottom:"1px solid var(--border-subtle)"}}>
+              <small style={{color:"var(--text-muted)"}}>[{item.kind}]</small> <strong>{item.title}</strong>
+              <p style={{margin:0,fontSize:14,color:"var(--text-secondary)"}}>{item.body?.slice(0,200)}</p>
+            </div>)}
+          </div>
+        )}
+
+        {tab === "hotspot" && (
+          <div>
+            <h2>热点监控</h2>
+            <button className="primary" onClick={fetchHotspots} style={{marginBottom:12}}><TrendingUp size={16}/> 获取今日热点</button>
+            {hotspots.map((t:any,i:number)=><div key={i} style={{padding:"8px 0",borderBottom:"1px solid var(--border-subtle)"}}>
+              <strong>{t.title}</strong> <small style={{color:"var(--text-muted)"}}>[{t.category}] 热度:{t.score}</small>
+              <p style={{margin:0,fontSize:13,color:"var(--text-secondary)"}}>{t.angle}</p>
+            </div>)}
+            {briefing?.generated && <div style={{marginTop:12}}><h3>已生成内容草稿</h3>
+              {briefing.generated.map((g:any,i:number)=><div key={i} style={{padding:8,border:"1px solid var(--border-subtle)",borderRadius:8,marginBottom:8}}>
+                <strong>{g.topic}</strong><pre style={{fontSize:11,color:"var(--text-muted)",whiteSpace:"pre-wrap"}}>{JSON.stringify(g.draft,null,2)?.slice(0,300)}</pre>
+              </div>)}
+            </div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
