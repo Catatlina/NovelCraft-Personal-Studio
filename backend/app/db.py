@@ -121,6 +121,7 @@ def init_db() -> None:
         "editor_expand", "editor_condense", "editor_deai",
         "summarize_chapter", "summarize_volume", "summarize_book",
         "gen_next_chapter", "extract_entities", "extract_foreshadowing", "expand_outline",
+        "extract_timeline", "extract_arcs",
     ]
     for task_type in task_types:
         db.execute(

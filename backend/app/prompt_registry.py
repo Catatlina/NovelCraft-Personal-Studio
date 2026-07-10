@@ -11,7 +11,7 @@ PROMPT_SEEDS = [
     ("bootstrap.gen_characters", "1.0.0", "mock", "请为 $selected_title 生成 3 到 6 位核心人物。"),
     ("bootstrap.gen_outline", "1.0.0", "mock", "请为 $selected_title 生成三卷总纲。"),
     ("bootstrap.gen_chapter1", "1.0.0", "mock", "请按 $style 写 $selected_title 第一章。"),
-    ("bootstrap.review_7dim", "1.0.0", "mock", "请对第一章做七维审核并输出 JSON。"),
+    ("bootstrap.review_7dim", "1.0.0", "mock", "请对章节做七维审核：文笔/剧情/人物(OOC检测)/设定(冲突检测)/逻辑(前文一致性)/节奏/伏笔。输出JSON。"),
     ("editor.polish", "1.0.0", "mock", "请润色选中文本，保持含义和风格。\\n$selection"),
     ("editor.rewrite", "1.0.0", "mock", "请按要求改写选中文本。\\n要求：$instruction\\n$selection"),
     ("editor.continue", "1.0.0", "mock", "请续写选中文本。\\n要求：$instruction\\n$selection"),
@@ -24,6 +24,8 @@ PROMPT_SEEDS = [
     ("narrative.summarize_book", "1.0.0", "deepseek", "总结全书状态。$instructions\\n\\n$body"),
     ("narrative.gen_next_chapter", "1.0.0", "deepseek", "根据上下文写下一章。\\n$context\\n\\n请输出JSON: {\\\"chapter\\\":{\\\"title\\\":\\\"\\\",\\\"body\\\":[\\\"段落\\\"]}}"),
     ("narrative.expand_outline", "1.0.0", "deepseek", "将卷纲展开为逐章细纲。卷纲：$volume\\n每卷$chapters_per_volume章。输出JSON: {\\\"chapters\\\":[{\\\"title\\\":\\\"\\\",\\\"outline\\\":\\\"\\\"}]}"),
+    ("narrative.extract_timeline", "1.0.0", "deepseek", "提取本章时间线事件。$instructions\\n$body\\n输出JSON: {\\\"events\\\":[{\\\"event\\\":\\\"事件描述\\\"}]}"),
+    ("narrative.extract_arcs", "1.0.0", "deepseek", "提取人物弧线进展。$instructions\\n$body\\n输出JSON: {\\\"arcs\\\":[{\\\"character\\\":\\\"人物名\\\",\\\"stage\\\":\\\"弧线阶段\\\",\\\"goal\\\":\\\"目标\\\"}]}"),
 ]
 
 
@@ -34,7 +36,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_characters": '{"characters":[{"name":"姓名","role":"角色定位","arc":"人物弧线"}]}',
     "gen_outline": '{"outline":["第一卷：...","第二卷：...","第三卷：..."]}',
     "gen_chapter1": '{"chapter":{"title":"第一章 标题","body":["段落一","段落二"]}}',
-    "review_7dim": '{"score":80,"dimensions":{"hook":80,"character":80,"world":80,"pace":80,"emotion":80,"clarity":80,"serial_potential":80},"issues":["问题一"]}',
+    "review_7dim": '{"score":80,"dimensions":{"prose":80,"plot":80,"character_ooc":80,"world_conflict":80,"logic_consistency":80,"pace":80,"foreshadowing":80},"issues":["问题"]}',
     "editor_polish": '{"text":"润色后的文本"}',
     "editor_rewrite": '{"text":"改写后的文本"}',
     "editor_continue": '{"text":"续写后的文本"}',

@@ -295,17 +295,13 @@ def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:
         return {
             "score": 84,
             "dimensions": {
-                "hook": 88,
-                "character": 82,
-                "world": 86,
-                "pace": 80,
-                "emotion": 78,
-                "clarity": 90,
-                "serial_potential": 85,
+                "prose": 88, "plot": 82, "character_ooc": 80,
+                "world_conflict": 86, "logic_consistency": 84,
+                "pace": 80, "foreshadowing": 78,
             },
             "issues": [
-                "第一章悬念成立，可以在结尾补一个更明确的行动目标。",
-                "主角职业和日常压力还可以再落地一些。",
+                "第一章悬念成立，可在结尾补更明确的行动目标。",
+                "主角职业和日常压力可以再落地一些。",
             ],
         }
     if task_type.startswith("editor_"):

@@ -313,6 +313,11 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
     from app.services.foreshadowing import extract_and_store_foreshadowing
     extract_and_store_foreshadowing(cid, next_seq, text)
 
+    # Extract timeline events and arc progress
+    from app.services.timeline import extract_timeline, update_arcs
+    extract_timeline(cid, text)
+    update_arcs(novel_id, text)
+
     # Summarize
     _summarize_and_store(db, cid, chapter.get("body", []))
 

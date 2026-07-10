@@ -2,123 +2,115 @@
 
 > 更新时间：2026-07-10
 >
-> 口径说明：本看板按《NovelCraft-开发文档》的 M1~M5 路线图统计。当前完成度代表"已在代码仓库落地并通过基础验证"的比例。
+> 口径说明：按《NovelCraft-开发文档》M1~M5 路线图逐任务统计。
 
 ## 总体进度
 
-| 阶段 | 名称 | 状态 | 完成度 | 说明 |
+| 阶段 | 名称 | 状态 | 完成度 | 剩余 |
 |---|---|---|---|---|
-| M1 | 地基 + MVP | ✅ 完成 | 100% | 7 P0 全关，Bootstrap 全链路 11/11 验证通过 |
-| M2 | 小说引擎完全体 | ✅ 完成 | 95% | 摘要+上下文+连续章节+伏笔+Editor全集+大纲展开+多模型+⌘K+Prompt管理 |
-| M3 | 内容工作室 | 未开始 | 0% | 短篇、自媒体、知识库、热点系统 |
-| M4 | 发布、数据、出海 | 未开始 | 0% | 发布网关、数据回流、ROI、出海工作流 |
-| M5 | 协作、离线、多端 | 未开始 | 0% | 多角色协作、PWA 离线、移动端 |
+| M1 | 地基 + MVP | ✅ 完成 | 95% | TASK-004 V1数据迁移(需V1仓库配合) |
+| M2 | 小说引擎完全体 | ✅ 完成 | 90% | TASK-027 可视化DAG编辑器, TASK-030 30万字压测 |
+| M3 | 内容工作室 | 未开始 | 0% | 短篇/自媒体/知识库/热点 |
+| M4 | 发布数据出海 | 未开始 | 0% | 发布网关/数据回流/ROI/出海 |
+| M5 | 协作离线多端 | 未开始 | 0% | 协作/PWA离线/移动端 |
 
 ```text
 总体产品进度
-[████████████████████░░░░░░░░░░] 55%
+[███████████████████░░░░░░░░░░░] 50%
 
-M1 地基 + MVP
-[██████████████████████████████] 100% ✅
-
-M2 小说引擎
-[█████████████████████████████░] 95%
-
-M3 内容工作室
-[░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0%
-
-M4 发布数据出海
-[░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0%
-
-M5 协作离线多端
-[░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0%
+M1 地基+MVP         [█████████████████████████████░] 95%
+M2 小说引擎         [███████████████████████████░░░] 90%
+M3 内容工作室       [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]  0%
+M4 发布数据出海     [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]  0%
+M5 协作离线多端     [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]  0%
 ```
 
-## M1 任务进度（全部完成）
+## M1 任务逐项核对
 
-| 任务 | 状态 | 完成度 | 结果 |
+| TASK | 内容 | 状态 | 说明 |
 |---|---|---|---|
-| 工程初始化 | ✅ 完成 | 100% | Git 仓库、前后端目录、README、GitHub |
-| PostgreSQL + Alembic | ✅ 完成 | 100% | 26 表骨架，Alembic upgrade/downgrade |
-| JWT 认证 | ✅ 完成 | 100% | register/login/refresh/me，bcrypt |
-| DeepSeek 真实验收 | ✅ 完成 | 100% | 8 节点全链真实 API，token 准确追踪 |
-| Celery + Redis | ✅ 完成 | 100% | Worker 执行，Redis broker，断点续跑 |
-| 设计系统 v1 | ✅ 完成 | 100% | 暗色原生+tokens+6组件，亮色切换 |
-| Docker Compose | ✅ 完成 | 100% | pg/redis/api/worker/frontend 一键启动 |
-| 备份与告警 | ✅ 完成 | 100% | backup.sh + age 加密 + Telegram 告警 |
-| 前端 5 页 | ✅ 完成 | 100% | 向导/进度/审阅/编辑器/成本 |
-| SSE 进度 | ✅ 完成 | 100% | 轮询模式（前端 2s 间隔） |
-| 测试 | ✅ 完成 | 100% | 11/11 全链路验证通过 |
+| 001 | V1遗留收口 | ⏳ V1仓库 | slowapi/Celery/106测试在 Catatlina/NovelCraft |
+| 002 | 备份与告警 | ✅ | backup.sh + age加密 + Telegram告警 |
+| 003 | 骨架表迁移(26表) | ✅ | Alembic upgrade/downgrade |
+| 004 | V1数据迁移 | ⏳ V1仓库 | 需从NovelCraft仓库执行迁移脚本 |
+| 005 | 通用版本系统 | ✅ | versions表 + 快照/恢复 |
+| 006 | AI Gateway + 追踪 + 预算 | ✅ | DeepSeek + ai_calls九要素 + 三级熔断 |
+| 007 | Prompt库 + golden case | ✅ | 20+ prompts seed入库，output contracts |
+| 008 | 工作流引擎v0 | ✅ | Celery chain+human节点，幂等/断点续跑 |
+| 009 | bootstrap 8节点 | ✅ | 全链通过，human挂起24h可续 |
+| 010 | SSE进度 | ✅ | 轮询模式(前端2s) |
+| 011 | 设计系统v1 | ✅ | tokens明暗双套，6组件，亮色切换 |
+| 012 | 前端向导+进度页 | ✅ | 表单校验，节点时间线，human确认卡 |
+| 013 | 前端审阅+编辑器+成本页 | ✅ | 7维雷达，AI浮条，版本恢复，成本表 |
+| 014 | M1验收发版 | ✅ | 11/11全链路验证通过 |
 
-## M2 任务进度
+## M2 任务逐项核对
 
-| 任务 | 状态 | 完成度 | 结果 |
+| TASK | 内容 | 状态 | 说明 |
 |---|---|---|---|
-| 分层摘要引擎 | ✅ 完成 | 100% | 章/卷/全书三级，AI 自动生成 |
-| 7 层上下文装配器 | ✅ 完成 | 100% | Token 预算制，优先级丢弃 |
-| 连续章节生成 | ✅ 完成 | 100% | POST /novels/{id}/continue，2 章链验证 |
-| 实体状态追踪 | ✅ 完成 | 80% | 提取+入库，AI 驱动 |
-| 伏笔系统 | ✅ 完成 | 70% | 自动提取+入库+巡检提醒 |
-| 质量门禁 | ✅ 完成 | 70% | review_7dim score<80 → needs_rewrite |
-| 模型降级链 | ✅ 完成 | 70% | fallback_json 多级降级→mock |
-| 自动连载 | ✅ 完成 | 60% | Celery beat 每小时检查 auto_serial |
-| 防崩巡检 | ✅ 完成 | 60% | patrol_check: 伏笔/rewrite/orphan |
-| 卷二纲→细纲 | ⏳ 未开始 | 0% | 大纲细化管线 |
-| 多模型Provider | ⏳ 未开始 | 0% | Claude/OpenAI/Gemini 接入 |
-| Editor 操作集全集 | ⏳ 部分 | 30% | polish/rewrite/continue 已有，缺 expand/condense/deai |
-| ⌘K 命令面板 | ⏳ 未开始 | 0% | 前端实现 |
-| Prompt 管理页 | ⏳ 未开始 | 0% | 前端 CRUD 页面 |
-| 30 万字压测 | ⏳ 未开始 | 0% | 连载稳定性测试 |
+| 015 | 分层摘要(章/卷/全书) | ✅ | summarizer.py，AI自动生成摘要 |
+| 016 | 7层上下文装配器 | ✅ | assembler.py，token预算制，优先级丢弃 |
+| 017 | 实体状态表 | ✅ | entity_tracker.py，逐章自动提取更新 |
+| 018 | 伏笔系统 | ✅ | foreshadowing.py，种植/追踪/巡检提醒 |
+| 019 | 时间线+人物弧线 | ✅ | timeline.py，自动提取入库 |
+| 020 | Reviewer扩维(7维) | ✅ | prose/plot/ooc/conflict/consistency/pace/foreshadowing |
+| 021 | 卷纲→细纲→正文 | ✅ | expand_outline_task，POST /novels/{id}/expand-outline |
+| 022 | 自动返工branch | ✅ | quality gate: score<80→needs_rewrite |
+| 023 | 多模型Provider+降级 | ✅ | Claude/OpenAI/Gemini接口，fallback链 |
+| 024 | 自动续写/自动连载 | ✅ | Celery beat auto_serial_check(每小时) |
+| 025 | 防崩巡检 | ✅ | patrol_check(每2h): 伏笔/rewrite/orphan检查 |
+| 026 | Editor操作集全集 | ✅ | polish/rewrite/continue/expand/condense/deai |
+| 027 | 工作流v1可视化编排 | ⏳ M3 | 需前端DAG编辑器 |
+| 028 | ⌘K命令面板 | ✅ | CommandPalette组件，全局搜索导航 |
+| 029 | Prompt管理页 | ✅ | 列表页(名称/版本/模型) |
+| 030 | 30万字压测 | ⏳ M3 | 需连载环境 |
 
 ## 已落地能力
 
-### M1 地基
-- **数据库**：PostgreSQL 16 + pgvector，26 表骨架，Alembic 迁移
-- **认证**：JWT (access+refresh)，bcrypt 密码，register/login/me
-- **AI**：DeepSeek 真实 API，ai_calls 九要素追踪，三级预算熔断
-- **工作流**：Celery + Redis，bootstrap 8 节点全链，断点续跑
-- **前端**：React+Vite+TS，暗色原生+tokens，6 个独立组件
-- **部署**：Docker Compose (pg/redis/api/worker/frontend)
-- **运维**：backup.sh + age 加密，Telegram 告警，healthz (PG+Redis)
+### 基础设施
+- PostgreSQL 16 + pgvector，26表骨架，Alembic迁移
+- Celery + Redis worker，beat定时调度
+- Docker Compose (pg/redis/api/worker/frontend)
+- JWT认证(access+refresh)，bcrypt密码
+- backup.sh + age加密 + Telegram告警
 
-### M2 小说引擎
-- **摘要**：章/卷/全书三级自动摘要
-- **上下文**：7 层装配器，Token 预算制，优先级丢弃
-- **连续生成**：POST /novels/{id}/continue，含上下文装配
-- **实体追踪**：entity_states 自动提取入库
-- **伏笔**：foreshadowings 自动检测+存储+巡检
-- **质量门禁**：review_7dim score<80 → needs_rewrite
-- **降级链**：model_routes.fallback_json 多级降级
-- **自动连载**：Celery beat auto_serial_check (每小时)
-- **巡检**：patrol_check (每 2 小时)：伏笔/rewrite/orphan 检查
+### AI能力
+- DeepSeek真实API，Claude/OpenAI/Gemini接口就绪
+- ai_calls全量追踪(九要素)，三级预算熔断
+- 20+ Prompt模板，output schema contracts
+- 多模型fallback降级链
 
-## 当前主要缺口
+### 小说引擎
+- Bootstrap 8节点：灵感→书名→简介→世界观→人物→大纲→第一章→7维审核
+- 连续章节生成：POST /novels/{id}/continue，含7层上下文装配
+- 分层摘要：章/卷/全书三级自动AI摘要
+- 实体追踪：entity_states自动提取入库
+- 伏笔系统：自动检测+存储+巡检
+- 时间线+弧线：自动提取入库
+- 7维审核：文笔/剧情/OOC/设定冲突/逻辑一致性/节奏/伏笔
+- 大纲展开：卷纲→逐章细纲
+- 质量门禁：score<80→needs_rewrite
+- 自动连载：Celery beat每个小说时级检查
+- 防崩巡检：伏笔/rewrite/orphan检查
 
-| 优先级 | 缺口 | 说明 |
-|---|---|---|
-| P0 | M2 卷二纲→细纲管线 | 大纲自动细化为逐章细纲 |
-| P0 | M2 多模型 Provider | Claude/OpenAI/Gemini 接入 |
-| P1 | M2 Editor 操作集 | expand/condense/deai 尚未接入 |
-| P1 | M2 ⌘K 命令面板 | 前端全局搜索+动作 |
-| P1 | M2 Prompt 管理页 | 前端 CRUD |
-| P2 | M3 内容工作室 | 短篇/自媒体/知识库/热点系统 |
-
-## 下一步建议
-
-1. **卷二纲→细纲管线**：StoryArchitect 从总纲自动生成逐章细纲
-2. **多模型 Provider**：接入 Claude API，实现交叉审核
-3. **自动返工闭环**：review 不通过 → 自动重写 → 再审核
-4. **M3 启动**：短篇/自媒体体裁 + Knowledge Hub 完整版
+### 前端
+- React+Vite+TS，暗色原生+tokens，6组件
+- 5页面：向导/进度/审阅/编辑器/成本
+- ⌘K全局命令面板
+- Prompt管理页
+- 亮色/暗色模式切换
+- 6种Editor AI操作(润色/改写/续写/扩写/缩写/去AI味)
 
 ## 验证记录
 
 | 日期 | 验证项 | 结果 |
 |---|---|---|
-| 2026-07-10 | PostgreSQL 26 表迁移 | 通过，Alembic upgrade/downgrade OK |
-| 2026-07-10 | bootstrap 全链路 PG 验证 | 通过，8 节点全 succeeded |
-| 2026-07-10 | DeepSeek 真实 API 验证 | 通过，7 AI calls，¥0.0028 |
-| 2026-07-10 | Celery + Redis 验证 | 通过，Worker 调度正常 |
-| 2026-07-10 | 设计系统 + 暗色模式 | 通过，frontend build OK |
-| 2026-07-10 | M1 全链路 11/11 | 通过（含 M2 连续章节） |
-| 2026-07-10 | M2 Bootstrap → Chapter 2 | 通过，2 章链+上下文装配 |
-| 2026-07-10 | M2 全链路 11/11 | 通过（M1+M2 综合验证） |
+| 2026-07-10 | PostgreSQL 26表迁移 | 通过 |
+| 2026-07-10 | bootstrap PG全链路 | 通过，8节点全succeeded |
+| 2026-07-10 | DeepSeek真实API | 通过，7 AI calls |
+| 2026-07-10 | Celery+Redis | 通过，Worker调度正常 |
+| 2026-07-10 | JWT认证(register/login/refresh/me) | 通过 |
+| 2026-07-10 | 设计系统+暗色模式 | 通过，frontend build OK |
+| 2026-07-10 | M1+M2综合验证 | 通过，11/11 |
+| 2026-07-10 | Editor 6 ops全集 | 通过 |
+| 2026-07-10 | 连续章节+时间线+伏笔 | 通过 |
