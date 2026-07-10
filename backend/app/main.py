@@ -52,13 +52,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware: capture X-Api-Key header for this request
+# Middleware: capture X-Api-* headers for this request
 @app.middleware("http")
 async def capture_api_key(request: Request, call_next):
-    from app.gateway import _request_api_key
+    from app.gateway import _request_api_key, _request_api_base_url, _request_model
     key = request.headers.get("X-Api-Key")
     if key:
         _request_api_key.set(key)
+    base_url = request.headers.get("X-Api-Base-Url")
+    if base_url:
+        _request_api_base_url.set(base_url)
+    model = request.headers.get("X-Model")
+    if model:
+        _request_model.set(model)
     response = await call_next(request)
     return response
 

@@ -78,12 +78,12 @@ export function Settings() {
                 style={{flex:1}} />
             </div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <input placeholder="API 地址 (默认 https://api.deepseek.com/v1)" 
+              <input placeholder="API 地址，例 https://api.deepseek.com/v1"
+                onChange={async e => { const { setApiUrl } = await import("../lib/api"); setApiUrl(e.target.value); }}
                 style={{flex:1,fontSize:13}} />
-              <select style={{width:120}}>
-                <option>deepseek-chat</option>
-                <option>deepseek-reasoner</option>
-              </select>
+              <input placeholder="模型名，例 deepseek-chat"
+                onChange={async e => { const { setModel } = await import("../lib/api"); setModel(e.target.value); }}
+                style={{flex:1,fontSize:13}} />
             </div>
             <table><thead><tr><th>配置项</th><th>值</th><th>说明</th><th>操作</th></tr></thead>
             <tbody>

@@ -12,6 +12,8 @@ from .db import connect, decode, encode, new_id, row_to_dict
 
 # Context variable for per-request API key (set by middleware from X-Api-Key header)
 _request_api_key: ContextVar[str | None] = ContextVar("request_api_key", default=None)
+_request_api_base_url: ContextVar[str | None] = ContextVar("request_api_base_url", default=None)
+_request_model: ContextVar[str | None] = ContextVar("request_model", default=None)
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
 from .core.alerts import alert_budget, alert_provider_error
 
@@ -53,7 +55,8 @@ def complete(
         model_name = "mock"
     elif provider == "deepseek" or settings.ai_provider == "deepseek":
         try:
-            output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
+            model_ = _request_model.get() or model or settings.deepseek_model
+            output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
             provider_name = "deepseek"
             model_name = model or settings.deepseek_model
         except ProviderError:
@@ -230,8 +233,9 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
         "response_format": {"type": "json_object"},
         "temperature": params.get("temperature", 0.7),
     }
+    base_url = (_request_api_base_url.get() or settings.deepseek_base_url).rstrip("/")
     request = urllib.request.Request(
-        f"{settings.deepseek_base_url.rstrip('/')}/chat/completions",
+        f"{base_url}/chat/completions",
         data=json.dumps(body).encode("utf-8"),
         method="POST",
         headers={
