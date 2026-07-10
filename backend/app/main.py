@@ -90,6 +90,24 @@ def list_projects(user: dict = Depends(get_current_user)) -> ApiResponse:
     return ok(rows)
 
 
+@app.post("/api/v1/projects")
+def create_project(name: str = "新项目", user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn = connect()
+    pid = new_id()
+    conn.execute(
+        "INSERT INTO projects (id, name, owner_id) VALUES (%s, %s, %s)",
+        (pid, name, user["id"]),
+    )
+    conn.execute(
+        "INSERT INTO project_members (id, project_id, user_id, role) VALUES (%s, %s, %s, 'owner') ON CONFLICT DO NOTHING",
+        (new_id(), pid, user["id"]),
+    )
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM projects WHERE id = %s", (pid,)).fetchone())
+    conn.close()
+    return ok(row)
+
+
 @app.post("/api/v1/projects/{project_id}/novels")
 def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
