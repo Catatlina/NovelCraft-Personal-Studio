@@ -2,10 +2,9 @@
 
 const KEY_STORE = "nc_deepseek_key";
 
-/* Vite proxy handles /api in dev; in production, derive from current origin */
-const API_BASE = typeof window !== "undefined" && window.location.port === "5173"
-  ? "/api"  // Vite dev proxy
-  : `${window.location.protocol}//${window.location.hostname}:8000/api`;
+/* Vite dev server has proxy; production (npm build) needs absolute API URL */
+const IS_DEV = typeof import.meta !== "undefined" && !!(import.meta as any).env?.DEV;
+const API_BASE = IS_DEV ? "/api" : `${window.location.protocol}//${window.location.hostname}:8000/api`;
 
 export function getApiKey(): string {
   return sessionStorage.getItem(KEY_STORE) || "";
