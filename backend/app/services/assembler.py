@@ -120,7 +120,7 @@ class ContextAssembler:
             rows = []
         if not rows:
             rows = db.execute(
-                "SELECT entity_type, entity_name, location FROM entity_states WHERE content_id IN (SELECT id FROM contents WHERE parent_id = %s) ORDER BY updated_at DESC LIMIT 10",
+                "SELECT entity_type, entity_name, location FROM entity_states WHERE chapter_id IN (SELECT id FROM contents WHERE parent_id = %s) ORDER BY updated_at DESC LIMIT 10",
                 (self.novel_id,),
             ).fetchall()
         db.close()
@@ -136,7 +136,7 @@ class ContextAssembler:
     def _foreshadowing_alerts(self) -> str:
         db = connect()
         rows = db.execute(
-            "SELECT content, planned_resolve_chapter FROM foreshadowings WHERE novel_id = %s AND status = 'planted' ORDER BY created_at LIMIT 5",
+            "SELECT content, planned_resolve_chapter FROM foreshadowings WHERE chapter_id IN (SELECT id FROM contents WHERE parent_id = %s) AND status = 'planted' ORDER BY created_at LIMIT 5",
             (self.novel_id,),
         ).fetchall()
         db.close()

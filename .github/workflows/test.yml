@@ -1,0 +1,46 @@
+# NovelCraft CI — run tests on push to main
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: {POSTGRES_USER: novelcraft, POSTGRES_PASSWORD: novelcraft, POSTGRES_DB: test}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Install deps
+        run: pip install -r backend/requirements.txt
+      - name: Run migrations
+        run: cd backend && alembic upgrade head
+        env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test}
+      - name: Run tests
+        run: cd backend && pytest tests/ -v
+        env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test, REDIS_URL: redis://localhost:6379/0, NOVELCRAFT_ENV: ci}
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - name: Install & build
+        run: cd frontend && npm ci && npm run build

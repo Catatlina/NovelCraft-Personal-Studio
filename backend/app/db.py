@@ -180,9 +180,21 @@ def init_db() -> None:
             """,
             (new_id(), task_type, "deepseek", "deepseek-chat", encode({"temperature": 0.7}), encode([])),
         )
+    # Seed sensitive word list
+    SENSITIVE_WORDS = ["政治敏感", "色情", "暴力恐怖", "赌博", "毒品", "枪支", "诈骗", "传销", "邪教", "违禁内容",
+                       "分裂国家", "颠覆政权", "民族仇恨", "宗教极端", "淫秽", "凶杀", "校园暴力", "自杀",
+                       "假币", "假发票", "人体器官", "间谍器材", "非法集资", "高利贷", "套路贷",
+                       "迷药", "催情", "窃听", "偷拍", "考试作弊", "代孕", "代写论文",
+                       "刷单", "刷粉", "删帖", "水军", "网络攻击", "木马", "病毒"]
+    for word in SENSITIVE_WORDS:
+        db.execute(
+            "INSERT INTO sensitive_words (id, word, category) VALUES (%s, %s, %s) ON CONFLICT(word) DO NOTHING",
+            (new_id(), word, "通用"),
+        )
     db.commit()
     db.close()
 
 
 def row_to_dict(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    return row
     return row

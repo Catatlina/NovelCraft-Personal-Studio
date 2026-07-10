@@ -44,6 +44,11 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   worker:
     build: ./backend
@@ -69,6 +74,11 @@ services:
       - ./frontend/src:/app/src
     depends_on:
       - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5173"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   # Run once to migrate DB
   migrate:
