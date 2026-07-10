@@ -34,6 +34,9 @@ PROMPT_SEEDS = [
     ("social.gen_video", "1.0.0", "deepseek", "生成$platform短视频脚本(≤$max_duration秒)。\\n风格：$style\\n内容：$body\\n输出JSON: {\\\"hook_3s\\\":\\\"\\\",\\\"scenes\\\":[{\\\"duration\\\":5,\\\"visual\\\":\\\"\\\",\\\"audio\\\":\\\"\\\"}],\\\"title\\\":\\\"\\\",\\\"cta\\\":\\\"\\\"}"),
     ("social.fetch_hotspots", "1.0.0", "deepseek", "列出当前最热门的5个话题。输出JSON: {\\\"topics\\\":[{\\\"title\\\":\\\"\\\",\\\"category\\\":\\\"\\\",\\\"score\\\":85,\\\"angle\\\":\\\"\\\"}]}"),
     ("social.gen_daily_brief", "1.0.0", "deepseek", "根据话题生成每日内容简报。话题：$topic\\n角度：$angle\\n输出JSON: {\\\"wechat_draft\\\":\\\"公众号草稿\\\",\\\"toutiao_draft\\\":\\\"头条草稿\\\",\\\"xhs_draft\\\":\\\"小红书草稿\\\"}"),
+    # M4: overseas
+    ("overseas.segment_translate", "1.0.0", "deepseek", "翻译以下内容为$target_lang。\\n$text\\n输出JSON: {\\\"translated\\\":\\\"翻译后文本\\\"}"),
+    ("overseas.cultural_localize", "1.0.0", "deepseek", "文化本地化以下$target_lang文本，适配目标读者。\\n$text\\n输出JSON: {\\\"localized\\\":\\\"本地化后文本\\\",\\\"notes\\\":[\\\"修改说明\\\"]}"),
 ]
 
 
