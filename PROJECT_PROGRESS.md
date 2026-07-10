@@ -1,29 +1,29 @@
 # NovelCraft Personal Studio — 项目进度
 
-> 更新：2026-07-10 · 13 tests pass · Frontend build OK
+> 更新：2026-07-10 · 13 tests pass · Ubuntu 已部署
 
 ## 诚实进度
 
-| 阶段 | 完成度 | 本轮新增 |
+| 阶段 | 本轮新增 | 完成度 |
 |---|---|---|
-| M1 地基+MVP | ~90% | CI/CD + Docker health + 13 tests |
-| M2 小说引擎 | ~68% | assembler隔离修复 + 2 tests |
-| M3 内容工作室 | ~40% | fan-out AI gen |
-| M4 发布出海 | ~30% | 15 platform adapters + 32敏感词 |
-| M5 协作多端 | ~25% | team UI(邀请/日志) + PWA |
+| M1 | RichEditor + CI/CD + Docker health | ~92% |
+| M2 | assembler修复 + 2 tests | ~68% |
+| M3 | fan-out AI + 知识库导入导出 + metrics | ~45% |
+| M4 | 15 adapters + 32敏感词 | ~30% |
+| M5 | RichEditor + PWA + IndexedDB + team UI | ~30% |
 
 ```
-M1 ███████████████████████████ 90%
+M1 ████████████████████████████ 92%
 M2 █████████████████████░░░░░ 68%
-M3 ████████████░░░░░░░░░░░░░ 40%
+M3 █████████████░░░░░░░░░░░░ 45%
 M4 █████████░░░░░░░░░░░░░░░░ 30%
-M5 ████████░░░░░░░░░░░░░░░░░ 25%
+M5 █████████░░░░░░░░░░░░░░░░ 30%
 ───────────────────────────────
-总体 █████████████████░░░░░░░ ~58%
+总体 ██████████████████░░░░░ ~60%
 ```
 
-## 已验证(13/13 tests)
-- ✅ Auth全流程+403+429 | 项目CRUD+隔离 | PG池+Alembic
-- ✅ 13组件+11Tab+Login+ErrorBoundary+⌘K
-- ✅ PWA注册+移动端CSS | CI/CD workflow | 日志+限流
-- ✅ Assembler novel隔离 | Docker health checks
+## Ubuntu 部署 ✅
+- API: `http://192.168.5.56:8000` (healthz=ok)
+- 前端: `http://192.168.5.56:5173`
+- PostgreSQL 16 + Redis 7 + Celery
+- 缺 DeepSeek API Key
