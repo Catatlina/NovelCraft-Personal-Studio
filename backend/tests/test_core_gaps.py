@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.core.rate_limit import limiter
 from app.main import app
-from app.db import connect, new_id
+from app.db import connect, encode, new_id
 from app.services.knowledge_hub import (
     EMBEDDING_DIMENSION,
     _chunk_text,
@@ -15,6 +17,11 @@ from app.services.knowledge_hub import (
     search,
 )
 from app.services.text_metrics import count_content_chars
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    limiter.reset()
 
 
 def test_content_character_count_ignores_whitespace():
@@ -142,3 +149,100 @@ def test_chapter_generation_releases_lock_on_failure(monkeypatch):
     else:
         raise AssertionError("generation failure was not propagated")
     assert released == ["lock:novel:novel-id:gen_chapter"]
+
+
+def test_offline_content_sync_is_idempotent_and_preserves_conflicts():
+    with TestClient(app) as client:
+        email = f"offline-sync-{uuid.uuid4().hex}@nc.dev"
+        registered = client.post("/api/v1/auth/register", json={"email": email, "password": "test1234"})
+        headers = {"Authorization": f"Bearer {registered.json()['data']['access_token']}"}
+        project_id = client.get("/api/v1/projects", headers=headers).json()["data"][0]["id"]
+        novel = client.post(
+            f"/api/v1/projects/{project_id}/novels",
+            headers=headers,
+            json={"idea": "离线冲突测试小说", "target_words": 100000},
+        ).json()["data"]
+        original_updated_at = novel["updated_at"]
+        first_mutation = f"mutation-{uuid.uuid4()}"
+        first_body = {"type": "doc", "content": [{"type": "paragraph", "text": "联网版本"}]}
+        applied = client.put(
+            f"/api/v1/contents/{novel['id']}",
+            headers=headers,
+            json={
+                "body": first_body,
+                "base_updated_at": original_updated_at,
+                "client_mutation_id": first_mutation,
+            },
+        ).json()["data"]
+        assert applied["sync_status"] == "applied"
+
+        replayed = client.put(
+            f"/api/v1/contents/{novel['id']}",
+            headers=headers,
+            json={
+                "body": first_body,
+                "base_updated_at": original_updated_at,
+                "client_mutation_id": first_mutation,
+            },
+        ).json()["data"]
+        assert replayed["mutation_replayed"] is True
+
+        conflict = client.put(
+            f"/api/v1/contents/{novel['id']}",
+            headers=headers,
+            json={
+                "body": {"type": "doc", "content": [{"type": "paragraph", "text": "离线版本"}]},
+                "base_updated_at": original_updated_at,
+                "client_mutation_id": f"mutation-{uuid.uuid4()}",
+            },
+        ).json()["data"]
+        assert conflict["sync_status"] == "conflict"
+        assert conflict["conflict_version_id"]
+        assert conflict["body"] == first_body
+        resolved = client.put(
+            f"/api/v1/contents/{novel['id']}",
+            headers=headers,
+            json={
+                "body": {"type": "doc", "content": [{"type": "paragraph", "text": "合并版本"}]},
+                "base_updated_at": conflict["updated_at"],
+                "client_mutation_id": f"mutation-{uuid.uuid4()}",
+            },
+        ).json()["data"]
+        assert resolved["sync_status"] == "applied"
+        db = connect()
+        conflict_version = db.execute(
+            "SELECT reason FROM versions WHERE id = %s",
+            (conflict["conflict_version_id"],),
+        ).fetchone()
+        db.close()
+        assert conflict_version["reason"] == "offline_conflict_resolved"
+
+
+def test_offline_ai_mutation_replay_returns_cached_result():
+    from app.gateway import complete
+
+    mutation_id = f"ai-mutation-{uuid.uuid4()}"
+    expected = {"text": "已经生成且不会重复计费"}
+    db = connect()
+    project = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
+    db.execute(
+        """
+        INSERT INTO ai_calls (
+            id, provider, model, prompt_name, task_type, input, output,
+            status, client_mutation_id, project_id
+        ) VALUES (%s, 'test', 'test', 'editor.polish', 'editor_polish', %s, %s, 'succeeded', %s, %s)
+        """,
+        (new_id(), encode({}), encode(expected), mutation_id, project["id"]),
+    )
+    db.commit()
+    db.close()
+    result = complete(
+        run_id=None,
+        node_key=None,
+        project_id=str(project["id"]),
+        task_type="editor_polish",
+        prompt_name="editor.polish",
+        variables={"selection": "原文"},
+        client_mutation_id=mutation_id,
+    )
+    assert result == expected

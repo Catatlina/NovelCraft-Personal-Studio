@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "./components/Layout";
 import { Wizard } from "./components/Wizard";
 import { Progress } from "./components/Progress";
@@ -11,18 +11,18 @@ import { Settings } from "./components/Settings";
 import { Studio } from "./components/Studio";
 import { PublishDashboard } from "./components/PublishDashboard";
 import { LoginPage } from "./components/LoginPage";
-import { api as baseApi } from "./lib/api";
-import { cacheGet, cacheSet } from "./lib/offlineCache";
+import { ApiError, api as baseApi } from "./lib/api";
+import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
-type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string };
+type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
 type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string }> };
 type RunNode = { node_key: string; kind: string; agent: string | null; title: string; status: string; output: Record<string, unknown> };
 type Run = { id: string; project_id: string; novel_id: string; status: string; current_node_key: string | null; context: Record<string, unknown>; nodes: RunNode[] };
 type AiCall = { id: string; provider: string; model: string; prompt_name: string; task_type: string; prompt_tokens: number; completion_tokens: number; cost_cny: number; latency_ms: number; status: string; created_at: string };
 type Knowledge = { id: string; kind: string; title: string; body: string; meta: Record<string, unknown> };
-type Version = { id: string; label: string; snapshot: Record<string, unknown>; created_at: string };
+type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
 type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
@@ -65,6 +65,11 @@ export default function App() {
   const [selection, setSelection] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [offlineNotice, setOfflineNotice] = useState("");
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
+  const replayingOffline = useRef(false);
+  const editorTextRef = useRef(editorText);
 
   useEffect(() => {
     if (!token) return;
@@ -72,6 +77,7 @@ export default function App() {
     cacheGet<{ id: string; name: string }[]>("projects").then(cached => {
       if (cached?.length) setProject(cached[0]);
     });
+    cacheGet<Content>("currentNovel").then(cached => { if (cached) setNovel(cached); });
     // Then fetch from API
     api<{ id: string; name: string }[]>("/api/v1/projects").then(p => {
       setProject(p[0] ?? null);
@@ -87,12 +93,27 @@ export default function App() {
 
   useEffect(() => {
     if (!novel || !project) return;
+    const contentsKey = `contents:${novel.id}`;
+    const knowledgeKey = `knowledge:${novel.id}`;
+    cacheGet<Content[]>(contentsKey).then(items => {
+      const cachedChapter = items?.find(item => item.type === "chapter") ?? null;
+      if (cachedChapter) {
+        setChapter(cachedChapter); setEditorText(docToText(cachedChapter.body)); void loadVersions(cachedChapter.id);
+        cacheGet<Content>(`offline-content:${cachedChapter.id}`).then(offline => {
+          if (offline) { setChapter(offline); setEditorText(docToText(offline.body)); }
+        });
+      }
+    });
+    cacheGet<Knowledge[]>(knowledgeKey).then(cached => { if (cached) setKnowledge(cached); });
     api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`).then(items => {
+      void cacheSet(contentsKey, items);
       const ch = items.find(i => i.type === "chapter") ?? null;
       setChapter(ch);
       if (ch) { setEditorText(docToText(ch.body)); loadVersions(ch.id); }
-    });
-    api<Knowledge[]>(`/api/v1/knowledge?project_id=${project.id}&content_id=${novel.id}`).then(setKnowledge);
+    }).catch(() => undefined);
+    api<Knowledge[]>(`/api/v1/knowledge?project_id=${project.id}&content_id=${novel.id}`).then(items => {
+      setKnowledge(items); void cacheSet(knowledgeKey, items);
+    }).catch(() => undefined);
   }, [novel?.id, run?.status]);
 
   useEffect(() => { if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls); }, [run?.id, run?.status]);
@@ -102,11 +123,22 @@ export default function App() {
     api<ModelRoute[]>("/api/v1/model-routes").then(setRoutes);
   }, [project?.id, run?.status]);
 
+  useEffect(() => {
+    if (!token) return;
+    const replay = () => { void replayOfflineMutations(); };
+    window.addEventListener("online", replay);
+    void replayOfflineMutations();
+    return () => window.removeEventListener("online", replay);
+  }, [token, chapter?.id]);
+
+  useEffect(() => { editorTextRef.current = editorText; }, [editorText]);
+
   async function refreshRun(runId: string) {
     const r = await api<Run>(`/api/v1/runs/${runId}`);
     setRun(r);
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
+    void cacheSet("currentNovel", n);
     if (r.status === "succeeded") setTab("review");
   }
 
@@ -116,6 +148,7 @@ export default function App() {
     try {
       const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, style, target_words: targetWords }) });
       setNovel(c);
+      void cacheSet("currentNovel", c);
       const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: "{}" });
       setTab("progress");
       await refreshRun(s.run_id);
@@ -130,20 +163,165 @@ export default function App() {
 
   async function saveChapter() {
     if (!chapter) return;
-    const u = await api<Content>(`/api/v1/contents/${chapter.id}`, { method: "PUT", body: JSON.stringify({ body: textToDoc(editorText), reason: "manual_save" }) });
-    setChapter(u); loadVersions(u.id);
+    const mutationId = crypto.randomUUID();
+    const body = {
+      body: textToDoc(editorText), label: "offline_save",
+      base_updated_at: chapter.updated_at, client_mutation_id: mutationId,
+    };
+    if (!navigator.onLine) {
+      await queueOfflineMutation(mutationId, "content_update", `/api/v1/contents/${chapter.id}`, "PUT", body);
+      const optimistic = { ...chapter, body: body.body };
+      setChapter(optimistic);
+      await cacheSet(`offline-content:${chapter.id}`, optimistic);
+      setOfflineNotice("内容已离线保存，联网后自动同步");
+      return;
+    }
+    try {
+      const updated = await api<Content>(`/api/v1/contents/${chapter.id}`, { method: "PUT", body: JSON.stringify(body) });
+      if (updated.sync_status === "conflict") {
+        setChapter(updated);
+        await cacheDelete(`offline-content:${chapter.id}`);
+        setOfflineNotice("检测到版本冲突，离线稿已保存到版本树");
+        await loadVersions(chapter.id);
+        return;
+      }
+      setChapter(updated); await cacheDelete(`offline-content:${chapter.id}`); loadVersions(updated.id);
+    } catch (caught) {
+      if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
+      await queueOfflineMutation(mutationId, "content_update", `/api/v1/contents/${chapter.id}`, "PUT", body);
+      const optimistic = { ...chapter, body: body.body };
+      setChapter(optimistic);
+      await cacheSet(`offline-content:${chapter.id}`, optimistic);
+      setOfflineNotice("网络不可用，内容已进入同步队列");
+    }
   }
 
   async function runEditorOp(op: string) {
     if (!chapter || !selection.trim()) return;
-    const o = await api<{ text: string }>(`/api/v1/contents/${chapter.id}/ai/${op}`, { method: "POST", body: JSON.stringify({ selection, instruction: "保持当前风格" }) });
-    setEditorText(c => c.replace(selection, o.text)); setSelection("");
-    if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
+    const selectedText = selection;
+    const mutationId = crypto.randomUUID();
+    const url = `/api/v1/contents/${chapter.id}/ai/${op}`;
+    const body = { selection: selectedText, instruction: "保持当前风格", client_mutation_id: mutationId };
+    if (!navigator.onLine) {
+      await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
+      setOfflineNotice("AI 操作已排队，联网后自动执行");
+      return;
+    }
+    try {
+      const output = await api<{ text: string }>(url, { method: "POST", body: JSON.stringify(body) });
+      setEditorText(current => current.replace(selectedText, output.text)); setSelection("");
+      if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
+    } catch (caught) {
+      if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
+      await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
+      setOfflineNotice("网络不可用，AI 操作已进入出站队列");
+    }
+  }
+
+  async function queueOfflineMutation(
+    id: string,
+    kind: "content_update" | "ai_operation",
+    url: string,
+    method: "POST" | "PUT",
+    body: Record<string, unknown>,
+  ) {
+    await enqueueMutation({ id, kind, url, method, body });
+    setOfflineQueueCount((await listMutations()).length);
+  }
+
+  async function replayOfflineMutations() {
+    if (!navigator.onLine || replayingOffline.current) return;
+    replayingOffline.current = true;
+    try {
+      const mutations = await listMutations("pending");
+      setOfflineQueueCount((await listMutations()).length);
+      for (const mutation of mutations) {
+        try {
+          const response = await baseApi<ApiResponse<any>>(mutation.url, {
+            method: mutation.method,
+            body: JSON.stringify(mutation.body),
+          });
+          if (mutation.kind === "content_update" && response.data?.sync_status === "conflict") {
+            await deleteMutation(mutation.id);
+            setChapter(response.data as Content);
+            const conflictContentId = mutation.url.split("/").at(-1);
+            if (conflictContentId) await cacheDelete(`offline-content:${conflictContentId}`);
+            setOfflineNotice("检测到离线版本冲突，草稿已保存在版本树");
+            if (chapter?.id && mutation.url.includes(chapter.id)) await loadVersions(chapter.id);
+          } else if (mutation.kind === "ai_operation") {
+            const selectedText = String(mutation.body.selection || "");
+            if (chapter?.id && mutation.url.includes(chapter.id) && editorTextRef.current.includes(selectedText)) {
+              setEditorText(current => current.replace(selectedText, response.data.text || ""));
+              await deleteMutation(mutation.id);
+              setOfflineNotice("离线 AI 操作已执行并应用");
+            } else {
+              await updateMutation(mutation.id, { status: "completed", result: response.data });
+              setOfflineNotice("离线 AI 操作已完成，结果保留在队列中");
+            }
+          } else {
+            await deleteMutation(mutation.id);
+            const syncedContentId = mutation.url.split("/").at(-1);
+            if (syncedContentId) await cacheDelete(`offline-content:${syncedContentId}`);
+            if (chapter?.id && mutation.url.includes(chapter.id)) {
+              const updated = response.data as Content;
+              setChapter(updated);
+              setEditorText(docToText(updated.body));
+              await loadVersions(chapter.id);
+            }
+            setOfflineNotice("离线内容已同步");
+          }
+        } catch (caught) {
+          const attempts = mutation.attempts + 1;
+          const permanentFailure = caught instanceof ApiError && caught.status < 500;
+          if (permanentFailure) {
+            await deleteMutation(mutation.id);
+            setOfflineNotice("离线队列中有请求被服务器拒绝，请重新执行该操作");
+            break;
+          }
+          await updateMutation(mutation.id, {
+            attempts,
+            error: caught instanceof Error ? caught.message : String(caught),
+          });
+          if (caught instanceof ApiError && isOfflineApiError(caught)) break;
+          if (!navigator.onLine) break;
+        }
+      }
+      const allMutations = await listMutations();
+      setOfflineQueueCount(allMutations.length);
+      setOfflineAiResults(allMutations.filter(item => item.kind === "ai_operation" && item.status === "completed").map(item => ({
+        id: item.id,
+        text: String((item.result as { text?: string } | undefined)?.text || ""),
+      })));
+    } finally {
+      replayingOffline.current = false;
+    }
+  }
+
+  function isOfflineApiError(error: ApiError): boolean {
+    const payload = error.payload as { code?: string } | null;
+    return error.status === 503 && payload?.code === "OFFLINE";
+  }
+
+  async function applyOfflineAiResult(id: string, text: string) {
+    if (!text) return;
+    setEditorText(current => `${current}\n\n${text}`.trim());
+    await deleteMutation(id);
+    const allMutations = await listMutations();
+    setOfflineQueueCount(allMutations.length);
+    setOfflineAiResults(results => results.filter(result => result.id !== id));
+    setOfflineNotice("离线 AI 结果已追加到编辑器，请确认后保存");
   }
 
   async function loadVersions(contentId: string) {
-    const rows = await api<Version[]>(`/api/v1/contents/${contentId}/versions`);
-    setVersions(rows);
+    const key = `versions:${contentId}`;
+    try {
+      const rows = await api<Version[]>(`/api/v1/contents/${contentId}/versions`);
+      setVersions(rows);
+      await cacheSet(key, rows);
+    } catch {
+      const cached = await cacheGet<Version[]>(key);
+      if (cached) setVersions(cached);
+    }
   }
 
   async function restoreVersion(versionId: string) {
@@ -196,7 +374,7 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
       {tab === "review" && <Review chapter={novel} characters={characters} timeline={[]} arcs={[]} />}
-      {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion }} />}
+      {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
         <div className="panel"><h2>Prompt 库</h2>

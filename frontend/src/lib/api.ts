@@ -8,6 +8,16 @@ const IS_DEV = typeof import.meta !== "undefined" && !!(import.meta as any).env?
 const API_BASE = IS_DEV ? "/api" : `${window.location.protocol}//${window.location.hostname}:8000/api`;
 let refreshInFlight: Promise<boolean> | null = null;
 
+export class ApiError extends Error {
+  status: number;
+  payload: unknown;
+  constructor(status: number, payload: unknown) {
+    super(`API request failed with status ${status}`);
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 export function getApiKey(): string { return sessionStorage.getItem(K_API_KEY) || ""; }
 export function setApiKey(key: string) { sessionStorage.setItem(K_API_KEY, key); }
 export function getApiUrl(): string { return sessionStorage.getItem(K_API_URL) || ""; }
@@ -66,5 +76,7 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
     headers["Authorization"] = `Bearer ${sessionStorage.getItem("nc_token") || ""}`;
     r = await fetch(fullUrl, { ...init, headers, credentials: "include" });
   }
-  return r.json();
+  const payload = await r.json();
+  if (!r.ok) throw new ApiError(r.status, payload);
+  return payload;
 }

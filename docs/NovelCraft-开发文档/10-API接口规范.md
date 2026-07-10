@@ -431,9 +431,11 @@ Query：`project_id [必填]`、`type?`（如 `chapter`）、`parent_id?`、`sta
 #### 4.3.5 更新内容（自动版本快照）
 `PUT /api/v1/contents/{content_id}`　权限：editor
 
-Body：`title?`、`body?`（Tiptap JSON）、`meta?`、`status?`
+Body：`title?`、`body?`（Tiptap JSON）、`meta?`、`label?`、`base_updated_at?`、`client_mutation_id?`
 
-响应：更新后内容 + `version_no`（由 VersionedRepository 自动快照）。错误：`META_SCHEMA_INVALID`(400)、`VERSION_CONFLICT`(409，离线乐观锁 base_version_id 不符)。
+在线保存不传同步字段；离线重放必须传服务端最后一次 `updated_at` 作为 `base_updated_at`，并传 UUID 型 `client_mutation_id`。命中相同 mutation 时直接返回第一次结果。
+
+响应：更新后内容；离线同步额外返回 `sync_status=applied|conflict`。发生冲突时不静默覆盖服务器正文，而是将本地稿写入 `versions` 分支并返回 `conflict_version_id`，供三方对比 UI 处理。
 
 #### 4.3.6 删除内容
 `DELETE /api/v1/contents/{content_id}`　权限：editor
@@ -445,7 +447,7 @@ Body：`title?`、`body?`（Tiptap JSON）、`meta?`、`status?`
 
 `op ∈ {polish(润色), rewrite(改写), continue(续写), expand(扩写), compress(缩写), humanize(去AI味)}`
 
-Body：`selection: object [选填]`（`{from,to}` 选区；缺省作用于全文）、`instruction: string [选填]`、`Idempotency-Key: header [建议]`
+Body：`selection: string`、`instruction: string [选填]`、`client_mutation_id: string [离线重放必填]`。相同 mutation 已成功时直接返回 `ai_calls.output`，不会再次调用模型或扣费。
 
 响应：
 ```json

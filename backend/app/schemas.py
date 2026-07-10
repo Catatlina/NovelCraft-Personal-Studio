@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -27,11 +28,14 @@ class ContentUpdate(BaseModel):
     body: dict[str, Any] | None = None
     meta: dict[str, Any] | None = None
     label: str = Field(default="manual_save", max_length=80)
+    base_updated_at: datetime | None = None
+    client_mutation_id: str | None = Field(default=None, min_length=8, max_length=100)
 
 
 class AiEditRequest(BaseModel):
     selection: str = Field(min_length=1, max_length=8000)
     instruction: str = Field(default="", max_length=1000)
+    client_mutation_id: str | None = Field(default=None, min_length=8, max_length=100)
 
 
 class VersionRestore(BaseModel):

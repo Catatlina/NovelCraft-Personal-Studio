@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -9,14 +10,14 @@ from typing import Any
 
 from .config import settings
 from .core.circuit_breaker import circuit_breaker, record_failure, record_success
+from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
+from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
 
 # Context variable for per-request API key (set by middleware from X-Api-Key header)
 _request_api_key: ContextVar[str | None] = ContextVar("request_api_key", default=None)
 _request_api_base_url: ContextVar[str | None] = ContextVar("request_api_base_url", default=None)
 _request_model: ContextVar[str | None] = ContextVar("request_model", default=None)
-from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
-from .core.alerts import alert_budget, alert_provider_error
 
 
 MODEL = "mock-deepseek-chat"
@@ -39,7 +40,17 @@ def complete(
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
+    client_mutation_id: str | None = None,
 ) -> dict[str, Any]:
+    if client_mutation_id:
+        existing_db = connect()
+        existing = existing_db.execute(
+            "SELECT output FROM ai_calls WHERE project_id = %s AND client_mutation_id = %s AND status = 'succeeded'",
+            (project_id, client_mutation_id),
+        ).fetchone()
+        existing_db.close()
+        if existing:
+            return decode(existing["output"], {})
     start = time.perf_counter()
     prompt_text, provider, model, params = _load_prompt_and_route(prompt_name, task_type, variables)
     estimated_cost = _estimate_cost(variables, {"prompt": prompt_text})
@@ -54,7 +65,7 @@ def complete(
         output = _mock_output(task_type, variables)
         provider_name = "mock"
         model_name = "mock"
-    elif provider == "deepseek" or settings.ai_provider == "deepseek" or True:
+    elif provider == "deepseek":
         if not circuit_breaker("deepseek"):
             raise ProviderError("deepseek circuit breaker open — too many failures")
         try:
@@ -106,8 +117,9 @@ def complete(
         """
         INSERT INTO ai_calls (
             id, run_id, node_key, provider, model, prompt_name, task_type,
-            input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status
-        ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s)
+            input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
+            client_mutation_id, project_id
+        ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s)
         """,
         (
             new_id("call"),
@@ -124,6 +136,8 @@ def complete(
             cost_cny,
             latency_ms,
             "succeeded",
+            client_mutation_id,
+            project_id,
         ),
     )
     conn.execute(

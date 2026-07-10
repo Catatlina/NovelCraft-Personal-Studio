@@ -268,11 +268,63 @@ def get_content(content_id: str, user: dict = Depends(get_current_user)) -> ApiR
 @app.put("/api/v1/contents/{content_id}")
 def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, row = load_content_for_user(content_id, user, {"owner", "editor"})
+    row = conn.execute("SELECT * FROM contents WHERE id = %s FOR UPDATE", (content_id,)).fetchone()
     snapshot = {"title": row["title"], "body": decode(row["body"], {}), "meta": decode(row["meta"], {})}
+    if payload.client_mutation_id:
+        existing = conn.execute(
+            "SELECT id, reason FROM versions WHERE client_mutation_id = %s",
+            (payload.client_mutation_id,),
+        ).fetchone()
+        if existing:
+            current = parse_content(dict(row))
+            current["sync_status"] = "conflict" if existing["reason"] == "offline_conflict" else "applied"
+            current["mutation_replayed"] = True
+            current["conflict_version_id"] = existing["id"] if existing["reason"] == "offline_conflict" else None
+            conn.close()
+            return ok(current)
+
+    latest = conn.execute(
+        "SELECT id, reason FROM versions WHERE entity_type = 'content' AND entity_id = %s ORDER BY created_at DESC LIMIT 1",
+        (content_id,),
+    ).fetchone()
+    parent_version_id = latest["id"] if latest else None
+    if payload.base_updated_at and payload.base_updated_at != row["updated_at"]:
+        conflict_version_id = new_id("ver")
+        incoming = {
+            "title": payload.title if payload.title is not None else snapshot["title"],
+            "body": payload.body if payload.body is not None else snapshot["body"],
+            "meta": payload.meta if payload.meta is not None else snapshot["meta"],
+        }
+        conn.execute(
+            """
+            INSERT INTO versions (
+                id, entity_type, entity_id, parent_version_id, label, snapshot,
+                reason, author_id, client_mutation_id
+            ) VALUES (%s, 'content', %s, %s, 'offline_conflict', %s, 'offline_conflict', %s, %s)
+            """,
+            (conflict_version_id, content_id, parent_version_id, encode(incoming), user["id"], payload.client_mutation_id),
+        )
+        conn.commit()
+        current = parse_content(dict(row))
+        current["sync_status"] = "conflict"
+        current["conflict_version_id"] = conflict_version_id
+        conn.close()
+        return ok(current)
+
     conn.execute(
-        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s ,%s, %s)",
-        (new_id("ver"), content_id, payload.label, encode(snapshot)),
+        """
+        INSERT INTO versions (
+            id, entity_type, entity_id, parent_version_id, label, snapshot,
+            reason, author_id, client_mutation_id
+        ) VALUES (%s, 'content', %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            new_id("ver"), content_id, parent_version_id, payload.label, encode(snapshot),
+            "offline_sync" if payload.client_mutation_id else "manual", user["id"], payload.client_mutation_id,
+        ),
     )
+    if latest and latest.get("reason") == "offline_conflict":
+        conn.execute("UPDATE versions SET reason = 'offline_conflict_resolved' WHERE id = %s", (latest["id"],))
     title = payload.title if payload.title is not None else row["title"]
     body = payload.body if payload.body is not None else snapshot["body"]
     meta = payload.meta if payload.meta is not None else snapshot["meta"]
@@ -282,6 +334,8 @@ def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends
     )
     conn.commit()
     updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone()))
+    if payload.client_mutation_id:
+        updated["sync_status"] = "applied"
     conn.close()
     return ok(updated)
 
@@ -626,6 +680,7 @@ def ai_edit(
         task_type=f"editor_{op}",
         prompt_name=f"editor.{op}",
         variables={"selection": payload.selection, "instruction": payload.instruction},
+        client_mutation_id=payload.client_mutation_id,
     )
     return ok(output)
 

@@ -1,16 +1,30 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
-type Version = { id: string; label: string; snapshot: Record<string, unknown>; created_at: string };
+type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 
-export function Editor({ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion }: {
+export function Editor({ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult }: {
   chapter: Content | null; editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
   saveChapter: () => void; runEditorOp: (op: string) => void;
   versions: Version[]; restoreVersion: (id: string) => void;
+  offlineNotice?: string; offlineQueueCount?: number;
+  offlineAiResults?: Array<{ id: string; text: string }>;
+  applyOfflineAiResult?: (id: string, text: string) => void;
 }) {
+  const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
+  const docText = (body: any) => body?.content?.map((item: any) => item?.text || "").join("\n\n") || "";
+  const localConflictText = useMemo(() => docText((conflict?.snapshot as any)?.body), [conflict?.id]);
+  const serverText = useMemo(() => docText(chapter?.body), [chapter?.id, (chapter as any)?.updated_at]);
+  const [mergeText, setMergeText] = useState("");
+  const [conflictDismissed, setConflictDismissed] = useState(false);
+  useEffect(() => {
+    setMergeText(localConflictText || editorText);
+    setConflictDismissed(false);
+  }, [conflict?.id]);
+
   return (
     <div className="editor-grid">
       <div className="panel">
@@ -18,6 +32,26 @@ export function Editor({ chapter, editorText, setEditorText, selection, setSelec
           <input value={chapter?.title ?? ""} readOnly style={{ flex: 1, background: "transparent", border: "none", fontSize: 18, fontWeight: 600 }} />
           <button onClick={saveChapter} disabled={!chapter}><Save size={16} />保存</button>
         </div>
+        {(offlineNotice || offlineQueueCount) ? (
+          <div className="pill pending" style={{ marginBottom: 8 }}>
+            {offlineNotice || `离线队列 ${offlineQueueCount} 项`}
+          </div>
+        ) : null}
+        {conflict && !conflictDismissed ? (
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <h2>离线版本冲突</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <label>本地稿<textarea value={localConflictText} readOnly rows={8} /></label>
+              <label>服务器稿<textarea value={serverText} readOnly rows={8} /></label>
+              <label>合并稿<textarea value={mergeText} onChange={event => setMergeText(event.target.value)} rows={8} /></label>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={() => { setEditorText(localConflictText); setConflictDismissed(true); }}>采用本地稿</button>
+              <button onClick={() => { setEditorText(serverText); setConflictDismissed(true); }}>采用服务器稿</button>
+              <button className="primary" onClick={() => { setEditorText(mergeText); setConflictDismissed(true); }}>采用合并稿</button>
+            </div>
+          </div>
+        ) : null}
         <RichEditor value={editorText} onChange={setEditorText} onSelection={setSelection} onAiOp={op => runEditorOp(op)} />
       </div>
       <div className="panel versions">
@@ -26,6 +60,13 @@ export function Editor({ chapter, editorText, setEditorText, selection, setSelec
           <button key={v.id} onClick={() => restoreVersion(v.id)}>
             <RotateCcw size={14} />{v.label}
             <small>{new Date(v.created_at).toLocaleString()}</small>
+          </button>
+        ))}
+        {offlineAiResults?.length ? <h2>离线 AI 结果</h2> : null}
+        {offlineAiResults?.map(result => (
+          <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)}>
+            应用 AI 结果
+            <small>{result.text.slice(0, 36)}…</small>
           </button>
         ))}
       </div>
