@@ -1,7 +1,7 @@
 """Auth endpoints: register, login, refresh, logout."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from app.core.security import (
@@ -99,7 +99,7 @@ def refresh_token(payload: RefreshRequest):
 
 
 @router.get("/me")
-def me(user: dict = get_current_user):
+def me(user: dict = Depends(get_current_user)):
     return {"code": 0, "message": "ok", "data": {
         "id": user["id"], "email": user["email"], "display_name": user["display_name"],
     }}
