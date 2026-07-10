@@ -1,5 +1,6 @@
 import React from "react";
 import { Bot, Wand2, Sparkles, Save, RotateCcw } from "lucide-react";
+import { RichEditor } from "./RichEditor";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; snapshot: Record<string, unknown>; created_at: string };
@@ -18,14 +19,7 @@ export function Editor({ chapter, editorText, setEditorText, selection, setSelec
           <input value={chapter?.title ?? ""} readOnly style={{ flex: 1, background: "transparent", border: "none", fontSize: 18, fontWeight: 600 }} />
           <button onClick={saveChapter} disabled={!chapter}><Save size={16} />保存</button>
         </div>
-        <textarea
-          value={editorText}
-          onChange={e => setEditorText(e.target.value)}
-          onSelect={e => {
-            const t = e.currentTarget;
-            setSelection(t.value.slice(t.selectionStart, t.selectionEnd));
-          }}
-        />
+        <RichEditor value={editorText} onChange={setEditorText} />
         <div className="ai-bar">
           <button onClick={() => runEditorOp("polish")} disabled={!selection}><Wand2 size={15} />润色</button>
           <button onClick={() => runEditorOp("rewrite")} disabled={!selection}><Bot size={15} />改写</button>

@@ -13,7 +13,7 @@ export function Settings() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [settings, setAppSettings] = useState<AppSetting[]>([]);
-  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings">("appsettings");
+  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"data">("appsettings");
   const [editRoute, setEditRoute] = useState<ModelRoute|null>(null);
   const [editBudget, setEditBudget] = useState<{pid:string;scope:string;limit:number}|null>(null);
   const [editSetting, setEditSetting] = useState<{key:string;value:string;description:string}|null>(null);
@@ -63,6 +63,7 @@ export function Settings() {
         <button className={subtab==="routes"?"active":""} onClick={()=>setSubtab("routes")} style={{justifyContent:"flex-start"}}><Cpu size={16}/> 模型路由</button>
         <button className={subtab==="budgets"?"active":""} onClick={()=>setSubtab("budgets")} style={{justifyContent:"flex-start"}}><DollarSign size={16}/> 预算</button>
         <button className={subtab==="prompts"?"active":""} onClick={()=>setSubtab("prompts")} style={{justifyContent:"flex-start"}}><Code2 size={16}/> Prompts</button>
+        <button className={subtab==="data"?"active":""} onClick={()=>setSubtab("data")} style={{justifyContent:"flex-start"}}><Save size={16}/> 数据</button>
       </div>
 
       <div className="panel" style={{overflow:"auto"}}>
@@ -145,6 +146,37 @@ export function Settings() {
         {subtab==="prompts" && (
           <table><thead><tr><th>名称</th><th>版本</th><th>模型</th><th>模板(前80字)</th></tr></thead>
           <tbody>{prompts.slice(0,30).map(p=><tr key={p.id}><td style={{fontSize:13}}>{p.name}</td><td>{p.version}</td><td>{p.model}</td><td style={{fontSize:12,color:"var(--text-muted)",maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.template?.slice(0,80)}</td></tr>)}</tbody></table>
+        )}
+
+        {subtab==="data" && (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div>
+              <h3>导入知识库</h3>
+              <input type="file" accept=".json,.csv" onChange={async e=>{
+                const f=e.target.files?.[0]; if(!f)return;
+                const text=await f.text();
+                await fetch("/api/v1/import/knowledge_hub",{method:"POST",headers:{"Content-Type":"application/json"},body:text});
+                alert("导入成功");
+              }} />
+            </div>
+            <div>
+              <h3>导出知识库</h3>
+              <button onClick={async()=>{
+                const r=await fetch("/api/v1/admin/knowledge_hub?format=json").then(r=>r.json());
+                const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
+                const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+                a.download="novelcraft_knowledge.json";a.click();
+              }}>导出 JSON</button>
+            </div>
+            <div>
+              <h3>数据统计</h3>
+              <table><tbody>
+                {[{label:"API调用次数",value:prompts.length*2||"—"},{label:"内容条数",value:"—"},{label:"存储空间",value:"—"}].map((m,i)=>
+                  <tr key={i}><td>{m.label}</td><td style={{fontWeight:600}}>{m.value}</td></tr>
+                )}
+              </tbody></table>
+            </div>
+          </div>
         )}
       </div>
     </div>
