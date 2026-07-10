@@ -219,6 +219,15 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
         # M2: auto-summarize chapter
         _summarize_and_store(db, cid, chapter.get("body", []))
 
+    if task_type == "review_7dim":
+        score = output.get("score", 0)
+        cid = context.get("chapter_id", "")
+        if score < 80 and cid:
+            db.execute(
+                "UPDATE contents SET meta = meta || %s, status = 'needs_rewrite', updated_at = now() WHERE id = %s",
+                (encode({"review_score": score, "review_issues": output.get("issues", [])}), cid),
+            )
+
     db.execute(
         "UPDATE run_nodes SET status = 'succeeded', output = %s, finished_at = now() WHERE run_id = %s AND node_key = %s",
         (encode(output), run_id, node_key),
@@ -299,6 +308,10 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
     # Extract entity states
     text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
     extract_and_store(cid, novel_id, text)
+
+    # Extract foreshadowing
+    from app.services.foreshadowing import extract_and_store_foreshadowing
+    extract_and_store_foreshadowing(cid, next_seq, text)
 
     # Summarize
     _summarize_and_store(db, cid, chapter.get("body", []))
