@@ -318,3 +318,60 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
 
     db.close()
     return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq}
+
+
+@celery_app.task
+def auto_serial_check() -> dict:
+    """M2 beat: check for novels with auto-serial enabled and generate next chapter."""
+    db = connect()
+    novels = db.execute(
+        "SELECT id, project_id FROM contents WHERE type='novel' AND meta->>'auto_serial' = 'true' AND is_deleted = FALSE"
+    ).fetchall()
+    db.close()
+    results = []
+    for novel in novels:
+        try:
+            gen_next_chapter_task.delay(novel["id"], novel["project_id"])
+            results.append({"novel_id": novel["id"], "status": "dispatched"})
+        except Exception as e:
+            results.append({"novel_id": novel["id"], "status": f"error: {e}"})
+    return {"checked": len(novels), "results": results}
+
+
+@celery_app.task
+def patrol_check() -> dict:
+    """M2 beat: consistency patrol — check foreshadowing, chapter gaps, quality."""
+    db = connect()
+    # Check for overdue foreshadowing (planted but past planned chapter)
+    overdue = db.execute(
+        """SELECT f.id, f.content, f.planned_resolve_chapter, c.title as chapter_title
+           FROM foreshadowings f JOIN contents c ON f.chapter_id = c.id
+           WHERE f.status = 'planted'"""
+    ).fetchall()
+
+    # Check for chapters needing rewrite
+    needs_rewrite = db.execute(
+        "SELECT id, title FROM contents WHERE status = 'needs_rewrite' AND is_deleted = FALSE"
+    ).fetchall()
+
+    # Check for orphan chapters (no parent novel)
+    orphans = db.execute(
+        "SELECT id, title FROM contents WHERE type='chapter' AND parent_id IS NULL AND is_deleted = FALSE"
+    ).fetchall()
+
+    db.close()
+
+    issues = []
+    if overdue:
+        issues.append(f"{len(overdue)} unfulfilled foreshadowings")
+    if needs_rewrite:
+        issues.append(f"{len(needs_rewrite)} chapters need rewrite")
+    if orphans:
+        issues.append(f"{len(orphans)} orphan chapters")
+
+    return {
+        "status": "ok" if not issues else "issues_found",
+        "issues": issues,
+        "foreshadowing_count": len(overdue),
+        "needs_rewrite_count": len(needs_rewrite),
+    }

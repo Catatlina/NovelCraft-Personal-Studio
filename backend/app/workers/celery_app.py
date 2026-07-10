@@ -20,4 +20,14 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
     imports=["app.workers.tasks"],
+    beat_schedule={
+        "auto-serial-check": {
+            "task": "app.workers.tasks.auto_serial_check",
+            "schedule": 3600.0,  # Every hour
+        },
+        "patrol-check": {
+            "task": "app.workers.tasks.patrol_check",
+            "schedule": 7200.0,  # Every 2 hours
+        },
+    },
 )
