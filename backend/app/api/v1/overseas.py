@@ -25,7 +25,7 @@ def translate_content(
     body_text = str(content.get("body", ""))[:5000]
     output = complete(
         run_id=None, node_key=None, project_id=content.get("project_id", ""),
-        task_type="translate", prompt_name="editor.rewrite",
+        task_type="editor_rewrite", prompt_name="editor.rewrite",
         variables={
             "selection": body_text,
             "instruction": f"Translate to {target_lang}. Preserve formatting and tone.",
