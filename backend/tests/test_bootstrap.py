@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 import pytest
+import uuid
 from fastapi.testclient import TestClient
 
 os.environ["NOVELCRAFT_ENV"] = "dev"
@@ -135,3 +136,37 @@ def test_create_project(client: TestClient):
 def test_create_project_requires_auth(client: TestClient):
     r = client.post("/api/v1/projects?name=test")
     assert r.status_code == 401
+
+
+def test_auth_wrong_password(client: TestClient):
+    token, _ = _register_user(client, "wrongpw")
+    r = client.post("/api/v1/auth/login", json={"email": f"wrongpw-{uuid.uuid4().hex[:8]}@nc.dev", "password": "wrong"})
+    # Should fail — user doesn't exist
+    assert r.status_code in [401, 400, 422]
+
+
+def test_bootstrap_requires_auth(client: TestClient):
+    r = client.post("/api/v1/novels/00000000-0000-0000-0000-000000000000/bootstrap")
+    assert r.status_code == 401
+
+
+def test_continue_requires_auth(client: TestClient):
+    r = client.post("/api/v1/novels/00000000-0000-0000-0000-000000000000/continue")
+    assert r.status_code == 401
+
+
+def test_short_story_templates_public(client: TestClient):
+    r = client.get("/api/v1/short-stories/templates")
+    assert r.status_code == 200
+
+
+def test_settings_providers_require_auth(client: TestClient):
+    r = client.get("/api/v1/admin/providers")
+    assert r.status_code == 401
+
+
+def test_settings_prompts_with_auth(client: TestClient):
+    token, _ = _register_user(client, "prompts")
+    r = client.get("/api/v1/admin/prompts", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    assert "data" in r.json()

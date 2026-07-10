@@ -31,7 +31,11 @@ PROMPT_SEEDS = [
     # M3: short story
     ("shortstory.gen_titles", "1.0.0", "deepseek", "为短篇创意生成3个标题。\n灵感：$idea\n题材：$genre\n模板：$template\n输出JSON: {\\\"titles\\\":[\\\"标题1\\\",\\\"标题2\\\",\\\"标题3\\\"]}"),
     ("shortstory.gen_story", "1.0.0", "deepseek", "按「$template」模板写短篇。\n标题：$title\n灵感：$idea\n风格：$style\n字数：$max_words字以内\n输出JSON: {\\\"story\\\":{\\\"title\\\":\\\"\\\",\\\"body\\\":[\\\"段落\\\"]}}"),
-    ("shortstory.review", "1.0.0", "deepseek", "审核短篇质量。\n输出JSON: {\\\"score\\\":80,\\\"hooks\\\":\\\"开头评价\\\",\\\"pacing\\\":\\\"节奏评价\\\",\\\"ending\\\":\\\"结尾评价\\\",\\\"issues\\\":[\\\"问题\\\"]}"),
+    ("shortstory.review", "1.0.0", "deepseek", "审核短篇质量。\n输出JSON: {\"score\":80,\"hooks\":\"开头评价\",\"pacing\":\"节奏评价\",\"ending\":\"结尾评价\",\"issues\":[\"问题\"]}"),
+    # M2: extended review dimensions
+    ("review.ooc", "1.0.0", "deepseek", "审查角色OOC。\n$body\n角色档案: $characters\n输出JSON: {\"ooc_count\":0,\"violations\":[{\"character\":\"名\",\"action\":\"行为\",\"expected\":\"应该怎样\"}]}"),
+    ("review.consistency", "1.0.0", "deepseek", "审查前后一致性。\n本章: $body\n前文摘要: $summary\n输出JSON: {\"contradictions\":[{\"type\":\"时间/地点/人物\",\"this_chapter\":\"本章\",\"previous\":\"前文\"}]}"),
+    ("review.rhythm", "1.0.0", "deepseek", "审查节奏。\n$body\n输出JSON: {\"pacing_score\":80,\"sections\":[{\"range\":\"段1-3\",\"label\":\"快/慢/适中\",\"advice\":\"建议\"}]}"),
     # M3: social media
     ("social.gen_video", "1.0.0", "deepseek", "生成$platform短视频脚本(≤$max_duration秒)。\n风格：$style\n内容：$body\n输出JSON: {\\\"hook_3s\\\":\\\"\\\",\\\"scenes\\\":[{\\\"duration\\\":5,\\\"visual\\\":\\\"\\\",\\\"audio\\\":\\\"\\\"}],\\\"title\\\":\\\"\\\",\\\"cta\\\":\\\"\\\"}"),
     ("social.fetch_hotspots", "1.0.0", "deepseek", "列出当前最热门的5个话题。输出JSON: {\\\"topics\\\":[{\\\"title\\\":\\\"\\\",\\\"category\\\":\\\"\\\",\\\"score\\\":85,\\\"angle\\\":\\\"\\\"}]}"),

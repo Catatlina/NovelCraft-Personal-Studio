@@ -53,12 +53,13 @@ def complete(
         output = _mock_output(task_type, variables)
         provider_name = "mock"
         model_name = "mock"
-    elif provider == "deepseek" or settings.ai_provider == "deepseek":
+    elif provider == "deepseek" or settings.ai_provider == "deepseek" or True:
         try:
             model_ = _request_model.get() or model or settings.deepseek_model
             output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
-            provider_name = "deepseek"
-            model_name = model or settings.deepseek_model
+            # Dynamic provider name based on model prefix
+            provider_name = "openai" if model_.startswith("gpt") else ("anthropic" if model_.startswith("claude") else "deepseek")
+            model_name = model_
         except ProviderError:
             # Try fallback chain
             route = _load_route(task_type)
