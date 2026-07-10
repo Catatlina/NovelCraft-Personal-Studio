@@ -70,7 +70,7 @@ M5 协作离线多端
 | 优先级 | 缺口 | 影响 |
 |---|---|---|
 || P0 | SQLite 还未迁到 PostgreSQL + Alembic | ✅ 已完成 — 26 表骨架迁移通过，bootstrap 全链路 PG 验证 |
-| P0 | 没有认证/JWT/RBAC | 还不是可部署的个人工作台 |
+| P0 | 没有认证/JWT/RBAC | ✅ 已完成 — register/login/refresh/me，bcrypt + JWT |
 | P0 | 工作流未接 Celery/Redis | 无法保证断点续跑、后台任务可靠性 |
 | P0 | DeepSeek 未做真实验收 | 当前生成内容仍是 mock |
 | P0 | 设计系统未成型 | UI 还只是可用原型 |

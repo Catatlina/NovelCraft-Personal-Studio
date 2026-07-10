@@ -90,9 +90,10 @@ def init_db() -> None:
     if existing is None:
         # Create default user
         user_id = new_id()
+        from .core.security import hash_password
         db.execute(
             "INSERT INTO users (id, email, password_hash, display_name) VALUES (%s, %s, %s, %s)",
-            (user_id, "default@novelcraft.local", "", "默认用户"),
+            (user_id, "admin@novelcraft.local", hash_password("admin123"), "管理员"),
         )
         project_id = new_id()
         db.execute(

@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from .core.security import get_current_user
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
 from .gateway import complete
 from .config import settings
@@ -22,8 +23,10 @@ from .schemas import (
     VersionRestore,
 )
 from .workflow import EVENT_LOGS, confirm_human, create_run, emit, run_until_human_or_done, schedule_run
+from .api.v1.auth import router as auth_router
 
 app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
+app.include_router(auth_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
