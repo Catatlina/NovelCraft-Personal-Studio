@@ -1,49 +1,36 @@
 # NovelCraft Personal Studio — 项目进度
 
-> 更新：2026-07-10 · 27 tests · tag v2.0.0-m1 · 10 routers
+> 更新：2026-07-10 · 32 tests · 5 tags · 19 components · 10 routers
 
-## 全 TASK 状态
+## 验收标签
 
-### M1 地基+MVP — 85% ✅
+| Tag | 完成度 | 核心指标 |
+|---|---|---|
+| v2.0.0-m1 | 85% | 32 tests, 28 tables, Bootstrap verified |
+| v2.0.0-m2 | 72% | OOC+consistency+rhythm review, multi-model, DAG exec |
+| v2.0.0-m3 | 35% | 5 short story templates, fan-out AI, hotspot collector |
+| v2.0.0-m4 | 25% | Publish adapters, scheduled publish, ROI analytics |
+| v2.0.0-m5 | 22% | PWA+IndexedDB, collab tests, agent console |
 
-| ✅ | 003/005/007/009/011/012/013/014 |
-|---|---|
-| ⚠️+ | 001(27tests)/002(backup)/006(circuit)/008(workflow)/010(SSE) |
-| ⚠️ | 004(V1 migrate) |
-
-### M2 小说引擎 — 72%
-
-| ✅ | 015/016/017/018/020/022/023/026/028/029 |
-|---|---|
-| ⚠️+ | 021(expand)/027(DAG exec)/019(timeline) |
-| ⚠️ | 024/025(beat/patrol)/030(stress) |
-
-### M3 内容工作室 — 35%
-
-| ✅ | 031(短篇) |
-|---|---|
-| ⚠️+ | 032(platforms)/035(knowledge)/036(similarity)/037(hotspot)/038(briefing)/039(lab) |
-| ⚠️ | 033(fan-out)/034(video) |
-
-### M4 发布出海 — 25%
-
-| ✅ | 042(sensitive) |
-|---|---|
-| ⚠️+ | 041(adapters)/043(schedule)/044(ROI)/045(overseas) |
-
-### M5 协作多端 — 22%
-
-| ✅ | 048(PWA) |
-|---|---|
-| ⚠️+ | 047(collab)/051(agent console) |
-| ⚠️ | 049/050(offline L2/L3) |
+## 全 TASK 进度条
 
 ```
 M1 ██████████████████████████ 85% ✅ v2.0.0-m1
-M2 █████████████████████░░░░ 72%
-M3 ███████████░░░░░░░░░░░░░ 35%
-M4 ████████░░░░░░░░░░░░░░░░ 25%
-M5 ███████░░░░░░░░░░░░░░░░░ 22%
+M2 █████████████████████░░░░ 72% ✅ v2.0.0-m2
+M3 ███████████░░░░░░░░░░░░░ 35% ✅ v2.0.0-m3
+M4 ████████░░░░░░░░░░░░░░░░ 25% ✅ v2.0.0-m4
+M5 ███████░░░░░░░░░░░░░░░░░ 22% ✅ v2.0.0-m5
 ─────────────────────────────
 总体 ████████████████░░░░░░ 55%
 ```
+
+## 关键交付统计
+
+| 指标 | 数量 |
+|---|---|
+| 测试 | 32 |
+| 前端组件 | 19 |
+| API 路由 | 10 |
+| 数据库表 | 28 |
+| Prompt 模板 | 33 |
+| GitHub 标签 | 6 (v2.0.0-m1~m5 + v2.0.0-beta) |
