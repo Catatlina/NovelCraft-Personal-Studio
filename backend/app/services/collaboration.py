@@ -30,9 +30,9 @@ def invite_user(project_id: str, email: str, role: str = "editor") -> dict:
 def list_members(project_id: str) -> list[dict]:
     db = connect()
     rows = db.execute(
-        """SELECT u.email, u.display_name, pm.role, pm.joined_at
+        """SELECT u.email, u.display_name, pm.role, pm.created_at
            FROM project_members pm JOIN users u ON pm.user_id = u.id
-           WHERE pm.project_id = %s ORDER BY pm.joined_at""",
+           WHERE pm.project_id = %s ORDER BY pm.created_at""",
         (project_id,),
     ).fetchall()
     db.close()

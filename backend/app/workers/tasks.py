@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from app.db import connect, encode, new_id
+from app.db import connect, encode, new_id, row_to_dict
 from app.gateway import BudgetExceeded, ProviderError, complete
 
 from .celery_app import celery_app

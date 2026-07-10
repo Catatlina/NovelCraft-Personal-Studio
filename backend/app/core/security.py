@@ -1,62 +1,54 @@
-"""JWT + password authentication."""
+"""Security utilities — JWT + password hashing + authorization."""
 from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 
 from app.db import connect
 
-SECRET_KEY = os.getenv("NOVELCRAFT_JWT_SECRET", "dev-secret-change-in-production")
-ALGORITHM = "HS256"
-ACCESS_TTL = timedelta(minutes=30)
-REFRESH_TTL = timedelta(days=7)
-import bcrypt as _bcrypt
-
 bearer_scheme = HTTPBearer(auto_error=False)
+JWT_ALGORITHM = "HS256"
+JWT_SECRET = os.getenv("NOVELCRAFT_JWT_SECRET", "dev-secret-change-in-production")
 
 
 def hash_password(password: str) -> str:
-    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return _bcrypt.checkpw(plain.encode(), hashed.encode())
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def create_token(user_id: str, ttl: timedelta, token_type: str = "access") -> str:
-    now = datetime.now(timezone.utc)
-    return jwt.encode(
-        {"sub": user_id, "type": token_type, "iat": now, "exp": now + ttl},
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
-
-
-def create_access_token(user_id: str) -> str:
-    return create_token(user_id, ACCESS_TTL, "access")
-
-
-def create_refresh_token(user_id: str) -> str:
-    return create_token(user_id, REFRESH_TTL, "refresh")
+def create_token(user_id: str, token_type: str = "access", expires_delta: timedelta | None = None) -> str:
+    if expires_delta is None:
+        expires_delta = timedelta(hours=1) if token_type == "access" else timedelta(days=7)
+    payload = {
+        "sub": user_id,
+        "type": token_type,
+        "exp": datetime.now(timezone.utc) + expires_delta,
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)):
-    """FastAPI dependency: extracts user from Bearer token. Skips auth if no token for M1 dev mode."""
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> dict:
+    """FastAPI dependency: requires valid Bearer token. No dev-mode bypass."""
     if credentials is None:
-        # M1 dev mode: return default user
-        return get_default_user()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
     payload = decode_token(credentials.credentials)
     if payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token is not an access token")
@@ -66,11 +58,14 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     db.close()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
-    return user
+    return dict(user)
 
 
-def require_project_role(project_id: str, roles: list[str]):
-    """Factory: returns a FastAPI dependency that checks project membership."""
+def require_project_role(project_id: str, roles: list[str] | None = None):
+    """Factory: FastAPI dependency that checks project membership + optional role.
+    
+    Blocks non-members (None → 403, not bypass).
+    """
     async def checker(user: dict = Depends(get_current_user)):
         db = connect()
         member = db.execute(
@@ -78,17 +73,9 @@ def require_project_role(project_id: str, roles: list[str]):
             (project_id, user["id"]),
         ).fetchone()
         db.close()
-        if member and member["role"] not in roles:
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not a project member")
+        if roles and member["role"] not in roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient permissions")
         return user
     return checker
-
-
-def get_default_user():
-    """M1 dev mode: returns the seed user without requiring auth."""
-    db = connect()
-    user = db.execute("SELECT * FROM users WHERE is_deleted = FALSE LIMIT 1").fetchone()
-    db.close()
-    if user is None:
-        raise HTTPException(status_code=500, detail="no users in database")
-    return user
