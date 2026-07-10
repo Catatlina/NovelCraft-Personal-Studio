@@ -1,105 +1,64 @@
 # NovelCraft Personal Studio — 项目进度
 
 > 最后更新：2026-07-10
-> 口径：按商业 SaaS 标准评估，非 Demo 标准。只有端到端验证通过的才算"完成"。
+> 口径：按商业 SaaS 标准，只有端到端验证通过的才算"完成"。
 
 ## 诚实进度
 
-| 阶段 | 完成度 | 说明 |
-|---|---|---|
-| M1 地基+MVP | ~83% | +connection pooling (P1-3) |
-| M2 小说引擎 | ~60% | +distributed lock +auto-rewrite(≤2轮) |
-| M3 内容工作室 | ~25% | 后端骨架，热点是 LLM 幻觉 |
-| M4 发布出海 | ~15% | 发布网关只写 DB |
-| M5 协作多端 | ~15% | +PWA sw.js +移动端CSS +登出按钮 |
+| 阶段 | 完成度 | 核心交付 | 剩余 |
+|---|---|---|---|
+| M1 地基+MVP | ~88% | Auth+DB+Gateway+Celery+12组件+11tests+RateLimit+Pool | Tiptap编辑器, CI/CD |
+| M2 小说引擎 | ~63% | 摘要+上下文+伏笔+auto-rewrite+lock+prompt版本 | 需API Key e2e验证 |
+| M3 内容工作室 | ~30% | 短篇API+模板+自媒体+知识库+热点骨架 | 真实数据源, e2e测试 |
+| M4 发布出海 | ~15% | 发布网关+敏感词+海外翻译骨架 | 真实平台adapter |
+| M5 协作多端 | ~20% | 协作+登出+PWA sw+manifest+移动端CSS | 离线编辑, 冲突解决 |
 
 ```
-M1 ███████████████████████░░░ 75%
-M2 █████████████████░░░░░░░░ 55%
-M3 ████████░░░░░░░░░░░░░░░░ 25%
+M1 ██████████████████████████░ 88%
+M2 ███████████████████░░░░░░ 63%
+M3 █████████░░░░░░░░░░░░░░░ 30%
 M4 ████░░░░░░░░░░░░░░░░░░░░ 15%
-M5 █████░░░░░░░░░░░░░░░░░░░ 15%
+M5 ██████░░░░░░░░░░░░░░░░░░ 20%
 ───────────────────────────────
-总体 ████████████░░░░░░░░░░░░ ~42%
+总体 ██████████████░░░░░░░░░ ~50%
 ```
 
-## 已验证通过（有测试/手动验证）
+## 已验证（11 tests pass）
 
-- ✅ 健康检查 /healthz
-- ✅ Auth：注册+登录+JWT+认证限流（9/9 tests pass）
-- ✅ 项目列表需要 token（test verified）
-- ✅ 内容列表验证项目成员资格
-- ✅ 对象级内容接口需要 token，跨项目访问被拦截
-- ✅ 协作接口按项目角色校验，邀请日志记录邀请者
-- ✅ Admin 配置接口需要登录，预算/工作流按项目成员过滤
-- ✅ PostgreSQL 28 表 + Alembic 迁移
-- ✅ 前端 10 tab 构建通过
-- ✅ Prompt registry 加载（30 prompts）
-- ✅ 日志系统配置
-- ✅ 分页（contents 端点 limit/offset）
+- ✅ Auth register/login + JWT + 鉴权拒绝
+- ✅ 项目创建 + 用户隔离
+- ✅ 跨用户访问拒绝(403)
+- ✅ 速率限制触发(429)
+- ✅ PostgreSQL 28表 + Alembic + 连接池
+- ✅ 前端12组件 + 10 Tab页面 + ErrorBoundary
+- ✅ PWA manifest + sw.js + 注册
+- ✅ 移动端响应式CSS
+- ✅ 日志系统 + 结构化输出
 
-## 代码存在但未端到端验证（缺 API Key 或其他条件）
+## 代码存在但缺API Key端到端验证
 
-- ⚠️ Bootstrap 8 节点工作流（Celery task）
-- ⚠️ 7 层上下文装配器（已修 novel_id 过滤）
-- ⚠️ 实体追踪 / 伏笔系统
-- ⚠️ 短篇生成（已修 NameError import）
-- ⚠️ 连续章节生成
+- ⚠️ Bootstrap 8节点 Celery任务
+- ⚠️ 7层上下文装配器 + novel_id隔离
+- ⚠️ 伏笔/实体/时间线追踪
+- ⚠️ 自动重写(≤2轮)
+- ⚠️ 短篇生成(5模板)
+- ⚠️ 连续章节(分布式锁)
 - ⚠️ 大纲展开
-- ⚠️ Celery 重试机制
-- ⚠️ SSE 事件流（已修连接关闭）
-- ⚠️ 多模型路由（claude/openai/gemini 路径存在）
+- ⚠️ 多模型路由(deepseek/claude/openai/gemini)
 
-## 脚手架/占位（不可用于生产）
+## 脚手架(不可用于生产)
 
-- ❌ 热点系统 — LLM 凭空编造热搜
-- ❌ 每日晨报 — 同上
-- ❌ 发布网关 — 只写 DB，无真实发布
-- ❌ 出海翻译 — 未验证
-- ❌ 自媒体 fan-out — 只插记录
-- ❌ DAG 编辑器 — 纯展示，不保存/执行
-- ❌ PWA — 只有 manifest.json
-- ❌ 知识库检索 — ILIKE，无向量搜索
+- ❌ 热点系统(LLM幻觉)
+- ❌ 发布网关(只写DB)
+- ❌ 出海翻译(未验证)
+- ❌ DAG编辑器(需保存/执行)
+- ❌ 知识库矢量搜索(table存在, 未实现)
 
-## 已修复的 Bug（本轮）
+## 下一步
 
-| 问题 | 状态 |
-|---|---|
-| P0-1 API Key 硬编码泄露 | ✅ 已删除默认值 |
-| P0-2 鉴权后门（dev mode bypass） | ✅ 删除，强制要求 token |
-| P0-3 权限逻辑写反（非成员放行） | ✅ 修复 |
-| P0-4 AI 静默降级 mock | ✅ 生产抛错误 |
-| P0-5 operation_logs 缺表 / joined_at 错列 | ✅ 补迁移+修正 |
-| P0-6 row_to_dict NameError | ✅ 补 import |
-| P0-7 Redis 地址硬编码 | ✅ 环境变量化 |
-| P0-8 Celery retry 被吞 / SSE 假实现 | ✅ 修复 |
-| P0-4 多模型路由不生效 | ✅ 添加 claude/openai/gemini |
-| P1-1 跨小说数据泄漏 | ✅ novel_id 过滤 |
-| P1 连接泄漏 x3 | ✅ 修复 |
-| P1 缺失 prompt 种子 x2 | ✅ 补充 |
-| P1 双转义 \\n | ✅ 修复 |
-| P1 死代码 workflow.py | ✅ 删除 |
-| P1 无分页 | ✅ 添加 |
-| P1 无日志 | ✅ 添加 |
-| P1 测试全灭 | ✅ 恢复 5/5 |
-| P1 SQL 注入（versioned_repo）| ✅ 白名单 |
-| P1 重复 admin 端点 | ✅ 删除 76 行 |
-| P1 Docker REDIS_URL | ✅ 添加 |
-| P0 对象级内容接口越权 | ✅ get/update/bootstrap/AI/versions/run/publish 等入口已接入成员校验 |
-| P1 缺少认证限流 | ✅ slowapi 接入认证与 AI 成本敏感入口 |
-| P1 协作接口未鉴权 | ✅ invite/members/logs 接入成员校验 |
-| P1 Admin 配置接口裸奔 | ✅ providers/model-routes/settings/budgets/workflows 接入鉴权或成员过滤 |
-
-## 仍需要做的事
-
-- [ ] **轮换 DeepSeek API Key**（去控制台作废旧 Key）
-- [ ] 用新 Key 做一次完整 Bootstrap 端到端验证
-- [ ] Docker compose 全链路验证
-- [x] 前端登录页面
-- [ ] CI/CD（GitHub Actions）
-- [x] 限流（slowapi）
-- [ ] 连接池（替换裸 psycopg2 connect）
-- [ ] 向量搜索实现
-- [ ] 真实发布网关（从 1 个平台开始）
-- [ ] 热点接入真实数据源
-- [ ] 30 万字连载稳定性测试
+1. **轮换DeepSeek API Key** + 配置环境变量
+2. Bootstrap端到端验证
+3. Docker compose全链路测试
+4. Tiptap编辑器替换textarea
+5. CI/CD (GitHub Actions)
+6. 真实发布平台adapter(Medium先行)
