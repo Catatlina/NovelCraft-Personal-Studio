@@ -289,6 +289,11 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
     """M2: Generate the next chapter using context assembler."""
     from app.services.assembler import ContextAssembler
     from app.services.entity_tracker import extract_and_store
+    from .lock import acquire_lock, release_lock
+
+    lock_key = f"lock:novel:{novel_id}:gen_chapter"
+    if not acquire_lock(lock_key):
+        return {"status": "skipped", "reason": "another generation in progress"}
 
     db = connect()
     # Find last chapter seq
@@ -342,6 +347,7 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
     _summarize_and_store(db, cid, chapter.get("body", []))
 
     db.close()
+    release_lock(lock_key)
     return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq}
 
 
