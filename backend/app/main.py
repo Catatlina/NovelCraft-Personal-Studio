@@ -29,6 +29,9 @@ from .api.v1.config import router as config_router
 from .api.v1.short_story import router as short_story_router
 from .api.v1.dag_exec import router as dag_exec_router
 from .api.v1.knowledge import router as knowledge_router
+from .api.v1.hotspots import router as hotspots_router
+from .api.v1.publish_schedule import router as publish_schedule_router
+from .api.v1.overseas import router as overseas_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -47,6 +50,9 @@ app.include_router(config_router)
 app.include_router(short_story_router)
 app.include_router(dag_exec_router)
 app.include_router(knowledge_router)
+app.include_router(hotspots_router)
+app.include_router(publish_schedule_router)
+app.include_router(overseas_router)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
@@ -415,10 +421,11 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
 
     async def event_stream():
         import asyncio
+        seq = 0
         while True:
-            yield ": heartbeat\n\n"
+            seq += 1
+            yield f"id: {seq}\\n\\n"
             await asyncio.sleep(1)
-            # Check if run completed and close stream
             conn = connect()
             row = conn.execute(
                 "SELECT status, nodes FROM workflow_runs WHERE id = %s", (run_id,)
@@ -427,8 +434,9 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
             if row and row["status"] in ("succeeded", "failed", "cancelled"):
                 nodes = decode(row["nodes"], [])
                 for n in nodes:
-                    yield f"data: {json.dumps(n)}\n\n"
-                yield "data: {\"status\": \"completed\"}\n\n"
+                    seq += 1
+                    yield f"id: {seq}\\ndata: {json.dumps(n)}\\n\\n"
+                yield f"id: {seq+1}\\ndata: {{\\\"status\\\": \\\"completed\\\"}}\\n\\n"
                 break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
