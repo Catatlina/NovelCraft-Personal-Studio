@@ -13,6 +13,12 @@ This repository starts the M1 vertical slice from the project documentation:
 
 Project progress is tracked in [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md).
 
+## Documentation
+
+- Product idea: [docs/IDEA.md](docs/IDEA.md)
+- Development documentation index: [docs/NovelCraft-开发文档/README-文档索引.md](docs/NovelCraft-开发文档/README-文档索引.md)
+- Project progress: [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md)
+
 ## Local Development
 
 Backend:
