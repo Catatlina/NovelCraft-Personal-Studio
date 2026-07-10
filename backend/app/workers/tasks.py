@@ -253,3 +253,55 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
             )
     except Exception:
         pass  # Non-critical, don't block the workflow
+
+
+@celery_app.task(bind=True, max_retries=2)
+def gen_next_chapter_task(self, novel_id: str, project_id: str) -> dict:
+    """M2: Generate the next chapter using context assembler."""
+    from app.services.assembler import ContextAssembler
+    from app.services.entity_tracker import extract_and_store
+
+    db = connect()
+    # Find last chapter seq
+    last = db.execute(
+        "SELECT COALESCE(MAX((meta->>'seq')::int), 0) as seq FROM contents WHERE parent_id = %s AND type='chapter'",
+        (novel_id,),
+    ).fetchone()
+    next_seq = (last["seq"] if last else 0) + 1
+    db.close()
+
+    # Build context
+    assembler = ContextAssembler(novel_id)
+    context = assembler.build()
+
+    # Generate
+    output = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
+        variables={"context": context},
+    )
+
+    chapter = output.get("chapter", {})
+    body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
+    cid = new_id()
+
+    db = connect()
+    db.execute(
+        "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"), encode(body), encode({"seq": next_seq}), "draft"),
+    )
+    db.execute(
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
+        (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": {"seq": next_seq}})),
+    )
+    db.commit()
+
+    # Extract entity states
+    text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
+    extract_and_store(cid, novel_id, text)
+
+    # Summarize
+    _summarize_and_store(db, cid, chapter.get("body", []))
+
+    db.close()
+    return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq}

@@ -123,19 +123,13 @@ class ContextAssembler:
                 "SELECT entity_type, entity_name, location FROM entity_states ORDER BY updated_at DESC LIMIT 10"
             ).fetchall()
         db.close()
-        if not rows:
-            rows = db.execute(
-                "SELECT entity_type, entity_name, location FROM entity_states ORDER BY updated_at DESC LIMIT 10"
-            ).fetchall()
-            db.close()
         if not rows and self.chapter_id:
-            # Fallback: get characters from knowledge_items
-            db = connect()
-            rows = db.execute(
+            db2 = connect()
+            rows = db2.execute(
                 "SELECT kind as entity_type, title as entity_name, '' as location FROM knowledge_items WHERE content_id = %s AND kind='character'",
                 (self.novel_id,),
             ).fetchall()
-            db.close()
+            db2.close()
         return "\n".join(f"- [{r['entity_type']}] {r['entity_name']}: {r.get('location','未知')}" for r in rows) if rows else "[无实体状态]"
 
     def _foreshadowing_alerts(self) -> str:

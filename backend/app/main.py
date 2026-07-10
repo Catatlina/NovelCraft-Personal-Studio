@@ -171,6 +171,19 @@ async def bootstrap_novel(novel_id: str) -> ApiResponse:
     return ok({"run_id": run_id})
 
 
+@app.post("/api/v1/novels/{novel_id}/continue")
+async def continue_novel(novel_id: str) -> ApiResponse:
+    """M2: Generate next chapter for an existing novel."""
+    conn = connect()
+    novel = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s AND type = 'novel'", (novel_id,)).fetchone())
+    conn.close()
+    if novel is None:
+        raise HTTPException(status_code=404, detail="novel not found")
+    from .workers.tasks import gen_next_chapter_task
+    result = gen_next_chapter_task.delay(novel_id, novel["project_id"])
+    return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
+
+
 @app.get("/api/v1/runs/{run_id}")
 def get_run(run_id: str) -> ApiResponse:
     conn = connect()
