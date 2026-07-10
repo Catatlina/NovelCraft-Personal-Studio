@@ -127,8 +127,9 @@ if __name__ == "__main__":
     if args.dry_run:
         print("Dry run — checking connectivity...")
         c = connect(V2_DB)
-        c.cursor().execute("SELECT count(*) as cnt FROM information_schema.tables WHERE table_schema='public'")
-        print(f"V2 tables: {c.cursor().fetchone()}")
+        cur = c.cursor()
+        cur.execute("SELECT count(*) as cnt FROM information_schema.tables WHERE table_schema='public'")
+        print(f"V2 tables: {cur.fetchone()}")
         c.close()
         sys.exit(0)
 
