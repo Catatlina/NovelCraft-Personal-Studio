@@ -126,7 +126,7 @@ def init_db() -> None:
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT(task_type) DO NOTHING
             """,
-            (new_id("rte"), task_type, "mock", "mock-deepseek-chat", encode({"temperature": 0.7}), encode([])),
+            (new_id(), task_type, "deepseek", "deepseek-chat", encode({"temperature": 0.7}), encode([])),
         )
     db.commit()
     db.close()

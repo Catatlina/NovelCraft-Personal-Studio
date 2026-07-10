@@ -38,17 +38,17 @@ def complete(
     _assert_budget(project_id, "bootstrap", estimated_cost)
 
     if provider == "deepseek" or (settings.ai_provider == "deepseek" and settings.deepseek_api_key):
-        output = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
+        output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
         provider_name = "deepseek"
         model_name = model or settings.deepseek_model
     else:
         output = _mock_output(task_type, variables)
         provider_name = PROVIDER
         model_name = MODEL
+        prompt_tokens = max(80, len(prompt_text) // 3)
+        completion_tokens = max(120, len(encode(output)) // 3)
 
     latency_ms = int((time.perf_counter() - start) * 1000) + 60
-    prompt_tokens = max(80, len(prompt_text) // 3)
-    completion_tokens = max(120, len(encode(output)) // 3)
     cost_cny = round((prompt_tokens + completion_tokens) * 0.000002, 4)
 
     conn = connect()
@@ -172,11 +172,12 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     except (urllib.error.URLError, TimeoutError) as exc:
         raise ProviderError(f"deepseek request failed: {exc}") from exc
     content = payload["choices"][0]["message"]["content"]
+    usage = payload.get("usage", {})
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
         raise ProviderError(f"deepseek returned non-json for {task_type}") from exc
-    return parsed
+    return parsed, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 
 def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:

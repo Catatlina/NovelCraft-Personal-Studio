@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    ai_provider: str = os.getenv("NOVELCRAFT_AI_PROVIDER", "mock")
-    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+    ai_provider: str = os.getenv("NOVELCRAFT_AI_PROVIDER", "deepseek")
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "sk-f3072475dbb9490f8909c54394e4d393")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "45"))
