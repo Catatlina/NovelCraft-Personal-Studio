@@ -39,9 +39,39 @@ def complete(
     _assert_budget(project_id, "bootstrap", estimated_cost)
 
     if provider == "deepseek" or (settings.ai_provider == "deepseek" and settings.deepseek_api_key):
-        output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
-        provider_name = "deepseek"
-        model_name = model or settings.deepseek_model
+        try:
+            output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model or settings.deepseek_model, params)
+            provider_name = "deepseek"
+            model_name = model or settings.deepseek_model
+        except ProviderError:
+            # Fallback chain: try alternatives from model_routes
+            route = _load_route(task_type)
+            fallbacks = route.get("fallback_json", []) if route else []
+            if isinstance(fallbacks, str):
+                fallbacks = json.loads(fallbacks)
+            for fb in fallbacks:
+                try:
+                    fb_provider = fb.get("provider", "deepseek")
+                    fb_model = fb.get("model", "deepseek-chat")
+                    if fb_provider == "deepseek":
+                        output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, fb_model, params)
+                    else:
+                        # Unknown provider → mock fallback
+                        output = _mock_output(task_type, variables)
+                        prompt_tokens = max(80, len(prompt_text) // 3)
+                        completion_tokens = max(120, len(encode(output)) // 3)
+                    provider_name = fb_provider
+                    model_name = fb_model
+                    break
+                except Exception:
+                    continue
+            else:
+                # All fallbacks failed → mock
+                output = _mock_output(task_type, variables)
+                provider_name = "mock-fallback"
+                model_name = "mock-deepseek-chat"
+                prompt_tokens = max(80, len(prompt_text) // 3)
+                completion_tokens = max(120, len(encode(output)) // 3)
     else:
         output = _mock_output(task_type, variables)
         provider_name = PROVIDER
@@ -91,11 +121,7 @@ def complete(
     return output
 
 
-def _load_prompt_and_route(
-    prompt_name: str,
-    task_type: str,
-    variables: dict[str, Any],
-) -> tuple[str, str, str, dict[str, Any]]:
+def _load_route(task_type: str) -> dict | None:
     conn = connect()
     route = row_to_dict(
         conn.execute(
@@ -103,9 +129,23 @@ def _load_prompt_and_route(
             (task_type,),
         ).fetchone()
     )
+    conn.close()
+    if route:
+        route["params"] = decode(route.get("params"), {})
+        route["fallback_json"] = decode(route.get("fallback_json"), [])
+    return route
+
+
+def _load_prompt_and_route(
+    prompt_name: str,
+    task_type: str,
+    variables: dict[str, Any],
+) -> tuple[str, str, str, dict[str, Any]]:
+    route = _load_route(task_type)
     provider = (route or {}).get("provider", "mock")
     model = (route or {}).get("model", MODEL)
-    params = decode((route or {}).get("params"), {})
+    params = (route or {}).get("params", {})
+    conn = connect()
     prompt = row_to_dict(
         conn.execute(
             """
