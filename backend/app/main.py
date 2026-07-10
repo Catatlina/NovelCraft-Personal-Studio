@@ -26,6 +26,7 @@ from .schemas import (
 from .workers.tasks import confirm_human, create_run
 from .api.v1.auth import router as auth_router
 from .api.v1.config import router as config_router
+from .api.v1.short_story import router as short_story_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -41,6 +42,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(config_router)
+app.include_router(short_story_router)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
