@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, CircleDollarSign, Code2, FileText, GitBranch, Layers, Rocket, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
+import { Check, CircleDollarSign, Code2, FileText, GitBranch, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
 
 type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
 
@@ -30,6 +30,9 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
         </nav>
         <div className="theme-toggle">
           <button onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}{theme==="dark"?"亮色":"暗色"}</button>
+          <button onClick={() => { (window as any).__ncLogout?.() }} style={{ marginLeft: 8 }} title="登出">
+            <LogOut size={16} />
+          </button>
         </div>
       </aside>
       <section className="workspace">

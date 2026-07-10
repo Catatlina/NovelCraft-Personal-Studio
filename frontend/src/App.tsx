@@ -10,7 +10,8 @@ import { DagEditor } from "./components/DagEditor";
 import { Settings } from "./components/Settings";
 import { Studio } from "./components/Studio";
 import { PublishDashboard } from "./components/PublishDashboard";
-import { Code2, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
+import { LoginPage } from "./components/LoginPage";
+import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string };
@@ -41,6 +42,9 @@ function textToDoc(text: string): TipTapDoc {
 }
 
 export default function App() {
+  const [tab, setTab] = useState<Tab>("wizard");
+  const [token, setToken] = useState("");
+  const [userEmail, setUserEmail] = useState("");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
   const [chapter, setChapter] = useState<Content | null>(null);
@@ -50,7 +54,6 @@ export default function App() {
   const [versions, setVersions] = useState<Version[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
-  const [tab, setTab] = useState<Tab>("wizard");
   const [idea, setIdea] = useState("一个写作者发现自己删掉的章节正在现实里发生。");
   const [genre, setGenre] = useState("都市奇幻");
   const [style, setStyle] = useState("克制、悬疑、强画面感");
@@ -155,6 +158,16 @@ export default function App() {
     { id: "studio", label: "内容工作室 → 短篇/自媒体/热点", action: () => setTab("studio") },
     { id: "publish", label: "发布看板 → 出海/数据", action: () => setTab("publish") },
   ];
+
+  function handleLogin(t: string, email: string) {
+    setToken(t); setUserEmail(email);
+  }
+
+  if (!token) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  (window as any).__ncLogout = () => { setToken(""); setUserEmail(""); };
 
   return (
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
