@@ -1,6 +1,0 @@
-CREATE TABLE novels ( id UUID PRIMARY KEY, title VARCHAR(255), genre
-VARCHAR(100), status VARCHAR(50), created_at TIMESTAMP DEFAULT
-CURRENT_TIMESTAMP );
-
-CREATE TABLE ai_tasks ( id UUID PRIMARY KEY, task_type VARCHAR(100),
-status VARCHAR(50), result TEXT );
