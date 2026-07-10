@@ -120,6 +120,23 @@ docker-compose.yml
 - 17-安全设计文档.md
 - 18-架构决策记录ADR.md
 
+## AI 配置系统
+
+所有 AI 配置均可在前端「系统设置 → 全局配置」页面可视化编辑，即时生效：
+
+| 配置项 | 说明 | 存储位置 |
+|---|---|---|
+| `deepseek_api_key` | DeepSeek API Key | DB (settings 表) |
+| `deepseek_base_url` | DeepSeek API 地址 | DB，默认 `https://api.deepseek.com` |
+| `deepseek_model` | DeepSeek 默认模型 | DB，默认 `deepseek-chat` |
+| `claude_api_key` / `openai_api_key` / `gemini_api_key` | 各 Provider API Key | DB |
+| `claude_base_url` / `openai_base_url` / `gemini_base_url` | 各 Provider API 地址 | DB |
+| `bootstrap_budget_cny` | Bootstrap 预算上限(¥) | DB，默认 2.0 |
+| `request_timeout_seconds` | AI 请求超时 | DB，默认 45 |
+
+**配置优先级**: 环境变量 > 数据库设置。修改后无需重启，即时生效。
+**API Key 安全**: API Key 字段在前端为密码输入框，API 返回时自动脱敏（仅显示前8后4字符）。
+
 ## 启动命令
 
 ```bash
