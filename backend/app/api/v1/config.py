@@ -111,3 +111,56 @@ def list_prompts():
         d["golden_cases"] = decode(d.get("golden_cases"), [])
         items.append(d)
     return {"code": 0, "message": "ok", "data": items}
+
+
+@router.get("/settings")
+def list_settings():
+    """Read all settings (keys masked)."""
+    db = connect()
+    rows = db.execute("SELECT key, value, description, updated_at FROM settings ORDER BY key").fetchall()
+    db.close()
+    items = []
+    for r in rows:
+        d = dict(r)
+        if "api_key" in d["key"] and d["value"]:
+            d["value"] = d["value"][:8] + "..." + d["value"][-4:] if len(d["value"]) > 12 else "***"
+        items.append(d)
+    return {"code": 0, "message": "ok", "data": items}
+
+
+@router.put("/settings/{key}")
+def update_setting(key: str, value: str) -> dict:
+    """Update a single setting."""
+    db = connect()
+    db.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT(key) DO UPDATE SET value=%s, updated_at=now()",
+        (key, value, value),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM settings WHERE key = %s", (key,)).fetchone()
+    db.close()
+    d = dict(row)
+    if "api_key" in d["key"] and d["value"]:
+        d["value"] = d["value"][:8] + "..." + d["value"][-4:]
+    return {"code": 0, "message": "ok", "data": d}
+
+
+@router.get("/env-check")
+def env_check():
+    """Check which env vars are configured vs DB settings."""
+    import os
+    db = connect()
+    rows = db.execute("SELECT key, value FROM settings").fetchall()
+    db.close()
+    db_settings = {r["key"]: r["value"] for r in rows}
+    checks = []
+    for provider in ["deepseek", "claude", "openai", "gemini"]:
+        env_key = os.getenv(f"{provider.upper()}_API_KEY", "")
+        db_val = db_settings.get(f"{provider}_api_key", "")
+        checks.append({
+            "provider": provider,
+            "env_configured": bool(env_key),
+            "db_configured": bool(db_val),
+            "effective_source": "env" if env_key else ("db" if db_val else "none"),
+        })
+    return {"code": 0, "message": "ok", "data": checks}
