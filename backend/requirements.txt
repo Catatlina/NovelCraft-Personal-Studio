@@ -9,6 +9,7 @@ bcrypt==4.2.1
 python-jose[cryptography]==3.3.0
 celery[redis]==5.4.0
 redis==5.2.1
+python-multipart==0.0.32
 alembic==1.14.1
 sqlalchemy==2.0.36
 slowapi==0.1.9
