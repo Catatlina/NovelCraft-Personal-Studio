@@ -172,6 +172,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
     context = run["context"] if isinstance(run["context"], dict) else {}
     context.update(output)
     novel_id = run["novel_id"]
+    project_id = run["project_id"]
 
     if task_type == "gen_titles":
         context["title_candidates"] = output.get("title_candidates", [])
@@ -219,10 +220,33 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
         score = output.get("score", 0)
         cid = context.get("chapter_id", "")
         if score < 80 and cid:
-            db.execute(
-                "UPDATE contents SET meta = meta || %s, status = 'needs_rewrite', updated_at = now() WHERE id = %s",
-                (encode({"review_score": score, "review_issues": output.get("issues", [])}), cid),
-            )
+            review_issues = output.get("issues", [])
+            rewrite_count = context.get("rewrite_count", 0)
+            if rewrite_count < 2:
+                # Auto-rewrite: regenerate chapter with review feedback
+                db.execute(
+                    "UPDATE contents SET meta = meta || %s WHERE id = %s",
+                    (encode({"review_score": score, "rewrite_count": rewrite_count + 1}), cid),
+                )
+                db.commit()
+                # Re-run gen_chapter1 with review context
+                gen_context = {**context, "rewrite_count": rewrite_count + 1,
+                               "review_feedback": review_issues, "chapter_id": cid}
+                output = complete(run_id=run_id, node_key=node_key, project_id=project_id,
+                                 task_type="gen_chapter1", prompt_name="bootstrap.gen_chapter1",
+                                 variables=gen_context)
+                chapter = output.get("chapter", {})
+                body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
+                db.execute(
+                    "UPDATE contents SET title = %s, body = %s, meta = meta || %s, status = 'draft', updated_at = now() WHERE id = %s",
+                    (chapter.get("title", context.get("title", "")), encode(body),
+                     encode({"review_score": score, "rewrite_count": rewrite_count + 1, "review_issues": review_issues}), cid),
+                )
+            else:
+                db.execute(
+                    "UPDATE contents SET meta = meta || %s, status = 'needs_rewrite', updated_at = now() WHERE id = %s",
+                    (encode({"review_score": score, "review_issues": review_issues, "rewrite_exhausted": True}), cid),
+                )
 
     db.execute(
         "UPDATE run_nodes SET status = 'succeeded', output = %s, finished_at = now() WHERE run_id = %s AND node_key = %s",
