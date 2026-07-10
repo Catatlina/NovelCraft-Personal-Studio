@@ -261,7 +261,10 @@ async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(
     conn.close()
     if novel["type"] != "novel":
         raise HTTPException(status_code=400, detail="content is not a novel")
-    run_id = create_run(novel["project_id"], novel_id)
+    run_id = create_run(novel["project_id"], novel_id,
+                        api_key=request.headers.get("X-Api-Key", ""),
+                        api_url=request.headers.get("X-Api-Base-Url", ""),
+                        model=request.headers.get("X-Model", ""))
     return ok({"run_id": run_id})
 
 

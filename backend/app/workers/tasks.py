@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 from app.db import connect, encode, new_id, row_to_dict
-from app.gateway import BudgetExceeded, ProviderError, complete
+from app.gateway import BudgetExceeded, ProviderError, complete, _request_api_key, _request_api_base_url, _request_model
 
 from .celery_app import celery_app
 
@@ -21,8 +21,17 @@ BOOTSTRAP_NODES = [
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
-def execute_bootstrap(self, run_id: str, start_key: str = "n1") -> dict:
+def execute_bootstrap(self, run_id: str, start_key: str = "n1",
+                       api_key: str = "", api_url: str = "", model: str = "") -> dict:
     """Execute bootstrap workflow from start_key to human node or completion."""
+    # Set context vars for this worker process
+    if api_key:
+        _request_api_key.set(api_key)
+    if api_url:
+        _request_api_base_url.set(api_url)
+    if model:
+        _request_model.set(model)
+
     start_index = next(i for i, node in enumerate(BOOTSTRAP_NODES) if node[0] == start_key)
 
     for node_key, kind, agent, title, task_type in BOOTSTRAP_NODES[start_index:]:
@@ -99,7 +108,8 @@ def execute_bootstrap(self, run_id: str, start_key: str = "n1") -> dict:
     return {"status": "succeeded"}
 
 
-def create_run(project_id: str, novel_id: str) -> str:
+def create_run(project_id: str, novel_id: str,
+               api_key: str = "", api_url: str = "", model: str = "") -> str:
     """Create a workflow run and its nodes in the database."""
     db = connect()
     novel = db.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone()
@@ -122,7 +132,7 @@ def create_run(project_id: str, novel_id: str) -> str:
     db.commit()
     db.close()
     # Dispatch to Celery
-    execute_bootstrap.delay(run_id, "n1")
+    execute_bootstrap.delay(run_id, "n1", api_key, api_url, model)
     return run_id
 
 
