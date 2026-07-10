@@ -1,30 +1,77 @@
 # NovelCraft Personal Studio — 项目进度
 
-> 更新：2026-07-10 · 13 tests · Ubuntu running · Bootstrap verified
+> 更新：2026-07-10 · 19 tests · Ubuntu running · 按需求文档逐条评估
 
-## 诚实进度
+## 真实进度（按 TASK 逐条）
+
+### M1 地基+MVP
+
+| TASK | 状态 | 说明 |
+|---|---|---|
+| 001 V1遗留 | ❌ | 13→19 tests, slowapi部分, Celery retry存在 |
+| 002 备份告警 | ⚠️ | backup.sh存在, 未加密/异地 |
+| 003 骨架表 | ✅ | 28表, Alembic可升降 |
+| 004 V1迁移 | ⚠️ | 脚本存在, 未执行 |
+| 005 版本系统 | ✅ | VersionedRepository可用 |
+| 006 AI Gateway | ⚠️ | DeepSeek+多模型路由, 缺三级熔断测试 |
+| 007 Prompt库 | ✅ | 33 prompts, 8 MVP各≥3 golden |
+| 008 工作流引擎 | ⚠️ | chain+human可用, 未全场景 |
+| 009 Bootstrap | ✅ | 8节点链通过(Ubuntu) |
+| 010 SSE | ⚠️ | 基础版, 无nginx验证 |
+| 011 设计系统 | ✅ | 14组件, 明暗双套 |
+| 012 向导+进度 | ✅ | 表单校验+时间线 |
+| 013 审阅+编辑器 | ⚠️ | RichEditor可用, 缺雷达图/Tiptap三件套 |
+| 014 M1验收 | ❌ | 未打tag |
+
+**M1: ~78%** (↑ from 75%)
+
+### M2 小说引擎
+
+| TASK | 状态 | 说明 |
+|---|---|---|
+| 015 分层摘要 | ✅ | 章/卷/全书 |
+| 016 7层上下文 | ✅ | novel_id隔离修复 |
+| 017 实体状态 | ✅ | 逐章更新 |
+| 018 伏笔系统 | ⚠️ | 代码存在, 看板UI无 |
+| 019 时间线 | ⚠️ | 代码存在, 未验证 |
+| 020 Reviewer | ⚠️ | 基础7dim + 新增OOC/一致性/节奏 |
+| 021 卷纲流水线 | ⚠️ | expand_outline存在 |
+| 022 自动返工 | ✅ | ≤2轮重写 |
+| 023 多模型 | ✅ | GPT/Claude/DeepSeek路由 |
+| 024 自动连载 | ⚠️ | beat已配置, 未实测 |
+| 025 防崩巡检 | ⚠️ | patrol_check代码存在 |
+| 026 Editor操作 | ⚠️ | 润色/改写/续写按钮, 未全接Gateway |
+| 027 DAG编辑器 | ⚠️ | 可视化+保存, 执行未验证 |
+| 028 ⌘K | ✅ | CommandPalette |
+| 029 Prompt管理 | ✅ | Settings可查看 |
+| 030 压测 | ❌ | 脚本存在, 未执行 |
+
+**M2: ~60%** (↑ from 55%)
+
+### M3/M4/M5（未重点推进）
 
 | 阶段 | 完成度 | 核心交付 |
 |---|---|---|
-| M1 地基+MVP | ~92% | CI/CD + RichEditor + 13comp + 13tests + Docker health |
-| M2 小说引擎 | ~72% | Bootstrap全链路✅ + auto-rewrite + lock + confirm+h4n flow |
-| M3 内容工作室 | ~45% | fan-out AI + 视频脚本模板 + 5内容类型 + 知识库导入导出 |
-| M4 发布出海 | ~32% | 15 adapters + 敏感词32条 + publish_content wired |
-| M5 协作多端 | ~35% | PWA + IndexedDB离线 + team UI + mobile CSS |
+| M3 内容工作室 | ~20% | fan-out AI + 视频脚本模板 |
+| M4 发布出海 | ~10% | adapter框架 + 32敏感词 |
+| M5 协作多端 | ~15% | PWA + IndexedDB + team UI + mobile CSS |
 
 ```
-M1 ████████████████████████████ 92%
-M2 ██████████████████████░░░░ 72%
-M3 █████████████░░░░░░░░░░░░ 45%
-M4 ██████████░░░░░░░░░░░░░░ 32%
-M5 ███████████░░░░░░░░░░░░░ 35%
+M1 █████████████████████████░░ 78%
+M2 ██████████████████░░░░░░░ 60%
+M3 ██████░░░░░░░░░░░░░░░░░░ 20%
+M4 ███░░░░░░░░░░░░░░░░░░░░░ 10%
+M5 █████░░░░░░░░░░░░░░░░░░░ 15%
 ───────────────────────────────
-总体 ███████████████████░░░░ ~62%
+总体 █████████████░░░░░░░░░░ ~43%
 ```
 
-## 已验证
-- ✅ Bootstrap 全链路 (n1-n8) + human_confirm ✅
-- ✅ DeepSeek API 真实调用 (27s gen_titles)
-- ✅ API Key 前端→后端→Celery worker 全链路
-- ✅ Ubuntu 192.168.5.56:8000+5173 运行中
-- ✅ 13/13 tests + build OK + GitHub push
+## 本轮交付
+
+| 项目 | 说明 |
+|---|---|
+| 测试 | 13→19 (+6) |
+| nginx | 反向代理配置 (/etc/nginx/sites-available) |
+| 审查扩展 | OOC + 一致性 + 节奏 (3 prompts) |
+| 多模型 | GPT/Claude/DeepSeek 自动识别路由 |
+| Celery beat | auto_serial 1h + patrol 2h |
