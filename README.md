@@ -11,6 +11,8 @@ This repository starts the M1 vertical slice from the project documentation:
 - Versioned content save/restore
 - React workbench for wizard, progress, review, editor, and costs
 
+Project progress is tracked in [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md).
+
 ## Local Development
 
 Backend:
