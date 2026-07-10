@@ -17,6 +17,7 @@ Project progress is tracked in [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md).
 
 - Product idea: [docs/IDEA.md](docs/IDEA.md)
 - Development documentation index: [docs/NovelCraft-开发文档/README-文档索引.md](docs/NovelCraft-开发文档/README-文档索引.md)
+- Historical documentation archive: [docs/archive/README.md](docs/archive/README.md)
 - Project progress: [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md)
 
 ## Local Development
