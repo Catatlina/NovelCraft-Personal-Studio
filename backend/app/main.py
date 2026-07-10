@@ -24,9 +24,11 @@ from .schemas import (
 )
 from .workers.tasks import confirm_human, create_run
 from .api.v1.auth import router as auth_router
+from .api.v1.config import router as config_router
 
 app = FastAPI(title="NovelCraft Personal Studio API", version="0.1.0")
 app.include_router(auth_router)
+app.include_router(config_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
