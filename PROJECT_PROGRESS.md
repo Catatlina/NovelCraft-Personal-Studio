@@ -20,7 +20,7 @@
 | 热点自媒体 | 🚧 部分完成 | 热点采集、Dashboard、社媒生成基础 | 热点→多平台稿→入库/发布的可恢复工作流 |
 | 长篇一致性 | 🚧 部分完成 | 上下文、摘要、实体、伏笔、时间线组件 | 百章压力、写后 reconcile、卷级门禁 |
 
-## 六项目融合
+## 八项目融合
 
 | 项目 | 状态 | 真实边界 |
 |---|---|---|
@@ -30,11 +30,14 @@
 | AI_NovelGenerator | 🧱 骨架 | 有目录解析和通用审核；百章记忆、六类一致性、写前检索/写后合并未验收 |
 | AI-auto-generates | 🧱 骨架 | 有批量生成、拆书和 Prompt 基础；缺完整拆书工作台、快捷词条、思维导图 |
 | harnessNovel | 🧱 骨架 | 有阶段规划函数；分层 AI 规划、自适应窗口、合理性审计、知识合并和 humanize 未实现 |
+| BrowserAct (MIT) | 🧱 骨架 | 仅保留合规部分：CLI 半自动发布包装（用户已登录会话）。上游 stealth-extract/anti-bot 能力按《25》合规边界不予融合，曾引入的抓取函数与 `/scrape/browseract` 端点已删除；CLI 未安装时显式 `unavailable`；无浏览器端验收 |
+| insprira (AGPL 洁净室) | 🧱 骨架 | 账号追踪/诊断、违禁词检测、Skill 中心为独立实现，已有 API、迁移和项目权限隔离；外部拉取失败显式 `unavailable`；无前端入口、无真实平台数据验收 |
 
 ## 验证基线
 
 - 远端既有 CI：154 项后端测试通过，前端构建通过；其中包含较多 T0/T1 存在性测试，不能代表核心链 E2E。
-- 当前验证：Alembic 已升级到 `d95f31a6e8c2`；容器内后端 **173 passed**；交付声明门禁和前端生产构建通过。纵横真实采集/持久化已有后端 T3；市场分析仅完成契约和失败语义测试，尚无真实 Provider T3，因此保持 `🧪`。
+- 当前验证（2026-07-11）：Alembic 单头 `nc_fusion_account_tracking`，干净库 upgrade→downgrade base→upgrade 往返通过（此前融合迁移 `down_revision=None` 造成双头、CI `alembic upgrade head` 连续两次失败，已修复）；宿主机后端 **230 passed**（含 complete_api 权限隔离、导出正文抽取、融合失败语义 11 项新测试）；交付声明门禁通过。纵横真实采集/持久化已有后端 T3；市场分析仅完成契约和失败语义测试，尚无真实 Provider T3，因此保持 `🧪`。
+- 已知修复：novel 导出此前对 doc 格式章节输出空正文（`body.get("text")`），已改为遍历 `content[]` 抽取；`complete_api.py` 全部资源端点补齐项目成员校验（此前任何登录用户可导出任意 novel）。
 - PR：`agent/complete-core-gaps` → `main`（Draft）。
 
 ## 下一顺序
