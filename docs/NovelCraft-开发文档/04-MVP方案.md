@@ -1,36 +1,37 @@
 # NovelCraft Personal Studio MVP 开发方案（M1，第 1~5 周）
 
-> MVP 的双重使命：① 交付用户闭环（灵感→第一章）；② **以最终形态落地五个平台能力骨架（C1 内容/C2 工作流/C3 网关/C5 版本/C8 追踪）**——宁可慢一周，不留返工债。V1 已有 80% 零件（认证、CRUD、DeepSeek 客户端、Prompt 引擎、状态机、7 维审核、限流），MVP 是"换骨架 + 串流水线"。
+> MVP 的第一使命是交付“扫榜→分析→全自动原创成书→自动入书库”，第二使命是“热点→自媒体多平台草稿”；灵感→第一章仅作为次要兼容入口。底层以最终形态落地 C1/C2/C3/C4/C5/C8，并遵循《19-开源项目融合基线》。
 
 ## 1. 用户旅程
 
 ```
-注册/登录 → 创建项目与小说 → 输入灵感（一句话~一段 + 题材/风格/目标字数）
- → bootstrap 工作流：书名(3候选)→简介卖点→世界观→人物(3~6)→总纲→第一章→7维审核
- → 审阅页（human 节点：选标题/确认或退回重跑单步）
- → 编辑器修改（选中润色/改写/续写）或一键按审核意见重写
- → 保存（自动版本快照）
+注册/登录 → 榜单中心选择平台/榜单/范围 → 采集快照 → 市场分析 → 原创选题
+ → 自动在书库创建小说(planning) → 世界观→人物→总纲→卷纲→细纲→第一章→7维审核/返工
+ → 继续批量生成/自动连载（生成中始终可在书库查看进度）
+
+次要入口：输入灵感 → 原创立项 → 复用同一成书工作流 → 自动进入书库。
+自媒体入口：热点扫描 → 价值/平台适配 → 选题池 → 至少三平台草稿。
 ```
 
 ## 2. 范围
 
-**做**：上述闭环 + 设计系统 v1 + 骨架表全建 + V1 数据迁移 + SSE 进度 + 三级预算 + 备份告警。
-**不做**（M2+ 再做）：第二章/连载、伏笔/时间线、多模型、可视化工作流编排、自媒体/热点/发布、离线、协作页（表结构先建）。
+**做**：扫榜成书、统一书库、热点自媒体、灵感兼容入口 + 设计系统v1 + 骨架表 + V1迁移 + SSE + 预算 + 备份告警。
+**不做**（M2+ 再做）：30万字完整压测、更多榜单源、真实发布、离线、协作；但不得把扫榜、书库和热点自媒体推迟到M3。
 
-## 3. bootstrap = 第一条预设工作流（工作流引擎 v0）
+## 3. rank-to-book = 第一条预设工作流；bootstrap 为次要入口
 
-引擎 v0 只支持线性 chain + human 节点，但表结构用最终版（workflows/workflow_runs/run_nodes）：
+引擎必须支持可恢复的 chain + branch + human；扫榜自动模式可跳过普通确认，但数据源、预算、质量异常必须进入等待态：
 
 ```
-run(bootstrap, novel_id)
- n1 agent:StoryArchitect  gen_titles      → contents(novel).meta.title_candidates
- n2 human                 选定标题（前端确认，run 挂起）
- n3 agent:StoryArchitect  gen_synopsis    → meta.synopsis / selling_points
- n4 agent:StoryArchitect  gen_worldview   → knowledge_items(kind=worldview)
- n5 agent:Character       gen_characters  → knowledge_items(kind=character)×N
- n6 agent:StoryArchitect  gen_outline     → meta.outline
- n7 agent:Writer          gen_chapter1    → contents(type=chapter, parent=novel)
- n8 agent:Reviewer        review_7dim     → run_nodes.output + 审阅页展示
+run(rank_to_book)
+ n1 tool:RankScanner       capture_snapshot → ranking_snapshots/items
+ n2 agent:Trend            analyze_market   → market_analysis
+ n3 agent:Producer         original_topics  → topic_candidates
+ n4 branch/human           auto_select_or_confirm
+ n5 tool:Library           create_book      → contents(type=novel, source_type=ranking)
+ n6 agent:Architect        bible_outline    → worldview/character/outline/detail
+ n7 agent:Writer           generate         → chapters
+ n8 agent:Reviewer         review_rewrite   → quality gate + reconcile
 ```
 每节点：幂等（node 级 succeeded 即跳过）、失败自动重试 2 次、可单点重跑；全部调用经 Gateway 落 ai_calls；进度经 Redis→SSE。
 
@@ -64,13 +65,14 @@ run(bootstrap, novel_id)
 
 ## 7. 验收标准（M1 门禁）
 
-1. 新用户 ≤15 分钟灵感→过审第一章，全程无需看日志；
-2. 杀 worker/断网后 run 断点续跑；human 节点挂起 24h 后确认仍可继续；
-3. 单次 bootstrap 成本 ≤¥2 预算，超限熔断为 PENDING_BUDGET 非失败；
-4. 任意保存/AI 重写可版本恢复；ai_calls 对每次调用记录 9 要素完整；
-5. V1 数据迁移校验通过且可回滚；
-6. 单测新增 ≥30（引擎 v0/幂等/预算/版本/迁移），总 ≥135 全绿；lint/type/build 过；三轮自审报告归档；
-7. 备份恢复演练 1 次通过；失败告警实际收到 1 条测试通知。
+1. 新用户完成扫榜→分析→原创立项→自动入书库→过审第一章，全程无需看日志；
+2. 灵感入口与扫榜入口生成的小说都能在统一书库管理；
+3. 热点入口可生成至少三平台稿件；
+4. 杀 worker/断网后 run 断点续跑；human 节点挂起24h后仍可继续；
+5. 单次成书受预算约束，超限熔断为 PENDING_BUDGET 非失败；
+6. 任意保存/AI重写可版本恢复；ai_calls记录9要素；
+7. V1迁移可回滚；总测试≥135、三轮自审、备份恢复和告警实收通过；
+8. 6个指定开源项目的融合/借鉴记录和许可证门禁通过。
 
 ## 8. 周计划
 

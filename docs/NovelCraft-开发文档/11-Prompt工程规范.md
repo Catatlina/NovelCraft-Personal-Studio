@@ -1,6 +1,6 @@
 # NovelCraft Personal Studio · Prompt 工程规范
 
-> 版本：V1.0 ｜ 适用范围：所有经 AI Gateway 触发的 Prompt 与 Agent
+> 版本：V1.1 ｜ 适用范围：所有经 AI Gateway 触发的 Prompt 与 Agent
 > 关联文档：02-架构评审报告 §4（Agent）、§5.1（风格学习三道闸）、§7（七层上下文）；05-技术实施方案 §4（AI 实施）
 > 强制约束（来自架构评审 §4.2）：LLM 调用只准走 `gateway.complete()`；Agent 之间禁止互调；每个 AgentNode 必须有 ≥1 条 golden case 进 CI。
 
@@ -19,6 +19,16 @@ gateway.complete(task_type, prompt_name, variables, output_schema, budget_scope)
 ```
 
 本文档的 10 个 Agent 契约（§4）、七层上下文装配（§5）、Golden Case（§6）、风格防侵权红线（§9）共同构成可落地的工程底座。
+
+### 0.1 `oh-story-claudecode` 模板融合边界
+
+首批 33 个扫描、分析、写作、润色、去 AI 味与审查模板，以 `worldwonderer/oh-story-claudecode@2e9cbac20201d616d7d6f8990060a9f1d206838f` 为研究基线。融合时必须：
+
+1. 逐模板拆成 NovelCraft 的 `AgentSpec + Prompt + Output Schema`，禁止复制成一个巨型 Prompt；
+2. 保留上游来源、提交号、许可证和本地改写说明；
+3. 将“去 AI 味”改造成可测规则集（套话、解释腔、重复总结、过度排比、抽象情绪等），而非仅写一句“更像人”；
+4. 扫榜分析只抽取市场与结构特征，不保留可识别原文表达；生成端必须经过原创性/相似度闸门；
+5. 每个模板至少 3 条 golden case，并分别覆盖正常、边界和拒绝/返工路径。
 
 ---
 

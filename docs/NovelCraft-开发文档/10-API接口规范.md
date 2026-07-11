@@ -4,7 +4,23 @@
 > 与《架构评审报告 V2.1》《MVP 方案》《技术实施方案》保持一致：统一内容模型（C1）、工作流引擎（C2）、AI Gateway（C3）、Knowledge Hub（C4）、版本系统（C5）、叙事一致性引擎（C6）、发布网关（C7）、追踪治理（C8）。
 > 所有端点前缀为 `/api/v1`（注：MVP 方案 §5 增量表中的 `/api/...` 为相对简写，全量版统一收敛到 `/api/v1`）。
 >
-> 文档版本：**V2.1**　基线范围：**全量 13 模块**。
+> 文档版本：**V2.2**　基线范围：**全量 13 模块 + 扫榜/书库主轴**。
+
+### V2.2 产品主轴新增资源
+
+扫榜成书与统一书库为P0，API至少提供：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/library/books` | 统一书库，按来源/状态/题材/平台筛选 |
+| POST | `/ranking/sources/{source}/scan` | 启动榜单扫描，返回可恢复任务 |
+| GET | `/ranking/snapshots/{id}` | 榜单快照、条目和来源健康状态 |
+| POST | `/ranking/snapshots/{id}/analyze` | 生成市场分析与原创选题候选 |
+| POST | `/topic-candidates/{id}/generate-book` | 创建书库小说并启动全自动成书工作流 |
+| POST | `/novels/from-inspiration` | 次要灵感入口，复用成书工作流并自动入库 |
+| POST | `/hotspots/scan-and-generate` | 热点分析并生成多平台内容矩阵 |
+
+所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。
 
 ---
 

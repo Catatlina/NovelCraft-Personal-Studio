@@ -1,35 +1,19 @@
 # NovelCraft Personal Studio — 开发文档总索引
 
-> 最后更新：2026-07-10
-> 版本：v2.0.0-m5 + core-hardening（持续开发，真实进度见 `PROJECT_PROGRESS.md`）
+> 最后更新：2026-07-11
+> 需求基线：V2.2（持续开发，真实进度见 `PROJECT_PROGRESS.md`）
 
 ## 项目概述
 
-NovelCraft Personal Studio 是一站式 AI 内容工厂，覆盖长篇小说、短篇、自媒体、短视频脚本、出海翻译的完整创作→发布管线。
+NovelCraft Personal Studio 是以“扫榜成书”为主轴的全自动 AI 内容生产系统：扫描小说榜单、提取市场结构、生成原创选题并自动完成整书，所有生成结果统一进入书库。自媒体生产以热点扫描为主轴；灵感生成保留为次要入口。
 
 - **仓库**: [Catatlina/NovelCraft-Personal-Studio](https://github.com/Catatlina/NovelCraft-Personal-Studio)
 - **技术栈**: FastAPI + PostgreSQL + Celery + Redis + React + TypeScript + Vite
 - **AI Provider**: DeepSeek (主), Claude/OpenAI/Gemini (降级链)
 
-## 里程碑进度
+## 当前交付状态
 
-| 阶段 | 进度 | 任务完成 | 核心交付 |
-|---|---|---|---|
-| M1 地基+MVP | 97% | 部分验收 | PG 骨架 + JWT 会话加固 + DeepSeek + Celery + Docker |
-| M2 小说引擎 | 95% | 部分验收 | 摘要 + 上下文 + 连续/批量章节 + 伏笔 + 质量门禁 |
-| M3 内容工作室 | 82% | 持续开发 | 短篇 + 自媒体 + 多格式向量知识库 + 热点 + 风格 |
-| M4 发布出海 | 75% | 部分验收 | 项目隔离发布网关 + 调度/ROI + 安全检查 + 出海翻译 |
-| M5 协作多端 | 75% | 部分验收 | 协作三角色 + PWA + 离线编辑冲突树 + AI 出站队列 |
-
-```text
-M1 ███████████████████████████████░ 97%
-M2 ██████████████████████████████░░ 95%
-M3 ██████████████████████████░░░░░░ 82%
-M4 ████████████████████████░░░░░░░░ 75%
-M5 ████████████████████████░░░░░░░░ 75%
-───────────────────────────────────────
-总体 ████████████████████████████░░░░ 86%
-```
+旧版“总体 86%”按功能数量统计，无法代表 V2.2 主流程是否可用，现已废止。已有认证、AI Gateway、章节生成、上下文、伏笔、工作流骨架、发布与离线能力可以复用；但“真实榜单扫描 → 市场分析 → 原创选题 → 全自动整书 → 统一书库”和“热点 → 自媒体矩阵”的端到端验收尚未完成。分项状态见 `PROJECT_PROGRESS.md`。
 
 ## 系统架构
 
@@ -54,7 +38,9 @@ docker-compose.yml
 |---|---|---|
 | Auth | /auth/register, /login, /refresh, /me | JWT 认证 |
 | Projects | /projects, /projects/{id}/novels, /short-stories | 项目管理 |
-| Bootstrap | /novels/{id}/bootstrap, /continue | 小说生成 |
+| Ranking（规划） | /ranking/sources/{source}/scan, /ranking/snapshots/{id}/analyze | 扫榜与市场分析 |
+| Library（规划） | /library/books | 统一书库 |
+| Bootstrap | /novels/{id}/bootstrap, /continue | 小说生成兼容入口 |
 | Content | /contents, /contents/{id}/ai/{op} | 内容 CRUD + AI 操作 |
 | Runs | /runs/{id}, /runs/{id}/events | 工作流运行 |
 | Knowledge | /knowledge, /knowledge/search, /daily-briefing | 知识库 |
@@ -87,7 +73,7 @@ docker-compose.yml
 
 ## 前端页面（10 Tab）
 
-1. 创作向导（灵感到第一章）
+1. 扫榜中心（目标主入口，待实现）
 2. 进度（Bootstrap 工作流）
 3. 审阅（7 维质量雷达）
 4. 编辑器（6 种 AI 操作）
@@ -95,8 +81,10 @@ docker-compose.yml
 6. Prompt 管理
 7. 工作流编排（DAG 编辑器）
 8. 系统设置（Providers/模型/预算/Prompts 可视化配置）
-9. 内容工作室（短篇/自媒体/知识库/热点）
+9. 内容工作室（热点驱动自媒体/短篇/知识库）
 10. 发布看板（发布/出海/数据）
+
+现有前端仍以创作向导为入口，尚未达到上述 V2.2 信息架构，不能视为主流程验收通过。
 
 ## 开发文档
 
@@ -119,6 +107,7 @@ docker-compose.yml
 - 16-编码规范.md
 - 17-安全设计文档.md
 - 18-架构决策记录ADR.md
+- 19-开源项目融合基线.md
 
 ## AI 配置系统
 
