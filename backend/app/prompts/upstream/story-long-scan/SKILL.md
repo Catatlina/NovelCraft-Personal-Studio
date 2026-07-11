@@ -56,7 +56,7 @@ metadata: {"openclaw":{"source":"https://github.com/worldwonderer/oh-story-claud
 优先运行对应平台脚本直接采集结构化数据。起点使用移动端 SSR pageContext，默认不需要 Chrome/CDP；番茄等需要浏览器态的平台再使用 `/browser-cdp` 启动 Chrome。
 
 **采集流程**：
-1. 选择平台脚本；起点直接运行 `scripts/qidian-rank-scraper.js`，番茄/七猫/晋江等按需启动 browser-cdp
+1. 生产链路统一使用 `backend/scripts/capture_ranking.py` 的可见浏览器工件协议；遇登录或安全挑战由用户接管。下列旧 `scripts/*-rank-scraper.js` 仅保留为上游研究材料，不得用于验证码、签名或访问控制绕过，也不得作为已验收数据源。
 2. 等待列表元素或 SSR 数据加载，逐条提取字段（排名、书名、作者、题材、字数、推荐/在读数等），判断翻页（起点通常单页50-100条，番茄按题材逐页cap≈20）
 3. 需要补充数据时（标签、简介、最新更新），进入详情页提取
 4. 按规范格式写入 Markdown 文件
@@ -64,7 +64,7 @@ metadata: {"openclaw":{"source":"https://github.com/worldwonderer/oh-story-claud
 
 **输出规范**：详见 [references/scan-output-format.md](references/scan-output-format.md)，包含各平台字段定义、输出模板。
 
-**起点采集目标**（优先运行 `node scripts/qidian-rank-scraper.js --type {榜单} --outdir {输出目录}`；默认 `--mode auto` 会先用 `https://m.qidian.com` 移动端 SSR，PC/CDP 只作回退）：
+**起点采集目标**（使用可见浏览器与用户会话；挑战未完成时输出 `user_action_required`，禁止静默降级或自动破解）：
 
 | 榜单 | URL | 核心字段 |
 |------|-----|----------|

@@ -6,45 +6,20 @@ import re, json, urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
+from app.services.ranking_capture import configured_capture
+
 
 # ============================================================
 # Source 1: 番茄小说 (fanqienovel.com) — HTML 解析
 # ============================================================
 
 def fetch_fanqie_ranking(category: str = "novel_rank") -> list[dict]:
-    """
-    Scrape 番茄小说 mobile API (no auth required).
-    Returns list of {rank, title, author, status, readers, last_update, url}.
-    """
-    url = f"https://fanqienovel.com/api/author/library/book_list/v0/rank/?page_size=20&rank_type=1&category_type=0"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Referer": "https://fanqienovel.com/",
-        "Accept": "application/json",
-    }
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        books = data.get("data", {}).get("book_list", data.get("data", []))
-        if isinstance(books, dict):
-            books = list(books.values())
-        results = []
-        for i, b in enumerate(books[:20], 1):
-            if isinstance(b, dict):
-                results.append({
-                    "rank": i,
-                    "title": b.get("book_name", b.get("title", "")),
-                    "author": b.get("author", ""),
-                    "status": "completed" if b.get("is_finish") else "ongoing",
-                    "readers": str(b.get("read_count", "")),
-                    "last_update": b.get("last_publish_time_desc", ""),
-                    "source": "fanqie",
-                    "url": f"https://fanqienovel.com/page/{b.get('book_id', '')}",
-                })
-        return results
-    except Exception as e:
-        return [{"source": "fanqie", "error": str(e), "degraded": True}]
+    """Load a rendered browser/OCR capture of public Fanqie rank metadata."""
+    capture = configured_capture("fanqie")
+    if capture:
+        return capture.as_adapter_items()
+    return [{"source": "fanqie", "degraded": True,
+             "error": "Fanqie requires a rendered browser/OCR capture; set RANKING_CAPTURE_FANQIE_PATH"}]
 
 
 # ============================================================
@@ -52,44 +27,13 @@ def fetch_fanqie_ranking(category: str = "novel_rank") -> list[dict]:
 # ============================================================
 
 def fetch_qidian_ranking() -> list[dict]:
-    """
-    Fetch 起点排行榜 via JSONP API.
-    Returns list of {rank, title, author, category, status, url}.
-    """
-    url = "https://www.qidian.com/ajax/rank/index?channelId=0&catId=0&style=1&page=1"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Referer": "https://www.qidian.com/rank/",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            text = resp.read().decode("utf-8", errors="replace")
-        # Qidian returns JSONP: jQuery(...) — extract JSON
-        match = re.search(r'\((\{.*\})\)', text, re.DOTALL)
-        if match:
-            data = json.loads(match.group(1))
-        else:
-            data = json.loads(text) if text.startswith("{") else {}
-        books = data.get("data", {}).get("books", data.get("data", []))
-        if not books:
-            raise ValueError("Qidian returned no ranking data (possible anti-bot or schema drift)")
-        results = []
-        for i, b in enumerate(books[:20], 1):
-            results.append({
-                "rank": i,
-                "title": b.get("bName", b.get("bookName", "")),
-                "author": b.get("bAuth", b.get("authorName", "")),
-                "category": b.get("catName", ""),
-                "status": b.get("bookStatus", ""),
-                "readers": str(b.get("bScore", "")),
-                "source": "qidian",
-                "url": f"https://www.qidian.com/book/{b.get('bid', b.get('bookId', ''))}/",
-            })
-        return results
-    except Exception as e:
-        return [{"source": "qidian", "error": str(e), "degraded": True}]
+    """Load public Qidian rank metadata captured in a user-controlled browser."""
+    capture = configured_capture("qidian")
+    if capture:
+        return capture.as_adapter_items()
+    return [{"source": "qidian", "degraded": True,
+             "error": "Qidian requires a user-controlled browser capture; complete any challenge manually, "
+                      "then set RANKING_CAPTURE_QIDIAN_PATH"}]
 
 
 # ============================================================
@@ -171,6 +115,12 @@ def normalize_ranking_items(source: str, items: list[dict], fetched_at: datetime
             external_id = path_ids[-1] if path_ids else None
         identity = external_id or f"{title.casefold()}|{author.casefold()}"
         dedupe_key = hashlib.sha256(f"{source}:{identity}".encode("utf-8")).hexdigest()
+        metrics = {"readers": str(raw.get("readers", "")), "status": str(raw.get("status", "")),
+                   "last_update": str(raw.get("last_update", ""))}
+        if any(key in raw for key in ("collector", "confidence", "evidence")):
+            metrics.update({"collector": str(raw.get("collector", "http")),
+                            "confidence": float(raw.get("confidence", 1.0)),
+                            "evidence": raw.get("evidence", {})})
         item = {
             "source_key": source,
             "external_id": external_id,
@@ -179,8 +129,7 @@ def normalize_ranking_items(source: str, items: list[dict], fetched_at: datetime
             "author": author,
             "category": str(raw.get("category", "")),
             "source_url": source_url,
-            "metrics": {"readers": str(raw.get("readers", "")), "status": str(raw.get("status", "")),
-                        "last_update": str(raw.get("last_update", ""))},
+            "metrics": metrics,
             "dedupe_key": dedupe_key,
             "fetched_at": fetched_at,
         }
