@@ -11,6 +11,8 @@ import { Settings } from "./components/Settings";
 import { Studio } from "./components/Studio";
 import { PublishDashboard } from "./components/PublishDashboard";
 import { LoginPage } from "./components/LoginPage";
+import { RankingCenter } from "./components/RankingCenter";
+import { BookLibrary } from "./components/BookLibrary";
 import { ApiError, api as baseApi } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
@@ -25,7 +27,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
+type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
 
 const API = "";
 
@@ -44,7 +46,7 @@ function textToDoc(text: string): TipTapDoc {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("wizard");
+  const [tab, setTab] = useState<Tab>("ranking");
   const [token, setToken] = useState(() => sessionStorage.getItem("nc_token") || "");
   const [userEmail, setUserEmail] = useState("");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
@@ -332,11 +334,13 @@ export default function App() {
 
   const review = run?.nodes.find(n => n.node_key === "n8")?.output as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
 
-  const titles: Record<Tab, string> = { wizard: "灵感到第一章", progress: "Bootstrap 工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板" };
+  const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
   const cmdActions = [
+    { id: "ranking", label: "扫榜中心 → 自动生成小说", action: () => setTab("ranking") },
+    { id: "library", label: "统一书库", action: () => setTab("library") },
     { id: "wizard", label: "创作向导 → 新建小说", action: () => setTab("wizard") },
     { id: "progress", label: "生成进度 → 查看工作流", action: () => setTab("progress") },
     { id: "editor", label: "编辑器 → 写章节", action: () => setTab("editor") },
@@ -371,6 +375,8 @@ export default function App() {
   return (
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
       {error && <div className="error">{error}</div>}
+      {tab === "ranking" && project && <RankingCenter projectId={project.id} onBookCreated={async (novelId, runId) => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); if (runId) { setTab("progress"); await refreshRun(runId); } else setTab("library"); }} />}
+      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
       {tab === "review" && <Review chapter={novel} characters={characters} timeline={[]} arcs={[]} />}

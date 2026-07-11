@@ -1,0 +1,160 @@
+"""Product-level contract tests for the ranking-driven novel workflow.
+
+These tests deliberately avoid live ranking websites and a running Celery worker.
+They protect the public API, persistence schema, explicit source-failure semantics,
+and the automatic path that must not pause for a title already selected by ranking.
+"""
+import json
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+
+
+ROOT = Path(__file__).resolve().parents[2]
+MIGRATION = ROOT / "backend/alembic/versions/b73d14f0c2a1_add_ranking_product_flow.py"
+
+
+def test_ranking_routes_are_registered_on_application():
+    from app.main import app
+
+    routes = {(route.path, method) for route in app.routes for method in getattr(route, "methods", set())}
+    required = {
+        ("/api/v1/ranking/sources", "GET"),
+        ("/api/v1/ranking/sources/{source_key}/scan", "POST"),
+        ("/api/v1/ranking/snapshots", "GET"),
+        ("/api/v1/ranking/snapshots/{snapshot_id}", "GET"),
+        ("/api/v1/ranking/snapshots/{snapshot_id}/analyze", "POST"),
+        ("/api/v1/ranking/topics", "GET"),
+        ("/api/v1/ranking/topics/{topic_id}/generate-book", "POST"),
+        ("/api/v1/ranking/library/books", "GET"),
+    }
+    assert required <= routes
+
+
+def test_ranking_migration_has_dedicated_traceable_product_tables():
+    sql = MIGRATION.read_text(encoding="utf-8")
+
+    for table in (
+        "ranking_sources",
+        "ranking_snapshots",
+        "ranking_items",
+        "market_analyses",
+        "topic_candidates",
+    ):
+        assert f"CREATE TABLE {table}" in sql
+        assert f"DROP TABLE IF EXISTS {table}" in sql
+
+    assert "UNIQUE(project_id, source_key)" in sql
+    assert "UNIQUE(snapshot_id, rank_no)" in sql
+    assert "snapshot_id UUID NOT NULL REFERENCES ranking_snapshots" in sql
+    assert "analysis_id UUID NOT NULL REFERENCES market_analyses" in sql
+    assert "novel_id UUID REFERENCES contents(id)" in sql
+
+
+def test_all_supported_ranking_sources_have_registered_fetchers():
+    from app.api.v1.ranking import SOURCE_NAMES
+    from app.services.ranking_adapter import RANKING_FETCHERS
+
+    assert set(RANKING_FETCHERS) == set(SOURCE_NAMES) == {"fanqie", "qidian", "zongheng"}
+    assert all(callable(fetcher) for fetcher in RANKING_FETCHERS.values())
+
+
+class _ScanDb:
+    def __init__(self):
+        self.statements = []
+        self.committed = False
+        self.closed = False
+
+    def execute(self, sql, params=()):
+        self.statements.append((" ".join(sql.split()), params))
+        return self
+
+    def fetchone(self):
+        return {"id": "source-id"}
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_scan_source_failure_is_persisted_and_raised_as_gateway_error(monkeypatch):
+    """A broken upstream must never become a successful empty snapshot."""
+    from app.api.v1 import ranking
+
+    db = _ScanDb()
+    monkeypatch.setattr(ranking, "connect", lambda: db)
+    monkeypatch.setattr(ranking, "require_member", lambda *_args, **_kwargs: None)
+    monkeypatch.setitem(
+        ranking.RANKING_FETCHERS,
+        "fanqie",
+        lambda: [{"source": "fanqie", "error": "upstream timeout", "degraded": True}],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        ranking.scan_source("fanqie", "project-id", {"id": "user-id"})
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail["code"] == "RANKING_SOURCE_FAILED"
+    assert exc_info.value.detail["reason"] == "upstream timeout"
+    assert db.committed and db.closed
+    persisted_sql = " ".join(sql for sql, _ in db.statements)
+    assert "ranking_snapshots" in persisted_sql and "'failed'" in persisted_sql
+    assert "'succeeded'" not in persisted_sql
+
+
+class _RunDb:
+    def __init__(self):
+        self.statements = []
+        self.committed = False
+        self.closed = False
+
+    def execute(self, sql, params=()):
+        self.statements.append((" ".join(sql.split()), params))
+        return self
+
+    def fetchone(self):
+        return {
+            "id": "novel-id",
+            "meta": {"idea": "榜单原创题材", "genre": "玄幻", "style": "商业网文"},
+        }
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_create_run_with_selected_title_skips_title_and_human_nodes(monkeypatch):
+    from app.workers import tasks
+
+    db = _RunDb()
+    dispatched = []
+    monkeypatch.setattr(tasks, "connect", lambda: db)
+    monkeypatch.setattr(tasks.execute_bootstrap, "delay", lambda *args: dispatched.append(args))
+
+    run_id = tasks.create_run(
+        "project-id",
+        "novel-id",
+        "api-key",
+        "https://provider.example/v1",
+        "model-id",
+        selected_title="榜单原创书名",
+    )
+
+    assert run_id
+    assert db.committed and db.closed
+    assert dispatched == [(run_id, "n3", "api-key", "https://provider.example/v1", "model-id")]
+
+    skip_updates = [params for sql, params in db.statements if "node_key IN ('n1','n2')" in sql]
+    assert len(skip_updates) == 1
+    assert skip_updates[0][1] == run_id
+    assert json.loads(skip_updates[0][0])["selected_title"] == "榜单原创书名"
+
+    run_updates = [params for sql, params in db.statements if "current_node_key='n3'" in sql]
+    assert len(run_updates) == 1
+    assert json.loads(run_updates[0][0])["selected_title"] == "榜单原创书名"
+    assert run_updates[0][1] == run_id

@@ -1,7 +1,6 @@
 """TASK-001/M1: Real ranking source adapters — HTTP scraping, no API key needed."""
 
 import re, json, urllib.request
-from typing import Optional
 
 
 # ============================================================
@@ -121,6 +120,13 @@ def collect_all_rankings() -> dict:
         "qidian": fetch_qidian_ranking(),
         "zongheng": fetch_zongheng_ranking(),
     }
+
+
+RANKING_FETCHERS = {
+    "fanqie": fetch_fanqie_ranking,
+    "qidian": fetch_qidian_ranking,
+    "zongheng": fetch_zongheng_ranking,
+}
 
 
 def store_ranking_snapshot(rankings: dict) -> int:

@@ -114,6 +114,11 @@ meter { width: 100%; }
 .card-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .card-list article { padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
 .card-list small { color: var(--text-muted); display: block; text-transform: uppercase; font-size: 11px; }
+.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }
+.feature-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.feature-card small, .muted { color: var(--text-muted); }
+.feature-card p { color: var(--text-secondary); font-size: 13px; }
+.danger-text { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); }

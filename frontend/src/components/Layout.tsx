@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Check, CircleDollarSign, Code2, FileText, GitBranch, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
+import { BookOpen, Check, CircleDollarSign, Code2, FileText, GitBranch, Library, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
 
-type Tab = "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
+type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
 
 export function Layout({ tab, setTab, title, runStatus, children }: {
   tab: Tab; setTab: (t: Tab) => void; title: string;
@@ -17,6 +17,8 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
       <aside className="sidebar">
         <div className="brand"><span>N</span> NovelCraft</div>
         <nav>
+          <TabBtn icon={<BookOpen size={18} />} active={tab==="ranking"} label="扫榜中心" onClick={()=>setTab("ranking")} />
+          <TabBtn icon={<Library size={18} />} active={tab==="library"} label="书库" onClick={()=>setTab("library")} />
           <TabBtn icon={<Sparkles size={18} />} active={tab==="wizard"} label="创作向导" onClick={()=>setTab("wizard")} />
           <TabBtn icon={<GitBranch size={18} />} active={tab==="progress"} label="生成进度" onClick={()=>setTab("progress")} />
           <TabBtn icon={<Check size={18} />} active={tab==="review"} label="审阅" onClick={()=>setTab("review")} />

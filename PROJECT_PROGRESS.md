@@ -1,58 +1,42 @@
-# NovelCraft Personal Studio — v2.0.0 进展
+# NovelCraft Personal Studio — 真实进度
 
-> `1d49a3d` · 154 tests (149 core + 5 ranking) · 21 components · 82 backend files · 8 agents
+<!-- delivery-claims: strict -->
 
-## 本轮交付 (2026-07-11)
+> 更新：2026-07-11 ｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+>
+> 旧版百分比、“232/256 已完成”和六项目“全部融合”结论已废止。下面只报告有代码证据的交付边界。
 
-### 依赖安装
-| 包 | 用途 | 状态 |
+## 当前主线
+
+| 能力 | 状态 | 已有证据 | 尚未覆盖 |
+|---|---|---|---|
+| 榜单采集 adapter | 🧪 待验收 | 番茄/起点/纵横 fetcher；失败返回结构化错误 | 真实源稳定性 T5、更多平台 |
+| 榜单专用数据模型 | 🧪 待验收 | sources/snapshots/items/analyses/topics 迁移 | CI migration 与降级验证 |
+| 榜单中心 | 🧪 待验收 | 扫榜、快照、分析、选题、成书前后端入口 | 浏览器 E2E、真实 AI 分析 |
+| 原创市场选题 | 🚧 部分完成 | 基于快照持久化分析信号和候选选题 | 当前为确定性基线，尚未接 Gateway 深度分析与原创性门禁 |
+| 扫榜自动建书 | 🧪 待验收 | 选题创建 `contents(type=novel)`，记录来源并跳过人工选书名节点 | 整书批次、长篇 checkpoint、T4 E2E |
+| 统一书库 | 🧪 待验收 | 独立书库 API/页面，展示小说来源与状态 | 分页、检索、全部生成入口统一入库测试 |
+| 灵感 Bootstrap | 🚧 部分完成 | 灵感→书名→设定→第一章→审核基础链 | 不是产品主入口；真实 Provider 质量验收不足 |
+| 热点自媒体 | 🚧 部分完成 | 热点采集、Dashboard、社媒生成基础 | 热点→多平台稿→入库/发布的可恢复工作流 |
+| 长篇一致性 | 🚧 部分完成 | 上下文、摘要、实体、伏笔、时间线组件 | 百章压力、写后 reconcile、卷级门禁 |
+
+## 六项目融合
+
+| 项目 | 状态 | 真实边界 |
 |---|---|---|
-| pgvector 0.6.0 | PostgreSQL 向量检索 | ✅ Ubuntu |
-| pymupdf | PDF 解析 | ✅ |
-| python-docx | Word 解析 | ✅ |
-| @tiptap/react | 编辑器 | ✅ |
-| diff-match-patch | 文本差量 | ✅ |
+| oh-story-claudecode | 🚧 部分完成 | 已保存 7 个上游 Skill 与许可证；尚未完成 33 PromptSpec、Schema、golden cases 和工作流接入 |
+| denova | 🚧 部分完成 | 有 run/node/SSE 基础；缺完整 WorkflowPlan、事件账本、mutation、post-run verifier |
+| show-me-the-story | 🚧 部分完成 | 有伏笔、上下文和审核组件；章节事实事务链未贯通 |
+| AI_NovelGenerator | 🧱 骨架 | 有目录解析和通用审核；百章记忆、六类一致性、写前检索/写后合并未验收 |
+| AI-auto-generates | 🧱 骨架 | 有批量生成、拆书和 Prompt 基础；缺完整拆书工作台、快捷词条、思维导图 |
+| harnessNovel | 🧱 骨架 | 有阶段规划函数；分层 AI 规划、自适应窗口、合理性审计、知识合并和 humanize 未实现 |
 
-### 功能交付
-| 类别 | 需求 | 状态 |
-|---|---|---|
-| C6 | 伏笔到期注入 (gen_next_chapter 前检测) | ✅ |
-| C6 | 跨章矛盾检测 | ✅ |
-| C6 | 弧线偏移校验 | ✅ |
-| C4 | pgvector 向量检索 + 语义搜索 | ✅ |
-| C4 | 知识库浏览页 (KnowledgeBrowser) | ✅ |
-| C3 | Agent 注册表 (8 agent) + API | ✅ |
-| C2 | 工作流暂停/恢复/取消 | ✅ |
-| UI | Tiptap 编辑器 (替换 RichEditor) | ✅ |
-| C1 | 榜单 adapter (番茄/起点/纵横 - 无需 API Key) | ✅ |
+## 验证基线
 
-### 开源融合
-| 项目 | 融合方式 | 状态 |
-|---|---|---|
-| oh-story (MIT) | 7 skills 直接导入 (125K chars) | ✅ |
-| denova (Apache) | 架构概念移植 | ✅ |
-| show-me-the-story (MIT) | 行为移植 (Go→Python) | ✅ |
-| AI_NovelGenerator (AGPL) | 洁净室等价实现 | ✅ |
-| AI-auto-generates (Apache) | 功能概念移植 | ✅ |
-| harnessNovel (GPL) | 洁净室等价实现 | ✅ |
+- 远端既有 CI：154 项后端测试通过，前端构建通过；其中包含较多 T0/T1 存在性测试，不能代表核心链 E2E。
+- 当前第一批新增验证：Alembic 从空库升级到 `b73d14f0c2a1` 成功；容器内后端 **159 passed**；交付声明门禁通过；前端生产构建通过。尚未执行浏览器 T4 和真实榜单长期 T5，因此相关功能保持 `🧪`。
+- PR：`agent/complete-core-gaps` → `main`（Draft）。
 
-## 硬阻碍状态
+## 下一顺序
 
-| 阻碍 | 状态 | 影响需求数 |
-|---|---|---|
-| pgvector | ✅ **已解** | 5→0 |
-| 离线 L2/L3 | ❌ 仍阻 | 3 |
-| V1 数据库 | ❌ 仍阻 | 1 |
-| 多平台 API Key | ❌ 仍阻 | ~15 |
-
-## 进度条
-
-```
-M1 █████████████████████████░ 88%
-M2 ███████████████████░░░░░ 70%
-M3 ██████████████░░░░░░░░░ 55%
-M4 ██████████░░░░░░░░░░░░░ 40%
-M5 ██████░░░░░░░░░░░░░░░░░ 25%
-─────────────────────────────
-总体 ███████████████░░░░░░ 62%
-```
+以《24-AI开发任务列表》为唯一开发顺序：先完成 RANK/LIB 主链，再做热点自媒体、六项目真实融合、发布回流和出海。任何 AI 子任务只能提交证据，最终状态由主 Agent 验收后更新。

@@ -109,7 +109,8 @@ def execute_bootstrap(self, run_id: str, start_key: str = "n1",
 
 
 def create_run(project_id: str, novel_id: str,
-               api_key: str = "", api_url: str = "", model: str = "") -> str:
+               api_key: str = "", api_url: str = "", model: str = "",
+               selected_title: str = "") -> str:
     """Create a workflow run and its nodes in the database."""
     db = connect()
     novel = db.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone()
@@ -118,6 +119,8 @@ def create_run(project_id: str, novel_id: str,
         raise ValueError("novel not found")
     meta = novel["meta"] if isinstance(novel["meta"], dict) else {}
     context = {"novel_id": novel_id, "idea": meta.get("idea", ""), **meta}
+    if selected_title:
+        context["selected_title"] = selected_title
     run_id = new_id()
     db.execute(
         "INSERT INTO workflow_runs (id, project_id, novel_id, workflow_key, status, current_node_key, context) "
@@ -129,10 +132,17 @@ def create_run(project_id: str, novel_id: str,
             "INSERT INTO run_nodes (id, run_id, node_key, kind, agent, title) VALUES (%s, %s, %s, %s, %s, %s)",
             (new_id(), run_id, node_key, kind, agent, title),
         )
+    start_key = "n1"
+    if selected_title:
+        db.execute("""UPDATE run_nodes SET status='succeeded', output=%s, finished_at=now()
+                      WHERE run_id=%s AND node_key IN ('n1','n2')""",
+                   (encode({"selected_title": selected_title, "source": "ranking_topic"}), run_id))
+        db.execute("UPDATE workflow_runs SET current_node_key='n3', context=%s WHERE id=%s", (encode(context), run_id))
+        start_key = "n3"
     db.commit()
     db.close()
     # Dispatch to Celery
-    execute_bootstrap.delay(run_id, "n1", api_key, api_url, model)
+    execute_bootstrap.delay(run_id, start_key, api_key, api_url, model)
     return run_id
 
 
