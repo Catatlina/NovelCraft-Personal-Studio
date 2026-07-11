@@ -3,7 +3,7 @@ from alembic import op
 
 
 revision = "nc_fusion_account_tracking"
-down_revision = None
+down_revision = "f27bc1058a40"
 
 def upgrade():
     op.execute("""
