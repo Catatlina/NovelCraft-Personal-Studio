@@ -13,16 +13,16 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
   const [inviteRole, setInviteRole] = useState("viewer");
 
   useEffect(() => {
-    api<Member[]>(`/api/v1/projects/${projectId}/members`).then(d => setMembers(d || []));
-    api<Log[]>(`/api/v1/projects/${projectId}/operation-logs`).then(d => setLogs(d || []));
+    api<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`).then(d => setMembers(d.data || []));
+    api<{ data: Log[] }>(`/api/v1/collaboration/logs?project_id=${projectId}`).then(d => setLogs(d.data || []));
   }, [projectId]);
 
   async function invite() {
     if (!inviteEmail) return;
-    await api(`/api/v1/projects/${projectId}/members/invite`, { method: "POST", body: JSON.stringify({ email: inviteEmail, role: inviteRole }) });
+    await api(`/api/v1/collaboration/invite?project_id=${projectId}&email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`, { method: "POST" });
     setInviteEmail("");
-    const d = await api<Member[]>(`/api/v1/projects/${projectId}/members`);
-    setMembers(d || []);
+    const d = await api<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`);
+    setMembers(d.data || []);
   }
 
   const roleIcon = (r: string) => r === "owner" ? <Shield size={12} /> : r === "editor" ? <Activity size={12} /> : null;

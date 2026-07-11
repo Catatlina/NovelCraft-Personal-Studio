@@ -31,5 +31,9 @@ celery_app.conf.update(
             "task": "app.workers.tasks.patrol_check",
             "schedule": 7200.0,  # Every 2 hours
         },
+        "purge-stale-autosaves": {
+            "task": "app.workers.tasks.purge_stale_autosaves",
+            "schedule": 86400.0,  # Daily — C5-05 7-day retention
+        },
     },
 )

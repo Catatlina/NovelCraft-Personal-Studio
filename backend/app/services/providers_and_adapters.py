@@ -107,46 +107,111 @@ def _publish_x(title: str, body: str, token: str = "") -> dict:
 
 
 # ===== Multi-round review =====
+# These review/audit/matrix helpers previously fabricated scores from string
+# length ("固定字典冒充 AI 分析", forbidden by docs/23 §4). They now go through
+# the gateway; provider unavailability surfaces as pending_provider, never as
+# an invented score.
 
-def multi_round_review(content: str, rounds: int = 3) -> dict:
-    """TASK-032/033: Run multi-round review with improving thresholds."""
+def _review_via_gateway(content: str, project_id: str, mutation_id: str) -> dict:
+    from app.gateway import complete
+
+    return complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+        variables={"body": content[:6000]},
+        client_mutation_id=mutation_id,
+    )
+
+
+def multi_round_review(content: str, rounds: int = 3, project_id: str = "") -> dict:
+    """TASK-032/033: Real multi-round review; stops early once the round threshold passes."""
+    import hashlib
+
+    from app.gateway import BudgetExceeded, ProviderError
+
+    digest = hashlib.sha256(content.encode()).hexdigest()[:16]
     results = []
-    for r in range(1, rounds + 1):
-        threshold = 70 + (r - 1) * 10  # 70, 80, 90
-        results.append({
-            "round": r, "threshold": threshold,
-            "passed": len(content) > threshold * 10,  # Simple heuristic
-            "content_length": len(content),
-        })
-    return {"rounds": results, "final_pass": all(r["passed"] for r in results)}
+    for round_no in range(1, rounds + 1):
+        threshold = 70 + (round_no - 1) * 10  # 70, 80, 90
+        try:
+            review = _review_via_gateway(content, project_id, f"multi-review:{digest}:round:{round_no}")
+        except (ProviderError, BudgetExceeded) as exc:
+            results.append({"round": round_no, "threshold": threshold,
+                            "status": "pending_provider", "error": str(exc)})
+            return {"rounds": results, "final_pass": False, "status": "pending_provider"}
+        score = int(review.get("score", 0))
+        passed = score >= threshold
+        results.append({"round": round_no, "threshold": threshold, "score": score,
+                        "passed": passed, "issues": review.get("issues", []), "status": "succeeded"})
+        if not passed:
+            return {"rounds": results, "final_pass": False, "status": "succeeded"}
+    return {"rounds": results, "final_pass": True, "status": "succeeded"}
 
 
 # ===== Cross-model audit =====
 
-def cross_model_audit(content: str, models: list = ["deepseek", "claude", "openai"]) -> dict:
-    """TASK-C6: Cross-model audit — run same content through multiple models."""
+def cross_model_audit(content: str, models: list[str] | None = None, project_id: str = "") -> dict:
+    """TASK-C6: Cross-model audit via the gateway model override, one real call per model."""
+    import hashlib
+
+    from app.gateway import BudgetExceeded, ProviderError, _request_model
+
+    models = models or ["deepseek"]
+    digest = hashlib.sha256(content.encode()).hexdigest()[:16]
     audits = []
     for model in models:
-        word_count = len(content)
-        score = min(95, 50 + word_count // 100)
-        audits.append({"model": model, "score": score, "word_count": word_count, "passed": score >= 70})
-    consensus = sum(a["passed"] for a in audits) / max(len(audits), 1)
-    return {"audits": audits, "consensus": consensus, "overall_pass": consensus >= 0.5}
+        previous = _request_model.get()
+        _request_model.set(model if model not in ("deepseek",) else None)
+        try:
+            review = _review_via_gateway(content, project_id, f"cross-audit:{digest}:{model}")
+            score = int(review.get("score", 0))
+            audits.append({"model": model, "score": score, "passed": score >= 70,
+                           "issues": review.get("issues", []), "status": "succeeded"})
+        except (ProviderError, BudgetExceeded) as exc:
+            audits.append({"model": model, "status": "pending_provider", "error": str(exc)})
+        finally:
+            _request_model.set(previous)
+    scored = [a for a in audits if a.get("status") == "succeeded"]
+    consensus = sum(a["passed"] for a in scored) / len(scored) if scored else 0.0
+    return {"audits": audits, "consensus": consensus,
+            "overall_pass": bool(scored) and consensus >= 0.5,
+            "status": "succeeded" if scored else "pending_provider"}
 
 
 # ===== Matrix batch run =====
 
-def matrix_batch_run(prompt_name: str, variables_list: list[dict], models: list = ["deepseek"]) -> dict:
-    """TASK-039: Matrix batch — same prompt × multiple variables × multiple models."""
+def matrix_batch_run(prompt_name: str, variables_list: list[dict], models: list[str] | None = None,
+                     project_id: str = "") -> dict:
+    """TASK-039: Matrix batch — really executes prompt × variables × models via the gateway."""
+    import hashlib
+    import json as _json
+
+    from app.gateway import BudgetExceeded, ProviderError, _request_model, complete
+
+    models = models or ["deepseek"]
+    task_type = prompt_name.split(".")[-1]
     results = []
-    for i, vars_ in enumerate(variables_list):
+    for index, variables in enumerate(variables_list):
+        var_digest = hashlib.sha256(_json.dumps(variables, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
         for model in models:
-            results.append({
-                "batch": i + 1, "model": model, "variables": vars_,
-                "status": "ready",  # Would call complete() in production
-                "estimated_tokens": len(str(vars_)) * 2,
-            })
-    return {"prompt": prompt_name, "total_runs": len(results), "models": models, "results": results}
+            previous = _request_model.get()
+            _request_model.set(model if model not in ("deepseek",) else None)
+            try:
+                output = complete(
+                    run_id=None, node_key=None, project_id=project_id,
+                    task_type=task_type, prompt_name=prompt_name, variables=variables,
+                    client_mutation_id=f"matrix:{prompt_name}:{var_digest}:{model}",
+                )
+                results.append({"batch": index + 1, "model": model, "variables": variables,
+                                "status": "succeeded", "output": output})
+            except (ProviderError, BudgetExceeded) as exc:
+                results.append({"batch": index + 1, "model": model, "variables": variables,
+                                "status": "pending_provider", "error": str(exc)})
+            finally:
+                _request_model.set(previous)
+    succeeded = sum(1 for r in results if r["status"] == "succeeded")
+    return {"prompt": prompt_name, "total_runs": len(results), "succeeded": succeeded,
+            "models": models, "results": results}
 
 
 # ===== Book analysis workbench =====

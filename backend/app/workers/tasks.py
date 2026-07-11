@@ -872,6 +872,30 @@ def auto_serial_check() -> dict:
 
 
 @celery_app.task
+def purge_stale_autosaves() -> dict:
+    """C5-05: 7-day retention for routine save versions.
+
+    Only manual_save/offline_save are purged, and the 10 most recent per
+    entity are always kept; semantic branches (ai_edit/ai_generate/
+    initial_idea/offline_conflict/before_restore) are never touched."""
+    db = connect()
+    db.execute(
+        """DELETE FROM versions WHERE id IN (
+             SELECT id FROM (
+               SELECT id, ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY created_at DESC) AS rn
+               FROM versions
+               WHERE label IN ('manual_save', 'offline_save')
+                 AND created_at < now() - interval '7 days'
+             ) ranked WHERE ranked.rn > 10
+           )"""
+    )
+    deleted = getattr(db._cur, "rowcount", 0)
+    db.commit()
+    db.close()
+    return {"deleted": deleted}
+
+
+@celery_app.task
 def patrol_check() -> dict:
     """M2 beat: consistency patrol — check foreshadowing, chapter gaps, quality."""
     db = connect()

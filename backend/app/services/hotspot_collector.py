@@ -16,14 +16,17 @@ def _dedup_key(title: str, source: str) -> str:
     return hashlib.sha256(f"{source}:{title}".encode()).hexdigest()[:32]
 
 
-def fetch_hotspots() -> list[dict]:
-    results = []
+def fetch_hotspots() -> tuple[list[dict], dict[str, str]]:
+    """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4)."""
+    results: list[dict] = []
+    source_status: dict[str, str] = {}
     for key, cfg in HOTSPOT_SOURCES.items():
         try:
             req = urllib.request.Request(cfg["url"], headers={"User-Agent": "NovelCraft/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
             items = data.get("data", data.get("realtime", []))[:15]
+            count = 0
             for item in items:
                 title = item.get("target", {}).get("title", item.get("word", ""))
                 if not title: continue
@@ -35,9 +38,11 @@ def fetch_hotspots() -> list[dict]:
                     "fetched_at": datetime.utcnow().isoformat(),
                     "dedup_key": _dedup_key(title, key),
                 })
-        except Exception:
-            continue
-    return results
+                count += 1
+            source_status[key] = "ok" if count else "empty"
+        except Exception as exc:
+            source_status[key] = f"error: {exc}"
+    return results, source_status
 
 
 def compute_freshness_score(fetched_at: str) -> float:

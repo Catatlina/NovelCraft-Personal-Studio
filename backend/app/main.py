@@ -772,7 +772,43 @@ def ai_edit(
         variables={"selection": payload.selection, "instruction": payload.instruction},
         client_mutation_id=payload.client_mutation_id,
     )
+    # C5-03: every AI edit leaves a version branch so the tree stays auditable.
+    conn = connect()
+    conn.execute(
+        """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id, client_mutation_id)
+           VALUES (%s, 'content', %s, 'ai_edit', %s, %s, %s, %s)
+           ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL DO NOTHING""",
+        (new_id("ver"), content_id,
+         encode({"op": str(op), "selection": payload.selection[:2000],
+                 "instruction": payload.instruction[:500], "output": output}),
+         f"editor_{op}", user["id"], payload.client_mutation_id),
+    )
+    conn.commit()
+    conn.close()
     return ok(output)
+
+
+@app.get("/api/v1/agents/status")
+def agents_status(user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Real per-agent stats from run_nodes, scoped to the user's projects."""
+    conn = connect()
+    rows = [dict(r) for r in conn.execute(
+        """SELECT rn.agent AS name,
+                  COUNT(*) AS task_count,
+                  COUNT(*) FILTER (WHERE rn.status = 'running') AS running_count,
+                  MAX(COALESCE(rn.finished_at, rn.started_at)) AS last_run
+           FROM run_nodes rn
+           JOIN workflow_runs wr ON wr.id = rn.run_id
+           JOIN project_members pm ON pm.project_id = wr.project_id
+           WHERE pm.user_id = %s AND rn.agent IS NOT NULL AND rn.agent != ''
+           GROUP BY rn.agent ORDER BY rn.agent""",
+        (user["id"],),
+    ).fetchall()]
+    conn.close()
+    return ok([{"name": r["name"],
+                "status": "running" if r["running_count"] else "idle",
+                "task_count": int(r["task_count"]),
+                "last_run": str(r["last_run"]) if r["last_run"] else "--"} for r in rows])
 
 
 @app.get("/api/v1/ai-calls")

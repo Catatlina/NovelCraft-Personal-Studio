@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Terminal, Play, Pause, RotateCcw, Activity } from "lucide-react";
+import { Terminal, Activity } from "lucide-react";
 import { api } from "../lib/api";
 
 type AgentStatus = { name: string; status: string; task_count: number; last_run: string };
@@ -7,16 +7,13 @@ type AgentStatus = { name: string; status: string; task_count: number; last_run:
 export function AgentConsole() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
 
-  useEffect(() => {
-    // TODO: replace with real API
-    // Simulated agent status — would come from Celery inspect in production
-    setAgents([
-      { name: "StoryArchitect", status: "idle", task_count: 0, last_run: "--" },
-      { name: "Writer", status: "idle", task_count: 0, last_run: "--" },
-      { name: "Reviewer", status: "idle", task_count: 0, last_run: "--" },
-      { name: "Celery Worker", status: "running", task_count: 0, last_run: "--" },
-    ]);
-  }, []);
+  const load = () => {
+    api<{ data: AgentStatus[] }>("/api/v1/agents/status")
+      .then(d => setAgents(d.data || []))
+      .catch(() => setAgents([]));
+  };
+
+  useEffect(load, []);
 
   return (
     <div className="panel">
@@ -42,9 +39,9 @@ export function AgentConsole() {
           ))}
         </tbody>
       </table>
+      {!agents.length && <p className="muted" style={{ fontSize: 12 }}>暂无 Agent 运行记录 — 启动一次生成工作流后此处显示真实节点统计。</p>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={() => api("/api/v1/healthz")}><Activity size={12} /> 刷新</button>
-        <button><RotateCcw size={12} /> 重启Worker</button>
+        <button onClick={load}><Activity size={12} /> 刷新</button>
       </div>
     </div>
   );

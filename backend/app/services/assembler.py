@@ -143,13 +143,25 @@ class ContextAssembler:
         return "\n".join(f"⚠️ 待回收伏笔: {r['content'][:200]}" for r in rows) if rows else "[无到期伏笔]"
 
     def _knowledge_recall(self) -> str:
+        # Query Knowledge Hub with the novel's premise; the old version filtered
+        # knowledge_items.content_id = novel_id, a column no writer populates,
+        # so this layer was permanently empty.
         db = connect()
-        rows = db.execute(
-            "SELECT kind, title, body FROM knowledge_items WHERE content_id = %s LIMIT 8",
-            (self.novel_id,),
-        ).fetchall()
+        novel = db.execute(
+            "SELECT title, project_id, meta FROM contents WHERE id = %s", (self.novel_id,)
+        ).fetchone()
         db.close()
-        items = [f"[{r['kind']}] {r['title']}: {r['body'][:200]}" for r in rows]
+        if not novel:
+            return "[无知识库素材]"
+        meta = novel.get("meta") if isinstance(novel.get("meta"), dict) else {}
+        query = " ".join(filter(None, [novel.get("title", ""), str(meta.get("idea", ""))[:200],
+                                       str(meta.get("genre", ""))]))
+        try:
+            from app.services.knowledge_hub import search
+            rows = search(query or novel.get("title", ""), project_id=novel.get("project_id"), limit=8)
+        except Exception:
+            rows = []
+        items = [f"[{r['kind']}] {r['title']}: {str(r['body'])[:200]}" for r in rows]
         return "\n".join(items) if items else "[无知识库素材]"
 
     def _chapter_outline(self) -> str:
