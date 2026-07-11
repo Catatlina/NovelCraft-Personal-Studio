@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import time
+from functools import wraps
 
 from app.db import connect, encode, new_id, row_to_dict
-from app.gateway import BudgetExceeded, ProviderError, complete, _request_api_key, _request_api_base_url, _request_model
+from app.gateway import (BudgetExceeded, OutputValidationError, ProviderError, complete,
+                         validate_task_output, _request_api_key, _request_api_base_url, _request_model)
 
 from .celery_app import celery_app
 
@@ -20,7 +22,24 @@ BOOTSTRAP_NODES = [
 ]
 
 
+def _isolated_request_context(fn):
+    """Prevent BYOK credentials leaking between tasks in a reused worker process."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        _request_api_key.set(None)
+        _request_api_base_url.set(None)
+        _request_model.set(None)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _request_api_key.set(None)
+            _request_api_base_url.set(None)
+            _request_model.set(None)
+    return wrapped
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
+@_isolated_request_context
 def execute_bootstrap(self, run_id: str, start_key: str = "n1",
                        api_key: str = "", api_url: str = "", model: str = "") -> dict:
     """Execute bootstrap workflow from start_key to human node or completion."""
@@ -63,10 +82,15 @@ def execute_bootstrap(self, run_id: str, start_key: str = "n1",
             celery_app.backend.set(f"run:{run_id}:human", node_key)
             return {"status": "waiting_human", "node_key": node_key}
 
-        conn.execute(
-            "UPDATE run_nodes SET status = 'running', attempt = attempt + 1, started_at = now() WHERE run_id = %s AND node_key = %s",
-            (run_id, node_key),
+        claim = conn.execute(
+            """UPDATE run_nodes SET status='running',attempt=attempt+1,started_at=now(),error=NULL
+               WHERE run_id=%s AND node_key=%s
+                 AND status IN ('pending','failed','pending_provider','pending_budget')
+               RETURNING id""", (run_id, node_key),
         )
+        if hasattr(claim, "rowcount") and claim.rowcount != 1:
+            conn.close()
+            return {"status": "already_claimed", "node_key": node_key}
         conn.execute(
             "UPDATE workflow_runs SET status = 'running', current_node_key = %s, updated_at = now() WHERE id = %s",
             (node_key, run_id),
@@ -84,10 +108,15 @@ def execute_bootstrap(self, run_id: str, start_key: str = "n1",
                 task_type=task_type or "",
                 prompt_name=f"bootstrap.{task_type}",
                 variables=run["context"] if isinstance(run["context"], dict) else {},
+                client_mutation_id=f"bootstrap:{run_id}:{node_key}",
             )
+            output = validate_task_output(task_type or "", output)
         except BudgetExceeded:
             _mark_node(run_id, node_key, "pending_budget", "budget exceeded")
             return {"status": "pending_budget", "node_key": node_key}
+        except OutputValidationError as exc:
+            _mark_node(run_id, node_key, "failed", str(exc))
+            return {"status": "invalid_output", "node_key": node_key}
         except ProviderError:
             _mark_node(run_id, node_key, "pending_provider", "provider error")
             return {"status": "pending_provider", "node_key": node_key}
@@ -98,21 +127,47 @@ def execute_bootstrap(self, run_id: str, start_key: str = "n1",
         _persist_output(run_id, node_key, task_type or "", output)
 
     conn = connect()
+    completed_run = conn.execute("SELECT * FROM workflow_runs WHERE id=%s", (run_id,)).fetchone()
+    completed_context = completed_run["context"] if completed_run and isinstance(completed_run["context"], dict) else {}
+    chapter_id = completed_context.get("chapter_id")
+    chapter = conn.execute("SELECT status FROM contents WHERE id=%s", (chapter_id,)).fetchone() if chapter_id else None
+    needs_review = bool(chapter and chapter["status"] == "needs_rewrite")
+    final_status = "needs_review" if needs_review else "succeeded"
+    novel_status = "needs_review" if needs_review else "draft"
+    topic_status = "needs_review" if needs_review else "generated"
     conn.execute(
-        "UPDATE workflow_runs SET status = 'succeeded', current_node_key = NULL, updated_at = now() WHERE id = %s",
-        (run_id,),
+        """UPDATE workflow_runs SET status=%s,current_node_key=NULL,finished_at=now(),updated_at=now()
+           WHERE id=%s""", (final_status, run_id),
     )
+    if completed_run and completed_run.get("novel_id"):
+        conn.execute("UPDATE contents SET status=%s,updated_at=now() WHERE id=%s",
+                     (novel_status, completed_run["novel_id"]))
+        conn.execute("UPDATE topic_candidates SET status=%s WHERE novel_id=%s",
+                     (topic_status, completed_run["novel_id"]))
     conn.commit()
     conn.close()
-    celery_app.backend.set(f"run:{run_id}:status", "succeeded")
-    return {"status": "succeeded"}
+    celery_app.backend.set(f"run:{run_id}:status", final_status)
+    return {"status": final_status}
 
 
 def create_run(project_id: str, novel_id: str,
                api_key: str = "", api_url: str = "", model: str = "",
-               selected_title: str = "") -> str:
+               selected_title: str = "", idempotency_key: str | None = None) -> str:
     """Create a workflow run and its nodes in the database."""
     db = connect()
+    if idempotency_key:
+        existing = db.execute(
+            "SELECT * FROM workflow_runs WHERE project_id=%s AND idempotency_key=%s",
+            (project_id, idempotency_key),
+        ).fetchone()
+        if existing:
+            db.close()
+            if existing["status"] == "dispatch_failed" or (
+                existing["status"] == "pending" and not existing.get("last_dispatched_at")
+            ):
+                dispatch_bootstrap_run(existing["id"], existing.get("current_node_key") or "n1",
+                                       api_key, api_url, model)
+            return existing["id"]
     novel = db.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone()
     if novel is None:
         db.close()
@@ -123,9 +178,10 @@ def create_run(project_id: str, novel_id: str,
         context["selected_title"] = selected_title
     run_id = new_id()
     db.execute(
-        "INSERT INTO workflow_runs (id, project_id, novel_id, workflow_key, status, current_node_key, context) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (run_id, project_id, novel_id, "bootstrap", "pending", "n1", encode(context)),
+        "INSERT INTO workflow_runs "
+        "(id, project_id, novel_id, workflow_key, status, current_node_key, context, idempotency_key) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (run_id, project_id, novel_id, "bootstrap", "pending", "n1", encode(context), idempotency_key),
     )
     for node_key, kind, agent, title, _task_type in BOOTSTRAP_NODES:
         db.execute(
@@ -141,9 +197,26 @@ def create_run(project_id: str, novel_id: str,
         start_key = "n3"
     db.commit()
     db.close()
-    # Dispatch to Celery
-    execute_bootstrap.delay(run_id, start_key, api_key, api_url, model)
+    dispatch_bootstrap_run(run_id, start_key, api_key, api_url, model)
     return run_id
+
+
+def dispatch_bootstrap_run(run_id: str, start_key: str, api_key: str = "",
+                           api_url: str = "", model: str = "") -> None:
+    """Dispatch or redrive one committed run and persist broker failures."""
+    try:
+        execute_bootstrap.delay(run_id, start_key, api_key, api_url, model)
+    except Exception as exc:
+        db = connect()
+        db.execute("""UPDATE workflow_runs SET status='dispatch_failed', dispatch_attempts=dispatch_attempts+1,
+                      dispatch_error=%s, updated_at=now() WHERE id=%s""", (str(exc), run_id))
+        db.commit(); db.close()
+        raise
+    db = connect()
+    db.execute("""UPDATE workflow_runs SET status=CASE WHEN status='dispatch_failed' THEN 'pending' ELSE status END,
+                  dispatch_attempts=dispatch_attempts+1,last_dispatched_at=now(),dispatch_error=NULL,updated_at=now()
+                  WHERE id=%s""", (run_id,))
+    db.commit(); db.close()
 
 
 def confirm_human(run_id: str, selected_title: str,
@@ -192,6 +265,11 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
     if run is None:
         db.close()
         return
+    node = db.execute("SELECT * FROM run_nodes WHERE run_id=%s AND node_key=%s FOR UPDATE",
+                      (run_id, node_key)).fetchone()
+    if node and node["status"] == "succeeded":
+        db.close()
+        return
     context = run["context"] if isinstance(run["context"], dict) else {}
     context.update(output)
     novel_id = run["novel_id"]
@@ -208,19 +286,33 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
     elif task_type == "gen_worldview":
         wv = output.get("worldview", {})
         knowledge_id = new_id()
-        db.execute(
-            "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (knowledge_id, run["project_id"], novel_id, "worldview", wv.get("name", ""), "\n".join(wv.get("rules", [])), encode(wv)),
-        )
-        knowledge_ids_to_reindex.append(knowledge_id)
+        generation_key = f"run:{run_id}:node:{node_key}:worldview"
+        stored = db.execute(
+            """INSERT INTO knowledge_items
+               (id,project_id,content_id,kind,title,body,meta,generation_key)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (content_id,generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+               DO UPDATE SET title=EXCLUDED.title,body=EXCLUDED.body,meta=EXCLUDED.meta,updated_at=now()
+               RETURNING id""",
+            (knowledge_id, run["project_id"], novel_id, "worldview", wv.get("name", ""),
+             "\n".join(wv.get("rules", [])), encode(wv), generation_key),
+        ).fetchone()
+        knowledge_ids_to_reindex.append(stored["id"] if stored else knowledge_id)
     elif task_type == "gen_characters":
-        for c in output.get("characters", []):
+        for index, c in enumerate(output.get("characters", [])):
             knowledge_id = new_id()
-            db.execute(
-                "INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (knowledge_id, run["project_id"], novel_id, "character", c.get("name", ""), c.get("arc", ""), encode(c)),
-            )
-            knowledge_ids_to_reindex.append(knowledge_id)
+            generation_key = f"run:{run_id}:node:{node_key}:character:{index}"
+            stored = db.execute(
+                """INSERT INTO knowledge_items
+                   (id,project_id,content_id,kind,title,body,meta,generation_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (content_id,generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+                   DO UPDATE SET title=EXCLUDED.title,body=EXCLUDED.body,meta=EXCLUDED.meta,updated_at=now()
+                   RETURNING id""",
+                (knowledge_id, run["project_id"], novel_id, "character", c.get("name", ""),
+                 c.get("arc", ""), encode(c), generation_key),
+            ).fetchone()
+            knowledge_ids_to_reindex.append(stored["id"] if stored else knowledge_id)
     elif task_type == "gen_outline":
         meta = db.execute("SELECT meta FROM contents WHERE id = %s", (novel_id,)).fetchone()
         if meta:
@@ -234,14 +326,24 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
         chapter_text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
         chapter_meta = {"seq": 1, "word_count": count_content_chars(chapter_text)}
         cid = new_id()
-        db.execute(
-            "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            (cid, run["project_id"], novel_id, "chapter", chapter.get("title", ""), encode(body), encode(chapter_meta), "reviewed"),
-        )
+        generation_key = f"run:{run_id}:node:{node_key}:chapter:1"
+        stored = db.execute(
+            """INSERT INTO contents (id,project_id,parent_id,type,title,body,meta,status,generation_key)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (project_id,generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+               DO UPDATE SET title=EXCLUDED.title,body=EXCLUDED.body,meta=EXCLUDED.meta,updated_at=now()
+               RETURNING id""",
+            (cid, run["project_id"], novel_id, "chapter", chapter.get("title", ""),
+             encode(body), encode(chapter_meta), "reviewed", generation_key),
+        ).fetchone()
+        cid = stored["id"] if stored else cid
         context["chapter_id"] = cid
         db.execute(
-            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
-            (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta})),
+            """INSERT INTO versions (id,entity_type,entity_id,label,snapshot,client_mutation_id)
+               VALUES (%s,'content',%s,'ai_generate',%s,%s)
+               ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL DO NOTHING""",
+            (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta}),
+             f"run:{run_id}:node:{node_key}:version"),
         )
         # M2: auto-summarize chapter
         _summarize_and_store(db, cid, chapter.get("body", []))

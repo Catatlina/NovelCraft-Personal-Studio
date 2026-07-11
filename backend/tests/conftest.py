@@ -1,6 +1,11 @@
-"""Test configuration — reset connection pool between test files."""
+"""Test configuration — explicit mock boundary and reset connection pool."""
+import os
+
 import pytest
 from app.db import close_pool
+
+os.environ["NOVELCRAFT_ENV"] = "test"
+os.environ["NOVELCRAFT_ALLOW_MOCK"] = "true"
 
 
 @pytest.fixture(autouse=True)

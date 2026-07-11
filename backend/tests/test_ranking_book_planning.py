@@ -102,7 +102,8 @@ def test_ranking_planning_nodes_use_gateway_and_have_structured_contracts():
         assert nodes[node_key] == task_type
         assert task_type in OUTPUT_CONTRACTS
         assert required_keys <= json.loads(OUTPUT_CONTRACTS[task_type]).keys()
-    assert "complete" in tasks.execute_bootstrap.run.__code__.co_names
+    task_impl = getattr(tasks.execute_bootstrap.run, "__wrapped__", tasks.execute_bootstrap.run)
+    assert "complete" in task_impl.__code__.co_names
 
 
 def test_provider_failure_keeps_retryable_run_state_without_fabricated_output(monkeypatch):

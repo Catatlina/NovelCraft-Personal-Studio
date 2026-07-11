@@ -8,6 +8,8 @@ import urllib.request
 from contextvars import ContextVar
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
 from .config import settings
 from .core.circuit_breaker import circuit_breaker, record_failure, record_success
 from .core.alerts import alert_budget, alert_provider_error
@@ -30,6 +32,78 @@ class BudgetExceeded(RuntimeError):
 
 class ProviderError(RuntimeError):
     """Raised when a configured provider cannot return a usable JSON result."""
+
+
+class OutputValidationError(ProviderError):
+    """Raised when a provider response is JSON but violates the task contract."""
+
+
+class _StrictOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _SynopsisOutput(_StrictOutput):
+    synopsis: str = Field(min_length=20)
+    selling_points: list[str] = Field(min_length=2)
+
+
+class _WorldviewBody(_StrictOutput):
+    name: str = Field(min_length=2)
+    rules: list[str] = Field(min_length=3)
+
+
+class _WorldviewOutput(_StrictOutput):
+    worldview: _WorldviewBody
+
+
+class _CharacterBody(_StrictOutput):
+    name: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    arc: str = Field(min_length=5)
+
+
+class _CharactersOutput(_StrictOutput):
+    characters: list[_CharacterBody] = Field(min_length=3, max_length=8)
+
+
+class _OutlineOutput(_StrictOutput):
+    outline: list[str] = Field(min_length=3)
+
+
+class _ChapterBody(_StrictOutput):
+    title: str = Field(min_length=2)
+    body: list[str] = Field(min_length=3)
+
+
+class _ChapterOutput(_StrictOutput):
+    chapter: _ChapterBody
+
+
+BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
+    "gen_synopsis": _SynopsisOutput,
+    "gen_worldview": _WorldviewOutput,
+    "gen_characters": _CharactersOutput,
+    "gen_outline": _OutlineOutput,
+    "gen_chapter1": _ChapterOutput,
+}
+
+
+def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
+    """Reject malformed creative output before it can be persisted as success."""
+    if not isinstance(output, dict):
+        raise OutputValidationError(f"provider returned non-object output for {task_type}")
+    model = BOOTSTRAP_OUTPUT_MODELS.get(task_type)
+    if not model:
+        return output
+    metadata = output.get("_meta")
+    payload = {key: value for key, value in output.items() if key != "_meta"}
+    try:
+        validated = model.model_validate(payload).model_dump()
+        if metadata is not None:
+            validated["_meta"] = metadata
+        return validated
+    except ValidationError as exc:
+        raise OutputValidationError(f"provider output schema mismatch for {task_type}: {exc}") from exc
 
 
 def complete(
@@ -60,8 +134,10 @@ def complete(
 
     # Route to provider
     if provider == "mock":
-        if not os.getenv("NOVELCRAFT_ENV", "").startswith("dev"):
-            raise ProviderError("mock provider not allowed in production")
+        environment = os.getenv("NOVELCRAFT_ENV", "development").lower()
+        allow_mock = (os.getenv("NOVELCRAFT_ALLOW_MOCK") or os.getenv("ALLOW_MOCK", "false")).lower() == "true"
+        if environment not in {"test", "testing"} or not allow_mock:
+            raise ProviderError("mock provider requires NOVELCRAFT_ENV=test and NOVELCRAFT_ALLOW_MOCK=true")
         output = _mock_output(task_type, variables)
         provider_name = "mock"
         model_name = "mock"
@@ -108,6 +184,10 @@ def complete(
                 raise ProviderError(f"provider {provider} failed and all fallbacks exhausted for {task_type}")
     else:
         raise ProviderError(f"unsupported provider: {provider}")
+
+    output = validate_task_output(task_type, output)
+    if provider_name == "mock":
+        output["_meta"] = {"provider": "mock", "synthetic": True}
 
     latency_ms = int((time.perf_counter() - start) * 1000) + 60
     cost_cny = round((prompt_tokens + completion_tokens) * 0.000002, 4)

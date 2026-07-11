@@ -488,7 +488,13 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
         try:
             run_id = create_run(topic["project_id"], novel_id, request.headers.get("X-Api-Key", ""),
                                 request.headers.get("X-Api-Base-Url", ""), request.headers.get("X-Model", ""),
-                                selected_title=topic["title"])
+                                selected_title=topic["title"],
+                                idempotency_key=f"ranking-topic:{topic_id}:book-plan:v1")
+            status_db = connect()
+            status_db.execute("UPDATE topic_candidates SET status='generating' WHERE id=%s", (topic_id,))
+            status_db.execute("""UPDATE contents SET meta=meta || jsonb_build_object('workflow_run_id',%s),
+                                  updated_at=now() WHERE id=%s""", (run_id, novel_id))
+            status_db.commit(); status_db.close()
             return ok({"novel_id": novel_id, "run_id": run_id, "status": "generating"})
         except Exception as exc:
             return ok({"novel_id": novel_id, "run_id": None, "status": "planning", "warning": f"book created but workflow unavailable: {exc}"})
@@ -500,10 +506,11 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
         "target_words": payload.target_words, "selected_title": topic["title"], "source_type": "ranking_topic",
         "source_ref_id": topic_id, "analysis_id": topic["analysis_id"], "snapshot_id": snapshot_id,
         "workflow_scope": "planning_and_chapter1"}
-    db.execute("""INSERT INTO contents (id,project_id,type,title,body,meta,status,owner_id)
-                  VALUES (%s,%s,'novel',%s,%s,%s,'planning',%s)""",
-               (novel_id, topic["project_id"], topic["title"], encode({"type":"doc","content":[]}), encode(meta), user["id"]))
-    db.execute("UPDATE topic_candidates SET status='generating', novel_id=%s WHERE id=%s", (novel_id, topic_id))
+    db.execute("""INSERT INTO contents (id,project_id,type,title,body,meta,status,owner_id,generation_key)
+                  VALUES (%s,%s,'novel',%s,%s,%s,'planning',%s,%s)""",
+               (novel_id, topic["project_id"], topic["title"], encode({"type":"doc","content":[]}),
+                encode(meta), user["id"], f"ranking-topic:{topic_id}:novel:v1"))
+    db.execute("UPDATE topic_candidates SET status='planned', novel_id=%s WHERE id=%s", (novel_id, topic_id))
     db.commit(); db.close()
     run_id = None
     if payload.auto_start:
@@ -511,7 +518,13 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
         try:
             run_id = create_run(topic["project_id"], novel_id, request.headers.get("X-Api-Key", ""),
                                 request.headers.get("X-Api-Base-Url", ""), request.headers.get("X-Model", ""),
-                                selected_title=topic["title"])
+                                selected_title=topic["title"],
+                                idempotency_key=f"ranking-topic:{topic_id}:book-plan:v1")
+            status_db = connect()
+            status_db.execute("UPDATE topic_candidates SET status='generating' WHERE id=%s", (topic_id,))
+            status_db.execute("""UPDATE contents SET meta=meta || jsonb_build_object('workflow_run_id',%s),
+                                  updated_at=now() WHERE id=%s""", (run_id, novel_id))
+            status_db.commit(); status_db.close()
         except Exception as exc:
             return ok({"novel_id": novel_id, "run_id": None, "status": "planning",
                        "warning": f"book created but workflow unavailable: {exc}"})
