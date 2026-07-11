@@ -13,17 +13,17 @@ from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
-from .gateway import complete
+from .gateway import BudgetExceeded, ProviderError, complete
 from .config import settings
 from .schemas import (
     AiEditRequest,
     AiOperation,
     ApiResponse,
-    BudgetUpdate,
     ContentUpdate,
     HumanConfirm,
     ModelRouteUpdate,
     NovelCreate,
+    ShortStoryCreate,
     VersionRestore,
 )
 from .workers.tasks import confirm_human, create_run
@@ -551,7 +551,8 @@ def resume_generation_batch(request: Request, batch_id: str, user: dict = Depend
 
 @app.post("/api/v1/projects/{project_id}/short-stories")
 @limiter.limit("10/minute")
-async def create_short_story(request: Request, project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+async def create_short_story(request: Request, project_id: str, payload: ShortStoryCreate,
+                             user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Create and bootstrap a short story."""
     conn = connect()
     project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
@@ -562,8 +563,8 @@ async def create_short_story(request: Request, project_id: str, user: dict = Dep
     sid = new_id()
     conn.execute(
         "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (sid, project_id, "short_story", "新短篇", encode({"type":"doc","content":[]}),
-         encode({"idea": "请基于灵感创作", "template": "viral", "genre": "都市", "style": "现代"}), "draft"),
+        (sid, project_id, "short_story", payload.idea[:26], encode({"type":"doc","content":[]}),
+         encode(payload.model_dump()), "draft"),
     )
     conn.commit()
     conn.close()
@@ -601,8 +602,9 @@ async def fanout_content(
                 variables={"selection": src_text[:3000], "instruction": f"改写为{p['name']}格式: {p['style']}"},
             )
             body = {"type": "doc", "content": [{"type": "paragraph", "text": output.get("text", src_text[:500])}]}
-        except Exception:
-            body = {"type": "doc", "content": [{"type": "paragraph", "text": src_text[:500]}]}
+        except (ProviderError, BudgetExceeded) as exc:
+            results.append({"platform": pkey, "status": "pending_provider", "error": str(exc)})
+            continue
 
         conn.execute(
             "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -614,7 +616,8 @@ async def fanout_content(
             "INSERT INTO derivations (id, source_content_id, derived_content_id) VALUES (%s,%s,%s)",
             (new_id(), content_id, derived_id),
         )
-        results.append({"platform": pkey, "type": p["type"], "derived_id": derived_id})
+        results.append({"platform": pkey, "type": p["type"], "derived_id": derived_id,
+                        "status": "succeeded"})
     conn.commit()
     conn.close()
     return ok({"fanout_count": len(results), "items": results})
@@ -877,34 +880,6 @@ def update_model_route(task_type: str, payload: ModelRouteUpdate, user: dict = D
     row = dict(conn.execute("SELECT * FROM model_routes WHERE task_type = %s", (task_type,)).fetchone())
     row["params"] = decode(row["params"], {})
     row["fallback_json"] = decode(row["fallback_json"], [])
-    conn.close()
-    return ok(row)
-
-
-@app.get("/api/v1/admin/budgets")
-def list_budgets(project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn = connect()
-    ensure_project_member(conn, project_id, user)
-    rows = [dict(row) for row in conn.execute("SELECT * FROM budgets WHERE project_id = %s ORDER BY scope", (project_id,)).fetchall()]
-    conn.close()
-    return ok(rows)
-
-
-@app.put("/api/v1/admin/budgets/{project_id}/{scope}")
-def update_budget(project_id: str, scope: str, payload: BudgetUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn = connect()
-    ensure_project_member(conn, project_id, user, {"owner"})
-    conn.execute(
-        """
-        INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
-        VALUES (%s, %s, %s ,%s, 0)
-        ON CONFLICT(project_id, scope)
-        DO UPDATE SET limit_cny = excluded.limit_cny, updated_at = CURRENT_TIMESTAMP
-        """,
-        (new_id("bdg"), project_id, scope, payload.limit_cny),
-    )
-    conn.commit()
-    row = dict(conn.execute("SELECT * FROM budgets WHERE project_id = %s AND scope = %s", (project_id, scope)).fetchone())
     conn.close()
     return ok(row)
 

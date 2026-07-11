@@ -51,6 +51,15 @@ class ModelRouteUpdate(BaseModel):
     fallbacks: list[dict] = []
 
 
+class WorkflowSaveRequest(BaseModel):
+    project_id: str
+    nodes: list[dict] = Field(min_length=1, max_length=100)
+
+
+class BudgetLimitRequest(BaseModel):
+    limit_cny: float = Field(ge=0.000001, le=10000)
+
+
 @router.get("/providers")
 def list_providers(user: dict = Depends(get_current_user)):
     """List all configured AI providers with masked keys."""
@@ -127,7 +136,7 @@ def list_budgets(project_id: str = "", user: dict = Depends(get_current_user)):
 def update_budget(
     project_id: str,
     scope: str,
-    limit_cny: float = 2.0,
+    payload: BudgetLimitRequest,
     user: dict = Depends(get_current_user),
 ):
     ensure_project_member(project_id, user, {"owner"})
@@ -136,7 +145,7 @@ def update_budget(
         """INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
            VALUES (%s, %s, %s, %s, 0)
            ON CONFLICT(project_id, scope) DO UPDATE SET limit_cny=EXCLUDED.limit_cny, updated_at=now()""",
-        (new_id(), project_id, scope, limit_cny),
+        (new_id(), project_id, scope, payload.limit_cny),
     )
     db.commit()
     row = db.execute("SELECT * FROM budgets WHERE project_id = %s AND scope = %s", (project_id, scope)).fetchone()
@@ -217,7 +226,13 @@ def list_workflows(project_id: str = "", user: dict = Depends(get_current_user))
         db.close()
         ensure_project_member(project_id, user)
         db = connect()
-        rows = db.execute("SELECT * FROM workflows WHERE project_id = %s ORDER BY created_at DESC", (project_id,)).fetchall()
+        rows = db.execute(
+            """SELECT * FROM workflows
+               WHERE (project_id = %s OR (project_id IS NULL AND is_preset = TRUE))
+                 AND is_deleted = FALSE
+               ORDER BY project_id NULLS LAST, updated_at DESC""",
+            (project_id,),
+        ).fetchall()
     else:
         rows = db.execute(
             """
@@ -235,22 +250,29 @@ def list_workflows(project_id: str = "", user: dict = Depends(get_current_user))
 @router.put("/workflows/{name}")
 def save_workflow(
     name: str,
-    nodes: list[dict],
-    project_id: str = "",
+    payload: WorkflowSaveRequest,
     user: dict = Depends(get_current_user),
 ):
-    if project_id:
-        ensure_project_member(project_id, user, {"owner", "editor"})
-    else:
-        require_admin(user)
+    project_id = payload.project_id
+    ensure_project_member(project_id, user, {"owner", "editor"})
+    if name == "bootstrap":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SYSTEM_WORKFLOW_READ_ONLY",
+                    "message": "bootstrap is a system workflow; save a named draft instead"},
+        )
     db = connect()
     db.execute(
-        """INSERT INTO workflows (id, project_id, name, config)
+        """INSERT INTO workflows (id, project_id, name, definition)
            VALUES (%s, %s, %s, %s)
-           ON CONFLICT(project_id, name) DO UPDATE SET config=EXCLUDED.config, updated_at=now()""",
-        (new_id(), project_id or None, name, encode({"nodes": nodes})),
+           ON CONFLICT(project_id, name) WHERE project_id IS NOT NULL AND is_deleted=FALSE
+           DO UPDATE SET definition=EXCLUDED.definition, updated_at=now()""",
+        (new_id(), project_id, name, encode({"nodes": payload.nodes})),
     )
     db.commit()
-    row = db.execute("SELECT * FROM workflows WHERE name = %s", (name,)).fetchone()
+    row = db.execute(
+        "SELECT * FROM workflows WHERE project_id=%s AND name=%s AND is_deleted=FALSE",
+        (project_id, name),
+    ).fetchone()
     db.close()
     return {"code": 0, "message": "ok", "data": dict(row or {})}

@@ -25,7 +25,8 @@ export function FanoutMatrix({ contentId }: { contentId: string }) {
     });
     if (data.code === 0) {
       const map: Record<string, any> = {};
-      (data.data as any[]).forEach((item: any) => { map[item.platform] = item; });
+      const items = (data.data as any)?.items || [];
+      items.forEach((item: any) => { map[item.platform] = item; });
       setResults(map);
     }
     setBusy(false);

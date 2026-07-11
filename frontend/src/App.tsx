@@ -411,11 +411,11 @@ export default function App() {
         </div>
       )}
       {tab === "dag" && <DagEditor projectId={project?.id || ""} />}
-      {tab === "settings" && <Settings />}
+      {tab === "settings" && <Settings projectId={project?.id || ""} />}
       {tab === "studio" && <Studio />}
       {tab === "publish" && <PublishDashboard />}
       {tab === "hotspot" && <HotspotDashboard />}
-      {tab === "knowledge" && <KnowledgeBrowser />}
+      {tab === "knowledge" && project && <KnowledgeBrowser projectId={project.id} />}
       {tab === "fanout" && <FanoutMatrix contentId={novel?.id || ""} />}
       {tab === "versions" && chapter && <VersionTree contentId={chapter.id} versions={versions} onRestore={restoreVersion} />}
       {tab === "foreshadowing" && novel && <ForeshadowingBoard novelId={novel.id} />}
