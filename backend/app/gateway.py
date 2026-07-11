@@ -79,6 +79,22 @@ class _ChapterOutput(_StrictOutput):
     chapter: _ChapterBody
 
 
+class _ReviewDimensions(_StrictOutput):
+    prose: float = Field(ge=0, le=100)
+    plot: float = Field(ge=0, le=100)
+    character_ooc: float = Field(ge=0, le=100)
+    world_conflict: float = Field(ge=0, le=100)
+    logic_consistency: float = Field(ge=0, le=100)
+    pace: float = Field(ge=0, le=100)
+    foreshadowing: float = Field(ge=0, le=100)
+
+
+class _ReviewOutput(_StrictOutput):
+    score: float = Field(ge=0, le=100)
+    dimensions: _ReviewDimensions
+    issues: list[str]
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -86,6 +102,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_outline": _OutlineOutput,
     "gen_chapter1": _ChapterOutput,
     "gen_next_chapter": _ChapterOutput,
+    "review_7dim": _ReviewOutput,
 }
 
 

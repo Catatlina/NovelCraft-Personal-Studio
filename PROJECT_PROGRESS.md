@@ -15,7 +15,7 @@
 | 榜单中心 | 🧪 待验收 | 扫榜、快照、分析、选题、成书前后端入口 | 浏览器 E2E、真实 AI 分析 |
 | 原创市场选题 | 🧪 待验收 | 已接 Gateway、严格输出 Schema、输入防注入、候选标题原创边界、失败 `pending_provider` | 缺真实 Provider T3 结果与浏览器验收；原创检查仅为风险辅助，不是版权结论 |
 | 扫榜自动建书 | 🧪 待验收 | 选题创建 `contents(type=novel)`，记录来源并跳过人工选书名节点 | 真实 Provider 整书批次成功路径、T4 E2E |
-| 连续章节流水线 | 🧪 待验收 | 严格输出 Schema、章节级幂等键、连续性风险报告、批次断点续跑+resume、书库入口（续写/批量/恢复/导出）；浏览器实测失败→恢复→pending_provider 链路与导出正文 | 真实 Provider 多章样本、批次成功路径、审核门禁接入 |
+| 连续章节流水线 | 🧪 待验收 | 严格输出 Schema、章节级幂等键、连续性风险报告、章节目录真实落库、七维审核→低分改写→再次审核门禁、批次质量计数与断点恢复、书库入口（续写/批量/恢复/导出） | 真实 Provider 多章样本、审核返工与批次成功路径浏览器 E2E；批次槽位级崩溃恢复仍需加强 |
 | 统一书库 | 🧪 待验收 | 独立书库 API/页面，展示小说来源与状态 | 分页、检索、全部生成入口统一入库测试 |
 | 灵感 Bootstrap | 🚧 部分完成 | 灵感→书名→设定→第一章→审核基础链 | 不是产品主入口；真实 Provider 质量验收不足 |
 | 热点自媒体 | 🚧 部分完成 | 热点采集、Dashboard、社媒生成基础 | 热点→多平台稿→入库/发布的可恢复工作流 |
@@ -38,7 +38,7 @@
 
 - 仓库同步（2026-07-11）：本地 `agent/complete-core-gaps` 与 `origin/agent/complete-core-gaps` 为 `0/0`，不存在未拉取或未推送代码；该分支相对 `origin/main` 为 `45/0`，功能仍在 Draft PR #1，尚未合并到 main。
 - 远端既有 CI：154 项后端测试通过，前端构建通过；其中包含较多 T0/T1 存在性测试，不能代表核心链 E2E。
-- 当前验证（2026-07-11）：Alembic 单头 `nc_sc004_batch_recovery`，干净库 upgrade→downgrade base→upgrade 往返通过（此前融合迁移 `down_revision=None` 造成双头、CI `alembic upgrade head` 连续两次失败，已修复）；宿主机后端 **243 passed**、前端 `tsc -b && vite build` 通过；PR #1 最新后端/前端 CI 均通过。纵横真实采集/持久化已有后端 T3；市场分析仅完成契约和失败语义测试，尚无真实 Provider T3，因此保持 `🧪`。
+- 当前验证（2026-07-11）：Alembic 单头 `nc_sc004_review_gate`，干净库 upgrade→单步 downgrade→upgrade 往返通过；宿主机后端 **259 passed**、前端 `tsc -b && vite build` 通过。纵横真实采集/持久化已有后端 T3；市场分析和章级审核仍缺真实 Provider T3，因此保持 `🧪`。
 - 已知修复（2026-07-11）：novel 导出对 doc 格式章节输出空正文（已改为遍历 `content[]`）；`complete_api.py` 资源端点补齐项目成员校验；伏笔到期检查查询不存在的 `target_chapter` 列、跨章矛盾检查查询不存在的 `character_name/event_time` 列（真库从未生效，已按真实 schema 重写并补真库回归测试）。
 - 已知修复（2026-07-11）：`POST /novels/{id}/import-chapters` 已从“只解析不落库”改为项目权限校验、连续 seq 真实落库、标题幂等去重、已有章节后追加和事务失败回滚；仍缺前端预览/确认入口。
 - 环境提示：docker 前端容器镜像依赖过旧（缺 Tiptap），只挂载 `src` 导致一直在供旧 UI，需 `docker compose build frontend` 重建。

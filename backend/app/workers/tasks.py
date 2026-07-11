@@ -445,6 +445,7 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 
 
 @celery_app.task(bind=True, max_retries=2)
+@_isolated_request_context
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
                            api_key: str = "", api_url: str = "", model: str = "") -> dict:
     """M2: Generate the next chapter using context assembler (with distributed lock)."""
@@ -516,7 +517,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
            DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
            RETURNING id""",
         (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"),
-         encode(body), encode(chapter_meta), "draft", generation_key),
+         encode(body), encode(chapter_meta), "pending_review", generation_key),
     ).fetchone()
     cid = stored["id"] if stored else cid
     db.execute(
@@ -545,17 +546,87 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
     # failure is recorded as unchecked, never silently dropped.
     continuity = _continuity_report(novel_id, next_seq)
 
-    # Summarize
+    # Persist continuity evidence before the review gate so the reviewer can see it.
     db = connect()
-    _summarize_and_store(db, cid, chapter["body"])
     db.execute(
         "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
         (encode({"continuity": continuity}), cid),
     )
     db.commit()
     db.close()
+    review = _review_and_finalize_chapter(
+        cid, novel_id, project_id, next_seq, generation_key, chapter.get("title", ""),
+        list(chapter["body"]), continuity,
+    )
+    db = connect()
+    _summarize_and_store(db, cid, review["body"])
+    db.commit(); db.close()
     return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq,
-            "continuity": continuity}
+            "continuity": continuity, "accepted": review["accepted"],
+            "review_status": review["review_status"], "final_score": review["final_score"],
+            "rewrite_attempts": review["rewrite_attempts"]}
+
+
+def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str, chapter_seq: int,
+                                 generation_key: str, title: str, paragraphs: list[str],
+                                 continuity: dict, threshold: float = 80, max_rewrites: int = 2) -> dict:
+    """Review every generated chapter; rewrites must be reviewed again before acceptance."""
+    current_title = title
+    current_body = list(paragraphs)
+    for attempt in range(max_rewrites + 1):
+        current_text = "\n".join(current_body)
+        review = complete(
+            run_id=None, node_key=None, project_id=project_id,
+            task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+            variables={"chapter_id": chapter_id, "chapter_seq": chapter_seq, "body": current_text,
+                       "continuity": continuity, "threshold": threshold},
+            client_mutation_id=f"{generation_key}:review:{attempt}:v1",
+        )
+        score = float(review["score"])
+        issues = list(review.get("issues", []))
+        review_key = f"{generation_key}:review-record:{attempt}:v1"
+        db = connect()
+        db.execute(
+            """INSERT INTO reviews (id,content_id,score,dimensions,issues,generation_key)
+               VALUES (%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (content_id,generation_key) WHERE generation_key IS NOT NULL
+               DO UPDATE SET score=EXCLUDED.score,dimensions=EXCLUDED.dimensions,issues=EXCLUDED.issues""",
+            (new_id(), chapter_id, score, encode(review["dimensions"]), encode(issues), review_key),
+        )
+        status = "reviewed" if score >= threshold else "pending_review"
+        db.execute("""UPDATE contents SET status=%s,meta=meta || %s,updated_at=now() WHERE id=%s""",
+                   (status, encode({"review_score": score, "review_issues": issues,
+                                    "review_attempts": attempt + 1}), chapter_id))
+        db.commit(); db.close()
+        if score >= threshold:
+            return {"accepted": True, "review_status": "reviewed", "final_score": score,
+                    "rewrite_attempts": attempt, "title": current_title, "body": current_body}
+        if attempt == max_rewrites:
+            db = connect()
+            db.execute("UPDATE contents SET status='needs_rewrite',updated_at=now() WHERE id=%s", (chapter_id,))
+            db.commit(); db.close()
+            return {"accepted": False, "review_status": "needs_rewrite", "final_score": score,
+                    "rewrite_attempts": attempt, "title": current_title, "body": current_body}
+
+        rewritten = complete(
+            run_id=None, node_key=None, project_id=project_id,
+            task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
+            variables={"rewrite": True, "chapter_seq": chapter_seq, "current_title": current_title,
+                       "current_body": current_text, "review_feedback": issues, "continuity": continuity},
+            client_mutation_id=f"{generation_key}:rewrite:{attempt + 1}:v1",
+        )["chapter"]
+        current_title = rewritten["title"]
+        current_body = list(rewritten["body"])
+        rewritten_doc = {"type": "doc", "content": [{"type": "paragraph", "text": text}
+                                                         for text in current_body]}
+        from app.services.text_metrics import count_content_chars
+        db = connect()
+        db.execute("""UPDATE contents SET title=%s,body=%s,meta=meta || %s,status='pending_review',updated_at=now()
+                      WHERE id=%s""",
+                   (current_title, encode(rewritten_doc),
+                    encode({"word_count": count_content_chars("\n".join(current_body)),
+                            "rewrite_attempts": attempt + 1}), chapter_id))
+        db.commit(); db.close()
 
 
 def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
@@ -593,6 +664,7 @@ def batch_generate_chapters_task(
     db.close()
 
     remaining = batch["requested_count"] - batch.get("completed_count", 0)
+    had_needs_review = False
     try:
         for _ in range(remaining):
             db = connect()
@@ -603,11 +675,17 @@ def batch_generate_chapters_task(
             result = gen_next_chapter_task.run(batch["novel_id"], batch["project_id"], api_key, api_url, model)
             if result.get("status") == "skipped":
                 raise RuntimeError(result.get("reason", "chapter generation skipped"))
+            accepted = result.get("accepted", True)
+            had_needs_review = had_needs_review or not accepted
             db = connect()
             db.execute(
-                "UPDATE generation_batches SET completed_count = completed_count + 1, updated_at = now() WHERE id = %s",
+                "UPDATE generation_batches SET completed_count = completed_count + 1, updated_at=now() WHERE id=%s",
                 (batch_id,),
             )
+            db.execute("""UPDATE generation_batches SET generated_count=generated_count+1,
+                           reviewed_count=reviewed_count+1,accepted_count=accepted_count+%s,
+                           needs_review_count=needs_review_count+%s,updated_at=now() WHERE id=%s""",
+                       (1 if accepted else 0, 0 if accepted else 1, batch_id))
             db.commit()
             db.close()
     except (ProviderError, BudgetExceeded) as exc:
@@ -631,10 +709,11 @@ def batch_generate_chapters_task(
         raise
 
     db = connect()
-    db.execute("UPDATE generation_batches SET status = 'succeeded', updated_at = now() WHERE id = %s", (batch_id,))
+    final_status = "needs_review" if had_needs_review else "succeeded"
+    db.execute("UPDATE generation_batches SET status=%s,updated_at=now() WHERE id=%s", (final_status, batch_id))
     db.commit()
     db.close()
-    return {"status": "succeeded", "batch_id": batch_id, "completed_count": batch["requested_count"]}
+    return {"status": final_status, "batch_id": batch_id, "completed_count": batch["requested_count"]}
 
 
 @celery_app.task

@@ -134,6 +134,40 @@ def get_novel_completion_status(novel_id: str) -> dict:
     if scores: avg_score = sum(scores) / len(scores)
 
     db.close()
+    meta = novel.get("meta", {}) if novel and isinstance(novel.get("meta"), dict) else {}
+    target_chapters = int(meta.get("target_chapters") or 0)
+    target_words = int(meta.get("target_words") or 0)
+    target_missing = target_chapters <= 0 and target_words <= 0
+    if target_chapters > 0:
+        generation_percent = min(100, round(len(chapters) / target_chapters * 100))
+        progress_basis = "chapters"
+    elif target_words > 0:
+        generation_percent = min(100, round(word_count / target_words * 100))
+        progress_basis = "words"
+    else:
+        generation_percent = None
+        progress_basis = "missing"
+    review_percent = round(reviewed / len(chapters) * 100) if chapters else 0
+    continuity_flagged = 0
+    continuity_unchecked = 0
+    needs_rewrite = 0
+    for chapter in chapters:
+        chapter_meta = chapter.get("meta", {}) if isinstance(chapter.get("meta"), dict) else {}
+        continuity_status = (chapter_meta.get("continuity") or {}).get("status")
+        continuity_flagged += continuity_status == "flagged"
+        continuity_unchecked += continuity_status == "unchecked"
+        needs_rewrite += chapter.get("status") == "needs_rewrite"
+    quality_warnings = []
+    if reviewed < len(chapters):
+        quality_warnings.append("存在未审核章节")
+    if continuity_flagged:
+        quality_warnings.append(f"{continuity_flagged}章存在连续性风险")
+    if continuity_unchecked:
+        quality_warnings.append(f"{continuity_unchecked}章连续性未检查")
+    if needs_rewrite:
+        quality_warnings.append(f"{needs_rewrite}章需要返工")
+    ready_for_release = bool(chapters) and generation_percent == 100 and reviewed == len(chapters) \
+        and continuity_flagged == 0 and continuity_unchecked == 0 and needs_rewrite == 0
     return {
         "novel_id": novel_id,
         "title": novel["title"] if novel else "",
@@ -141,7 +175,18 @@ def get_novel_completion_status(novel_id: str) -> dict:
         "reviewed_chapters": reviewed,
         "total_words": word_count,
         "average_review_score": round(avg_score, 1),
-        "completion_percent": round(len(chapters) / max(novel.get("meta", {}).get("target_chapters", len(chapters) or 1), 1) * 100 if novel else 0),
+        "completion_percent": generation_percent,
+        "generation_percent": generation_percent,
+        "review_percent": review_percent,
+        "progress_basis": progress_basis,
+        "target_chapters": target_chapters or None,
+        "target_words": target_words or None,
+        "target_missing": target_missing,
+        "continuity_flagged": continuity_flagged,
+        "continuity_unchecked": continuity_unchecked,
+        "needs_rewrite_chapters": needs_rewrite,
+        "quality_warnings": quality_warnings,
+        "ready_for_release": ready_for_release,
         "status": novel.get("status", "unknown") if novel else "not_found",
         "exportable": len(chapters) > 0,
     }
