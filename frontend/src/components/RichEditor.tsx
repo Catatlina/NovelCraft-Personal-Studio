@@ -1,79 +1,83 @@
-import React, { useRef, useState, useEffect } from "react";
-import { Bold, Italic, Heading, Undo, Wand2, Bot, Sparkles } from "lucide-react";
+import React, { useCallback, useState, useRef, useEffect } from "react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
+import { Bold, Italic, Heading, List, Undo, Redo, Wand2, Sparkles, Bot } from "lucide-react";
 
 type Props = {
   value: string;
   onChange: (v: string) => void;
-  onSelection?: (text: string) => void;
-  onAiOp?: (op: "polish" | "rewrite" | "continue") => void;
+  onSelection?: (s: string) => void;
+  onAiOp?: (op: string) => void;
 };
 
 export function RichEditor({ value, onChange, onSelection, onAiOp }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [selBar, setSelBar] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [showAiBar, setShowAiBar] = useState(false);
+  const [barPos, setBarPos] = useState({ x: 0, y: 0 });
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Placeholder.configure({ placeholder: "开始创作..." }),
+    ],
+    content: value ? (value.startsWith("{") ? value : `<p>${value}</p>`) : "",
+    onUpdate: ({ editor }) => {
+      onChange(editor.getHTML());
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const { from, to, empty } = editor.state.selection;
+      if (!empty && from !== to) {
+        const text = editor.state.doc.textBetween(from, to);
+        onSelection?.(text);
+        // Position the AI bar near selection
+        const view = editor.view;
+        const start = view.coordsAtPos(from);
+        const end = view.coordsAtPos(to);
+        setBarPos({ x: (start.left + end.right) / 2, y: start.top - 40 });
+        setShowAiBar(true);
+      } else {
+        setShowAiBar(false);
+      }
+    },
+  });
 
   useEffect(() => {
-    function handleSel() {
-      const sel = window.getSelection();
-      const text = sel?.toString().trim();
-      if (text && text.length > 0) {
-        const range = sel!.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        setSelBar({ x: rect.left + rect.width / 2, y: rect.top - 40, text });
-        onSelection?.(text);
-      } else {
-        setSelBar(null);
-      }
+    if (editor && value !== editor.getHTML()) {
+      editor.commands.setContent(value.startsWith("{") ? value : `<p>${value}</p>`);
     }
-    document.addEventListener("selectionchange", handleSel);
-    return () => document.removeEventListener("selectionchange", handleSel);
-  }, [onSelection]);
+  }, [value, editor]);
 
-  function exec(cmd: string, val?: string) {
-    document.execCommand(cmd, false, val);
-    ref.current?.focus();
-    if (ref.current) onChange(ref.current.innerHTML);
-  }
-
-  function doAiOp(op: "polish" | "rewrite" | "continue") {
-    onAiOp?.(op);
-    setSelBar(null);
-  }
+  if (!editor) return <div>Loading editor...</div>;
 
   return (
     <div style={{ position: "relative" }}>
-      {selBar && onAiOp && (
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: 4, padding: "4px 0", borderBottom: "1px solid var(--border-subtle)", marginBottom: 8 }}>
+        <button onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive("bold") ? "active" : ""}><Bold size={14} /></button>
+        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive("italic") ? "active" : ""}><Italic size={14} /></button>
+        <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive("heading") ? "active" : ""}><Heading size={14} /></button>
+        <button onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={14} /></button>
+        <button onClick={() => editor.chain().focus().undo().run()}><Undo size={14} /></button>
+        <button onClick={() => editor.chain().focus().redo().run()}><Redo size={14} /></button>
+      </div>
+
+      {/* Editor area */}
+      <EditorContent editor={editor} style={{ minHeight: 300, padding: "0 8px", fontSize: 15, lineHeight: 1.8 }} />
+
+      {/* Floating AI bar on text selection */}
+      {showAiBar && (
         <div style={{
-          position: "fixed", left: selBar.x, top: selBar.y,
-          transform: "translateX(-50%)", zIndex: 100,
+          position: "absolute", left: barPos.x, top: barPos.y,
+          transform: "translate(-50%, -100%)",
           display: "flex", gap: 4, padding: "4px 8px",
-          background: "var(--bg-primary)", border: "1px solid var(--border-subtle)",
-          borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,.3)",
+          background: "var(--surface-elevated)", borderRadius: 8,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100,
         }}>
-          <button onClick={() => doAiOp("polish")} title="润色" style={{ padding: "4px 8px" }}><Wand2 size={14} /></button>
-          <button onClick={() => doAiOp("rewrite")} title="改写" style={{ padding: "4px 8px" }}><Bot size={14} /></button>
-          <button onClick={() => doAiOp("continue")} title="续写" style={{ padding: "4px 8px" }}><Sparkles size={14} /></button>
+          <button onClick={() => onAiOp?.("polish")} style={{ fontSize: 12 }}><Wand2 size={12} /> 润色</button>
+          <button onClick={() => onAiOp?.("rewrite")} style={{ fontSize: 12 }}><Sparkles size={12} /> 改写</button>
+          <button onClick={() => onAiOp?.("continue")} style={{ fontSize: 12 }}><Bot size={12} /> 续写</button>
         </div>
       )}
-
-      <div style={{ display: "flex", gap: 4, marginBottom: 8, padding: 4, background: "var(--bg-secondary)", borderRadius: 6 }}>
-        <button type="button" onClick={() => exec("bold")} title="加粗"><Bold size={14} /></button>
-        <button type="button" onClick={() => exec("italic")} title="斜体"><Italic size={14} /></button>
-        <button type="button" onClick={() => exec("formatBlock", "h3")} title="标题"><Heading size={14} /></button>
-        <button type="button" onClick={() => exec("formatBlock", "p")} title="正文"><Undo size={14} /></button>
-      </div>
-      <div
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={e => onChange((e.target as HTMLDivElement).innerHTML)}
-        dangerouslySetInnerHTML={{ __html: value }}
-        style={{
-          minHeight: 300, padding: 12, border: "1px solid var(--border-subtle)",
-          borderRadius: 8, outline: "none", fontSize: 15, lineHeight: 1.8,
-          background: "var(--bg-primary)",
-        }}
-      />
     </div>
   );
 }
