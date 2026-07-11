@@ -14,11 +14,11 @@ from app.db import connect, new_id, encode
 # Commit: browser-act/skills@22aad3f
 # =====================================================
 
-def _run_browseract(command: str, timeout: int = 60) -> dict:
-    """Execute browser-act CLI command. Falls back gracefully if CLI not installed."""
+def _run_browseract(args: list[str], timeout: int = 60) -> dict:
+    """Execute browser-act CLI with an explicit argument list. Falls back gracefully if CLI not installed."""
     try:
         result = subprocess.run(
-            ["browser-act"] + command.split(),
+            ["browser-act", *args],
             capture_output=True, text=True, timeout=timeout
         )
         return {"status": "ok" if result.returncode == 0 else "error",
@@ -29,18 +29,14 @@ def _run_browseract(command: str, timeout: int = 60) -> dict:
         return {"status": "timeout", "message": f"Command timed out after {timeout}s"}
 
 
-def scrape_ranking_with_browseract(url: str, selector: str = "") -> dict:
-    """Use BrowserAct stealth-extract to scrape ranking pages with anti-bot bypass."""
-    cmd = f"stealth-extract {url}"
-    if selector:
-        cmd += f" --selector '{selector}'"
-    return _run_browseract(cmd, timeout=120)
+# NOTE: scrape_ranking_with_browseract (stealth-extract) was removed. Docs/25 forbids
+# breaking anti-bot walls, solving captchas, or forging signatures; ranking capture must
+# go through the user-controlled browser artifact flow in ranking_capture.py.
 
 
 def publish_with_browseract(platform: str, content: str, login_profile: str = "") -> dict:
-    """Use BrowserAct chrome mode to publish content on platforms with existing login."""
-    cmd = f"chrome --profile {login_profile or platform}"
-    result = _run_browseract(cmd)
+    """Use BrowserAct chrome mode to publish content via the user's own logged-in session."""
+    result = _run_browseract(["chrome", "--profile", login_profile or platform])
     if result["status"] == "unavailable":
         return {"status": "manual_fallback", "platform": platform,
                 "instructions": f"安装 browser-act CLI 后自动发布到 {platform}",
@@ -82,7 +78,7 @@ def track_account(platform: str, account_id: str, project_id: str = "") -> dict:
     return {"status": "tracking_started", "tracking_id": tid, "platform": platform, "account_id": account_id}
 
 
-def get_account_diagnostics(platform: str, account_id: str) -> dict:
+def get_account_diagnostics(platform: str, account_id: str, project_id: str = "") -> dict:
     """Clean-room: Diagnose account performance — follower trend, engagement, content stats.
 
     Behavior: insprira generates diagnostic charts (followers/redfox-index/score/posts).
@@ -90,8 +86,9 @@ def get_account_diagnostics(platform: str, account_id: str) -> dict:
     db = connect()
     posts = db.execute(
         "SELECT COUNT(*) as cnt, AVG((meta->>'engagement')::numeric) as avg_eng "
-        "FROM published_posts WHERE platform = %s AND meta->>'account_id' = %s",
-        (platform, account_id),
+        "FROM published_posts WHERE platform = %s AND meta->>'account_id' = %s "
+        "AND (project_id = %s OR (%s = '' AND project_id IS NULL))",
+        (platform, account_id, project_id or None, project_id),
     ).fetchone()
     db.close()
     cnt = posts["cnt"] if posts else 0
@@ -156,8 +153,10 @@ def fetch_community_skills(repo_url: str = "https://github.com/redfox-community/
         req = urllib.request.Request(api_url, headers={"User-Agent": "NovelCraft/1.0"})
         with urllib.request.urlopen(req, timeout=10) as r:
             items = json.loads(r.read())
-    except Exception:
-        items = []
+    except Exception as exc:
+        # Docs/23 §4: an upstream fetch failure must stay visible, never an empty "ok".
+        return {"status": "unavailable", "skill_count": 0, "skills": [],
+                "source": repo_url, "error": str(exc)}
 
     skills = []
     for item in items:

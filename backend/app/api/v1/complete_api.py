@@ -2,10 +2,46 @@
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from app.core.security import get_current_user
+from app.db import connect
 
 router = APIRouter(prefix="/api/v1", tags=["complete"])
 
 def ok(data): return {"code": 0, "message": "ok", "data": data}
+
+
+def require_member(db, project_id: str, user: dict, write: bool = False) -> None:
+    row = db.execute(
+        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
+        (project_id, user["id"]),
+    ).fetchone()
+    if not row:
+        raise HTTPException(403, "not a project member")
+    if write and row["role"] not in {"owner", "editor"}:
+        raise HTTPException(403, "insufficient permissions")
+
+
+def require_novel_member(novel_id: str, user: dict, write: bool = False) -> None:
+    """Resolve a novel to its project and enforce membership before any access."""
+    db = connect()
+    try:
+        novel = db.execute(
+            "SELECT project_id FROM contents WHERE id = %s AND type = 'novel'", (novel_id,)
+        ).fetchone()
+        if not novel:
+            raise HTTPException(404, "novel not found")
+        require_member(db, novel["project_id"], user, write=write)
+    finally:
+        db.close()
+
+
+def require_project_member(project_id: str, user: dict, write: bool = False) -> None:
+    if not project_id or not project_id.strip():
+        raise HTTPException(422, "project_id is required")
+    db = connect()
+    try:
+        require_member(db, project_id, user, write=write)
+    finally:
+        db.close()
 
 
 @router.get("/providers/test/{provider}")
@@ -55,8 +91,9 @@ def analyze_book(title: str, content: str, user: dict = Depends(get_current_user
 
 
 @router.post("/v1/migrate")
-def migrate_v1(project_id: str = "", user: dict = Depends(get_current_user)):
+def migrate_v1(project_id: str, user: dict = Depends(get_current_user)):
     from app.services.v1_migration import create_v1_test_db, migrate_v1_to_v2
+    require_project_member(project_id, user, write=True)
     v1_path = create_v1_test_db()
     stats = migrate_v1_to_v2(v1_path, project_id)
     return ok({"v1_source": v1_path, "stats": stats})
@@ -67,46 +104,48 @@ def migrate_v1(project_id: str = "", user: dict = Depends(get_current_user)):
 @router.get("/novels/{novel_id}/export/txt")
 def export_novel_txt_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
     from app.services.novel_export import export_novel_txt
-    result = export_novel_txt(novel_id)
-    return ok(result)
+    require_novel_member(novel_id, user)
+    return ok(export_novel_txt(novel_id))
 
 
 @router.get("/novels/{novel_id}/export/markdown")
 def export_novel_markdown_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
     from app.services.novel_export import export_novel_markdown
+    require_novel_member(novel_id, user)
     return ok(export_novel_markdown(novel_id))
 
 
 @router.get("/novels/{novel_id}/export/epub")
 def export_novel_epub_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
     from app.services.novel_export import export_novel_epub
+    require_novel_member(novel_id, user)
     return ok(export_novel_epub(novel_id))
 
 
 @router.get("/novels/{novel_id}/completion")
 def get_novel_completion_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
     from app.services.novel_export import get_novel_completion_status
+    require_novel_member(novel_id, user)
     return ok(get_novel_completion_status(novel_id))
 
 
 # --- NC-FUS: BrowserAct + insprira fusion ---
-
-@router.post("/scrape/browseract")
-def scrape_with_browseract(url: str, selector: str = "", user: dict = Depends(get_current_user)):
-    from app.services.fusion_browseract_insprira import scrape_ranking_with_browseract
-    return ok(scrape_ranking_with_browseract(url, selector))
-
+# NOTE: the former POST /scrape/browseract endpoint (stealth-extract anti-bot scraping)
+# was removed: docs/25 forbids bypassing anti-bot measures. Ranking capture goes through
+# the user-controlled browser artifacts in ranking_capture.py instead.
 
 @router.post("/accounts/track")
-def track_account_endpoint(platform: str, account_id: str, project_id: str = "", user: dict = Depends(get_current_user)):
+def track_account_endpoint(platform: str, account_id: str, project_id: str, user: dict = Depends(get_current_user)):
     from app.services.fusion_browseract_insprira import track_account
+    require_project_member(project_id, user, write=True)
     return ok(track_account(platform, account_id, project_id))
 
 
 @router.get("/accounts/{platform}/{account_id}/diagnostics")
-def account_diagnostics(platform: str, account_id: str, user: dict = Depends(get_current_user)):
+def account_diagnostics(platform: str, account_id: str, project_id: str, user: dict = Depends(get_current_user)):
     from app.services.fusion_browseract_insprira import get_account_diagnostics
-    return ok(get_account_diagnostics(platform, account_id))
+    require_project_member(project_id, user)
+    return ok(get_account_diagnostics(platform, account_id, project_id))
 
 
 @router.post("/content/check-compliance")

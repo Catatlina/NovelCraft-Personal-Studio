@@ -5,6 +5,30 @@ from datetime import datetime
 from app.db import connect
 
 
+def extract_body_text(body) -> str:
+    """Extract plain text from a chapter body: plain string, {"text": ...},
+    or the persisted doc format {"type":"doc","content":[{"type":"paragraph","text":...}]}
+    (nodes may also carry standard Tiptap nested content with text leaves)."""
+    if body is None:
+        return ""
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+        except (ValueError, TypeError):
+            return body
+        return body if not isinstance(parsed, (dict, list)) else extract_body_text(parsed)
+    if isinstance(body, list):
+        return "\n".join(filter(None, (extract_body_text(node) for node in body)))
+    if isinstance(body, dict):
+        parts = []
+        if isinstance(body.get("text"), str):
+            parts.append(body["text"])
+        if isinstance(body.get("content"), list):
+            parts.append(extract_body_text(body["content"]))
+        return "\n".join(filter(None, parts))
+    return str(body)
+
+
 def export_novel_txt(novel_id: str) -> dict:
     """Export novel as plain text with chapter markers."""
     db = connect()
@@ -23,11 +47,7 @@ def export_novel_txt(novel_id: str) -> dict:
 
     for ch in chapters:
         lines.append(f"\n--- 第{ch.get('meta', {}).get('seq', '?')}章 {ch['title']} ---\n")
-        body = ch.get("body", "")
-        if isinstance(body, str):
-            lines.append(body)
-        elif isinstance(body, dict):
-            lines.append(str(body.get("text", "")))
+        lines.append(extract_body_text(ch.get("body", "")))
     return {"status": "ok", "format": "txt", "content": "\n".join(lines), "chapter_count": len(chapters)}
 
 
@@ -49,11 +69,7 @@ def export_novel_markdown(novel_id: str) -> dict:
     for ch in chapters:
         seq = ch.get('meta', {}).get('seq', '?') if isinstance(ch.get('meta'), dict) else '?'
         lines.append(f"## 第{seq}章 {ch['title']}\n")
-        body = ch.get("body", "")
-        if isinstance(body, str):
-            lines.append(body + "\n")
-        elif isinstance(body, dict):
-            lines.append(str(body.get("text", "")) + "\n")
+        lines.append(extract_body_text(ch.get("body", "")) + "\n")
 
     return {"status": "ok", "format": "markdown", "content": "\n".join(lines), "chapter_count": len(chapters)}
 
@@ -80,8 +96,7 @@ def export_novel_epub(novel_id: str, output_path: str = "") -> dict:
         for ch in chapters:
             seq = ch.get('meta', {}).get('seq', '?') if isinstance(ch.get('meta'), dict) else ch.get('seq', '?')
             c = epub.EpubHtml(title=ch['title'], file_name=f'ch{seq}.xhtml', lang='zh')
-            body = ch.get("body", "")
-            text = body if isinstance(body, str) else str(body.get("text", ""))
+            text = extract_body_text(ch.get("body", ""))
             c.content = f'<h1>第{seq}章 {ch["title"]}</h1>\n{text.replace(chr(10), "<br/>")}'
             book.add_item(c)
             spine.append(c)
@@ -106,7 +121,7 @@ def get_novel_completion_status(novel_id: str) -> dict:
         (novel_id,)
     ).fetchall()
     word_count = sum(
-        len(str(ch.get("body", ""))) for ch in chapters
+        len(extract_body_text(ch.get("body", ""))) for ch in chapters
     )
     reviewed = sum(1 for ch in chapters if ch.get("status") == "reviewed")
     avg_score = 0
