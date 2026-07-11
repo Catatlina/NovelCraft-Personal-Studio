@@ -87,3 +87,35 @@ def export_novel_epub_endpoint(novel_id: str, user: dict = Depends(get_current_u
 def get_novel_completion_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
     from app.services.novel_export import get_novel_completion_status
     return ok(get_novel_completion_status(novel_id))
+
+
+# --- NC-FUS: BrowserAct + insprira fusion ---
+
+@router.post("/scrape/browseract")
+def scrape_with_browseract(url: str, selector: str = "", user: dict = Depends(get_current_user)):
+    from app.services.fusion_browseract_insprira import scrape_ranking_with_browseract
+    return ok(scrape_ranking_with_browseract(url, selector))
+
+
+@router.post("/accounts/track")
+def track_account_endpoint(platform: str, account_id: str, project_id: str = "", user: dict = Depends(get_current_user)):
+    from app.services.fusion_browseract_insprira import track_account
+    return ok(track_account(platform, account_id, project_id))
+
+
+@router.get("/accounts/{platform}/{account_id}/diagnostics")
+def account_diagnostics(platform: str, account_id: str, user: dict = Depends(get_current_user)):
+    from app.services.fusion_browseract_insprira import get_account_diagnostics
+    return ok(get_account_diagnostics(platform, account_id))
+
+
+@router.post("/content/check-compliance")
+def check_content_compliance(text: str, user: dict = Depends(get_current_user)):
+    from app.services.fusion_browseract_insprira import check_compliance
+    return ok(check_compliance(text))
+
+
+@router.get("/skills/community")
+def fetch_community_skills_endpoint(user: dict = Depends(get_current_user)):
+    from app.services.fusion_browseract_insprira import fetch_community_skills
+    return ok(fetch_community_skills())
