@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Search, BookOpen, FileText, TrendingUp, Plus } from "lucide-react";
+import React, { useState } from "react";
+import { Search, BookOpen, FileText } from "lucide-react";
 import { api } from "../lib/api";
 
 type KnowledgeItem = {
@@ -7,17 +7,17 @@ type KnowledgeItem = {
   similarity?: number; meta?: Record<string, unknown>;
 };
 
-export function KnowledgeBrowser() {
+export function KnowledgeBrowser({ projectId }: { projectId: string }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<KnowledgeItem[]>([]);
   const [kind, setKind] = useState("");
 
   async function search() {
     if (!query) return;
-    const r = await api<{ results: KnowledgeItem[] }>(
-      `/api/v1/knowledge/search?q=${encodeURIComponent(query)}&top_k=10`
-    );
-    setResults(r?.results || []);
+    const params = new URLSearchParams({ project_id: projectId, query });
+    if (kind) params.set("kind", kind);
+    const r = await api<{ data: KnowledgeItem[] }>(`/api/v1/knowledge/search?${params}`, { method: "POST" });
+    setResults(r.data || []);
   }
 
   return (
@@ -39,7 +39,7 @@ export function KnowledgeBrowser() {
             <option value="hotspot">热点</option>
             <option value="ranking">榜单</option>
           </select>
-          <button onClick={search}><Search size={14} /> 搜索</button>
+          <button disabled={!projectId} onClick={search}><Search size={14} /> 搜索</button>
         </div>
       </div>
 

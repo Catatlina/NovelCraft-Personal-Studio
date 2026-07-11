@@ -24,7 +24,9 @@ export function Studio() {
   async function createShortStory() {
     setBusy(true);
     const pid = (await api("/api/v1/projects")).data[0].id;
-    const r = await api(`/api/v1/projects/${pid}/short-stories`, {method:"POST"});
+    const r = await api(`/api/v1/projects/${pid}/short-stories`, {
+      method:"POST", body: JSON.stringify({ idea, template, genre: "都市", style: "现代" }),
+    });
     setResult(r);
     setBusy(false);
     setMsg("短篇已创建！查看审阅页");

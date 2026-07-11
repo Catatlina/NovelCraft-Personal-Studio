@@ -29,11 +29,11 @@ export function DagEditor({ projectId = "" }: { projectId?: string }) {
   async function saveWorkflow() {
     if (!projectId) { setSaveMsg("❌ 缺少项目，无法保存"); setTimeout(() => setSaveMsg(""), 2000); return; }
     try {
-      await api("/api/v1/admin/workflows/bootstrap", {
+      await api("/api/v1/admin/workflows/custom-dag", {
         method: "PUT", headers: {"Content-Type":"application/json"},
         body: JSON.stringify({nodes, project_id: projectId}),
       });
-      setSaveMsg("✅ 已保存");
+      setSaveMsg("✅ 设计稿已保存");
     } catch { setSaveMsg("❌ 保存失败"); }
     setTimeout(() => setSaveMsg(""), 2000);
   }
@@ -43,10 +43,11 @@ export function DagEditor({ projectId = "" }: { projectId?: string }) {
       <div className="panel" style={{ minHeight: 400 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <GitBranch size={18} />
-          <h2 style={{ margin: 0, fontSize: 16 }}>工作流 DAG</h2>
+          <h2 style={{ margin: 0, fontSize: 16 }}>工作流 DAG 设计稿</h2>
           <button onClick={addNode} style={{ marginLeft: "auto" }}><Plus size={14} />添加节点</button>
           <button onClick={saveWorkflow} style={{ marginLeft: 8 }}><Save size={14} />保存{saveMsg && <small style={{marginLeft:4}}>{saveMsg}</small>}</button>
         </div>
+        <p className="muted" style={{ fontSize: 12 }}>当前仅系统 Bootstrap 工作流可执行；这里保存的是项目级设计稿，不会被冒充为已运行。</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 0, alignItems: "center" }}>
           {nodes.map((node, i) => (
             <React.Fragment key={node.key}>

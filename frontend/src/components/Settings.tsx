@@ -8,7 +8,7 @@ type Budget = { id: string; project_id: string; scope: string; limit_cny: number
 type Prompt = { id: string; name: string; version: string; model: string; template: string };
 type AppSetting = { key: string; value: string; description: string; updated_at: string };
 
-export function Settings() {
+export function Settings({ projectId = "" }: { projectId?: string }) {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
@@ -54,20 +54,11 @@ export function Settings() {
 
   async function saveBudget() {
     if (!editBudget) return;
-    const resp = await api(`/api/v1/admin/budgets?project_id=${editBudget.pid}`);
-    const budgets = resp.data || [];
-    
-    if (budgets.length > 0) {
-      await api(`/api/v1/admin/budgets/${budgets[0].id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: editBudget.scope, limit_cny: editBudget.limit })
-      });
-    } else {
-      await api("/api/v1/admin/budgets", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: editBudget.pid, scope: editBudget.scope, limit_cny: editBudget.limit })
-      });
-    }
+    await api(`/api/v1/admin/budgets/${editBudget.pid}/${encodeURIComponent(editBudget.scope)}`, {
+      method: "PUT", body: JSON.stringify({ limit_cny: editBudget.limit }),
+    });
+    const refreshed = await api("/api/v1/admin/budgets");
+    setBudgets(refreshed.data || []);
     setEditBudget(null);
   }
 
@@ -201,17 +192,19 @@ export function Settings() {
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <h3>导入知识库</h3>
-              <input type="file" accept=".json,.csv" onChange={async e=>{
+              <input type="file" accept=".txt,.md,.json,.jsonl,.pdf,.docx" disabled={!projectId} onChange={async e=>{
                 const f=e.target.files?.[0]; if(!f)return;
-                const text=await f.text();
-                await api("/api/v1/import/knowledge_hub",{method:"POST",headers:{"Content-Type":"application/json"},body:text});
+                const form = new FormData(); form.append("file", f);
+                await api(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
                 alert("导入成功");
               }} />
+              {!projectId && <small className="muted">请先选择项目再导入。</small>}
             </div>
             <div>
               <h3>导出知识库</h3>
               <button onClick={async()=>{
-                const r=await api("/api/v1/admin/knowledge_hub?format=json");
+                if (!projectId) { alert("请先选择项目"); return; }
+                const r=await api(`/api/v1/knowledge?project_id=${projectId}`);
                 const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
                 const a=document.createElement("a");a.href=URL.createObjectURL(blob);
                 a.download="novelcraft_knowledge.json";a.click();

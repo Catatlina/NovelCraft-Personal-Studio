@@ -58,7 +58,8 @@ async function tryRefreshToken(): Promise<boolean> {
 
 /** Unified fetch — injects X-Api-Key, X-Api-Url, X-Model, Authorization headers + resolves API base */
 export async function api<T = any>(url: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) };
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const headers: Record<string, string> = { ...(!isFormData ? { "Content-Type": "application/json" } : {}), ...(init?.headers as Record<string, string> || {}) };
   const key = getApiKey(); const apiUrl = getApiUrl(); const model = getModel();
   if (key) headers["X-Api-Key"] = key;
   if (apiUrl) headers["X-Api-Base-Url"] = apiUrl;

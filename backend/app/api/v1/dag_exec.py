@@ -28,20 +28,28 @@ def execute_workflow(name: str, project_id: str, novel_id: str,
     if not member or member["role"] not in {"owner", "editor"}:
         conn.close()
         raise HTTPException(status_code=403, detail="insufficient permissions")
-    wf = row_to_dict(conn.execute("SELECT * FROM workflows WHERE name = %s", (name,)).fetchone())
+    wf = row_to_dict(conn.execute(
+        """SELECT * FROM workflows
+           WHERE name=%s AND is_deleted=FALSE AND (project_id=%s OR project_id IS NULL)
+           ORDER BY (project_id IS NOT NULL) DESC LIMIT 1""",
+        (name, project_id),
+    ).fetchone())
     novel = row_to_dict(conn.execute(
         "SELECT id FROM contents WHERE id = %s AND project_id = %s AND type = 'novel'",
         (novel_id, project_id)).fetchone())
     conn.close()
-    if not wf:
-        raise HTTPException(status_code=404, detail=f"workflow '{name}' not found")
     if not novel:
         raise HTTPException(status_code=404, detail="novel not found in project")
     if name != "bootstrap":
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"workflow '{name}' not found in project")
         raise HTTPException(status_code=501, detail={
             "code": "WORKFLOW_EXECUTOR_NOT_IMPLEMENTED",
             "message": f"workflow '{name}' has no dedicated executor; only 'bootstrap' is runnable",
         })
+    # Bootstrap is a versioned system executor defined in workers.tasks; it does
+    # not depend on a user-saved DAG row. Saved custom graphs remain design-only
+    # until a dedicated executor exists.
     from app.workers.tasks import create_run
     run_id = create_run(project_id, novel_id)
     return ok({"run_id": run_id, "workflow": name, "status": "dispatched"})

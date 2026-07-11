@@ -198,6 +198,129 @@ def test_non_bootstrap_workflow_returns_501(authed):
     assert response.json()["detail"]["code"] == "WORKFLOW_EXECUTOR_NOT_IMPLEMENTED"
 
 
+def test_workflow_draft_contract_persists_definition_and_is_project_scoped(authed):
+    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    payload = {"project_id": project_id,
+               "nodes": [{"key": "n1", "kind": "agent", "title": "设计节点", "task": "gen_titles"}]}
+    saved = client.put("/api/v1/admin/workflows/custom-dag", headers=headers, json=payload)
+    assert saved.status_code == 200
+    assert saved.json()["data"]["definition"]["nodes"][0]["title"] == "设计节点"
+
+    listed = client.get(f"/api/v1/admin/workflows?project_id={project_id}", headers=headers)
+    assert listed.status_code == 200
+    assert any(item["name"] == "custom-dag" for item in listed.json()["data"])
+
+    email = f"isolated-{uuid.uuid4().hex[:6]}@nc.dev"
+    token = client.post("/api/v1/auth/register", json={"email": email, "password": "test1234"}).json()["data"]["access_token"]
+    other_headers = {"Authorization": f"Bearer {token}"}
+    assert client.get(f"/api/v1/admin/workflows?project_id={project_id}", headers=other_headers).status_code == 403
+
+
+def test_system_bootstrap_workflow_cannot_be_overwritten(authed):
+    response = authed["client"].put(
+        "/api/v1/admin/workflows/bootstrap", headers=authed["headers"],
+        json={"project_id": authed["project_id"],
+              "nodes": [{"key": "n1", "kind": "agent", "title": "伪 Bootstrap"}]},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "SYSTEM_WORKFLOW_READ_ONLY"
+
+
+def test_workflow_scope_migration_adds_real_columns_and_indexes():
+    sql = (ROOT / "backend/alembic/versions/nc_audit_workflow_scope.py").read_text(encoding="utf-8")
+    assert "ADD COLUMN IF NOT EXISTS project_id" in sql
+    assert "workflows_project_name_uq" in sql
+
+
+def test_no_duplicate_method_path_routes_are_registered():
+    from collections import Counter
+
+    from app.main import app
+
+    pairs = [
+        (method, route.path)
+        for route in app.routes
+        for method in (getattr(route, "methods", set()) or set())
+        if method not in {"HEAD", "OPTIONS"}
+    ]
+    assert [pair for pair, count in Counter(pairs).items() if count > 1] == []
+
+
+def test_budget_update_matches_settings_request_body(authed):
+    response = authed["client"].put(
+        f"/api/v1/admin/budgets/{authed['project_id']}/bootstrap",
+        headers=authed["headers"], json={"limit_cny": 3.25},
+    )
+    assert response.status_code == 200
+    assert float(response.json()["data"]["limit_cny"]) == 3.25
+
+
+def test_settings_uses_real_knowledge_and_budget_endpoints():
+    source = (ROOT / "frontend/src/components/Settings.tsx").read_text(encoding="utf-8")
+    assert "/api/v1/import/knowledge_hub" not in source
+    assert "/api/v1/admin/knowledge_hub" not in source
+    assert "/api/v1/knowledge/import?project_id=" in source
+    assert "/api/v1/admin/budgets/${editBudget.pid}/${encodeURIComponent(editBudget.scope)}" in source
+
+
+def test_frontend_response_contracts_match_backend_wrappers():
+    knowledge = (ROOT / "frontend/src/components/KnowledgeBrowser.tsx").read_text(encoding="utf-8")
+    hotspots = (ROOT / "frontend/src/components/HotspotDashboard.tsx").read_text(encoding="utf-8")
+    fanout = (ROOT / "frontend/src/components/FanoutMatrix.tsx").read_text(encoding="utf-8")
+    publishing = (ROOT / "frontend/src/components/PublishDashboard.tsx").read_text(encoding="utf-8")
+    assert 'project_id: projectId, query' in knowledge and 'method: "POST"' in knowledge
+    assert "r.data || []" in knowledge
+    assert "response?.data || {}" in hotspots
+    assert "(data.data as any)?.items || []" in fanout
+    assert "Promise.allSettled(selected.map(platform" in publishing
+    assert 'platform=${selected.join(",")}' not in publishing
+
+
+def test_short_story_persists_user_idea_and_template(authed, monkeypatch):
+    from app.db import connect
+    from app.workers import tasks
+
+    monkeypatch.setattr(tasks.bootstrap_short_story_task, "delay",
+                        lambda *_args, **_kwargs: type("Task", (), {"id": "task-1"})())
+    response = authed["client"].post(
+        f"/api/v1/projects/{authed['project_id']}/short-stories",
+        headers=authed["headers"],
+        json={"idea": "真实用户输入的悬疑短篇", "template": "suspense",
+              "genre": "悬疑", "style": "冷峻"},
+    )
+    assert response.status_code == 200
+    db = connect()
+    row = db.execute("SELECT meta FROM contents WHERE id=%s", (response.json()["data"]["short_id"],)).fetchone()
+    db.close()
+    assert row["meta"]["idea"] == "真实用户输入的悬疑短篇"
+    assert row["meta"]["template"] == "suspense"
+
+
+def test_fanout_provider_failure_does_not_create_fake_content(authed, monkeypatch):
+    import app.main as main_module
+    from app.db import connect, encode, new_id
+    from app.gateway import ProviderError
+
+    content_id = new_id()
+    db = connect()
+    db.execute(
+        "INSERT INTO contents (id,project_id,type,title,body,meta,status) VALUES (%s,%s,'chapter','原文',%s,%s,'draft')",
+        (content_id, authed["project_id"],
+         encode({"type": "doc", "content": [{"type": "paragraph", "text": "这是真实原文"}]}),
+         encode({"seq": 1})),
+    )
+    db.commit(); db.close()
+    monkeypatch.setattr(main_module, "complete", lambda **_kwargs: (_ for _ in ()).throw(ProviderError("down")))
+    response = authed["client"].post(
+        f"/api/v1/contents/{content_id}/fanout?platforms=wechat", headers=authed["headers"])
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["status"] == "pending_provider"
+    db = connect()
+    count = db.execute("SELECT COUNT(*) AS c FROM contents WHERE parent_id=%s", (content_id,)).fetchone()["c"]
+    db.close()
+    assert count == 0
+
+
 # --- C5-05: autosave retention --------------------------------------------------
 
 def test_purge_keeps_recent_and_semantic_versions(authed):

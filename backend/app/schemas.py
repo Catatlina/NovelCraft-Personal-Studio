@@ -19,6 +19,13 @@ class NovelCreate(BaseModel):
     target_words: int = Field(default=1000000, ge=1000, le=3000000)
 
 
+class ShortStoryCreate(BaseModel):
+    idea: str = Field(min_length=4, max_length=1200)
+    template: str = Field(default="viral", pattern="^(flash|emotional|suspense|viral|dialogue)$")
+    genre: str = Field(default="都市", max_length=80)
+    style: str = Field(default="现代", max_length=160)
+
+
 class HumanConfirm(BaseModel):
     selected_title: str = Field(min_length=1, max_length=120)
 

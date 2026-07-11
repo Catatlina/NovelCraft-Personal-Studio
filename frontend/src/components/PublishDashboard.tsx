@@ -27,8 +27,12 @@ export function PublishDashboard() {
       setResult({ blocked: true, words: safety.blocked_words });
       return;
     }
-    const r = await api(`/api/v1/publish?content_id=${contentId}&platform=${selected.join(",")}`, {method:"POST"});
-    setResult(r);
+    const settled = await Promise.allSettled(selected.map(platform =>
+      api(`/api/v1/publish?content_id=${contentId}&platform=${encodeURIComponent(platform)}`, {method:"POST"})
+    ));
+    setResult({ items: settled.map((item, index) => item.status === "fulfilled"
+      ? { platform: selected[index], status: "queued", response: item.value }
+      : { platform: selected[index], status: "failed", error: String(item.reason) }) });
   }
 
   async function doTranslate() {

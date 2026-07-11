@@ -5,11 +5,17 @@ import { api } from "../lib/api";
 export function HotspotDashboard() {
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [angles, setAngles] = useState<string[]>([]);
+  const [error, setError] = useState("");
+
+  const applyResult = (response: any) => {
+    const data = response?.data || {};
+    setHotspots(data.hotspots || []);
+    setAngles((data.creative_angles || []).map((item: any) => typeof item === "string" ? item : item.angle));
+    setError("");
+  };
 
   useEffect(() => {
-    api<{ hotspots: any[]; creative_angles: any[] }>("/api/v1/hotspots").then(d => {
-      if (d) { setHotspots(d.hotspots || []); setAngles(d.creative_angles?.map((a: any) => a.angle) || []); }
-    }).catch(() => {});
+    api("/api/v1/hotspots").then(applyResult).catch(caught => setError(`热点获取失败：${String(caught)}`));
   }, []);
 
   return (
@@ -17,10 +23,9 @@ export function HotspotDashboard() {
       <div className="panel">
         <h3><TrendingUp size={14} /> 热点看板</h3>
         <button onClick={() => {
-          api("/api/v1/hotspots").then(d => {
-            if (d) { setHotspots(d.hotspots || []); setAngles(d.creative_angles || []); }
-          });
+          api("/api/v1/hotspots").then(applyResult).catch(caught => setError(`热点获取失败：${String(caught)}`));
         }}><Zap size={12} /> 刷新</button>
+        {error && <div className="error">{error}</div>}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
