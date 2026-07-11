@@ -172,3 +172,29 @@ def check_content_compliance(text: str, user: dict = Depends(get_current_user)):
 def fetch_community_skills_endpoint(user: dict = Depends(get_current_user)):
     from app.services.fusion_browseract_insprira import fetch_community_skills
     return ok(fetch_community_skills())
+
+
+# --- NC-FUS-001~004: Fusion governance ---
+
+@router.get("/fusion/report")
+def get_fusion_report_endpoint(user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import get_fusion_report
+    return ok(get_fusion_report())
+
+
+@router.get("/fusion/contracts")
+def validate_contracts_endpoint(user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import validate_fusion_contracts
+    return ok(validate_fusion_contracts())
+
+
+@router.get("/fusion/integration")
+def get_integration_status(user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import get_fusion_integration_status
+    return ok(get_fusion_integration_status())
+
+
+@router.get("/fusion/integrity")
+def validate_integrity_endpoint(user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import validate_fusion_data_integrity
+    return ok(validate_fusion_data_integrity())
