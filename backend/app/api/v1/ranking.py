@@ -473,7 +473,7 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
 def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
                   user: dict = Depends(get_current_user)):
     db = connect()
-    topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+    topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s FOR UPDATE", (topic_id,)).fetchone()
     if not topic: db.close(); raise HTTPException(404, "topic not found")
     require_member(db, topic["project_id"], user, write=True)
     if topic.get("novel_id"):
@@ -492,9 +492,14 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             return ok({"novel_id": novel_id, "run_id": run_id, "status": "generating"})
         except Exception as exc:
             return ok({"novel_id": novel_id, "run_id": None, "status": "planning", "warning": f"book created but workflow unavailable: {exc}"})
+    snapshot_id = topic.get("snapshot_id")
+    if not snapshot_id:
+        analysis = db.execute("SELECT snapshot_id FROM market_analyses WHERE id=%s", (topic["analysis_id"],)).fetchone()
+        snapshot_id = analysis["snapshot_id"] if analysis else None
     novel_id = new_id(); meta = {"idea": topic["premise"], "genre": topic["genre"], "style": payload.style,
         "target_words": payload.target_words, "selected_title": topic["title"], "source_type": "ranking_topic",
-        "source_ref_id": topic_id}
+        "source_ref_id": topic_id, "analysis_id": topic["analysis_id"], "snapshot_id": snapshot_id,
+        "workflow_scope": "planning_and_chapter1"}
     db.execute("""INSERT INTO contents (id,project_id,type,title,body,meta,status,owner_id)
                   VALUES (%s,%s,'novel',%s,%s,%s,'planning',%s)""",
                (novel_id, topic["project_id"], topic["title"], encode({"type":"doc","content":[]}), encode(meta), user["id"]))

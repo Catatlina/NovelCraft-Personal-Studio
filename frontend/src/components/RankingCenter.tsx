@@ -8,7 +8,7 @@ type Evidence = Record<string, unknown>;
 type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string; metadata_status?: string; collector?: string; confidence?: number; evidence?: Evidence; metrics?: { collector?: string; confidence?: number; evidence?: Evidence; validation?: Evidence } };
 type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals: Array<{ signal?: string; evidence?: string }>; audience: { primary?: string; needs?: string[] }; title_patterns: Array<{ pattern?: string }>; pacing: { opening?: string; retention_hooks?: string[] }; originality_constraints: string[] };
 type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
-type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; novel_id?: string };
+type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string; originality_notes?: string; novel_id?: string };
 type ImportItem = Record<string, unknown>;
 
 function errorText(error: unknown): string {
@@ -249,7 +249,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       </React.Fragment>)}</tbody>
     </table></section>
     <section className="panel"><h2>原创选题池</h2><div className="grid-cards">
-      {topics.map(topic => <article className="feature-card" key={topic.id}><strong>{topic.title}</strong><small>{topic.genre} · 市场分 {topic.market_score}</small><p>{topic.premise}</p><button className="primary" disabled={!!topic.novel_id || !!busy} onClick={() => createBook(topic)}>{topic.novel_id ? "已进入书库" : "自动生成整书"}</button></article>)}
+      {topics.map(topic => <article className="feature-card" key={topic.id}><strong>{topic.title}</strong><small>{topic.genre} · 市场分 {topic.market_score}</small><p>{topic.premise}</p>
+        {topic.target_audience && <small><b>目标受众：</b>{topic.target_audience}</small>}
+        {!!topic.differentiators?.length && <small><b>差异化：</b>{topic.differentiators.join("；")}</small>}
+        {!!topic.market_evidence?.length && <small><b>市场依据：</b>{topic.market_evidence.join("；")}</small>}
+        {topic.risk && <small className="danger-text"><b>风险：</b>{topic.risk}</small>}
+        {topic.originality_notes && <small><b>原创边界：</b>{topic.originality_notes}</small>}
+        <button className="primary" disabled={!!busy} onClick={() => topic.novel_id ? void onBookCreated(topic.novel_id) : void createBook(topic)}>{topic.novel_id ? "打开书库作品" : "创建作品并生成策划+首章"}</button>
+      </article>)}
     </div></section>
   </div>;
 }
