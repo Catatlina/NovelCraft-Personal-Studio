@@ -1001,3 +1001,23 @@ def list_foreshadowings(novel_id: str, user: dict = Depends(get_current_user)) -
     ).fetchall()]
     conn.close()
     return ok(rows)
+
+
+# --- C3: Agent registry ---
+
+@app.get("/api/v1/agents")
+def list_agents_endpoint(user: dict = Depends(get_current_user)) -> ApiResponse:
+    """List all registered AI agents with their contracts."""
+    from app.services.agent_registry import list_agents
+    agents = list_agents()
+    return ok({"agents": agents, "count": len(agents)})
+
+
+@app.get("/api/v1/agents/{agent_id}")
+def get_agent_endpoint(agent_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Get agent definition by ID."""
+    from app.services.agent_registry import get_agent
+    agent = get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
+    return ok({"id": agent_id, **agent})
