@@ -39,6 +39,15 @@ def migrate_v1_to_v2(v1_path: str, project_id: str = "") -> dict:
     v1 = sqlite3.connect(v1_path)
     v1.row_factory = sqlite3.Row
     
+    if not project_id or project_id.strip() == "":
+        project_id = str(uuid.uuid4())
+        # Create project entry first (FK constraint)
+        pdb = connect()
+        pdb.execute("INSERT INTO projects (id, name, owner_id) VALUES (%s, %s, %s)",
+                    (project_id, "V1 Migration Import", "00000000-0000-0000-0000-000000000000"))
+        pdb.commit()
+        pdb.close()
+    
     novels = [dict(r) for r in v1.execute("SELECT * FROM novels").fetchall()]
     stats = {"novels": 0, "chapters": 0, "characters": 0}
     
