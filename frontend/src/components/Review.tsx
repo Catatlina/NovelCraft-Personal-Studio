@@ -12,13 +12,13 @@ export function Review({ chapter, characters, timeline, arcs }: {
 }) {
   const meta = chapter?.meta || {};
   const dims = [
-    { name: "文学性", score: (meta as any).review_literary || 75 },
-    { name: "逻辑", score: (meta as any).review_logic || 75 },
-    { name: "节奏", score: (meta as any).review_rhythm || meta.review_rhythm_score || 75 },
-    { name: "角色", score: (meta as any).review_character || 75 },
-    { name: "对话", score: (meta as any).review_dialogue || 75 },
-    { name: "描写", score: (meta as any).review_description || 75 },
-    { name: "创新", score: (meta as any).review_innovation || 75 },
+    { name: "文学性", score: (meta as any).review_literary || 0 },
+    { name: "逻辑", score: (meta as any).review_logic || 0 },
+    { name: "节奏", score: (meta as any).review_rhythm || meta.review_rhythm_score || 0 },
+    { name: "角色", score: (meta as any).review_character || 0 },
+    { name: "对话", score: (meta as any).review_dialogue || 0 },
+    { name: "描写", score: (meta as any).review_description || 0 },
+    { name: "创新", score: (meta as any).review_innovation || 0 },
   ];
   const totalScore = dims.reduce((s, d) => s + d.score, 0) / dims.length;
 

@@ -16,7 +16,12 @@ from app.config import settings
 
 bearer_scheme = HTTPBearer(auto_error=False)
 JWT_ALGORITHM = "HS256"
-JWT_SECRET = settings.jwt_secret or "dev-secret-change-in-production"
+JWT_SECRET = settings.jwt_secret
+if not JWT_SECRET or JWT_SECRET == "dev-secret-change-in-production":
+    import os as _os
+    if _os.getenv("NOVELCRAFT_ENV", "development") == "production":
+        raise RuntimeError("NOVELCRAFT_JWT_SECRET must be set to 32+ chars in production")
+    JWT_SECRET = "dev-secret-change-in-production"  # dev fallback only
 
 
 def hash_password(password: str) -> str:

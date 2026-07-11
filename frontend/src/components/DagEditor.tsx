@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ArrowRight, Save, Settings, User, Zap, GitBranch, Plus, X } from "lucide-react";
+import { api } from "../lib/api";
 
 type WFNode = { key: string; kind: "agent"|"human"|"tool"|"branch"; agent?: string; title: string; task?: string };
 const NODE_COLORS: Record<string, string> = { agent: "var(--brand-500)", human: "var(--warning)", tool: "var(--info)", branch: "var(--success)" };
@@ -27,13 +28,12 @@ export function DagEditor() {
 
   async function saveWorkflow() {
     try {
-      const r = await fetch("/api/v1/admin/workflows/bootstrap", {
+      await api("/api/v1/admin/workflows/bootstrap", {
         method: "PUT", headers: {"Content-Type":"application/json"},
         body: JSON.stringify({nodes, project_id:""}),
       });
-      if (r.ok) setSaveMsg("✅ 已保存");
-      else setSaveMsg("❌ 保存失败");
-    } catch { setSaveMsg("❌ 网络错误"); }
+      setSaveMsg("✅ 已保存");
+    } catch { setSaveMsg("❌ 保存失败"); }
     setTimeout(() => setSaveMsg(""), 2000);
   }
 

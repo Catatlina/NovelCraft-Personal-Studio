@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Terminal, Play, Pause, RotateCcw, Activity } from "lucide-react";
+import { api } from "../lib/api";
 
 type AgentStatus = { name: string; status: string; task_count: number; last_run: string };
 
@@ -7,6 +8,7 @@ export function AgentConsole() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
 
   useEffect(() => {
+    // TODO: replace with real API
     // Simulated agent status — would come from Celery inspect in production
     setAgents([
       { name: "StoryArchitect", status: "idle", task_count: 0, last_run: "--" },
@@ -41,7 +43,7 @@ export function AgentConsole() {
         </tbody>
       </table>
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={() => fetch("/api/v1/healthz")}><Activity size={12} /> 刷新</button>
+        <button onClick={() => api("/api/v1/healthz")}><Activity size={12} /> 刷新</button>
         <button><RotateCcw size={12} /> 重启Worker</button>
       </div>
     </div>

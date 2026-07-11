@@ -668,7 +668,7 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
         seq = 0
         while True:
             seq += 1
-            yield f"id: {seq}\\n\\n"
+            yield f"id: {seq}\n\n"
             await asyncio.sleep(1)
             conn = connect()
             row = conn.execute(
@@ -679,8 +679,8 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
                 nodes = decode(row["nodes"], [])
                 for n in nodes:
                     seq += 1
-                    yield f"id: {seq}\\ndata: {json.dumps(n)}\\n\\n"
-                yield f"id: {seq+1}\\ndata: {{\\\"status\\\": \\\"completed\\\"}}\\n\\n"
+                    yield f"id: {seq}\ndata: {json.dumps(n)}\n\n"
+                yield f"id: {seq+1}\ndata: {{\"status\": \"completed\"}}\n\n"
                 break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

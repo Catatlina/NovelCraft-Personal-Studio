@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { BookOpen, Check, CircleDollarSign, Code2, FileText, GitBranch, Library, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow } from "lucide-react";
+import { BookOpen, Check, CircleDollarSign, Code2, FileText, GitBranch, Library, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow, TrendingUp, Search, Send, Lightbulb, Users, Terminal } from "lucide-react";
 
-type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
+type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
 
 export function Layout({ tab, setTab, title, runStatus, children }: {
   tab: Tab; setTab: (t: Tab) => void; title: string;
@@ -29,6 +29,13 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
           <TabBtn icon={<Settings size={18} />} active={tab==="settings"} label="设置" onClick={()=>setTab("settings")} />
           <TabBtn icon={<Layers size={18} />} active={tab==="studio"} label="工作室" onClick={()=>setTab("studio")} />
           <TabBtn icon={<Rocket size={18} />} active={tab==="publish"} label="发布" onClick={()=>setTab("publish")} />
+          <TabBtn icon={<TrendingUp size={18} />} active={tab==="hotspot"} label="热点" onClick={()=>setTab("hotspot")} />
+          <TabBtn icon={<Search size={18} />} active={tab==="knowledge"} label="知识库" onClick={()=>setTab("knowledge")} />
+          <TabBtn icon={<Send size={18} />} active={tab==="fanout"} label="分发" onClick={()=>setTab("fanout")} />
+          <TabBtn icon={<GitBranch size={18} />} active={tab==="versions"} label="版本树" onClick={()=>setTab("versions")} />
+          <TabBtn icon={<Lightbulb size={18} />} active={tab==="foreshadowing"} label="伏笔" onClick={()=>setTab("foreshadowing")} />
+          <TabBtn icon={<Users size={18} />} active={tab==="collaboration"} label="协作" onClick={()=>setTab("collaboration")} />
+          <TabBtn icon={<Terminal size={18} />} active={tab==="agents"} label="智能体" onClick={()=>setTab("agents")} />
         </nav>
         <div className="theme-toggle">
           <button onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}{theme==="dark"?"亮色":"暗色"}</button>

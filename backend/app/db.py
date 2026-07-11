@@ -74,6 +74,24 @@ class DB:
         self._conn = conn
         self._cur = conn.cursor()
 
+    def __enter__(self) -> DB:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> bool:
+        try:
+            if exc_type is None:
+                self._conn.commit()
+            else:
+                self._conn.rollback()
+        finally:
+            self.close()
+        return False
+
     def execute(self, sql: str, params: tuple = ()) -> DB:
         self._cur.execute(sql, params)
         return self
@@ -106,7 +124,7 @@ class DB:
 
     def close(self) -> None:
         self._cur.close()
-        self._conn.commit()
+        self._conn.rollback()
         try:
             putconn(self)
         except Exception:

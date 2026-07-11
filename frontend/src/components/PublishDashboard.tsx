@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle } from "lucide-react";
+import { api } from "../lib/api";
 
 export function PublishDashboard() {
   const [platforms] = useState(["wechat","toutiao","xiaohongshu","zhihu","medium","substack","twitter","wordpress","royalroad","kdp"]);
@@ -15,19 +16,19 @@ export function PublishDashboard() {
   const [logs, setLogs] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("/api/v1/publish/records").then(r=>r.json()).then(d=>setRecords(d.data||[]));
+    api("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
   }, [result]);
 
   async function doPublish() {
     if (!contentId) return;
-    const r = await fetch(`/api/v1/publish?content_id=${contentId}&platform=${selected.join(",")}`, {method:"POST"});
-    setResult(await r.json());
+    const r = await api(`/api/v1/publish?content_id=${contentId}&platform=${selected.join(",")}`, {method:"POST"});
+    setResult(r);
   }
 
   async function doTranslate() {
     if (!contentId) return;
-    const r = await fetch(`/api/v1/overseas/translate?content_id=${contentId}&target_lang=en`, {method:"POST"});
-    setTranslateResult(await r.json());
+    const r = await api(`/api/v1/overseas/translate?content_id=${contentId}&target_lang=en`, {method:"POST"});
+    setTranslateResult(r);
   }
 
   async function checkSensitive(contentId: string) {
@@ -35,22 +36,22 @@ export function PublishDashboard() {
   }
 
   async function loadMembers() {
-    const r = await fetch("/api/v1/projects").then(r=>r.json());
+    const r = await api("/api/v1/projects");
     const pid = r.data?.[0]?.id;
     if (pid) {
-      const m = await fetch(`/api/v1/collaboration/members?project_id=${pid}`).then(r=>r.json());
+      const m = await api(`/api/v1/collaboration/members?project_id=${pid}`);
       setMembers(m.data||[]);
-      const l = await fetch(`/api/v1/collaboration/logs?project_id=${pid}`).then(r=>r.json());
+      const l = await api(`/api/v1/collaboration/logs?project_id=${pid}`);
       setLogs(l.data||[]);
     }
   }
 
   async function inviteMember() {
     if (!inviteEmail) return;
-    const r = await fetch("/api/v1/projects").then(r=>r.json());
+    const r = await api("/api/v1/projects");
     const pid = r.data?.[0]?.id;
     if (pid) {
-      await fetch(`/api/v1/collaboration/invite?project_id=${pid}&email=${inviteEmail}&role=${inviteRole}`, {method:"POST"});
+      await api(`/api/v1/collaboration/invite?project_id=${pid}&email=${inviteEmail}&role=${inviteRole}`, {method:"POST"});
       setInviteEmail(""); loadMembers();
     }
   }

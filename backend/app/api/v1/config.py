@@ -16,8 +16,11 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
     if allowed and user["email"].lower() in allowed:
         return user
-    if not allowed and os.getenv("NOVELCRAFT_ENV", "").startswith("dev"):
+    # Only bypass admin check in test environments with mock mode explicitly enabled
+    if os.getenv("NOVELCRAFT_ENV", "") == "test" and os.getenv("NOVELCRAFT_ALLOW_MOCK", "").lower() == "true":
         return user
+    if not allowed:
+        raise HTTPException(status_code=403, detail="NOVELCRAFT_ADMIN_EMAILS must be set in production")
     raise HTTPException(status_code=403, detail="admin access required")
 
 

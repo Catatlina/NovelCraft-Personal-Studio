@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Send, CheckCircle } from "lucide-react";
+import { api } from "../lib/api";
 
 const PLATFORMS = [
   { key: "wechat", name: "微信公众号" },
@@ -19,10 +20,9 @@ export function FanoutMatrix({ contentId }: { contentId: string }) {
 
   async function runFanout() {
     setBusy(true);
-    const r = await fetch(`/api/v1/contents/${contentId}/fanout?platforms=${selected.join(",")}`, {
+    const data = await api(`/api/v1/contents/${contentId}/fanout?platforms=${selected.join(",")}`, {
       method: "POST",
     });
-    const data = await r.json();
     if (data.code === 0) {
       const map: Record<string, any> = {};
       (data.data as any[]).forEach((item: any) => { map[item.platform] = item; });

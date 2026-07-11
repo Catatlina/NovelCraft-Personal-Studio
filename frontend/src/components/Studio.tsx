@@ -1,10 +1,9 @@
 import React, { useState } from "react";
-import { BookOpen, Share2, Database, TrendingUp, Play, Loader2 } from "lucide-react";
-
-const API = "";
+import { BookOpen, Database, TrendingUp, Play, Loader2 } from "lucide-react";
+import { api } from "../lib/api";
 
 export function Studio() {
-  const [tab, setTab] = useState<"short"|"social"|"knowledge"|"hotspot">("short");
+  const [tab, setTab] = useState<"short"|"knowledge"|"hotspot">("short");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -22,36 +21,29 @@ export function Studio() {
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [briefing, setBriefing] = useState<any>(null);
 
-  async function callApi(path: string, method = "GET", body?: any) {
-    const r = await fetch(`${API}${path}`, {
-      method, headers: body ? {"Content-Type":"application/json"} : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    return r.json();
-  }
-
   async function createShortStory() {
     setBusy(true);
-    const r = await fetch("/api/v1/projects/" + (await (await fetch("/api/v1/projects")).json()).data[0].id + "/short-stories", {method:"POST"});
-    setResult(await r.json());
+    const pid = (await api("/api/v1/projects")).data[0].id;
+    const r = await api(`/api/v1/projects/${pid}/short-stories`, {method:"POST"});
+    setResult(r);
     setBusy(false);
     setMsg("短篇已创建！查看审阅页");
   }
 
   async function searchKnowledge() {
-    const r = await fetch("/api/v1/projects").then(r=>r.json());
+    const r = await api("/api/v1/projects");
     const pid = r.data[0].id;
     const params = new URLSearchParams({project_id: pid, query: kQuery});
     if (kKind) params.append("kind", kKind);
-    const res = await fetch(`/api/v1/knowledge/search?${params}`, {method:"POST"});
-    setKResults((await res.json()).data || []);
+    const res = await api(`/api/v1/knowledge/search?${params}`, {method:"POST"});
+    setKResults(res.data || []);
   }
 
   async function fetchHotspots() {
-    const r = await fetch("/api/v1/projects").then(r=>r.json());
+    const r = await api("/api/v1/projects");
     const pid = r.data[0].id;
-    const res = await fetch(`/api/v1/knowledge/daily-briefing?project_id=${pid}`, {method:"POST"});
-    const data = (await res.json()).data || {};
+    const res = await api(`/api/v1/knowledge/daily-briefing?project_id=${pid}`, {method:"POST"});
+    const data = res.data || {};
     setHotspots(data.topics || []);
     setBriefing(data);
   }
@@ -60,7 +52,7 @@ export function Studio() {
     <div style={{display:"grid",gridTemplateColumns:"180px 1fr",gap:16,minHeight:400}}>
       <div className="panel" style={{display:"flex",flexDirection:"column",gap:4}}>
         <button className={tab==="short"?"active":""} onClick={()=>setTab("short")} style={{justifyContent:"flex-start"}}><BookOpen size={16}/> 短篇创作</button>
-        <button className={tab==="social"?"active":""} onClick={()=>setTab("social")} style={{justifyContent:"flex-start"}}><Share2 size={16}/> 自媒体</button>
+
         <button className={tab==="knowledge"?"active":""} onClick={()=>setTab("knowledge")} style={{justifyContent:"flex-start"}}><Database size={16}/> 知识库</button>
         <button className={tab==="hotspot"?"active":""} onClick={()=>setTab("hotspot")} style={{justifyContent:"flex-start"}}><TrendingUp size={16}/> 热点</button>
       </div>
@@ -85,18 +77,6 @@ export function Studio() {
           </div>
         )}
 
-        {tab === "social" && (
-          <div>
-            <h2>自媒体平台</h2>
-            <p style={{color:"var(--text-muted)"}}>10 个平台类型、一稿多平台 Fan-out、短视频脚本生成。</p>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
-              {["wechat","toutiao","xiaohongshu","zhihu","baijia","dayu","wangyi","medium","substack","twitter"].map(p=>(
-                <div key={p} style={{padding:"8px 12px",border:"1px solid var(--border-subtle)",borderRadius:8,fontSize:14}}>{p}</div>
-              ))}
-            </div>
-            <p style={{marginTop:12,color:"var(--text-muted)",fontSize:13}}>使用 API: POST /contents/{'{id}'}/fanout?platforms=wechat,toutiao,xiaohongshu</p>
-          </div>
-        )}
 
         {tab === "knowledge" && (
           <div>

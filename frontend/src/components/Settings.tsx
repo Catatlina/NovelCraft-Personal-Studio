@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X } from "lucide-react";
+import { api } from "../lib/api";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string,unknown>; fallback_json: any[] };
@@ -31,37 +32,36 @@ export function Settings() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/v1/admin/providers").then(r=>r.json()).then(d=>setProviders(d.data||[]));
-    fetch("/api/v1/admin/model-routes").then(r=>r.json()).then(d=>setRoutes(d.data||[]));
-    fetch("/api/v1/admin/budgets").then(r=>r.json()).then(d=>setBudgets(d.data||[]));
-    fetch("/api/v1/admin/prompts").then(r=>r.json()).then(d=>setPrompts(d.data||[]));
-    fetch("/api/v1/admin/settings").then(r=>r.json()).then(d=>setAppSettings(d.data||[]));
+    api("/api/v1/admin/providers").then(d=>setProviders(d.data||[]));
+    api("/api/v1/admin/model-routes").then(d=>setRoutes(d.data||[]));
+    api("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
+    api("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
+    api("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
   }, []);
 
   async function saveRoute() {
     if (!editRoute) return;
-    await fetch(`/api/v1/admin/model-routes/${editRoute.task_type}`, {
+    await api(`/api/v1/admin/model-routes/${editRoute.task_type}`, {
       method: "PUT", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({provider:editRoute.provider, model:editRoute.model, params:editRoute.params, fallbacks:editRoute.fallback_json||[]}),
     });
     setMsg("路由已保存"); setEditRoute(null);
-    const r = await fetch("/api/v1/admin/model-routes").then(r=>r.json());
+    const r = await api("/api/v1/admin/model-routes");
     setRoutes(r.data||[]);
   }
 
   async function saveBudget() {
     if (!editBudget) return;
-    const r = await fetch(`/api/v1/admin/budgets?project_id=${editBudget.pid}`);
-    const resp = await r.json();
+    const resp = await api(`/api/v1/admin/budgets?project_id=${editBudget.pid}`);
     const budgets = resp.data || [];
     
     if (budgets.length > 0) {
-      await fetch(`/api/v1/admin/budgets/${budgets[0].id}`, {
+      await api(`/api/v1/admin/budgets/${budgets[0].id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scope: editBudget.scope, limit_cny: editBudget.limit })
       });
     } else {
-      await fetch("/api/v1/admin/budgets", {
+      await api("/api/v1/admin/budgets", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: editBudget.pid, scope: editBudget.scope, limit_cny: editBudget.limit })
       });
@@ -78,10 +78,10 @@ export function Settings() {
 
   async function saveSetting() {
     if (!editSetting) return;
-    await fetch(`/api/v1/admin/settings/${editSetting.key}?value=${encodeURIComponent(editSetting.value)}`, {method:"PUT"});
+    await api(`/api/v1/admin/settings/${editSetting.key}?value=${encodeURIComponent(editSetting.value)}`, {method:"PUT"});
     setMsg(`${editSetting.key} 已保存`);
     setEditSetting(null);
-    const r = await fetch("/api/v1/admin/settings").then(r=>r.json());
+    const r = await api("/api/v1/admin/settings");
     setAppSettings(r.data||[]);
   }
 
@@ -202,14 +202,14 @@ export function Settings() {
               <input type="file" accept=".json,.csv" onChange={async e=>{
                 const f=e.target.files?.[0]; if(!f)return;
                 const text=await f.text();
-                await fetch("/api/v1/import/knowledge_hub",{method:"POST",headers:{"Content-Type":"application/json"},body:text});
+                await api("/api/v1/import/knowledge_hub",{method:"POST",headers:{"Content-Type":"application/json"},body:text});
                 alert("导入成功");
               }} />
             </div>
             <div>
               <h3>导出知识库</h3>
               <button onClick={async()=>{
-                const r=await fetch("/api/v1/admin/knowledge_hub?format=json").then(r=>r.json());
+                const r=await api("/api/v1/admin/knowledge_hub?format=json");
                 const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
                 const a=document.createElement("a");a.href=URL.createObjectURL(blob);
                 a.download="novelcraft_knowledge.json";a.click();

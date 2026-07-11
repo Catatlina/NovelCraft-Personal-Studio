@@ -13,6 +13,13 @@ import { PublishDashboard } from "./components/PublishDashboard";
 import { LoginPage } from "./components/LoginPage";
 import { RankingCenter } from "./components/RankingCenter";
 import { BookLibrary } from "./components/BookLibrary";
+import { HotspotDashboard } from "./components/HotspotDashboard";
+import { KnowledgeBrowser } from "./components/KnowledgeBrowser";
+import { FanoutMatrix } from "./components/FanoutMatrix";
+import { VersionTree } from "./components/VersionTree";
+import { ForeshadowingBoard } from "./components/ForeshadowingBoard";
+import { CollaborationPanel } from "./components/Collaboration";
+import { AgentConsole } from "./components/AgentConsole";
 import { ApiError, api as baseApi } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
@@ -27,7 +34,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish";
+type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
 
 const API = "";
 
@@ -334,7 +341,7 @@ export default function App() {
 
   const review = run?.nodes.find(n => n.node_key === "n8")?.output as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
 
-  const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板" };
+  const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点仪表盘", knowledge: "知识库浏览器", fanout: "多平台分发", versions: "版本树", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
@@ -351,6 +358,13 @@ export default function App() {
     { id: "settings", label: "系统设置 → AI配置/预算", action: () => setTab("settings") },
     { id: "studio", label: "内容工作室 → 短篇/自媒体/热点", action: () => setTab("studio") },
     { id: "publish", label: "发布看板 → 出海/数据", action: () => setTab("publish") },
+    { id: "hotspot", label: "热点仪表盘 → 实时热点", action: () => setTab("hotspot") },
+    { id: "knowledge", label: "知识库浏览器 → 检索知识", action: () => setTab("knowledge") },
+    { id: "fanout", label: "多平台分发 → 一键分发", action: () => setTab("fanout") },
+    { id: "versions", label: "版本树 → 版本历史", action: () => setTab("versions") },
+    { id: "foreshadowing", label: "伏笔看板 → 伏笔追踪", action: () => setTab("foreshadowing") },
+    { id: "collaboration", label: "协作管理 → 团队协作", action: () => setTab("collaboration") },
+    { id: "agents", label: "智能体控制台 → Agent 状态", action: () => setTab("agents") },
   ];
 
   function handleLogin(t: string, email: string) {
@@ -392,6 +406,13 @@ export default function App() {
       {tab === "settings" && <Settings />}
       {tab === "studio" && <Studio />}
       {tab === "publish" && <PublishDashboard />}
+      {tab === "hotspot" && <HotspotDashboard />}
+      {tab === "knowledge" && <KnowledgeBrowser />}
+      {tab === "fanout" && <FanoutMatrix contentId={novel?.id || ""} />}
+      {tab === "versions" && chapter && <VersionTree contentId={chapter.id} versions={versions} onRestore={restoreVersion} />}
+      {tab === "foreshadowing" && novel && <ForeshadowingBoard novelId={novel.id} />}
+      {tab === "collaboration" && project && <CollaborationPanel projectId={project.id} />}
+      {tab === "agents" && <AgentConsole />}
       <CommandPalette commands={cmdActions} />
     </Layout>
   );
