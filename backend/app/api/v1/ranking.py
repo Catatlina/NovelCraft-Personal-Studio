@@ -9,17 +9,19 @@ import unicodedata
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic import ConfigDict
 
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
 from app.services.ranking_adapter import RANKING_FETCHERS, normalize_ranking_items
+from app.services.ranking_capture import validate_with_open_library
 from app.gateway import BudgetExceeded, ProviderError, complete
 
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
 
 SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网"}
+MIN_AUTOMATED_CONFIDENCE = 0.85
 
 
 def ok(data: Any):
@@ -45,6 +47,42 @@ class CreateBookRequest(BaseModel):
     auto_start: bool = True
     target_words: int = Field(default=800_000, ge=10_000, le=5_000_000)
     style: str = "商业网文、节奏紧凑、人物驱动"
+
+
+class RankingImportItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    rank: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=500)
+    author: str = Field(default="", max_length=200)
+    category: str = Field(default="", max_length=100)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("title must not be blank")
+        return value
+
+
+class RankingImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_key: str = Field(default="manual", pattern=r"^manual$")
+    source_label: str = Field(default="手动导入", min_length=1, max_length=100)
+    items: list[RankingImportItem] = Field(min_length=1, max_length=200)
+    metadata_validation: dict[str, Any] | None = None
+
+    def validated_items(self) -> list[dict[str, Any]]:
+        return [item.model_dump() for item in self.items]
+
+
+class SnapshotMetadataValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(default="open_library", pattern=r"^open_library$")
+    force: bool = False
+    limit: int = Field(default=20, ge=1, le=50)
 
 
 class MarketTopicOutput(BaseModel):
@@ -97,13 +135,21 @@ def _validate_market_analysis_output(output: dict, source_titles: list[str] | No
 def list_sources(project_id: str, user: dict = Depends(get_current_user)):
     db = connect()
     require_member(db, project_id, user)
-    existing = {r["source_key"]: r for r in rows(db, "SELECT * FROM ranking_sources WHERE project_id = %s", (project_id,))}
+    existing = {r["source_key"]: r for r in rows(db, """SELECT src.*, latest.capture_status, latest.collector,
+                 latest.confidence FROM ranking_sources src LEFT JOIN LATERAL
+                 (SELECT capture_status,collector,confidence FROM ranking_snapshots
+                  WHERE source_id=src.id ORDER BY captured_at DESC LIMIT 1) latest ON TRUE
+                 WHERE src.project_id=%s""", (project_id,))}
     result = []
     for key, name in SOURCE_NAMES.items():
         row = existing.get(key, {})
         result.append({"source_key": key, "display_name": name, "enabled": row.get("enabled", True),
                        "last_success_at": row.get("last_success_at"), "last_attempt_at": row.get("last_attempt_at"),
-                       "consecutive_failures": row.get("consecutive_failures", 0), "last_error": row.get("last_error")})
+                       "consecutive_failures": row.get("consecutive_failures", 0), "last_error": row.get("last_error"),
+                       "capture_status": row.get("capture_status"), "collector": row.get("collector"),
+                       "confidence": row.get("confidence"),
+                       "user_action_required": row.get("capture_status") == "user_action_required",
+                       "ocr_required": row.get("capture_status") == "ocr_required"})
     db.close()
     return ok(result)
 
@@ -113,54 +159,193 @@ def scan_source(source_key: str, project_id: str, user: dict = Depends(get_curre
     return _scan_source(source_key, project_id, user)
 
 
+def _persist_ranking_snapshot(
+    db,
+    *,
+    project_id: str,
+    source_key: str,
+    display_name: str,
+    normalized_items: list[dict],
+    capture_status: str = "succeeded",
+    metadata_validation: dict[str, Any] | None = None,
+    retry_of_snapshot_id: str | None = None,
+    error: str | None = None,
+) -> dict:
+    """Persist one normalized result while retaining review and validation evidence."""
+    source_id = new_id()
+    db.execute(
+        """INSERT INTO ranking_sources (id, project_id, source_key, display_name)
+           VALUES (%s,%s,%s,%s) ON CONFLICT(project_id, source_key) DO UPDATE
+           SET display_name=EXCLUDED.display_name, updated_at=now() RETURNING id""",
+        (source_id, project_id, source_key, display_name),
+    )
+    source_id = db.fetchone()["id"]
+    db.execute("UPDATE ranking_sources SET last_attempt_at=now(), updated_at=now() WHERE id=%s", (source_id,))
+    snapshot_id = new_id()
+    if error or not normalized_items:
+        reason = error or "source returned no ranking items"
+        failure_capture_status = capture_status if capture_status in {"ocr_required", "user_action_required", "failed"} else "failed"
+        db.execute("""INSERT INTO ranking_snapshots
+                      (id,project_id,source_id,status,error,retry_of_snapshot_id,capture_status)
+                      VALUES (%s,%s,%s,'failed',%s,%s,%s)""",
+                   (snapshot_id, project_id, source_id, reason, retry_of_snapshot_id, failure_capture_status))
+        db.execute("""UPDATE ranking_sources SET last_error=%s, consecutive_failures=consecutive_failures+1,
+                      updated_at=now() WHERE id=%s""", (reason, source_id))
+        return {"snapshot_id": snapshot_id, "source": source_key, "item_count": 0,
+                "status": "failed", "reason": reason}
+
+    status = "succeeded"
+    confidences = [float(item["metrics"].get("confidence", 1.0)) for item in normalized_items]
+    collectors = {str(item["metrics"].get("collector", "unknown")) for item in normalized_items}
+    collector = next(iter(collectors)) if len(collectors) == 1 else "mixed"
+    evidence = next((item["metrics"].get("evidence") for item in normalized_items
+                     if item["metrics"].get("evidence")), {})
+    db.execute("""INSERT INTO ranking_snapshots
+                  (id,project_id,source_id,status,item_count,retry_of_snapshot_id,capture_status,collector,confidence,evidence)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               (snapshot_id, project_id, source_id, status, len(normalized_items), retry_of_snapshot_id,
+                capture_status, collector, min(confidences) if confidences else None, encode(evidence)))
+    for item in normalized_items:
+        metrics = dict(item["metrics"])
+        if metadata_validation is not None:
+            metrics["metadata_validation"] = metadata_validation
+        db.execute(
+            """INSERT INTO ranking_items
+               (id,snapshot_id,rank_no,title,author,category,source_url,metrics,fetched_at,external_id,dedupe_key)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (new_id(), snapshot_id, item["rank_no"], item["title"], item["author"], item["category"],
+             item["source_url"], encode(metrics), item["fetched_at"], item["external_id"], item["dedupe_key"]),
+        )
+    db.execute("""UPDATE ranking_sources SET last_success_at=CASE WHEN %s='succeeded' THEN now() ELSE last_success_at END,
+                  last_error=NULL, consecutive_failures=0, updated_at=now() WHERE id=%s""", (capture_status, source_id))
+    return {"snapshot_id": snapshot_id, "source": source_key, "item_count": len(normalized_items),
+            "status": status, "capture_status": capture_status, "confidence": min(confidences) if confidences else None}
+
+
+@router.post("/import")
+def import_ranking(payload: RankingImportRequest, project_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        require_member(db, project_id, user, write=True)
+        raw_items = [{**item, "collector": item.get("collector", "manual_import"),
+                      "confidence": float(item.get("confidence", 1.0)),
+                      "evidence": item.get("evidence") or {"source_label": payload.source_label}}
+                     for item in payload.validated_items()]
+        normalized = normalize_ranking_items(payload.source_key, raw_items)
+        assessment = _ranking_snapshot_status(normalized, MIN_AUTOMATED_CONFIDENCE)
+        result = _persist_ranking_snapshot(
+            db, project_id=project_id, source_key=payload.source_key, display_name=payload.source_label,
+            normalized_items=normalized, capture_status=assessment["status"],
+            metadata_validation=payload.metadata_validation,
+        )
+        if hasattr(db, "commit"):
+            db.commit()
+        return ok({**result, "raw_count": len(raw_items), "dropped_count": len(raw_items) - len(normalized)})
+    finally:
+        db.close()
+
+
+def _normalize_metadata_value(value: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]", "", unicodedata.normalize("NFKC", value)).casefold()
+
+
+def _ranking_snapshot_status(items: list[dict], min_confidence: float = MIN_AUTOMATED_CONFIDENCE) -> dict:
+    confidences = [float(item.get("metrics", {}).get("confidence", 1.0)) for item in items]
+    low_count = sum(confidence < min_confidence for confidence in confidences)
+    return {"status": "needs_review" if low_count else "succeeded",
+            "min_confidence": min(confidences) if confidences else None,
+            "threshold": min_confidence, "low_confidence_count": low_count}
+
+
+def _classify_metadata_validation(item: dict, validation: dict) -> tuple[str, dict]:
+    if validation.get("status") == "unavailable":
+        return "unavailable", validation
+    matches = validation.get("matches") or []
+    if not matches:
+        return "not_found", validation
+    title = _normalize_metadata_value(str(item.get("title", "")))
+    author = _normalize_metadata_value(str(item.get("author", "")))
+    title_matches = [match for match in matches if _normalize_metadata_value(str(match.get("title", ""))) == title]
+    if not title_matches:
+        return "ambiguous", validation
+    if not author:
+        return "partial_match", validation
+    author_matches = [match for match in title_matches if author in {
+        _normalize_metadata_value(str(name)) for name in match.get("author_name", [])
+    }]
+    if len(author_matches) == 1:
+        return "confirmed", validation
+    if len(title_matches) > 1:
+        return "ambiguous", validation
+    enriched = {**validation, "conflicts": [{"field": "author", "source_value": item.get("author", ""),
+                 "reference_values": title_matches[0].get("author_name", [])}]}
+    return "conflict", enriched
+
+
+@router.post("/snapshots/{snapshot_id}/validate-metadata")
+def validate_snapshot_metadata(snapshot_id: str, payload: SnapshotMetadataValidationRequest,
+                               user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        snapshot = db.execute("SELECT * FROM ranking_snapshots WHERE id=%s", (snapshot_id,)).fetchone()
+        if not snapshot:
+            raise HTTPException(404, "snapshot not found")
+        require_member(db, snapshot["project_id"], user, write=True)
+        condition = "" if payload.force else "AND metadata_status='unvalidated'"
+        items = rows(db, f"""SELECT * FROM ranking_items WHERE snapshot_id=%s {condition}
+                              ORDER BY rank_no LIMIT %s""", (snapshot_id, payload.limit))
+        summary = Counter()
+        for item in items:
+            validation = validate_with_open_library(item["title"], item.get("author", ""))
+            metadata_status, evidence = _classify_metadata_validation(item, validation)
+            db.execute("""UPDATE ranking_items SET metadata_status=%s, metadata_checked_at=now(),
+                          metrics=COALESCE(metrics,'{}'::jsonb) || jsonb_build_object('validation',%s::jsonb)
+                          WHERE id=%s""", (metadata_status, json.dumps(evidence, ensure_ascii=False), item["id"]))
+            summary[metadata_status] += 1
+        all_statuses = rows(db, "SELECT metadata_status FROM ranking_items WHERE snapshot_id=%s", (snapshot_id,))
+        full_summary = dict(Counter(row["metadata_status"] for row in all_statuses))
+        validation_summary = {"provider": payload.provider, "checked": len(items), "counts": full_summary}
+        db.execute("UPDATE ranking_snapshots SET validation_summary=%s WHERE id=%s",
+                   (encode(validation_summary), snapshot_id))
+        db.commit()
+        overall = "provider_unavailable" if items and summary["unavailable"] == len(items) else "completed"
+        return ok({"snapshot_id": snapshot_id, "provider": payload.provider, "checked": len(items),
+                   "summary": full_summary, "status": overall})
+    finally:
+        db.close()
+
+
 def _scan_source(source_key: str, project_id: str, user: dict, retry_of_snapshot_id: str | None = None):
     fetcher = RANKING_FETCHERS.get(source_key)
     if not fetcher:
         raise HTTPException(404, "unknown ranking source")
     db = connect()
     require_member(db, project_id, user, write=True)
-    source_id = new_id()
-    db.execute(
-        """INSERT INTO ranking_sources (id, project_id, source_key, display_name)
-           VALUES (%s,%s,%s,%s) ON CONFLICT(project_id, source_key) DO UPDATE SET updated_at=now()
-           RETURNING id""",
-        (source_id, project_id, source_key, SOURCE_NAMES[source_key]),
-    )
-    source_id = db.fetchone()["id"]
-    db.execute("UPDATE ranking_sources SET last_attempt_at=now(), updated_at=now() WHERE id=%s", (source_id,))
     try:
         result = fetcher()
     except Exception as exc:
         result = [{"source": source_key, "error": str(exc), "degraded": True}]
     error_item = next((item for item in result if item.get("error")), None)
     normalized = normalize_ranking_items(source_key, result)
-    snapshot_id = new_id()
-    if error_item or not normalized:
-        error = (error_item or {}).get("error", "source returned no ranking items")
-        db.execute("""INSERT INTO ranking_snapshots (id,project_id,source_id,status,error,retry_of_snapshot_id)
-                      VALUES (%s,%s,%s,'failed',%s,%s)""",
-                   (snapshot_id, project_id, source_id, error, retry_of_snapshot_id))
-        db.execute("""UPDATE ranking_sources SET last_error=%s, consecutive_failures=consecutive_failures+1,
-                      updated_at=now() WHERE id=%s""", (error, source_id))
-        db.commit(); db.close()
-        raise HTTPException(502, {"code": "RANKING_SOURCE_FAILED", "source": source_key,
-                                  "snapshot_id": snapshot_id, "reason": error})
-    db.execute("""INSERT INTO ranking_snapshots (id,project_id,source_id,status,item_count,retry_of_snapshot_id)
-                  VALUES (%s,%s,%s,'succeeded',%s,%s)""",
-               (snapshot_id, project_id, source_id, len(normalized), retry_of_snapshot_id))
-    for item in normalized:
-        db.execute(
-            """INSERT INTO ranking_items
-               (id,snapshot_id,rank_no,title,author,category,source_url,metrics,fetched_at,external_id,dedupe_key)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (new_id(), snapshot_id, item["rank_no"], item["title"], item["author"], item["category"],
-             item["source_url"], encode(item["metrics"]), item["fetched_at"], item["external_id"], item["dedupe_key"]),
-        )
-    db.execute("""UPDATE ranking_sources SET last_success_at=now(), last_error=NULL, consecutive_failures=0,
-                  updated_at=now() WHERE id=%s""", (source_id,))
+    assessment = _ranking_snapshot_status(normalized, MIN_AUTOMATED_CONFIDENCE)
+    capture_status = (error_item or {}).get("capture_status") or assessment["status"]
+    error = (error_item or {}).get("error") if error_item else None
+    if error_item and error_item.get("capture_status"):
+        error = f"[{error_item['capture_status']}] {error}"
+    persisted = _persist_ranking_snapshot(
+        db, project_id=project_id, source_key=source_key, display_name=SOURCE_NAMES[source_key],
+        normalized_items=normalized, capture_status=capture_status,
+        retry_of_snapshot_id=retry_of_snapshot_id, error=error,
+    )
     db.commit(); db.close()
-    return ok({"snapshot_id": snapshot_id, "source": source_key, "item_count": len(normalized),
-               "raw_count": len(result), "dropped_count": len(result) - len(normalized), "status": "succeeded"})
+    if persisted["status"] == "failed":
+        needs_user = capture_status in {"user_action_required", "ocr_required"}
+        raise HTTPException(409 if needs_user else 502, {
+            "code": "RANKING_USER_ACTION_REQUIRED" if needs_user else "RANKING_SOURCE_FAILED",
+            "source": source_key, "capture_status": capture_status,
+            "snapshot_id": persisted["snapshot_id"], "reason": persisted["reason"],
+        })
+    return ok({**persisted, "raw_count": len(result), "dropped_count": len(result) - len(normalized)})
 
 
 @router.get("/snapshots")
@@ -210,6 +395,9 @@ def analyze_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
     snapshot = db.execute("SELECT * FROM ranking_snapshots WHERE id=%s", (snapshot_id,)).fetchone()
     if not snapshot: db.close(); raise HTTPException(404, "snapshot not found")
     require_member(db, snapshot["project_id"], user, write=True)
+    if snapshot.get("capture_status") in {"needs_review", "partial"}:
+        db.close()
+        raise HTTPException(409, "ranking capture requires review before market analysis")
     existing = db.execute("""SELECT * FROM market_analyses WHERE snapshot_id=%s AND status='succeeded'
                            ORDER BY created_at DESC LIMIT 1""", (snapshot_id,)).fetchone()
     if existing:

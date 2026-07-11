@@ -8,6 +8,7 @@ Captured artifacts contain public ranking metadata only, never chapter text.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import urllib.parse
@@ -64,8 +65,13 @@ def load_capture_artifact(path: str | Path, expected_source: str | None = None) 
     if not isinstance(items, list):
         raise ValueError("capture items must be a list")
     evidence = dict(data.get("evidence") or {})
+    artifact_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    if evidence.get("screenshot"):
+        evidence["screenshot"] = Path(str(evidence["screenshot"])).name
+    evidence.pop("browser_profile", None)
     evidence.update({
-        "artifact_path": str(artifact_path),
+        "artifact_name": artifact_path.name,
+        "artifact_sha256": artifact_digest,
         "captured_at": data.get("captured_at") or datetime.now(timezone.utc).isoformat(),
         "collector": data.get("collector", "browser"),
     })
@@ -90,6 +96,7 @@ def import_ranking_file(path: str | Path, source: str = "manual") -> list[dict[s
         raise ValueError("ranking import supports CSV or JSON only")
     if not isinstance(items, list):
         raise ValueError("ranking import must contain a list")
+    artifact_digest = hashlib.sha256(import_path.read_bytes()).hexdigest()
     output = []
     for index, raw in enumerate(items, 1):
         if not isinstance(raw, dict):
@@ -98,7 +105,8 @@ def import_ranking_file(path: str | Path, source: str = "manual") -> list[dict[s
         if missing or not str(raw.get("title", "")).strip():
             raise ValueError(f"row {index} missing required fields: {sorted(missing or {'title'})}")
         output.append({**raw, "source": source, "collector": "manual_import", "confidence": 1.0,
-                       "evidence": {"artifact_path": str(import_path), "row": index}})
+                       "evidence": {"artifact_name": import_path.name, "artifact_sha256": artifact_digest,
+                                    "row": index}})
     return output
 
 
