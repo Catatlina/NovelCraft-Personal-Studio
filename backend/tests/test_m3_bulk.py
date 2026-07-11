@@ -29,7 +29,16 @@ def test_book_analyzer():
 def test_schedule_briefings():
     """TASK-038: 7-day briefing schedule."""
     from app.services.m3_bulk import schedule_week_briefings
-    ids = schedule_week_briefings("00000000-0000-0000-0000-000000000001")
+    from app.db import connect, new_id, encode
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.core.rate_limit import limiter
+    limiter.reset()
+    tc = TestClient(app)
+    e = f"bf-{uuid.uuid4().hex[:6]}@nc.dev"
+    tok = tc.post("/api/v1/auth/register", json={"email": e, "password": "test1234"}).json()["data"]["access_token"]
+    pid = tc.get("/api/v1/projects", headers={"Authorization": f"Bearer {tok}"}).json()["data"][0]["id"]
+    ids = schedule_week_briefings(pid)
     assert len(ids) == 7
 
 

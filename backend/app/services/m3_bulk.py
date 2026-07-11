@@ -86,9 +86,15 @@ def schedule_week_briefings(project_id: str) -> list[str]:
         scheduled_time = (datetime.utcnow() + timedelta(days=day)).replace(hour=8, minute=0)
         db = connect()
         tid = new_id()
+        # Get or create reference content for FK constraint
+        ref = db.execute("SELECT id FROM contents WHERE project_id = %s LIMIT 1", (project_id,)).fetchone()
+        cid = ref["id"] if ref else new_id()
+        if not ref:
+            db.execute("INSERT INTO contents (id, project_id, type, title, body, status) VALUES (%s,%s,%s,%s,%s,%s)",
+                       (cid, project_id, "note", "briefing_ref", encode({}), "draft"))
         db.execute(
             "INSERT INTO publish_records (id, content_id, platform, status, meta) VALUES (%s,%s,%s,%s,%s)",
-            (tid, "00000000-0000-0000-0000-000000000000", "daily_briefing", "scheduled", encode({
+            (tid, cid, "daily_briefing", "scheduled", encode({
                 "scheduled_at": scheduled_time.isoformat(),
                 "day": day + 1,
                 "project_id": project_id,
