@@ -1,9 +1,7 @@
-"""TASK-037: Hotspot collection system with web adapter."""
+"""NC-HM-001: Hotspot ingestion — fetch, dedup, trend, freshness scoring."""
 from __future__ import annotations
-
-import os
-import json
-import urllib.request
+import json, os, urllib.request, hashlib
+from datetime import datetime, timedelta
 from app.db import connect, encode, new_id
 
 HOTSPOT_SOURCES = {
@@ -11,38 +9,100 @@ HOTSPOT_SOURCES = {
     "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch"},
 }
 
+DUPLICATE_WINDOW_HOURS = 24
+
+
+def _dedup_key(title: str, source: str) -> str:
+    return hashlib.sha256(f"{source}:{title}".encode()).hexdigest()[:32]
+
 
 def fetch_hotspots() -> list[dict]:
-    """TASK-037: Fetch hotspots from external sources."""
     results = []
     for key, cfg in HOTSPOT_SOURCES.items():
         try:
             req = urllib.request.Request(cfg["url"], headers={"User-Agent": "NovelCraft/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
-            items = data.get("data", data.get("realtime", []))[:10]
+            items = data.get("data", data.get("realtime", []))[:15]
             for item in items:
+                title = item.get("target", {}).get("title", item.get("word", ""))
+                if not title: continue
                 results.append({
-                    "source": key,
-                    "title": item.get("target", {}).get("title", item.get("word", "")),
+                    "source": key, "title": title.strip(),
                     "category": item.get("category", "general"),
-                    "score": item.get("detail_text", item.get("raw_hot", 0)),
+                    "raw_score": item.get("detail_text", item.get("raw_hot", 0)),
+                    "url": item.get("target", {}).get("url", ""),
+                    "fetched_at": datetime.utcnow().isoformat(),
+                    "dedup_key": _dedup_key(title, key),
                 })
         except Exception:
-            pass  # Source unavailable — skip gracefully
+            continue
     return results
 
 
+def compute_freshness_score(fetched_at: str) -> float:
+    """Decay score: 1.0 at fetch time, decays to 0.5 after 24h."""
+    if not fetched_at:
+        return 0.5
+    try:
+        age = (datetime.utcnow() - datetime.fromisoformat(fetched_at)).total_seconds()
+        return max(0.1, 1.0 - (age / (24 * 3600)) * 0.5)
+    except Exception:
+        return 0.5
+
+
+def compute_trend(item_title: str, source: str, current_score: float) -> str:
+    """Compare with previous snapshot to determine trend: rising/stable/cooling."""
+    db = connect()
+    prev = db.execute(
+        """SELECT meta FROM knowledge_items 
+           WHERE kind='hotspot' AND meta->>'title' = %s AND meta->>'source' = %s 
+           AND created_at > now() - interval '24 hours' 
+           ORDER BY created_at DESC LIMIT 1""",
+        (item_title, source),
+    ).fetchone()
+    db.close()
+    if not prev:
+        return "new"
+    prev_score = float((prev.get("meta") or {}).get("score", 0))
+    diff = current_score - prev_score
+    if diff > 5: return "rising"
+    if diff < -5: return "cooling"
+    return "stable"
+
+
 def store_hotspots(items: list[dict]) -> int:
-    """Store hotspot items in knowledge_items table."""
     db = connect()
     count = 0
+    now_str = datetime.utcnow().isoformat()
     for item in items:
+        # Dedup: check if same title+source within window
+        existing = db.execute(
+            "SELECT id FROM knowledge_items WHERE kind='hotspot' AND meta->>'dedup_key'=%s AND created_at > now() - interval '24 hours'",
+            (item.get("dedup_key", ""),),
+        ).fetchone()
+        if existing:
+            # Update trend + freshness
+            db.execute(
+                "UPDATE knowledge_items SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                (encode({"last_seen": now_str}), existing["id"]),
+            )
+            continue
+
+        trend = compute_trend(item.get("title", ""), item.get("source", ""), float(item.get("raw_score", 0)))
+        freshness = compute_freshness_score(now_str)
+
         db.execute(
-            "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-            (new_id(), "hotspot", item.get("title", ""),
+            "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s)",
+            (new_id(), "hotspot", item.get("title", "")[:200],
              json.dumps(item, ensure_ascii=False),
-             encode({"source": item.get("source", ""), "score": item.get("score", 0)})),
+             encode({
+                 "source": item.get("source", ""), "score": item.get("raw_score", 0),
+                 "dedup_key": item.get("dedup_key", ""),
+                 "trend": trend, "freshness": round(freshness, 3),
+                 "title": item.get("title", ""), "url": item.get("url", ""),
+                 "fetched_at": now_str,
+             })),
         )
         count += 1
     db.commit(); db.close()
@@ -50,18 +110,41 @@ def store_hotspots(items: list[dict]) -> int:
 
 
 def analyze_hotspots(items: list[dict]) -> list[dict]:
-    """TASK-037: Generate creative angles from hotspots (template-based, no LLM needed)."""
     angles = []
     templates = [
-        "如果「{title}」发生在一个虚构世界里会怎样？",
-        "「{title}」背后的故事，比新闻更精彩",
-        "从「{title}」看人性的复杂",
+        ("如果「{title}」发生在虚构世界里会怎样？", "fiction"),
+        ("「{title}」背后的故事，比新闻更精彩", "narrative"),
+        ("从「{title}」看人性的复杂", "human_nature"),
+        ("「{title}」揭示的系统性真相", "analysis"),
     ]
-    for item in items[:5]:
-        for tpl in templates:
+    for item in items[:8]:
+        for tpl, atype in templates:
             angles.append({
                 "topic": item.get("title", ""),
                 "angle": tpl.format(title=item.get("title", "")),
                 "category": item.get("category", ""),
+                "angle_type": atype,
             })
     return angles
+
+
+def get_hotspot_trend_report() -> dict:
+    """NC-HM-001: Aggregated trend report — counts by trend and freshness."""
+    db = connect()
+    trends = db.execute(
+        "SELECT meta->>'trend' as trend, COUNT(*) as cnt FROM knowledge_items "
+        "WHERE kind='hotspot' AND created_at > now() - interval '24 hours' GROUP BY trend"
+    ).fetchall()
+    fresh = db.execute(
+        "SELECT AVG((meta->>'freshness')::float) as avg_fresh FROM knowledge_items "
+        "WHERE kind='hotspot' AND created_at > now() - interval '24 hours'"
+    ).fetchone()
+    total = db.execute(
+        "SELECT COUNT(*) as total FROM knowledge_items WHERE kind='hotspot' AND created_at > now() - interval '24 hours'"
+    ).fetchone()
+    db.close()
+    return {
+        "total_hotspots_24h": total["total"] if total else 0,
+        "avg_freshness": round(float(fresh["avg_fresh"] or 0), 3) if fresh else 0,
+        "trends": {t["trend"]: t["cnt"] for t in trends},
+    }

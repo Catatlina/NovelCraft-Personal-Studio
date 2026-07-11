@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.core.security import get_current_user
-from app.services.hotspot_collector import fetch_hotspots, store_hotspots, analyze_hotspots
+from app.services.hotspot_collector import fetch_hotspots, store_hotspots, analyze_hotspots, get_hotspot_trend_report
 
 router = APIRouter(prefix="/api/v1", tags=["hotspots"])
 
