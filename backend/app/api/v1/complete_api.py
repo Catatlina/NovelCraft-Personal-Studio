@@ -242,3 +242,41 @@ def get_roi_report(user: dict = Depends(get_current_user)):
 def get_topic_suggestions_from_performance(user: dict = Depends(get_current_user)):
     from app.services.publish_hub import generate_topic_suggestions_from_data
     return ok(generate_topic_suggestions_from_data())
+
+
+# --- NC-SEA-001~003: Overseas markets, translation, publishing ---
+
+@router.get("/markets")
+def get_market_config_endpoint(market: str = "", user: dict = Depends(get_current_user)):
+    from app.services.overseas_complete import get_market_config
+    return ok(get_market_config(market))
+
+
+@router.post("/markets/{market}/compliance")
+def check_market_compliance_endpoint(market: str, content: str, user: dict = Depends(get_current_user)):
+    from app.services.overseas_complete import check_market_compliance
+    return ok(check_market_compliance(market, content))
+
+
+@router.post("/translate")
+def translate_text_endpoint(text: str, source_lang: str = "zh", target_lang: str = "en", user: dict = Depends(get_current_user)):
+    from app.services.overseas_complete import translate_text
+    return ok(translate_text(text, source_lang, target_lang))
+
+
+@router.post("/translate/localize")
+def localize_names_endpoint(chinese_name: str, target_market: str, user: dict = Depends(get_current_user)):
+    from app.services.overseas_complete import localize_names
+    return ok(localize_names(chinese_name, target_market))
+
+
+@router.post("/revenue/convert")
+def convert_revenue_endpoint(amount: float, from_currency: str, to_currency: str = "CNY", user: dict = Depends(get_current_user)):
+    from app.services.overseas_complete import convert_revenue
+    return ok(convert_revenue(amount, from_currency, to_currency))
+
+
+@router.post("/overseas/publish")
+def publish_overseas_endpoint(content_id: str, market: str, platform: str, user: dict = Depends(get_current_user)):
+    from app.services.overseas_complete import publish_overseas
+    return ok(publish_overseas(content_id, market, platform))
