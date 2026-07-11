@@ -40,7 +40,7 @@
 - 远端既有 CI：154 项后端测试通过，前端构建通过；其中包含较多 T0/T1 存在性测试，不能代表核心链 E2E。
 - 当前验证（2026-07-11）：Alembic 单头 `nc_sc004_batch_recovery`，干净库 upgrade→downgrade base→upgrade 往返通过（此前融合迁移 `down_revision=None` 造成双头、CI `alembic upgrade head` 连续两次失败，已修复）；宿主机后端 **243 passed**、前端 `tsc -b && vite build` 通过；PR #1 最新后端/前端 CI 均通过。纵横真实采集/持久化已有后端 T3；市场分析仅完成契约和失败语义测试，尚无真实 Provider T3，因此保持 `🧪`。
 - 已知修复（2026-07-11）：novel 导出对 doc 格式章节输出空正文（已改为遍历 `content[]`）；`complete_api.py` 资源端点补齐项目成员校验；伏笔到期检查查询不存在的 `target_chapter` 列、跨章矛盾检查查询不存在的 `character_name/event_time` 列（真库从未生效，已按真实 schema 重写并补真库回归测试）。
-- 已知缺陷（待修）：`import_chapter_directory` 只解析不落库且 seq 用行号，`POST /novels/{id}/import-chapters` 表面成功实际不保存任何章节。
+- 已知修复（2026-07-11）：`POST /novels/{id}/import-chapters` 已从“只解析不落库”改为项目权限校验、连续 seq 真实落库、标题幂等去重、已有章节后追加和事务失败回滚；仍缺前端预览/确认入口。
 - 环境提示：docker 前端容器镜像依赖过旧（缺 Tiptap），只挂载 `src` 导致一直在供旧 UI，需 `docker compose build frontend` 重建。
 - PR：`agent/complete-core-gaps` → `main`（Draft）。
 

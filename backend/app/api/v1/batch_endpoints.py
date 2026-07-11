@@ -1,10 +1,13 @@
 """Batch API endpoints: C2 tool/branch, C3 golden case, C4 libraries, C5 diff, C6 chapter import/planning, C7 platform validate."""
 from __future__ import annotations
 
+import hashlib
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user
-from app.db import connect
+from app.db import connect, encode, new_id
 
 router = APIRouter(prefix="/api/v1", tags=["batch"])
 
@@ -72,7 +75,64 @@ def import_chapters(novel_id: str, body: dict, user: dict = Depends(get_current_
     from app.services.batch_fixes import import_chapter_directory
     text = body.get("text", "")
     chapters = import_chapter_directory(text, novel_id)
-    return ok({"chapters": chapters, "count": len(chapters)})
+    db = connect()
+    try:
+        novel = db.execute("SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+                           (novel_id,)).fetchone()
+        if not novel:
+            raise HTTPException(404, "novel not found")
+        member = db.execute("SELECT role FROM project_members WHERE project_id=%s AND user_id=%s",
+                            (novel["project_id"], user["id"])).fetchone()
+        if not member or member["role"] not in {"owner", "editor"}:
+            raise HTTPException(403, "insufficient permissions")
+
+        existing = db.execute("""SELECT id,title,meta FROM contents
+                                  WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE""",
+                              (novel_id,)).fetchall()
+        max_row = db.execute("""SELECT COALESCE(MAX((meta->>'seq')::int),0) AS seq FROM contents
+                                 WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE""",
+                             (novel_id,)).fetchone()
+        next_seq = int((max_row or {}).get("seq") or 0) + 1
+
+        def normalized_title(value: str) -> str:
+            value = re.sub(r"^第[一二三四五六七八九十百千\d]+章\s*", "", value.strip(), flags=re.I)
+            return re.sub(r"\s+", "", value).casefold()
+
+        seen = {normalized_title(str(row.get("title", ""))) for row in existing}
+        ids: list[str] = []
+        imported_chapters: list[dict] = []
+        skipped = 0
+        for parsed in chapters:
+            title = parsed["title"].strip()
+            identity = normalized_title(title)
+            if not identity or identity in seen:
+                skipped += 1
+                continue
+            seen.add(identity)
+            chapter_id = new_id()
+            display_title = f"第{next_seq}章 {title}"
+            meta = {"seq": next_seq, "outline": title, "import_source": "chapter_directory",
+                    "source_raw": parsed["raw"]}
+            generation_key = "chapter-directory:" + hashlib.sha256(
+                f"{novel_id}:{identity}".encode("utf-8")
+            ).hexdigest()
+            db.execute("""INSERT INTO contents
+                          (id,project_id,parent_id,type,title,body,meta,status,owner_id,generation_key)
+                          VALUES (%s,%s,%s,'chapter',%s,%s,%s,'planned',%s,%s)""",
+                       (chapter_id, novel["project_id"], novel_id, display_title,
+                        encode({"type": "doc", "content": []}), encode(meta), user["id"], generation_key))
+            ids.append(chapter_id)
+            imported_chapters.append({"id": chapter_id, "seq": next_seq, "title": title})
+            next_seq += 1
+        db.commit()
+        return ok({"imported": len(ids), "skipped": skipped, "ids": ids,
+                   "chapters": imported_chapters, "count": len(ids)})
+    except Exception:
+        if hasattr(db, "rollback"):
+            db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @router.get("/novels/layered-plan")

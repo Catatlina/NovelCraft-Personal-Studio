@@ -105,18 +105,18 @@ def import_chapter_directory(text: str, novel_id: str) -> list[dict]:
     # Match patterns: "第X章 标题", "Chapter X: Title", "X、标题"
     chapters = []
     patterns = [
-        r'第([一二三四五六七八九十百千\d]+)章\s*(.+)',
-        r'Chapter\s+(\d+)[:：]\s*(.+)',
-        r'^\s*(\d+)[\.\、\s]+(.+)',
+        r'第([一二三四五六七八九十百千\d]+)章\s*(.*)',
+        r'Chapter\s+(\d+)[:：]\s*(.*)',
+        r'^\s*(\d+)[\.\、\s]+(.*)',
     ]
-    for i, line in enumerate(text.splitlines()):
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
         for pat in patterns:
             m = re.match(pat, line)
             if m:
-                chapters.append({"seq": i + 1, "title": m.group(2).strip()[:120], "raw": line})
+                chapters.append({"seq": len(chapters) + 1, "title": m.group(2).strip()[:120], "raw": line})
                 break
     return chapters
 
