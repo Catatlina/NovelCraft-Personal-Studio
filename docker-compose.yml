@@ -6,7 +6,7 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: novelcraft
-      POSTGRES_PASSWORD: novelcraft
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novelcraft}
       POSTGRES_DB: novelcraft
     volumes:
       - pg_data:/var/lib/postgresql/data
