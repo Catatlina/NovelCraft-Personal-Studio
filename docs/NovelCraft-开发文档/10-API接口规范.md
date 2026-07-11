@@ -32,10 +32,11 @@
 |---|---|---|
 | POST | `/api/v1/novels/{id}/continue` | 生成下一章；章节级 `generation_key` 幂等，重复派发不产生重复章节 |
 | POST | `/api/v1/novels/{id}/chapters/batch` | 建批次生成 1–50 章；返回 `batch_id` |
+| GET | `/api/v1/novels/{id}/generation-batches` | 按时间倒序返回该书持久批次及生成/审核/通过百分比、可恢复状态 |
 | GET | `/api/v1/generation-batches/{id}` | 批次进度；`status` 含 `pending/running/succeeded/failed/pending_provider/cancelled`，失败原因在 `error` |
 | POST | `/api/v1/generation-batches/{id}/cancel` | 请求取消；章节间检查点生效 |
 | POST | `/api/v1/generation-batches/{id}/resume` | 仅 `failed/pending_provider` 可恢复；从 `completed_count` 断点续跑，非中断态返回 409 |
-| GET | `/api/v1/novels/{id}/export/txt`、`.../export/markdown`、`.../export/epub` | 导出整书；需项目成员身份，未知 novel 返回 404 |
+| GET | `/api/v1/novels/{id}/export/txt`、`.../export/markdown`、`.../export/epub` | 导出整书；EPUB 返回 `application/epub+zip` 文件，无章节为 409、依赖不可用为 503；需项目成员身份 |
 | GET | `/api/v1/novels/{id}/completion` | 完成度统计（章节数/字数/审核数）；需项目成员身份 |
 
 所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。Provider 或预算不可用时批次进入 `pending_provider` 并保留已完成进度，禁止伪装成功或清零重跑。曾存在的 `POST /scrape/browseract` 因违反《25》采集合规边界已移除，不得恢复。

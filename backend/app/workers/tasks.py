@@ -447,7 +447,8 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 @celery_app.task(bind=True, max_retries=2)
 @_isolated_request_context
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
-                           api_key: str = "", api_url: str = "", model: str = "") -> dict:
+                           api_key: str = "", api_url: str = "", model: str = "",
+                           batch_id: str = "", batch_ordinal: int = 0) -> dict:
     """M2: Generate the next chapter using context assembler (with distributed lock)."""
     from app.gateway import _request_api_key, _request_api_base_url, _request_model
     from .lock import acquire_lock, release_lock
@@ -463,16 +464,46 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
     if not acquire_lock(lock_key):
         return {"status": "skipped", "reason": "another generation in progress"}
     try:
-        return _generate_next_chapter_unlocked(novel_id, project_id)
+        return _generate_next_chapter_unlocked(novel_id, project_id, batch_id, batch_ordinal)
     finally:
         release_lock(lock_key)
 
 
-def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
+def _batch_generation_key(batch_id: str, ordinal: int) -> str:
+    return f"batch:{batch_id}:slot:{ordinal}:v1"
+
+
+def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
+                                    batch_id: str = "", batch_ordinal: int = 0) -> dict:
     """Generate one chapter. The caller owns the per-novel distributed lock."""
     from app.services.assembler import ContextAssembler
     from app.services.entity_tracker import extract_and_store
     db = connect()
+    slot_key = _batch_generation_key(batch_id, batch_ordinal) if batch_id and batch_ordinal else ""
+    if slot_key:
+        existing = db.execute("""SELECT * FROM contents WHERE project_id=%s AND parent_id=%s
+                                  AND generation_key=%s AND type='chapter' AND is_deleted=FALSE""",
+                              (project_id, novel_id, slot_key)).fetchone()
+        if existing:
+            db.close()
+            meta = existing["meta"] if isinstance(existing.get("meta"), dict) else {}
+            if existing["status"] in {"reviewed", "needs_rewrite"}:
+                return {"chapter_id": existing["id"], "title": existing["title"], "seq": meta.get("seq"),
+                        "continuity": meta.get("continuity", {"status": "unchecked"}),
+                        "accepted": existing["status"] == "reviewed",
+                        "review_status": existing["status"], "final_score": meta.get("review_score"),
+                        "rewrite_attempts": meta.get("rewrite_attempts", 0), "reused": True}
+            from app.services.novel_export import extract_body_text
+            paragraphs = [part for part in extract_body_text(existing.get("body", "")).splitlines() if part.strip()]
+            review = _review_and_finalize_chapter(
+                existing["id"], novel_id, project_id, int(meta.get("seq") or 0), slot_key,
+                existing["title"], paragraphs, meta.get("continuity", {"status": "unchecked"}),
+            )
+            return {"chapter_id": existing["id"], "title": review["title"], "seq": meta.get("seq"),
+                    "continuity": meta.get("continuity", {"status": "unchecked"}),
+                    "accepted": review["accepted"], "review_status": review["review_status"],
+                    "final_score": review["final_score"], "rewrite_attempts": review["rewrite_attempts"],
+                    "reused": True}
     # Find last chapter seq
     last = db.execute(
         "SELECT COALESCE(MAX((meta->>'seq')::int), 0) as seq FROM contents WHERE parent_id = %s AND type='chapter'",
@@ -494,7 +525,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
 
     # Generate — output is schema-validated by the gateway; the stable mutation id
     # lets a retry replay the succeeded ai_call instead of paying for a new one.
-    generation_key = f"novel:{novel_id}:chapter:{next_seq}:v1"
+    generation_key = slot_key or f"novel:{novel_id}:chapter:{next_seq}:v1"
     output = complete(
         run_id=None, node_key=None, project_id=project_id,
         task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
@@ -510,6 +541,9 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
     from app.services.text_metrics import count_content_chars
     text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter["body"])
     chapter_meta = {"seq": next_seq, "word_count": count_content_chars(text)}
+    if batch_id and batch_ordinal:
+        chapter_meta.update({"batch_id": batch_id, "batch_ordinal": batch_ordinal,
+                             "ordinal": batch_ordinal, "quality_status": "draft_pending_review"})
     stored = db.execute(
         """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -596,14 +630,16 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         status = "reviewed" if score >= threshold else "pending_review"
         db.execute("""UPDATE contents SET status=%s,meta=meta || %s,updated_at=now() WHERE id=%s""",
                    (status, encode({"review_score": score, "review_issues": issues,
-                                    "review_attempts": attempt + 1}), chapter_id))
+                                    "review_attempts": attempt + 1,
+                                    "quality_status": "accepted" if score >= threshold else "draft_pending_review"}), chapter_id))
         db.commit(); db.close()
         if score >= threshold:
             return {"accepted": True, "review_status": "reviewed", "final_score": score,
                     "rewrite_attempts": attempt, "title": current_title, "body": current_body}
         if attempt == max_rewrites:
             db = connect()
-            db.execute("UPDATE contents SET status='needs_rewrite',updated_at=now() WHERE id=%s", (chapter_id,))
+            db.execute("""UPDATE contents SET status='needs_rewrite',meta=meta || %s,updated_at=now()
+                          WHERE id=%s""", (encode({"quality_status": "needs_review"}), chapter_id))
             db.commit(); db.close()
             return {"accepted": False, "review_status": "needs_rewrite", "final_score": score,
                     "rewrite_attempts": attempt, "title": current_title, "body": current_body}
@@ -625,7 +661,8 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                       WHERE id=%s""",
                    (current_title, encode(rewritten_doc),
                     encode({"word_count": count_content_chars("\n".join(current_body)),
-                            "rewrite_attempts": attempt + 1}), chapter_id))
+                            "rewrite_attempts": attempt + 1,
+                            "quality_status": "draft_pending_review"}), chapter_id))
         db.commit(); db.close()
 
 
@@ -643,6 +680,72 @@ def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
              + [{"type": "foreshadow_due", "content": f.get("content", ""), "foreshadow_id": f.get("id")}
                 for f in overdue])
     return {"status": "flagged" if risks else "clean", "risks": risks, "checked_at": checked_at}
+
+
+def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str = "",
+                    model: str = "") -> dict:
+    """Run or resume one stable batch slot."""
+    generation_key = _batch_generation_key(batch["id"], ordinal)
+    db = connect()
+    existing = db.execute("""SELECT * FROM contents WHERE project_id=%s AND parent_id=%s
+                              AND generation_key=%s AND type='chapter' AND is_deleted=FALSE""",
+                          (batch["project_id"], batch["novel_id"], generation_key)).fetchone()
+    db.close()
+    if existing:
+        meta = existing["meta"] if isinstance(existing.get("meta"), dict) else {}
+        if existing.get("status") in {"reviewed", "needs_rewrite"}:
+            accepted = existing["status"] == "reviewed"
+            return {"chapter_id": existing["id"], "accepted": accepted,
+                    "review_status": existing["status"], "reused": True}
+        from app.services.novel_export import extract_body_text
+        paragraphs = [line for line in extract_body_text(existing.get("body", "")).splitlines() if line.strip()]
+        review = _review_and_finalize_chapter(
+            existing["id"], batch["novel_id"], batch["project_id"], int(meta.get("seq") or 0),
+            generation_key, existing["title"], paragraphs,
+            meta.get("continuity", {"status": "unchecked"}),
+        )
+        return {"chapter_id": existing["id"], **review, "reused": True}
+    return gen_next_chapter_task.run(
+        batch["novel_id"], batch["project_id"], api_key, api_url, model,
+        batch["id"], ordinal,
+    )
+
+
+def _recount_batch_progress(db, batch_id: str) -> dict | None:
+    """Rebuild counters from distinct persisted slots; never blindly trust increments."""
+    cursor = db.execute("""SELECT status,meta FROM contents WHERE type='chapter'
+                           AND meta->>'batch_id'=%s AND is_deleted=FALSE""", (batch_id,))
+    if not hasattr(cursor, "fetchall"):
+        return None  # Compatibility for lightweight adapters; production DB always supports it.
+    rows = cursor.fetchall()
+    by_ordinal = {}
+    for row in rows:
+        meta = row.get("meta", {}) if isinstance(row.get("meta"), dict) else {}
+        if meta.get("batch_id") and meta.get("batch_id") != batch_id:
+            continue
+        ordinal = int(meta.get("batch_ordinal") or meta.get("ordinal") or 0)
+        if ordinal > 0:
+            by_ordinal[ordinal] = meta.get("quality_status") or row.get("status")
+    generated = len(by_ordinal)
+    accepted = sum(status in {"accepted", "reviewed"} for status in by_ordinal.values())
+    needs_review = sum(status in {"needs_review", "needs_rewrite"} for status in by_ordinal.values())
+    reviewed = accepted + needs_review
+    terminal = reviewed
+    db.execute("""UPDATE generation_batches SET generated_count=%s,reviewed_count=%s,
+                  accepted_count=%s,needs_review_count=%s,completed_count=%s,updated_at=now() WHERE id=%s""",
+               (generated, reviewed, accepted, needs_review, terminal, batch_id))
+    return {"generated_count": generated, "reviewed_count": reviewed, "accepted_count": accepted,
+            "needs_review_count": needs_review, "completed_count": terminal}
+
+
+def _increment_batch_progress_legacy(db, batch_id: str, accepted: bool) -> None:
+    """Only for non-production lightweight adapters without fetchall support."""
+    db.execute("UPDATE generation_batches SET completed_count = completed_count + 1, updated_at=now() WHERE id=%s",
+               (batch_id,))
+    db.execute("""UPDATE generation_batches SET generated_count=generated_count+1,
+                   reviewed_count=reviewed_count+1,accepted_count=accepted_count+%s,
+                   needs_review_count=needs_review_count+%s,updated_at=now() WHERE id=%s""",
+               (1 if accepted else 0, 0 if accepted else 1, batch_id))
 
 
 @celery_app.task(bind=True, max_retries=1)
@@ -663,29 +766,28 @@ def batch_generate_chapters_task(
     db.commit()
     db.close()
 
-    remaining = batch["requested_count"] - batch.get("completed_count", 0)
+    start_ordinal = batch.get("completed_count", 0) + 1
     had_needs_review = False
     try:
-        for _ in range(remaining):
+        for ordinal in range(start_ordinal, batch["requested_count"] + 1):
+            db = connect()
+            db.execute("UPDATE generation_batches SET current_ordinal=%s,updated_at=now() WHERE id=%s",
+                       (ordinal, batch_id))
+            db.commit(); db.close()
             db = connect()
             state = db.execute("SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
             db.close()
             if not state or state["cancel_requested"]:
                 return {"status": "cancelled", "batch_id": batch_id}
-            result = gen_next_chapter_task.run(batch["novel_id"], batch["project_id"], api_key, api_url, model)
+            result = _run_batch_slot(batch, ordinal, api_key, api_url, model)
             if result.get("status") == "skipped":
                 raise RuntimeError(result.get("reason", "chapter generation skipped"))
             accepted = result.get("accepted", True)
             had_needs_review = had_needs_review or not accepted
             db = connect()
-            db.execute(
-                "UPDATE generation_batches SET completed_count = completed_count + 1, updated_at=now() WHERE id=%s",
-                (batch_id,),
-            )
-            db.execute("""UPDATE generation_batches SET generated_count=generated_count+1,
-                           reviewed_count=reviewed_count+1,accepted_count=accepted_count+%s,
-                           needs_review_count=needs_review_count+%s,updated_at=now() WHERE id=%s""",
-                       (1 if accepted else 0, 0 if accepted else 1, batch_id))
+            counts = _recount_batch_progress(db, batch_id)
+            if counts is None:
+                _increment_batch_progress_legacy(db, batch_id, accepted)
             db.commit()
             db.close()
     except (ProviderError, BudgetExceeded) as exc:
@@ -710,7 +812,9 @@ def batch_generate_chapters_task(
 
     db = connect()
     final_status = "needs_review" if had_needs_review else "succeeded"
-    db.execute("UPDATE generation_batches SET status=%s,updated_at=now() WHERE id=%s", (final_status, batch_id))
+    db.execute("""UPDATE generation_batches SET status=%s,quality_status=%s,current_ordinal=NULL,updated_at=now()
+                  WHERE id=%s""",
+               (final_status, "needs_review" if had_needs_review else "verified", batch_id))
     db.commit()
     db.close()
     return {"status": final_status, "batch_id": batch_id, "completed_count": batch["requested_count"]}

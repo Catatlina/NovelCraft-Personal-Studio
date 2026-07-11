@@ -1,6 +1,10 @@
 """Complete API endpoints: providers, adapters, multi-review, cross-model, matrix, book analysis, V1 migration."""
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.background import BackgroundTask
+from starlette.responses import FileResponse
+import os
+import re
 from app.core.security import get_current_user
 from app.db import connect
 
@@ -117,9 +121,19 @@ def export_novel_markdown_endpoint(novel_id: str, user: dict = Depends(get_curre
 
 @router.get("/novels/{novel_id}/export/epub")
 def export_novel_epub_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
-    from app.services.novel_export import export_novel_epub
+    from app.services.novel_export import export_novel_epub, get_novel_completion_status
     require_novel_member(novel_id, user)
-    return ok(export_novel_epub(novel_id))
+    result = export_novel_epub(novel_id)
+    if result.get("status") == "empty":
+        raise HTTPException(409, "novel has no chapters")
+    if result.get("status") != "ok" or not result.get("path"):
+        raise HTTPException(503, {"code": "EPUB_EXPORT_UNAVAILABLE", "reason": result.get("message")})
+    completion = get_novel_completion_status(novel_id)
+    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]+", "_", completion.get("title") or "novel")[:80]
+    path = result["path"]
+    return FileResponse(path, media_type="application/epub+zip", filename=f"{safe_title}.epub",
+                        headers={"X-NovelCraft-Ready-For-Release": str(bool(completion.get("ready_for_release"))).lower()},
+                        background=BackgroundTask(lambda: os.path.exists(path) and os.unlink(path)))
 
 
 @router.get("/novels/{novel_id}/completion")

@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
 type Book = { id: string; title: string; status: string; meta: Record<string, any>; updated_at: string };
-type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string };
+type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string; blocker_code?: string; cancel_requested?: boolean; updated_at?: string };
+type Completion = { total_chapters: number; reviewed_chapters: number; total_words: number; average_review_score: number; generation_percent?: number | null; review_percent?: number; continuity_flagged?: number; continuity_unchecked?: number; needs_rewrite_chapters?: number; quality_warnings?: string[]; ready_for_release?: boolean; exportable: boolean };
+type ImportPreview = { seq: string; title: string; raw: string };
 type Wrapped<T> = { data: T };
 
 export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: (bookId: string) => Promise<void> }) {
@@ -12,11 +14,33 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [notice, setNotice] = useState("");
   const [batchCount, setBatchCount] = useState(5);
   const [batches, setBatches] = useState<Record<string, Batch>>({});
+  const [completions, setCompletions] = useState<Record<string, Completion>>({});
+  const [importBookId, setImportBookId] = useState("");
+  const [directoryText, setDirectoryText] = useState("");
   const pollers = useRef<Record<string, number>>({});
+
+  const loadBookState = async (book: Book) => {
+    const [completionResult, batchesResult] = await Promise.allSettled([
+      api<Wrapped<Completion>>(`/api/v1/novels/${book.id}/completion`),
+      api<Wrapped<Batch[] | { items?: Batch[]; data?: Batch[] }>>(`/api/v1/novels/${book.id}/generation-batches`),
+    ]);
+    if (completionResult.status === "fulfilled") setCompletions(previous => ({ ...previous, [book.id]: completionResult.value.data }));
+    if (batchesResult.status === "fulfilled") {
+      const payload = batchesResult.value.data;
+      const items = Array.isArray(payload) ? payload : payload.items || payload.data || [];
+      const latest = items[0];
+      if (latest) {
+        setBatches(previous => ({ ...previous, [book.id]: latest }));
+        if (["pending", "running"].includes(latest.status)) pollBatch(book.id, latest.id);
+      }
+    }
+  };
 
   useEffect(() => {
     setBooks([]); setError("");
-    api<Wrapped<Book[]>>(`/api/v1/ranking/library/books?project_id=${projectId}`).then(result => { setBooks(result.data); setError(""); }).catch(caught => setError(String(caught)));
+    api<Wrapped<Book[]>>(`/api/v1/ranking/library/books?project_id=${projectId}`).then(result => {
+      setBooks(result.data); setError(""); result.data.forEach(book => void loadBookState(book));
+    }).catch(caught => setError(String(caught)));
     return () => { Object.values(pollers.current).forEach(id => window.clearInterval(id)); pollers.current = {}; };
   }, [projectId]);
 
@@ -28,8 +52,13 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         setBatches(prev => ({ ...prev, [bookId]: result.data }));
         if (["succeeded", "failed", "cancelled", "pending_provider"].includes(result.data.status)) {
           window.clearInterval(pollers.current[batchId]); delete pollers.current[batchId];
+          const book = books.find(item => item.id === bookId);
+          if (book) void loadBookState(book);
         }
-      } catch { window.clearInterval(pollers.current[batchId]); delete pollers.current[batchId]; }
+      } catch (caught) {
+        window.clearInterval(pollers.current[batchId]); delete pollers.current[batchId];
+        setNotice(`批次状态刷新失败：${String(caught)}。请刷新书库重试。`);
+      }
     }, 3000);
   };
 
@@ -61,6 +90,36 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     } catch (caught) { setNotice(`恢复失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
+  const cancelBatch = async (book: Book, batch: Batch) => {
+    setBusy(book.id); setNotice("");
+    try {
+      const result = await api<Wrapped<{ status: string }>>(`/api/v1/generation-batches/${batch.id}/cancel`, { method: "POST", body: "{}" });
+      setBatches(previous => ({ ...previous, [book.id]: { ...batch, status: result.data.status, cancel_requested: true } }));
+      if (pollers.current[batch.id]) { window.clearInterval(pollers.current[batch.id]); delete pollers.current[batch.id]; }
+      setNotice(`《${book.title}》批次已请求取消。`);
+    } catch (caught) { setNotice(`取消失败：${String(caught)}`); } finally { setBusy(""); }
+  };
+
+  const importPreview: ImportPreview[] = directoryText.split(/\r?\n/).flatMap(raw => {
+    const line = raw.trim();
+    const match = line.match(/^第([一二三四五六七八九十百千\d]+)章\s*(.+)$/i)
+      || line.match(/^Chapter\s+(\d+)[:：]\s*(.+)$/i)
+      || line.match(/^(\d+)[.、\s]+(.+)$/);
+    return match ? [{ seq: match[1], title: match[2].trim(), raw: line }] : [];
+  });
+
+  const importDirectory = async (book: Book) => {
+    if (!importPreview.length) { setNotice("没有识别到章节目录，请使用“第1章 标题”等格式。"); return; }
+    setBusy(book.id); setNotice("");
+    try {
+      const result = await api<Wrapped<{ imported?: number; count?: number; skipped?: number }>>(`/api/v1/novels/${book.id}/import-chapters`, {
+        method: "POST", body: JSON.stringify({ text: directoryText }),
+      });
+      setNotice(`目录导入完成：新增 ${result.data.imported ?? result.data.count ?? 0} 章，跳过 ${result.data.skipped ?? 0} 章。`);
+      setDirectoryText(""); setImportBookId(""); await loadBookState(book);
+    } catch (caught) { setNotice(`目录导入失败：${String(caught)}`); } finally { setBusy(""); }
+  };
+
   const exportBook = async (book: Book, format: "txt" | "markdown") => {
     setBusy(book.id); setNotice("");
     try {
@@ -81,20 +140,45 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} style={{ width: "4em" }} /></label>
     <div className="grid-cards">{books.map(book => {
       const batch = batches[book.id];
+      const completion = completions[book.id];
       return <article className="feature-card" key={book.id}>
         <strong>{book.title}</strong><small>{book.status} · {book.meta?.source_type || "inspiration"}</small>
         <p>{book.meta?.idea || "暂无简介"}</p>
-        {batch && <p className="muted">批次 {batch.status}：{batch.completed_count}/{batch.requested_count}
-          {batch.error ? ` — ${batch.error}` : ""}</p>}
+        {completion ? <div style={{ display: "grid", gap: 4 }}>
+          <small>章节 {completion.total_chapters} · 已审核 {completion.reviewed_chapters} · {completion.total_words} 字</small>
+          <small>生成进度 {completion.generation_percent ?? "目标未设置"}{completion.generation_percent !== null && completion.generation_percent !== undefined ? "%" : ""} · 审核覆盖 {completion.review_percent ?? 0}% · 平均审核分 {completion.average_review_score || "暂无"}</small>
+          {(completion.quality_warnings || []).length > 0 && <div className="danger-text"><strong>质量警告：</strong>{completion.quality_warnings?.join("；")}</div>}
+          {!completion.ready_for_release && completion.total_chapters > 0 && <small>当前仅表示章节已生成，不代表质量验收或整书完成。</small>}
+        </div> : <small className="muted">正在加载章节完成度与质量状态…</small>}
+        {batch && <div className={batch.status === "failed" || batch.status === "pending_provider" ? "danger-text" : "muted"}>
+          批次 {batch.status}：{batch.completed_count}/{batch.requested_count}
+          {batch.cancel_requested ? " · 已请求取消" : ""}{batch.blocker_code ? ` · ${batch.blocker_code}` : ""}
+          {batch.error ? ` — ${batch.error}` : ""}
+          {batch.status === "succeeded" && <div><small>生成批次已结束，请继续核对审核覆盖和连续性风险。</small></div>}
+        </div>}
         <div className="row-actions">
           <button onClick={() => void onOpen(book.id)}>打开小说</button>
           <button disabled={busy === book.id} onClick={() => void continueOne(book)}>续写一章</button>
           <button disabled={busy === book.id} onClick={() => void startBatch(book)}>批量生成</button>
+          {batch && ["pending", "running"].includes(batch.status) &&
+            <button disabled={busy === book.id} onClick={() => void cancelBatch(book, batch)}>取消批次</button>}
           {batch && ["failed", "pending_provider"].includes(batch.status) &&
             <button disabled={busy === book.id} onClick={() => void resumeBatch(book, batch)}>恢复批次</button>}
-          <button disabled={busy === book.id} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
-          <button disabled={busy === book.id} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
+          <button disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入章节目录</button>
+          <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
+          <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
         </div>
+        {importBookId === book.id && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+          <strong>章节目录预览</strong>
+          <small>粘贴 TXT 目录；预览不会写入，点击确认后才创建空白计划章节。重复标题由后端跳过。</small>
+          <textarea rows={7} value={directoryText} onChange={event => setDirectoryText(event.target.value)} placeholder={"第1章 初入异界\n第2章 规则觉醒"} />
+          <small>识别 {importPreview.length} 条{directoryText.trim() && !importPreview.length ? "；当前格式无法识别" : ""}</small>
+          {importPreview.length > 0 && <ol style={{ maxHeight: 150, overflow: "auto", margin: 0, paddingLeft: 24 }}>
+            {importPreview.slice(0, 20).map((chapter, index) => <li key={`${chapter.raw}:${index}`}>第{chapter.seq}章 {chapter.title}</li>)}
+          </ol>}
+          {importPreview.length > 20 && <small>仅预览前 20 条，确认时提交全部 {importPreview.length} 条。</small>}
+          <button className="primary" disabled={busy === book.id || !importPreview.length} onClick={() => void importDirectory(book)}>{busy === book.id ? "导入中…" : `确认导入 ${importPreview.length} 条`}</button>
+        </div>}
       </article>;
     })}</div>
     {!books.length && !error && <p className="muted">书库为空。可以从扫榜中心或灵感入口创建小说。</p>}

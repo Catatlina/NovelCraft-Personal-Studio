@@ -1,6 +1,7 @@
 """NC-SC-004: Novel export — TXT, Markdown, EPUB + complete book status."""
 from __future__ import annotations
-import os, json
+import os, json, tempfile
+from html import escape
 from datetime import datetime
 from app.db import connect
 
@@ -86,6 +87,11 @@ def export_novel_epub(novel_id: str, output_path: str = "") -> dict:
         ).fetchall()
         db.close()
 
+        if not novel:
+            return {"status": "error", "message": "novel not found"}
+        if not chapters:
+            return {"status": "empty", "message": "novel has no chapters", "chapter_count": 0}
+
         book = epub.EpubBook()
         book.set_identifier(novel_id)
         book.set_title(novel['title'])
@@ -97,7 +103,7 @@ def export_novel_epub(novel_id: str, output_path: str = "") -> dict:
             seq = ch.get('meta', {}).get('seq', '?') if isinstance(ch.get('meta'), dict) else ch.get('seq', '?')
             c = epub.EpubHtml(title=ch['title'], file_name=f'ch{seq}.xhtml', lang='zh')
             text = extract_body_text(ch.get("body", ""))
-            c.content = f'<h1>第{seq}章 {ch["title"]}</h1>\n{text.replace(chr(10), "<br/>")}'
+            c.content = f'<h1>第{seq}章 {escape(ch["title"])}</h1>\n{escape(text).replace(chr(10), "<br/>")}'
             book.add_item(c)
             spine.append(c)
 
@@ -105,11 +111,16 @@ def export_novel_epub(novel_id: str, output_path: str = "") -> dict:
         book.add_item(epub.EpubNav())
         book.spine = spine
 
-        path = output_path or f"/tmp/novelcraft_export_{novel_id[:8]}.epub"
+        if output_path:
+            path = output_path
+        else:
+            handle = tempfile.NamedTemporaryFile(prefix="novelcraft_", suffix=".epub", delete=False)
+            path = handle.name
+            handle.close()
         epub.write_epub(path, book)
         return {"status": "ok", "format": "epub", "path": path, "chapter_count": len(chapters)}
     except ImportError:
-        return {"status": "fallback", "format": "txt", "message": "Install ebooklib for EPUB", **export_novel_txt(novel_id)}
+        return {"status": "unavailable", "format": "epub", "message": "Install ebooklib for EPUB"}
 
 
 def get_novel_completion_status(novel_id: str) -> dict:

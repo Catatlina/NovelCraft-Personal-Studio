@@ -407,9 +407,15 @@ async def batch_generate_chapters(
         conn.close()
         raise HTTPException(status_code=400, detail="content is not a novel")
     batch_id = new_id()
+    start_row = conn.execute("""SELECT COALESCE(MAX((meta->>'seq')::int),0)+1 AS start_seq FROM contents
+                                WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE""",
+                             (novel_id,)).fetchone()
+    start_seq = int((start_row or {}).get("start_seq") or 1)
     conn.execute(
-        "INSERT INTO generation_batches (id, project_id, novel_id, requested_count) VALUES (%s, %s, %s, %s)",
-        (batch_id, novel["project_id"], novel_id, payload.chapter_count),
+        """INSERT INTO generation_batches
+           (id,project_id,novel_id,requested_count,start_seq,quality_status)
+           VALUES (%s,%s,%s,%s,%s,'in_progress')""",
+        (batch_id, novel["project_id"], novel_id, payload.chapter_count, start_seq),
     )
     conn.commit()
     conn.close()
@@ -435,6 +441,33 @@ async def batch_generate_chapters(
     conn.commit()
     conn.close()
     return ok({"batch_id": batch_id, "task_id": task.id, "status": "pending"})
+
+
+@app.get("/api/v1/novels/{novel_id}/generation-batches")
+def list_novel_generation_batches(novel_id: str, limit: int = 20, offset: int = 0,
+                                  user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, novel = load_content_for_user(novel_id, user)
+    batches = conn.execute("""SELECT * FROM generation_batches WHERE novel_id=%s
+                              ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+                           (novel_id, min(max(limit, 1), 100), max(offset, 0))).fetchall()
+    conn.close()
+    items = []
+    for batch in batches:
+        requested = max(int(batch.get("requested_count") or 0), 1)
+        generated = int(batch.get("generated_count") or 0)
+        reviewed = int(batch.get("reviewed_count") or 0)
+        accepted = int(batch.get("accepted_count") or 0)
+        needs_review = int(batch.get("needs_review_count") or 0)
+        legacy = batch.get("status") == "succeeded" and generated == 0 and reviewed == 0 \
+            and int(batch.get("completed_count") or 0) > 0
+        quality_status = "legacy_unverified" if legacy else (batch.get("quality_status") or "in_progress")
+        items.append({**dict(batch), "terminal_count": accepted + needs_review,
+                      "generation_percent": round(generated / requested * 100),
+                      "review_percent": round(reviewed / generated * 100) if generated else 0,
+                      "acceptance_percent": round(accepted / requested * 100),
+                      "recoverable": batch.get("status") in {"failed", "pending_provider", "dispatch_failed"},
+                      "quality_status": quality_status})
+    return ok({"items": items, "count": len(items)})
 
 
 @app.get("/api/v1/generation-batches/{batch_id}")
@@ -466,7 +499,11 @@ def cancel_generation_batch(batch_id: str, user: dict = Depends(get_current_user
     )
     conn.commit()
     conn.close()
-    return ok({"batch_id": batch_id, "status": "cancelled"})
+    current_ordinal = batch.get("current_ordinal")
+    return ok({"batch_id": batch_id, "status": "cancelled", "in_flight": current_ordinal is not None,
+               "current_ordinal": current_ordinal,
+               "message": "已停止后续槽位；当前正在执行的章节可能完成后才停止" if current_ordinal is not None
+                          else "已取消，尚无正在执行的槽位"})
 
 
 @app.post("/api/v1/generation-batches/{batch_id}/resume")
