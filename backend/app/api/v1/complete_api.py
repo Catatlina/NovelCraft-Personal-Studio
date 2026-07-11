@@ -198,3 +198,47 @@ def get_integration_status(user: dict = Depends(get_current_user)):
 def validate_integrity_endpoint(user: dict = Depends(get_current_user)):
     from app.services.fusion_governance import validate_fusion_data_integrity
     return ok(validate_fusion_data_integrity())
+
+
+# --- NC-PUB-001~003: Publish state machine + data collection + ROI ---
+
+@router.post("/publish/account/register")
+def register_publish_account(platform: str, account_name: str, credentials: dict = {}, user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import register_platform_account
+    return ok(register_platform_account(platform, account_name, credentials))
+
+
+@router.post("/publish/state")
+def update_publish_state(content_id: str, platform: str, target_state: str, user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import publish_state_machine
+    return ok(publish_state_machine(content_id, platform, target_state))
+
+
+@router.get("/publish/history")
+def get_publish_history(content_id: str = "", platform: str = "", user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import get_publishing_history
+    return ok(get_publishing_history(content_id, platform))
+
+
+@router.post("/publish/data/collect")
+def collect_engagement_data(platform: str, content_id: str, data: dict, user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import collect_platform_data
+    return ok(collect_platform_data(platform, content_id, data))
+
+
+@router.get("/publish/stats")
+def get_platform_stats(platform: str = "", user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import aggregate_platform_stats
+    return ok(aggregate_platform_stats(platform))
+
+
+@router.get("/publish/roi")
+def get_roi_report(user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import generate_roi_report
+    return ok(generate_roi_report())
+
+
+@router.get("/publish/topic-suggestions")
+def get_topic_suggestions_from_performance(user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import generate_topic_suggestions_from_data
+    return ok(generate_topic_suggestions_from_data())
