@@ -38,6 +38,11 @@
 | POST | `/api/v1/generation-batches/{id}/resume` | 仅 `failed/pending_provider` 可恢复；从 `completed_count` 断点续跑，非中断态返回 409 |
 | GET | `/api/v1/novels/{id}/export/txt`、`.../export/markdown`、`.../export/epub` | 导出整书；EPUB 返回 `application/epub+zip` 文件，无章节为 409、依赖不可用为 503；需项目成员身份 |
 | GET | `/api/v1/novels/{id}/completion` | 完成度统计（章节数/字数/审核数）；需项目成员身份 |
+| GET | `/api/v1/novels/{id}/narrative` | 审阅页时间线/人物弧线真实数据（timeline_events + arcs 表） |
+| POST | `/api/v1/contents/{id}/check-sensitive` | 发布前敏感词检查；返回 `passed/blocked_words` |
+| GET | `/api/v1/stats/overview` | 用户项目范围真实统计（AI 调用数/内容数/库大小） |
+| POST | `/api/v1/publish/account/register` | 平台账号注册；凭据 Fernet 加密落 `platform_accounts`，响应不回显凭据 |
+| GET | `/api/v1/publish/accounts` | 当前用户平台账号列表（不含凭据字段） |
 
 所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。Provider 或预算不可用时批次进入 `pending_provider` 并保留已完成进度，禁止伪装成功或清零重跑。曾存在的 `POST /scrape/browseract` 因违反《25》采集合规边界已移除，不得恢复。
 

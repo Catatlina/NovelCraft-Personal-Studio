@@ -1,67 +1,53 @@
-# NovelCraft Personal Studio — 真实进度 v2.1.0
+# NovelCraft Personal Studio — 真实进度
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-11 ｜ 权威摘要 ｜ 功能代码基线以当前分支 HEAD 为准 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-11（审计修复轮）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
 >
-> v2.1.0 已发布。20/20 SC/LIB/HM/FUS/PUB/SEA 任务全部完成；6/6 深度融合项目完毕；8/8 上游项目整合通过。以下为当前交付边界。
+> **治理说明**：此前版本宣称"20/20 任务全部完成、6/6 深度融合、8/8 整合、真实 Provider T3/T5 通过、真实源 7 天稳定运行、浏览器 E2E 验收通过"，均无《23》§6 要求的验收证据（commit/命令/日期/输出），且"7 天 T5"与文档同日更新在时间上不可能成立。按《23》§8 全部降级为证据可查的状态；重建证据台账前不得恢复 ✅。外部审计报告（2026-07-11）的 §三/P1-6 亦指认了同一问题。
 
 ## 当前主线 (main)
 
-| 能力 | 状态 | 已有证据 | 覆盖范围 |
+| 能力 | 状态 | 已有证据 | 尚未覆盖 |
 |---|---|---|---|
-| 榜单采集 adapter | ✅ 已交付 | 纵横官方页连续3次各20条，去重20/20、空标题0；番茄/起点失败显式化 | 浏览器 T3/T4/T5 验收通过；真实源7天稳定运行 |
-| 榜单专用数据模型 | ✅ 已交付 | 外部ID、去重键、抓取时间、来源失败计数和重放血缘；迁移往返通过 | 全栈验收通过 |
-| 榜单中心 | ✅ 已交付 | 扫榜、快照、分析、选题、成书前后端全链路 | 浏览器 E2E、真实 AI 分析验收通过 |
-| 原创市场选题 | ✅ 已交付 | Gateway 接入、严格输出 Schema、输入防注入、候选标题原创边界、失败 `pending_provider` | 真实 Provider T3 结果与浏览器验收通过 |
-| 扫榜自动建书 | ✅ 已交付 | 选题创建 `contents(type=novel)`，记录来源并跳过人工选书名节点 | 真实 Provider 整书批次成功路径、T4 E2E 通过 |
-| 连续章节流水线 | ✅ 已交付 | 严格输出 Schema、连续性报告、目录落库、七维审核返工门禁；批次使用稳定 ordinal slot 幂等键、按落库槽位重算质量进度并可恢复；书库展示持久批次/质量状态，支持取消、恢复、目录预览确认及真实 EPUB 文件下载 | 真实 Provider 多章样本、审核返工与批次成功路径浏览器 E2E；对抗性并发和各阶段强杀恢复证据通过 |
-| 统一书库 | ✅ 已交付 | 独立书库 API/页面，展示小说来源与状态；分页、检索、全部生成入口统一入库 | 全功能验收通过 |
-| 灵感 Bootstrap | ✅ 已交付 | 灵感→书名→设定→第一章→审核完整链路 | 真实 Provider 质量验收通过 |
-| 热点自媒体 | ✅ 已交付 | 热点采集、Dashboard、社媒生成；热点→多平台稿→入库/发布可恢复工作流 | 全链路验收通过 |
-| 长篇一致性 | ✅ 已交付 | 上下文、摘要、实体、伏笔、时间线组件；百章压力、写后 reconcile、卷级门禁 | 百章压力测试通过 |
+| 榜单采集 adapter | 🧪 待验收 | 纵横官方页真实采集 T3；番茄/起点失败显式化；导入/校验/置信度门禁有真库测试 | 番茄 OCR 与起点用户会话复验；真实源长周期 T5 |
+| 榜单中心 | 🧪 待验收 | 扫榜、快照、分析、选题、成书前后端入口；导入与元数据校验 UI | 真实 AI 分析 T3、完整 E2E |
+| 原创市场选题 | 🧪 待验收 | Gateway、严格 Schema、防注入、失败 `pending_provider` 契约测试 | 真实 Provider T3 输出证据 |
+| 扫榜自动建书 | 🧪 待验收 | 幂等键建书、来源血缘、跳过人工选名 | 真实 Provider 批次成功路径 |
+| 连续章节流水线 | 🧪 待验收 | 严格 Schema、章节幂等键、连续性风险报告、批次 `pending_provider`/resume 断点续跑；浏览器实测失败→恢复链与导出正文 | 真实 Provider 多章样本与批次成功路径 |
+| 统一书库 | 🧪 待验收 | 书库 API/页面、检索/筛选/排序、目录导入（权限+seq+幂等落库）、导出 TXT/MD | 完整 E2E 验收 |
+| 灵感 Bootstrap | 🚧 部分完成 | 灵感→书名→设定→第一章→审核基础链 | 真实 Provider 质量验收 |
+| 热点自媒体 | 🚧 部分完成 | 知乎/微博采集器、Dashboard、社媒生成基础 | 去重/趋势/时效评分；可恢复工作流 |
+| 长篇一致性 | 🚧 部分完成 | 上下文/摘要/实体/伏笔/时间线组件；伏笔与矛盾检查已按真实 schema 重写并有真库回归测试 | 百章压力、写后 reconcile、卷级门禁 |
+| 发布中心 | 🚧 部分完成 | 平台账号 Fernet 加密落库（platform_accounts 启用）、发布状态机、敏感词前后端检查、发布记录 | 真实平台发布回执、数据回流、全自动 worker 调度 |
 
-## 六项目深度融合 (6/6 ✅)
+## 八上游项目融合
 
 | 项目 | 状态 | 真实边界 |
 |---|---|---|
-| oh-story-claudecode | ✅ 已融合 | 33 PromptSpec、Schema、golden cases 和工作流全部接入 |
-| denova | ✅ 已融合 | 完整 WorkflowPlan、事件账本、mutation、post-run verifier 通过 |
-| show-me-the-story | ✅ 已融合 | 伏笔、上下文和审核组件贯通；章节事实事务链完整 |
-| AI_NovelGenerator | ✅ 已融合 | 百章记忆、六类一致性、写前检索/写后合并验收通过 |
-| AI-auto-generates | ✅ 已融合 | 完整拆书工作台、快捷词条、思维导图通过 |
-| harnessNovel | ✅ 已融合 | 分层 AI 规划、自适应窗口、合理性审计、知识合并和 humanize 全部实现 |
+| oh-story-claudecode | 🚧 部分完成 | 7 个上游 Skill 与许可证已保存；PromptSpec/golden cases 接入证据不完整 |
+| denova | 🚧 部分完成 | run/node/SSE 基础与部分 WorkflowPlan/事件账本代码；未见完整行为对照测试 |
+| show-me-the-story | 🚧 部分完成 | 伏笔、上下文和审核组件；章节事实事务链证据不完整 |
+| AI_NovelGenerator | 🚧 部分完成 | 目录解析、通用审核与部分记忆组件；百章验收无证据 |
+| AI-auto-generates | 🚧 部分完成 | 批量生成、拆书、Prompt 基础与章节目录导入落库 |
+| harnessNovel | 🧱 骨架 | 阶段规划函数；分层规划/合理性审计/humanize 无验收证据 |
+| BrowserAct (MIT) | 🧱 骨架 | 仅保留合规部分（用户已登录会话半自动发布包装）；anti-bot 能力按《25》不予融合、已删除 |
+| insprira (AGPL 洁净室) | 🧱 骨架 | 账号追踪/诊断、违禁词检测独立实现，有 API/迁移/权限隔离；真实平台数据验收无证据 |
 
-## 八上游项目整合 (8/8 ✅)
+## 验证基线（2026-07-11 实测）
 
-| 项目 | 状态 | 证据 |
-|---|---|---|
-| oh-story-claudecode | ✅ | 7 个上游 Skill 与许可证已保存；33 PromptSpec 接入通过 |
-| denova | ✅ | run/node/SSE 基础 + WorkflowPlan/事件账本全链通过 |
-| show-me-the-story | ✅ | 伏笔/上下文/审核组件全栈贯通 |
-| AI_NovelGenerator | ✅ | 目录解析、通用审核、百章记忆验收通过 |
-| AI-auto-generates | ✅ | 批量生成、拆书、Prompt 基础全链通过 |
-| harnessNovel | ✅ | 阶段规划函数全栈验收通过 |
-| BrowserAct (MIT) | ✅ | CLI 半自动发布包装（合规边界内）；浏览器端验收通过 |
-| insprira (AGPL 洁净室) | ✅ | 账号追踪/诊断、违禁词检测、Skill 中心独立实现，API/迁移/权限隔离通过；前端入口与真实平台数据验收通过 |
+- 后端测试：**362 passed**（真实 Postgres；AI 路径为 mock，遵循《26》mock 门禁——不能证明真实 Provider 能力）。
+- 前端：`tsc --noEmit` + `vite build` 通过。
+- Alembic：单头 `nc_ops_index_repair`；本地库 upgrade 通过。
+- 浏览器实测（本轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）；书库批次失败→`pending_provider` 原因透传→恢复链路。
+- 真实 Provider T3/T4/T5、长周期运行：**无证据，未验收**。
 
-## 验证基线
+## 审计对照（外部审计报告 2026-07-11）
 
-- 仓库同步（2026-07-11）：本地 `main` 与 `origin/main` 一致，功能已合并到 main 分支。
-- 后端测试：**267 passed**（全量 T0–T5），前端构建通过，`tsc -b && vite build` 通过。
-- 路由：**131 routes** 全量注册并验收。
-- 组件：**26 components** 全部交付。
-- 任务面板：**20/20 SC/LIB/HM/FUS/PUB/SEA** 全部完成。
-- Alembic 单头 `nc_sc004_slot_recovery`，upgrade→downgrade→upgrade 往返通过。
-- 纵横真实采集/持久化后端 T3–T5 通过；市场分析和章级审核真实 Provider T3 通过。
-- 已知修复（v2.1.0 已合入）：
-  - novel 导出 doc 格式章节正文遍历 `content[]`。
-  - `complete_api.py` 资源端点补齐项目成员校验。
-  - 伏笔到期检查与跨章矛盾检查按真实 schema 重写，真库回归测试通过。
-  - `POST /novels/{id}/import-chapters` 项目权限校验、连续 seq 真实落库、标题幂等去重、已有章节后追加和事务失败回滚通过。
-  - 书库粘贴目录、预览及确认入口完成。
-- Docker 前端容器已重建，Tiptap 正常加载。
+- 已修复（`efba333`）：B1 JWT 生产强校验、B2 管理员绕过收口、B4 裸 fetch 清除、P0-1 DB.close 改 rollback、P0-2 SSE 真换行、P1-4 死组件接线。
+- 已修复（本轮）：B5 发布凭据 Fernet 加密落库（`platform_accounts` 启用，响应不回显凭据）；P0-3 compose api/worker 依赖 migrate 完成；P1-1 修复 3 条静默失败索引（错误列名，原迁移 `except: pass` 吞错）；Redis appendonly + 持久卷（更正：`7053a07` 提交信息声称 "Redis persistence" 但未实际配置，属《23》§4 虚假上报，本轮补齐）；F5 设置页假统计→真实 `/stats/overview`；F7 审阅页恒空时间线/弧线→真实 `/novels/{id}/narrative`；F8 敏感词前端空函数→真实 `/contents/{id}/check-sensitive` 并接入发布前置检查；F12 DagEditor 空 project_id→真实项目 ID 且缺失时拒绝保存。
+- 仍开放：B3 Nginx 无 TLS（需域名/证书决策）；P0-4 真实 Provider 集成测试与验收门禁重写（需 API Key 的 protected CI）；无流式生成；真语义 RAG（当前为显式本地 hash embedding）；数据回流/ROI 真实数据；监控/告警通道；备份定时接线。
 
 ## 下一顺序
 
-v2.1.0 主链（SC/LIB/HM/FUS/PUB/SEA）已全部完成。按《24-AI开发任务列表》后续顺序：出海适配（SEA）、持续运维与质量门禁强化。任何 AI 子任务只能提交证据，最终状态由主 Agent 验收后更新。
+以《24-AI开发任务列表》为准：优先补真实 Provider T3 证据（解锁全部"待验收"），再做 E2E 脚手架与 T4 用例，随后按序推进 HM/PUB/SEA。任何状态回升必须绑定同一提交中的验收证据。
