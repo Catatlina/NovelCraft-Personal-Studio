@@ -60,3 +60,30 @@ def migrate_v1(project_id: str = "", user: dict = Depends(get_current_user)):
     v1_path = create_v1_test_db()
     stats = migrate_v1_to_v2(v1_path, project_id)
     return ok({"v1_source": v1_path, "stats": stats})
+
+
+# --- NC-SC-004: Novel export ---
+
+@router.get("/novels/{novel_id}/export/txt")
+def export_novel_txt_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
+    from app.services.novel_export import export_novel_txt
+    result = export_novel_txt(novel_id)
+    return ok(result)
+
+
+@router.get("/novels/{novel_id}/export/markdown")
+def export_novel_markdown_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
+    from app.services.novel_export import export_novel_markdown
+    return ok(export_novel_markdown(novel_id))
+
+
+@router.get("/novels/{novel_id}/export/epub")
+def export_novel_epub_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
+    from app.services.novel_export import export_novel_epub
+    return ok(export_novel_epub(novel_id))
+
+
+@router.get("/novels/{novel_id}/completion")
+def get_novel_completion_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
+    from app.services.novel_export import get_novel_completion_status
+    return ok(get_novel_completion_status(novel_id))
