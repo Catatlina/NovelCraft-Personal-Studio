@@ -372,6 +372,13 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
     assembler = ContextAssembler(novel_id)
     context = assembler.build()
 
+    # M2: Check for due foreshadows + inject into context
+    from app.services.narrative_engine import check_foreshadow_due, inject_foreshadow_context
+    due_foreshadows = check_foreshadow_due(novel_id, next_seq)
+    if due_foreshadows:
+        inject_str = inject_foreshadow_context(due_foreshadows)
+        context = inject_str + "\n\n" + context
+
     # Generate
     output = complete(
         run_id=None, node_key=None, project_id=project_id,
