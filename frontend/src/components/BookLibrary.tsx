@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { Search, Filter, ArrowUpDown } from "lucide-react";
 
 type Book = { id: string; title: string; status: string; meta: Record<string, any>; updated_at: string };
 type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string; blocker_code?: string; cancel_requested?: boolean; updated_at?: string };
@@ -17,6 +18,12 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [completions, setCompletions] = useState<Record<string, Completion>>({});
   const [importBookId, setImportBookId] = useState("");
   const [directoryText, setDirectoryText] = useState("");
+  // NC-LIB-002: search, filter, sort, pagination
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"title" | "updated" | "chapters">("updated");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 10;
   const pollers = useRef<Record<string, number>>({});
 
   const loadBookState = async (book: Book) => {
@@ -134,11 +141,42 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     } catch (caught) { setNotice(`导出失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
+  // NC-LIB-002: Apply filters client-side
+  const filtered = books.filter(b => {
+    if (search && !b.title.includes(search) && !(b.meta?.idea || "").includes(search)) return false;
+    if (statusFilter && b.status !== statusFilter) return false;
+    return true;
+  }).sort((a, b) => {
+    if (sortBy === "title") return a.title.localeCompare(b.title);
+    if (sortBy === "chapters") return (completions[b.id]?.total_chapters || 0) - (completions[a.id]?.total_chapters || 0);
+    return new Date(b.updated_at || "").getTime() - new Date(a.updated_at || "").getTime();
+  });
+  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+
   return <section className="panel"><h2>统一书库</h2>{error && <div className="error">{error}</div>}
     {notice && <div className="muted">{notice}</div>}
+    {/* NC-LIB-002: Search + filter + sort toolbar */}
+    <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+        <Search size={14} /><input placeholder="搜索书名或简介…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ flex: 1 }} />
+      </div>
+      <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0); }} style={{ width: 100 }}>
+        <option value="">全部状态</option>
+        <option value="draft">draft</option>
+        <option value="planning">planning</option>
+        <option value="generated">generated</option>
+        <option value="completed">completed</option>
+      </select>
+      <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+        <option value="updated">最近更新</option>
+        <option value="title">按书名</option>
+        <option value="chapters">按章节数</option>
+      </select>
+    </div>
     <label className="muted">批量章节数 <input type="number" min={1} max={50} value={batchCount}
       onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} style={{ width: "4em" }} /></label>
-    <div className="grid-cards">{books.map(book => {
+    <div className="grid-cards">{paged.map(book => {
       const batch = batches[book.id];
       const completion = completions[book.id];
       return <article className="feature-card" key={book.id}>
@@ -181,6 +219,12 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         </div>}
       </article>;
     })}</div>
+    {/* NC-LIB-002: Pagination */}
+    {totalPages > 1 && <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 12 }}>
+      <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>上一页</button>
+      <span style={{ fontSize: 13 }}>{page + 1} / {totalPages} (共 {filtered.length} 本)</span>
+      <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
+    </div>}
     {!books.length && !error && <p className="muted">书库为空。可以从扫榜中心或灵感入口创建小说。</p>}
   </section>;
 }
