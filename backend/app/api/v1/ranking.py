@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
-from app.services.ranking_adapter import RANKING_FETCHERS
+from app.services.ranking_adapter import RANKING_FETCHERS, normalize_ranking_items
 
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
 
@@ -50,13 +50,18 @@ def list_sources(project_id: str, user: dict = Depends(get_current_user)):
     for key, name in SOURCE_NAMES.items():
         row = existing.get(key, {})
         result.append({"source_key": key, "display_name": name, "enabled": row.get("enabled", True),
-                       "last_success_at": row.get("last_success_at"), "last_error": row.get("last_error")})
+                       "last_success_at": row.get("last_success_at"), "last_attempt_at": row.get("last_attempt_at"),
+                       "consecutive_failures": row.get("consecutive_failures", 0), "last_error": row.get("last_error")})
     db.close()
     return ok(result)
 
 
 @router.post("/sources/{source_key}/scan")
 def scan_source(source_key: str, project_id: str, user: dict = Depends(get_current_user)):
+    return _scan_source(source_key, project_id, user)
+
+
+def _scan_source(source_key: str, project_id: str, user: dict, retry_of_snapshot_id: str | None = None):
     fetcher = RANKING_FETCHERS.get(source_key)
     if not fetcher:
         raise HTTPException(404, "unknown ranking source")
@@ -70,33 +75,40 @@ def scan_source(source_key: str, project_id: str, user: dict = Depends(get_curre
         (source_id, project_id, source_key, SOURCE_NAMES[source_key]),
     )
     source_id = db.fetchone()["id"]
+    db.execute("UPDATE ranking_sources SET last_attempt_at=now(), updated_at=now() WHERE id=%s", (source_id,))
     try:
         result = fetcher()
     except Exception as exc:
         result = [{"source": source_key, "error": str(exc), "degraded": True}]
     error_item = next((item for item in result if item.get("error")), None)
+    normalized = normalize_ranking_items(source_key, result)
     snapshot_id = new_id()
-    if error_item or not result:
+    if error_item or not normalized:
         error = (error_item or {}).get("error", "source returned no ranking items")
-        db.execute("INSERT INTO ranking_snapshots (id,project_id,source_id,status,error) VALUES (%s,%s,%s,'failed',%s)",
-                   (snapshot_id, project_id, source_id, error))
-        db.execute("UPDATE ranking_sources SET last_error=%s, updated_at=now() WHERE id=%s", (error, source_id))
+        db.execute("""INSERT INTO ranking_snapshots (id,project_id,source_id,status,error,retry_of_snapshot_id)
+                      VALUES (%s,%s,%s,'failed',%s,%s)""",
+                   (snapshot_id, project_id, source_id, error, retry_of_snapshot_id))
+        db.execute("""UPDATE ranking_sources SET last_error=%s, consecutive_failures=consecutive_failures+1,
+                      updated_at=now() WHERE id=%s""", (error, source_id))
         db.commit(); db.close()
         raise HTTPException(502, {"code": "RANKING_SOURCE_FAILED", "source": source_key,
                                   "snapshot_id": snapshot_id, "reason": error})
-    db.execute("INSERT INTO ranking_snapshots (id,project_id,source_id,status,item_count) VALUES (%s,%s,%s,'succeeded',%s)",
-               (snapshot_id, project_id, source_id, len(result)))
-    for item in result:
+    db.execute("""INSERT INTO ranking_snapshots (id,project_id,source_id,status,item_count,retry_of_snapshot_id)
+                  VALUES (%s,%s,%s,'succeeded',%s,%s)""",
+               (snapshot_id, project_id, source_id, len(normalized), retry_of_snapshot_id))
+    for item in normalized:
         db.execute(
-            """INSERT INTO ranking_items (id,snapshot_id,rank_no,title,author,category,source_url,metrics)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (new_id(), snapshot_id, item["rank"], item.get("title", ""), item.get("author", ""),
-             item.get("category", ""), item.get("url", ""), encode({"readers": item.get("readers", ""),
-             "status": item.get("status", ""), "last_update": item.get("last_update", "")})),
+            """INSERT INTO ranking_items
+               (id,snapshot_id,rank_no,title,author,category,source_url,metrics,fetched_at,external_id,dedupe_key)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (new_id(), snapshot_id, item["rank_no"], item["title"], item["author"], item["category"],
+             item["source_url"], encode(item["metrics"]), item["fetched_at"], item["external_id"], item["dedupe_key"]),
         )
-    db.execute("UPDATE ranking_sources SET last_success_at=now(), last_error=NULL, updated_at=now() WHERE id=%s", (source_id,))
+    db.execute("""UPDATE ranking_sources SET last_success_at=now(), last_error=NULL, consecutive_failures=0,
+                  updated_at=now() WHERE id=%s""", (source_id,))
     db.commit(); db.close()
-    return ok({"snapshot_id": snapshot_id, "source": source_key, "item_count": len(result), "status": "succeeded"})
+    return ok({"snapshot_id": snapshot_id, "source": source_key, "item_count": len(normalized),
+               "raw_count": len(result), "dropped_count": len(result) - len(normalized), "status": "succeeded"})
 
 
 @router.get("/snapshots")
@@ -116,6 +128,21 @@ def get_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
     require_member(db, snapshot["project_id"], user)
     items = rows(db, "SELECT * FROM ranking_items WHERE snapshot_id=%s ORDER BY rank_no", (snapshot_id,))
     data = {**dict(snapshot), "items": items}; db.close(); return ok(data)
+
+
+@router.post("/snapshots/{snapshot_id}/retry")
+def retry_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    snapshot = db.execute("""SELECT rs.*, src.source_key FROM ranking_snapshots rs
+                             JOIN ranking_sources src ON src.id=rs.source_id WHERE rs.id=%s""", (snapshot_id,)).fetchone()
+    if not snapshot:
+        db.close(); raise HTTPException(404, "snapshot not found")
+    require_member(db, snapshot["project_id"], user, write=True)
+    if snapshot["status"] != "failed":
+        db.close(); raise HTTPException(409, "only failed snapshots can be retried")
+    project_id, source_key = snapshot["project_id"], snapshot["source_key"]
+    db.close()
+    return _scan_source(source_key, project_id, user, retry_of_snapshot_id=snapshot_id)
 
 
 @router.post("/snapshots/{snapshot_id}/analyze")

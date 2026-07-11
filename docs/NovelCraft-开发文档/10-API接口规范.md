@@ -17,6 +17,7 @@
 | POST | `/api/v1/ranking/sources/{source}/scan?project_id=` | 同步采集并持久化快照；来源失败返回 502 和失败快照 |
 | GET | `/api/v1/ranking/snapshots?project_id=` | 项目榜单快照列表 |
 | GET | `/api/v1/ranking/snapshots/{id}` | 榜单快照和条目 |
+| POST | `/api/v1/ranking/snapshots/{id}/retry` | 仅重放失败快照；新快照记录 `retry_of_snapshot_id` |
 | POST | `/api/v1/ranking/snapshots/{id}/analyze` | 幂等生成市场分析与原创选题候选 |
 | GET | `/api/v1/ranking/topics?project_id=` | 原创选题池 |
 | POST | `/api/v1/ranking/topics/{id}/generate-book` | 建书入库；已有题名时跳过人工选名，从 n3 启动生成 |
