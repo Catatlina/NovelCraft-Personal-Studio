@@ -4,6 +4,8 @@
 set -euo pipefail
 
 DB_URL="${DATABASE_URL:-postgresql://genius@localhost/novelcraft_dev}"
+# Ensure pg_dump uses TCP (not Unix socket) for password-less auth
+export PGHOST=localhost PGUSER=genius PGDATABASE=novelcraft_dev
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 AGE_PUBKEY="${AGE_PUBKEY:-}"
