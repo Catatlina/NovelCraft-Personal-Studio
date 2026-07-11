@@ -203,9 +203,16 @@ def validate_integrity_endpoint(user: dict = Depends(get_current_user)):
 # --- NC-PUB-001~003: Publish state machine + data collection + ROI ---
 
 @router.post("/publish/account/register")
-def register_publish_account(platform: str, account_name: str, credentials: dict = {}, user: dict = Depends(get_current_user)):
+def register_publish_account(platform: str, account_name: str, credentials: dict | None = None,
+                             user: dict = Depends(get_current_user)):
     from app.services.publish_hub import register_platform_account
-    return ok(register_platform_account(platform, account_name, credentials))
+    return ok(register_platform_account(platform, account_name, credentials, user_id=user["id"]))
+
+
+@router.get("/publish/accounts")
+def list_publish_accounts(user: dict = Depends(get_current_user)):
+    from app.services.publish_hub import list_platform_accounts
+    return ok(list_platform_accounts(user["id"]))
 
 
 @router.post("/publish/state")

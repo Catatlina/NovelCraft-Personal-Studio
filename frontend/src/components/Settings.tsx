@@ -23,6 +23,7 @@ export function Settings() {
   const [editBudget, setEditBudget] = useState<{pid:string;scope:string;limit:number}|null>(null);
   const [editSetting, setEditSetting] = useState<{key:string;value:string;description:string}|null>(null);
   const [msg, setMsg] = useState("");
+  const [stats, setStats] = useState<{ ai_calls: number; contents: number; db_size: string } | null>(null);
 
   // Load saved API config on mount
   useEffect(() => {
@@ -37,6 +38,7 @@ export function Settings() {
     api("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
     api("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
     api("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
+    api("/api/v1/stats/overview").then(d=>setStats(d.data||null)).catch(()=>setStats(null));
   }, []);
 
   async function saveRoute() {
@@ -218,7 +220,7 @@ export function Settings() {
             <div>
               <h3>数据统计</h3>
               <table><tbody>
-                {[{label:"API调用次数",value:prompts.length*2||"—"},{label:"内容条数",value:"—"},{label:"存储空间",value:"—"}].map((m,i)=>
+                {[{label:"AI 调用次数",value:stats?stats.ai_calls:"加载中…"},{label:"内容条数",value:stats?stats.contents:"加载中…"},{label:"数据库大小",value:stats?stats.db_size:"加载中…"}].map((m,i)=>
                   <tr key={i}><td>{m.label}</td><td style={{fontWeight:600}}>{m.value}</td></tr>
                 )}
               </tbody></table>

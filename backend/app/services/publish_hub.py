@@ -1,20 +1,99 @@
 """NC-PUB-001~003: Publishing state machine, data collection, ROI dashboard."""
 from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
 from datetime import datetime, timezone
+
 from app.db import connect, new_id, encode
 
 PUBLISH_STATES = ["draft", "scheduled", "submitted", "published", "failed", "retrying", "retracted"]
 
 
 # ===== NC-PUB-001: Publish state machine + account authorization =====
+# Accounts live in platform_accounts with Fernet-encrypted credentials
+# (the table was designed for this; see init migration comment). Credential
+# plaintext is never returned by the registration/list APIs.
 
-AUTHORIZED_ACCOUNTS = {}  # In production: DB-backed with OAuth tokens
+
+def _credentials_fernet():
+    from cryptography.fernet import Fernet
+
+    key = os.getenv("NOVELCRAFT_CREDENTIALS_KEY", "").strip()
+    if key:
+        return Fernet(key.encode())
+    if os.getenv("NOVELCRAFT_ENV", "development").lower() == "production":
+        raise RuntimeError("NOVELCRAFT_CREDENTIALS_KEY must be set in production")
+    secret = os.getenv("NOVELCRAFT_JWT_SECRET", "dev-secret-change-in-production")
+    derived = hashlib.sha256(f"platform-credentials:{secret}".encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(derived))
 
 
-def register_platform_account(platform: str, account_name: str, credentials: dict = {}) -> dict:
-    """NC-PUB-001: Register/authorize a platform publishing account."""
-    AUTHORIZED_ACCOUNTS[platform] = {"name": account_name, "status": "authorized", "added_at": datetime.utcnow().isoformat()}
-    return {"status": "ok", "platform": platform, "account": account_name, "auth_status": "authorized"}
+def register_platform_account(platform: str, account_name: str, credentials: dict | None = None,
+                              user_id: str = "") -> dict:
+    """NC-PUB-001: Persist a platform publishing account with encrypted credentials."""
+    if not user_id:
+        return {"status": "error", "message": "user_id is required"}
+    encrypted = _credentials_fernet().encrypt(
+        json.dumps(credentials or {}, ensure_ascii=False).encode()
+    ).decode()
+    db = connect()
+    existing = db.execute(
+        "SELECT id FROM platform_accounts WHERE user_id=%s AND platform=%s AND account_name=%s AND is_deleted=FALSE",
+        (user_id, platform, account_name),
+    ).fetchone()
+    if existing:
+        account_id = existing["id"]
+        db.execute(
+            "UPDATE platform_accounts SET credentials_encrypted=%s, updated_at=now() WHERE id=%s",
+            (encrypted, account_id),
+        )
+    else:
+        account_id = new_id()
+        db.execute(
+            "INSERT INTO platform_accounts (id, user_id, platform, account_name, credentials_encrypted) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (account_id, user_id, platform, account_name, encrypted),
+        )
+    db.commit()
+    db.close()
+    return {"status": "ok", "account_id": account_id, "platform": platform,
+            "account": account_name, "auth_status": "authorized"}
+
+
+def list_platform_accounts(user_id: str) -> list[dict]:
+    """Accounts for one user — never includes credential material."""
+    db = connect()
+    rows = db.execute(
+        "SELECT id, platform, account_name, created_at, updated_at FROM platform_accounts "
+        "WHERE user_id=%s AND is_deleted=FALSE ORDER BY platform, account_name",
+        (user_id,),
+    ).fetchall()
+    db.close()
+    return [{"id": r["id"], "platform": r["platform"], "account_name": r["account_name"],
+             "updated_at": str(r["updated_at"])} for r in rows]
+
+
+def get_platform_credentials(user_id: str, platform: str, account_name: str = "") -> dict | None:
+    """Decrypt credentials for internal publish flows only; never expose via API."""
+    db = connect()
+    row = db.execute(
+        "SELECT credentials_encrypted FROM platform_accounts WHERE user_id=%s AND platform=%s "
+        "AND (account_name=%s OR %s='') AND is_deleted=FALSE ORDER BY updated_at DESC LIMIT 1",
+        (user_id, platform, account_name, account_name),
+    ).fetchone()
+    db.close()
+    if not row or not row["credentials_encrypted"]:
+        return None
+    from cryptography.fernet import InvalidToken
+
+    try:
+        plaintext = _credentials_fernet().decrypt(row["credentials_encrypted"].encode())
+    except InvalidToken:
+        return None
+    return json.loads(plaintext)
 
 
 def publish_state_machine(content_id: str, platform: str, target_state: str) -> dict:
@@ -62,10 +141,18 @@ def publish_state_machine(content_id: str, platform: str, target_state: str) -> 
 
 def get_publishing_history(content_id: str = "", platform: str = "") -> list[dict]:
     """NC-PUB-001: Full publishing history with state transitions."""
+    clauses, params = [], []
+    if content_id:
+        clauses.append("content_id=%s")
+        params.append(content_id)
+    if platform:
+        clauses.append("platform=%s")
+        params.append(platform)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     db = connect()
     rows = db.execute(
-        "SELECT * FROM publish_records WHERE (content_id=%s OR %s='') AND (platform=%s OR %s='') ORDER BY created_at DESC LIMIT 50",
-        (content_id, content_id, platform, platform),
+        f"SELECT * FROM publish_records {where} ORDER BY created_at DESC LIMIT 50",
+        tuple(params),
     ).fetchall()
     db.close()
     return [{"id": r["id"], "content_id": r["content_id"], "platform": r["platform"],
@@ -81,7 +168,7 @@ def collect_platform_data(platform: str, content_id: str, data: dict) -> dict:
     db.execute(
         "INSERT INTO published_posts (id, project_id, platform, content_id, title, body, status, published_at, meta) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (pid, "", platform, content_id, data.get("title", ""), "",
+        (pid, data.get("project_id") or None, platform, content_id or None, data.get("title", ""), "",
          "published", datetime.utcnow().isoformat(),
          encode({
              "reads": data.get("reads", 0), "likes": data.get("likes", 0),

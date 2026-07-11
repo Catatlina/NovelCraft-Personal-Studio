@@ -1004,6 +1004,56 @@ def publish(
     return ok(result)
 
 
+@app.post("/api/v1/contents/{content_id}/check-sensitive")
+def check_content_sensitive(content_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Standalone sensitive-word check so the UI can validate before publishing."""
+    from .services.publish_gateway import check_sensitive
+    conn, content = load_content_for_user(content_id, user)
+    conn.close()
+    body = content.get("body")
+    body = decode(body, {}) if isinstance(body, str) else (body or {})
+    text = "\n".join(c.get("text", "") for c in body.get("content", [])) if isinstance(body, dict) else str(body)
+    result = check_sensitive(text[:5000])
+    return ok({"passed": result["passed"], "blocked_words": result["blocked_words"], "checked_chars": len(text[:5000])})
+
+
+@app.get("/api/v1/novels/{novel_id}/narrative")
+def get_novel_narrative(novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Timeline events and character arcs for the review panel — real tables, no fallbacks."""
+    conn, novel = load_content_for_user(novel_id, user)
+    timeline = [dict(r) for r in conn.execute(
+        """SELECT te.event_text AS event, (c.meta->>'seq')::int AS chapter_seq
+           FROM timeline_events te JOIN contents c ON c.id = te.chapter_id
+           WHERE c.parent_id = %s ORDER BY chapter_seq, te.event_order LIMIT 200""",
+        (novel_id,),
+    ).fetchall()]
+    arcs = [dict(r) for r in conn.execute(
+        """SELECT character_name AS character, stage, goal, status
+           FROM arcs WHERE novel_id = %s ORDER BY character_name""",
+        (novel_id,),
+    ).fetchall()]
+    conn.close()
+    return ok({"timeline": timeline, "arcs": arcs})
+
+
+@app.get("/api/v1/stats/overview")
+def stats_overview(user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Real workspace statistics for the settings page (scoped to the user's projects)."""
+    conn = connect()
+    row = conn.execute(
+        """SELECT
+             (SELECT COUNT(*) FROM ai_calls a JOIN project_members pm ON pm.project_id = a.project_id
+              WHERE pm.user_id = %s) AS ai_calls,
+             (SELECT COUNT(*) FROM contents c JOIN project_members pm ON pm.project_id = c.project_id
+              WHERE pm.user_id = %s AND c.is_deleted = FALSE) AS contents,
+             pg_size_pretty(pg_database_size(current_database())) AS db_size""",
+        (user["id"], user["id"]),
+    ).fetchone()
+    conn.close()
+    return ok({"ai_calls": int(row["ai_calls"] or 0), "contents": int(row["contents"] or 0),
+               "db_size": row["db_size"]})
+
+
 @app.post("/api/v1/overseas/translate")
 @limiter.limit("20/minute")
 def overseas_translate(

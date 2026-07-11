@@ -6,7 +6,7 @@ type WFNode = { key: string; kind: "agent"|"human"|"tool"|"branch"; agent?: stri
 const NODE_COLORS: Record<string, string> = { agent: "var(--brand-500)", human: "var(--warning)", tool: "var(--info)", branch: "var(--success)" };
 const KINDS = ["agent","human","tool","branch"] as const;
 
-export function DagEditor() {
+export function DagEditor({ projectId = "" }: { projectId?: string }) {
   const [nodes, setNodes] = useState<WFNode[]>([
     { key: "n1", kind: "agent", agent: "StoryArchitect", title: "生成书名", task: "gen_titles" },
     { key: "n2", kind: "human", title: "选定书名" },
@@ -27,10 +27,11 @@ export function DagEditor() {
   function removeNode(key: string) { setNodes(nodes.filter(n => n.key !== key)); }
 
   async function saveWorkflow() {
+    if (!projectId) { setSaveMsg("❌ 缺少项目，无法保存"); setTimeout(() => setSaveMsg(""), 2000); return; }
     try {
       await api("/api/v1/admin/workflows/bootstrap", {
         method: "PUT", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({nodes, project_id:""}),
+        body: JSON.stringify({nodes, project_id: projectId}),
       });
       setSaveMsg("✅ 已保存");
     } catch { setSaveMsg("❌ 保存失败"); }

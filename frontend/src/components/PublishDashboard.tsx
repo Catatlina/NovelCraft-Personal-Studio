@@ -14,6 +14,7 @@ export function PublishDashboard() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [logs, setLogs] = useState<any[]>([]);
+  const [sensitiveResult, setSensitiveResult] = useState<{ passed: boolean; blocked_words: string[] } | null>(null);
 
   useEffect(() => {
     api("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
@@ -21,6 +22,11 @@ export function PublishDashboard() {
 
   async function doPublish() {
     if (!contentId) return;
+    const safety = await checkSensitive(contentId);
+    if (safety && !safety.passed) {
+      setResult({ blocked: true, words: safety.blocked_words });
+      return;
+    }
     const r = await api(`/api/v1/publish?content_id=${contentId}&platform=${selected.join(",")}`, {method:"POST"});
     setResult(r);
   }
@@ -31,8 +37,15 @@ export function PublishDashboard() {
     setTranslateResult(r);
   }
 
-  async function checkSensitive(contentId: string) {
-    return;
+  async function checkSensitive(id: string): Promise<{ passed: boolean; blocked_words: string[] } | null> {
+    try {
+      const r = await api<{ data: { passed: boolean; blocked_words: string[] } }>(`/api/v1/contents/${id}/check-sensitive`, { method: "POST" });
+      setSensitiveResult(r.data);
+      return r.data;
+    } catch {
+      setSensitiveResult(null);
+      return null;
+    }
   }
 
   async function loadMembers() {
@@ -81,7 +94,11 @@ export function PublishDashboard() {
                 </label>
               ))}
             </div>
+            <button onClick={()=>void checkSensitive(contentId)} disabled={!contentId}><AlertTriangle size={14}/> 敏感词检查</button>
             <button className="primary" onClick={doPublish} disabled={!contentId||selected.length===0}><Send size={14}/> 发布到 {selected.length} 个平台</button>
+            {sensitiveResult && (sensitiveResult.passed
+              ? <div className="muted">敏感词检查通过</div>
+              : <div className="error">检测到敏感词：{sensitiveResult.blocked_words.join("、")}</div>)}
             {result && <pre style={{fontSize:11,marginTop:12}}>{JSON.stringify(result,null,2)}</pre>}
           </div>
         )}

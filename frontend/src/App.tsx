@@ -59,6 +59,7 @@ export default function App() {
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
   const [characters, setCharacters] = useState<any[]>([]);
+  const [narrative, setNarrative] = useState<{ timeline: any[]; arcs: any[] }>({ timeline: [], arcs: [] });
   const [chapter, setChapter] = useState<Content | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
@@ -99,6 +100,13 @@ export default function App() {
     const poll = setInterval(() => { if (run) refreshRun(run.id); }, 2000);
     return () => clearInterval(poll);
   }, [run?.id]);
+
+  useEffect(() => {
+    if (tab !== "review" || !novel) { setNarrative({ timeline: [], arcs: [] }); return; }
+    api<{ timeline: any[]; arcs: any[] }>(`/api/v1/novels/${novel.id}/narrative`)
+      .then(data => setNarrative({ timeline: data.timeline || [], arcs: data.arcs || [] }))
+      .catch(() => setNarrative({ timeline: [], arcs: [] }));
+  }, [tab, novel?.id]);
 
   useEffect(() => {
     if (!novel || !project) return;
@@ -393,7 +401,7 @@ export default function App() {
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
-      {tab === "review" && <Review chapter={novel} characters={characters} timeline={[]} arcs={[]} />}
+      {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
@@ -402,7 +410,7 @@ export default function App() {
         <tbody>{prompts.map((p: any) => <tr key={p.id}><td>{p.name}</td><td>{p.version}</td><td>{p.model}</td></tr>)}</tbody></table>
         </div>
       )}
-      {tab === "dag" && <DagEditor />}
+      {tab === "dag" && <DagEditor projectId={project?.id || ""} />}
       {tab === "settings" && <Settings />}
       {tab === "studio" && <Studio />}
       {tab === "publish" && <PublishDashboard />}
