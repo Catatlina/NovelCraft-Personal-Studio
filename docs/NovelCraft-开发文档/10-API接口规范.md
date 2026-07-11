@@ -18,7 +18,7 @@
 | GET | `/api/v1/ranking/snapshots?project_id=` | 项目榜单快照列表 |
 | GET | `/api/v1/ranking/snapshots/{id}` | 榜单快照和条目 |
 | POST | `/api/v1/ranking/snapshots/{id}/retry` | 仅重放失败快照；新快照记录 `retry_of_snapshot_id` |
-| POST | `/api/v1/ranking/snapshots/{id}/analyze` | 幂等生成市场分析与原创选题候选 |
+| POST | `/api/v1/ranking/snapshots/{id}/analyze` | Gateway 结构化市场分析；严格校验后才写候选；Provider 失败返回 503 + `pending_provider`，不得生成固定候选 |
 | GET | `/api/v1/ranking/topics?project_id=` | 原创选题池 |
 | POST | `/api/v1/ranking/topics/{id}/generate-book` | 建书入库；已有题名时跳过人工选名，从 n3 启动生成 |
 | POST | `/novels/from-inspiration` | 次要灵感入口，复用成书工作流并自动入库 |

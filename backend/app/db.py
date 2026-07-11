@@ -194,7 +194,7 @@ def init_db() -> None:
         "extract_timeline", "extract_arcs",
         "gen_short_titles", "gen_short_story", "review_short",
         "gen_video_script", "fetch_hotspots", "gen_daily_brief",
-        "translate_segment", "cultural_localize",
+        "translate_segment", "cultural_localize", "ranking_market_analysis",
     ]
     for task_type in task_types:
         db.execute(

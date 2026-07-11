@@ -5,7 +5,8 @@ type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string };
 type Snapshot = { id: string; source_key: string; display_name: string; status: string; item_count: number; error?: string; captured_at: string };
 type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string };
-type SnapshotDetail = Snapshot & { items: RankingItem[] };
+type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals: Array<{ signal?: string; evidence?: string }>; audience: { primary?: string; needs?: string[] }; title_patterns: Array<{ pattern?: string }>; pacing: { opening?: string; retention_hooks?: string[] }; originality_constraints: string[] };
+type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
 type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; novel_id?: string };
 
 function errorText(error: unknown): string {
@@ -49,8 +50,9 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function analyze(snapshot: Snapshot) {
     setBusy(`analysis:${snapshot.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<{ summary: string }>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, { method: "POST", body: "{}" });
-      setMessage(result.data.summary); await load();
+      const result = await api<Wrapped<MarketAnalysis>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, { method: "POST", body: "{}" });
+      setSnapshotDetails(current => ({ ...current, [snapshot.id]: { ...(current[snapshot.id] || snapshot), items: current[snapshot.id]?.items || [], latest_analysis: result.data } as SnapshotDetail }));
+      setOpenSnapshotId(snapshot.id); setMessage(result.data.summary); await load();
     } catch (error) { setMessage(`分析失败：${errorText(error)}`); }
     finally { setBusy(""); }
   }
@@ -126,6 +128,16 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                 </li>)}
               </ol>
               {snapshotDetails[snapshot.id] && snapshotDetails[snapshot.id].items.length === 0 && <small>该快照没有榜单条目</small>}
+              {snapshotDetails[snapshot.id]?.latest_analysis && <div className="analysis-card" style={{ marginTop: 14 }}>
+                <strong>AI 市场分析</strong><small> · {snapshotDetails[snapshot.id].latest_analysis?.analysis_mode}</small>
+                <p>{snapshotDetails[snapshot.id].latest_analysis?.summary || "未产出摘要"}</p>
+                <p><b>目标受众：</b>{snapshotDetails[snapshot.id].latest_analysis?.audience?.primary || "未产出"}</p>
+                <p><b>标题模式：</b>{snapshotDetails[snapshot.id].latest_analysis?.title_patterns?.map(item => item.pattern).filter(Boolean).join("、") || "未产出"}</p>
+                <p><b>开篇节奏：</b>{snapshotDetails[snapshot.id].latest_analysis?.pacing?.opening || "未产出"}</p>
+                <p><b>市场信号：</b>{snapshotDetails[snapshot.id].latest_analysis?.market_signals?.map(item => item.signal).filter(Boolean).join("；") || "未产出"}</p>
+                <p><b>原创约束：</b>{snapshotDetails[snapshot.id].latest_analysis?.originality_constraints?.join("；") || "未产出"}</p>
+                <small>原创风险检查仅作辅助，不构成版权或法律结论。</small>
+              </div>}
             </div>}
         </td></tr>}
       </React.Fragment>)}</tbody>
