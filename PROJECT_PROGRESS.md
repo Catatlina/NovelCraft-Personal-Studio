@@ -2,7 +2,7 @@
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-11 ｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-11 ｜ 权威摘要 ｜ 功能代码基线 `2da8975` ｜ 状态遵循《23-AI开发边界与交付真实性规范》
 >
 > 旧版百分比、“232/256 已完成”和六项目“全部融合”结论已废止。下面只报告有代码证据的交付边界。
 
@@ -36,8 +36,9 @@
 
 ## 验证基线
 
+- 仓库同步（2026-07-11）：本地 `agent/complete-core-gaps` 与 `origin/agent/complete-core-gaps` 为 `0/0`，不存在未拉取或未推送代码；该分支相对 `origin/main` 为 `45/0`，功能仍在 Draft PR #1，尚未合并到 main。
 - 远端既有 CI：154 项后端测试通过，前端构建通过；其中包含较多 T0/T1 存在性测试，不能代表核心链 E2E。
-- 当前验证（2026-07-11）：Alembic 单头 `nc_sc004_batch_recovery`，干净库 upgrade→downgrade base→upgrade 往返通过（此前融合迁移 `down_revision=None` 造成双头、CI `alembic upgrade head` 连续两次失败，已修复）；宿主机后端 **243 passed**；交付声明门禁通过。纵横真实采集/持久化已有后端 T3；市场分析仅完成契约和失败语义测试，尚无真实 Provider T3，因此保持 `🧪`。
+- 当前验证（2026-07-11）：Alembic 单头 `nc_sc004_batch_recovery`，干净库 upgrade→downgrade base→upgrade 往返通过（此前融合迁移 `down_revision=None` 造成双头、CI `alembic upgrade head` 连续两次失败，已修复）；宿主机后端 **243 passed**、前端 `tsc -b && vite build` 通过；PR #1 最新后端/前端 CI 均通过。纵横真实采集/持久化已有后端 T3；市场分析仅完成契约和失败语义测试，尚无真实 Provider T3，因此保持 `🧪`。
 - 已知修复（2026-07-11）：novel 导出对 doc 格式章节输出空正文（已改为遍历 `content[]`）；`complete_api.py` 资源端点补齐项目成员校验；伏笔到期检查查询不存在的 `target_chapter` 列、跨章矛盾检查查询不存在的 `character_name/event_time` 列（真库从未生效，已按真实 schema 重写并补真库回归测试）。
 - 已知缺陷（待修）：`import_chapter_directory` 只解析不落库且 seq 用行号，`POST /novels/{id}/import-chapters` 表面成功实际不保存任何章节。
 - 环境提示：docker 前端容器镜像依赖过旧（缺 Tiptap），只挂载 `src` 导致一直在供旧 UI，需 `docker compose build frontend` 重建。

@@ -21,10 +21,24 @@
 | POST | `/api/v1/ranking/snapshots/{id}/analyze` | Gateway 结构化市场分析；严格校验后才写候选；Provider 失败返回 503 + `pending_provider`，不得生成固定候选 |
 | GET | `/api/v1/ranking/topics?project_id=` | 原创选题池 |
 | POST | `/api/v1/ranking/topics/{id}/generate-book` | 建书入库；已有题名时跳过人工选名，从 n3 启动生成 |
+| POST | `/api/v1/ranking/import?project_id=` | 用户授权的 CSV/JSON 榜单元数据导入；1–200 条，owner/editor 限定，低置信度快照 `needs_review` |
+| POST | `/api/v1/ranking/snapshots/{id}/validate-metadata` | Open Library 交叉校验；六态写入 `ranking_items.metadata_status`，证据并入 `metrics.validation` |
 | POST | `/novels/from-inspiration` | 次要灵感入口，复用成书工作流并自动入库 |
 | POST | `/hotspots/scan-and-generate` | 热点分析并生成多平台内容矩阵 |
 
-所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。
+### 连续章节与导出（NC-SC-004，2026-07-11）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/novels/{id}/continue` | 生成下一章；章节级 `generation_key` 幂等，重复派发不产生重复章节 |
+| POST | `/api/v1/novels/{id}/chapters/batch` | 建批次生成 1–50 章；返回 `batch_id` |
+| GET | `/api/v1/generation-batches/{id}` | 批次进度；`status` 含 `pending/running/succeeded/failed/pending_provider/cancelled`，失败原因在 `error` |
+| POST | `/api/v1/generation-batches/{id}/cancel` | 请求取消；章节间检查点生效 |
+| POST | `/api/v1/generation-batches/{id}/resume` | 仅 `failed/pending_provider` 可恢复；从 `completed_count` 断点续跑，非中断态返回 409 |
+| GET | `/api/v1/novels/{id}/export/txt`、`.../export/markdown`、`.../export/epub` | 导出整书；需项目成员身份，未知 novel 返回 404 |
+| GET | `/api/v1/novels/{id}/completion` | 完成度统计（章节数/字数/审核数）；需项目成员身份 |
+
+所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。Provider 或预算不可用时批次进入 `pending_provider` 并保留已完成进度，禁止伪装成功或清零重跑。曾存在的 `POST /scrape/browseract` 因违反《25》采集合规边界已移除，不得恢复。
 
 ---
 
