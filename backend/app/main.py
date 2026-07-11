@@ -469,6 +469,49 @@ def cancel_generation_batch(batch_id: str, user: dict = Depends(get_current_user
     return ok({"batch_id": batch_id, "status": "cancelled"})
 
 
+@app.post("/api/v1/generation-batches/{batch_id}/resume")
+def resume_generation_batch(request: Request, batch_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Re-dispatch an interrupted batch; it continues from completed_count."""
+    conn = connect()
+    batch = row_to_dict(conn.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone())
+    if not batch:
+        conn.close()
+        raise HTTPException(status_code=404, detail="batch not found")
+    ensure_project_member(conn, batch["project_id"], user, {"owner", "editor"})
+    if batch["status"] not in {"failed", "pending_provider"}:
+        conn.close()
+        raise HTTPException(status_code=409, detail=f"batch is {batch['status']}, only failed/pending_provider can resume")
+    conn.execute(
+        "UPDATE generation_batches SET status = 'pending', cancel_requested = FALSE, updated_at = now() WHERE id = %s",
+        (batch_id,),
+    )
+    conn.commit()
+    conn.close()
+    from .workers.tasks import batch_generate_chapters_task
+    try:
+        task = batch_generate_chapters_task.delay(
+            batch_id,
+            api_key=request.headers.get("X-Api-Key", ""),
+            api_url=request.headers.get("X-Api-Base-Url", ""),
+            model=request.headers.get("X-Model", ""),
+        )
+    except Exception as exc:
+        conn = connect()
+        conn.execute(
+            "UPDATE generation_batches SET status = %s, error = %s, updated_at = now() WHERE id = %s",
+            (batch["status"], f"resume dispatch failed: {exc}", batch_id),
+        )
+        conn.commit()
+        conn.close()
+        raise HTTPException(status_code=503, detail="generation queue unavailable") from exc
+    conn = connect()
+    conn.execute("UPDATE generation_batches SET celery_task_id = %s WHERE id = %s", (task.id, batch_id))
+    conn.commit()
+    conn.close()
+    return ok({"batch_id": batch_id, "task_id": task.id, "status": "pending",
+               "completed_count": batch["completed_count"], "requested_count": batch["requested_count"]})
+
+
 @app.post("/api/v1/projects/{project_id}/short-stories")
 @limiter.limit("10/minute")
 async def create_short_story(request: Request, project_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:

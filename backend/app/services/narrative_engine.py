@@ -8,10 +8,11 @@ def check_foreshadow_due(novel_id: str, current_chapter_seq: int) -> list[dict]:
     """Check if any foreshadows are due for resolution at this chapter."""
     db = connect()
     rows = db.execute(
-        """SELECT * FROM foreshadowings 
-           WHERE chapter_id IN (SELECT id FROM contents WHERE parent_id = %s)
-           AND target_chapter <= %s AND status != 'resolved'
-           ORDER BY target_chapter""",
+        """SELECT f.*, (c.meta->>'seq') AS planted_seq FROM foreshadowings f
+           JOIN contents c ON c.id = f.chapter_id
+           WHERE c.parent_id = %s
+           AND f.planned_resolve_chapter <= %s AND f.status != 'resolved'
+           ORDER BY f.planned_resolve_chapter""",
         (novel_id, current_chapter_seq)
     ).fetchall()
     db.close()
@@ -19,8 +20,8 @@ def check_foreshadow_due(novel_id: str, current_chapter_seq: int) -> list[dict]:
     for r in rows:
         due.append({
             "id": r["id"], "content": r.get("content", ""),
-            "target": r.get("target_chapter", 0),
-            "planted_at": str(r.get("plant_chapter", "")),
+            "target": r.get("planned_resolve_chapter", 0),
+            "planted_at": str(r.get("planted_seq") or ""),
             "status": r.get("status", "unknown"),
         })
     return due
@@ -38,32 +39,37 @@ def inject_foreshadow_context(due_items: list[dict]) -> str:
 
 
 def detect_cross_chapter_conflicts(novel_id: str) -> list[dict]:
-    """TASK-019: Cross-chapter contradiction detection via timeline events."""
+    """TASK-019: Contradiction detection from persisted entity states.
+
+    The previous version queried timeline_events columns that do not exist
+    (character_name/event_time), so it silently never found anything. Entity
+    states are what the pipeline actually records per chapter."""
     db = connect()
-    events = db.execute(
-        """SELECT te.*, c.title as chapter_title FROM timeline_events te
-           JOIN contents c ON te.chapter_id = c.id
-           WHERE c.parent_id = %s ORDER BY te.event_order""",
+    rows = db.execute(
+        """SELECT es.entity_name, es.location, c.title AS chapter_title,
+                  (c.meta->>'seq')::int AS seq
+           FROM entity_states es JOIN contents c ON c.id = es.chapter_id
+           WHERE c.parent_id = %s AND es.entity_type = 'character'
+             AND COALESCE(es.location, '') != ''
+           ORDER BY seq, es.entity_name, es.created_at""",
         (novel_id,)
     ).fetchall()
     db.close()
 
     conflicts = []
-    event_map = {}
-    for e in events:
-        key = f"{e.get('character_name','')}-{e.get('location','')}"
-        if key in event_map:
-            prev = event_map[key]
-            if e.get("event_time", "") and prev.get("event_time", ""):
-                if e["event_time"] < prev["event_time"]:
-                    conflicts.append({
-                        "type": "timeline_contradiction",
-                        "character": e.get("character_name", ""),
-                        "chapter_a": prev.get("chapter_title", ""),
-                        "chapter_b": e.get("chapter_title", ""),
-                        "detail": f"事件 '{e.get('event','')}' 时间早于 '{prev.get('event','')}'",
-                    })
-        event_map[key] = dict(e)
+    seen: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row["entity_name"], row["seq"])
+        prev = seen.get(key)
+        if prev and prev["location"] != row["location"]:
+            conflicts.append({
+                "type": "entity_location_contradiction",
+                "character": row["entity_name"],
+                "chapter_a": prev.get("chapter_title", ""),
+                "chapter_b": row.get("chapter_title", ""),
+                "detail": f"{row['entity_name']} 在第{row['seq']}章被同时记录于 '{prev['location']}' 与 '{row['location']}'",
+            })
+        seen[key] = dict(row)
     return conflicts
 
 

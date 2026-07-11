@@ -85,6 +85,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_characters": _CharactersOutput,
     "gen_outline": _OutlineOutput,
     "gen_chapter1": _ChapterOutput,
+    "gen_next_chapter": _ChapterOutput,
 }
 
 
@@ -412,6 +413,13 @@ def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:
             "他打开门，门外没有人，只有一枚黑色墨晶躺在脚垫中央。墨晶内部像困着一盏灯，照亮了他从未告诉过任何人的一句话：如果故事能救人，我愿意先被故事审判。",
         ]
         return {"chapter": {"title": "第一章 墨晶来信", "body": paragraphs}}
+    if task_type == "gen_next_chapter":
+        paragraphs = [
+            "夜色沉下来的时候，林序把墨晶放进外套内袋，沿着环河路往修档馆走。",
+            "沈微澜在馆门口等他，手里捏着一页被雨水泡皱的档案，纸角的编号正在缓慢褪色。",
+            "两人对视一眼，都没有说话。城市在他们身后轻轻震了一下，像一本被人翻动的书。",
+        ]
+        return {"chapter": {"title": "下一章 修档馆的震动", "body": paragraphs}}
     if task_type == "review_7dim":
         return {
             "score": 84,

@@ -491,28 +491,40 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
         inject_str = inject_foreshadow_context(due_foreshadows)
         context = inject_str + "\n\n" + context
 
-    # Generate
+    # Generate — output is schema-validated by the gateway; the stable mutation id
+    # lets a retry replay the succeeded ai_call instead of paying for a new one.
+    generation_key = f"novel:{novel_id}:chapter:{next_seq}:v1"
     output = complete(
         run_id=None, node_key=None, project_id=project_id,
         task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
         variables={"context": context, "context_length": len(context), "assembled_layers": list(assembler.layers_built.keys())},
+        client_mutation_id=generation_key,
     )
 
-    chapter = output.get("chapter", {})
-    body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
+    chapter = output["chapter"]
+    body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter["body"]]}
     cid = new_id()
 
     db = connect()
     from app.services.text_metrics import count_content_chars
-    text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
+    text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter["body"])
     chapter_meta = {"seq": next_seq, "word_count": count_content_chars(text)}
+    stored = db.execute(
+        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (project_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
+           RETURNING id""",
+        (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"),
+         encode(body), encode(chapter_meta), "draft", generation_key),
+    ).fetchone()
+    cid = stored["id"] if stored else cid
     db.execute(
-        "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-        (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"), encode(body), encode(chapter_meta), "draft"),
-    )
-    db.execute(
-        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'ai_generate', %s)",
-        (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta})),
+        """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, client_mutation_id)
+           VALUES (%s, 'content', %s, 'ai_generate', %s, %s)
+           ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL DO NOTHING""",
+        (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta}),
+         generation_key),
     )
     db.commit()
     db.close()
@@ -529,12 +541,37 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str) -> dict:
     extract_timeline(cid, text)
     update_arcs(novel_id, text)
 
+    # Continuity check + risk report (DB comparison, no extra AI spend); a check
+    # failure is recorded as unchecked, never silently dropped.
+    continuity = _continuity_report(novel_id, next_seq)
+
     # Summarize
     db = connect()
-    _summarize_and_store(db, cid, chapter.get("body", []))
-
+    _summarize_and_store(db, cid, chapter["body"])
+    db.execute(
+        "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+        (encode({"continuity": continuity}), cid),
+    )
+    db.commit()
     db.close()
-    return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq}
+    return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq,
+            "continuity": continuity}
+
+
+def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
+    """Cross-chapter conflicts + overdue foreshadows as a persisted risk report."""
+    from datetime import datetime, timezone
+    from app.services.narrative_engine import check_foreshadow_due, detect_cross_chapter_conflicts
+    checked_at = datetime.now(timezone.utc).isoformat()
+    try:
+        conflicts = detect_cross_chapter_conflicts(novel_id)
+        overdue = check_foreshadow_due(novel_id, chapter_seq)
+    except Exception as exc:
+        return {"status": "unchecked", "error": str(exc), "checked_at": checked_at}
+    risks = ([{"type": "conflict", **c} for c in conflicts]
+             + [{"type": "foreshadow_due", "content": f.get("content", ""), "foreshadow_id": f.get("id")}
+                for f in overdue])
+    return {"status": "flagged" if risks else "clean", "risks": risks, "checked_at": checked_at}
 
 
 @celery_app.task(bind=True, max_retries=1)
@@ -545,18 +582,19 @@ def batch_generate_chapters_task(
     api_url: str = "",
     model: str = "",
 ) -> dict:
-    """Generate a persisted batch and observe cancellation between chapters."""
+    """Generate a persisted batch, observing cancellation and resuming from completed_count."""
     db = connect()
     batch = db.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
     if not batch:
         db.close()
         return {"status": "error", "message": "batch not found"}
-    db.execute("UPDATE generation_batches SET status = 'running', updated_at = now() WHERE id = %s", (batch_id,))
+    db.execute("UPDATE generation_batches SET status = 'running', error = NULL, updated_at = now() WHERE id = %s", (batch_id,))
     db.commit()
     db.close()
 
+    remaining = batch["requested_count"] - batch.get("completed_count", 0)
     try:
-        for _ in range(batch["requested_count"]):
+        for _ in range(remaining):
             db = connect()
             state = db.execute("SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
             db.close()
@@ -572,9 +610,22 @@ def batch_generate_chapters_task(
             )
             db.commit()
             db.close()
-    except Exception:
+    except (ProviderError, BudgetExceeded) as exc:
+        # Provider/budget waits are recoverable: keep progress and surface the cause.
         db = connect()
-        db.execute("UPDATE generation_batches SET status = 'failed', updated_at = now() WHERE id = %s", (batch_id,))
+        db.execute(
+            "UPDATE generation_batches SET status = 'pending_provider', error = %s, updated_at = now() WHERE id = %s",
+            (str(exc), batch_id),
+        )
+        db.commit()
+        db.close()
+        return {"status": "pending_provider", "batch_id": batch_id, "reason": str(exc)}
+    except Exception as exc:
+        db = connect()
+        db.execute(
+            "UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
+            (str(exc), batch_id),
+        )
         db.commit()
         db.close()
         raise
