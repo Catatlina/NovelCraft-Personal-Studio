@@ -35,6 +35,7 @@ from .api.v1.knowledge import router as knowledge_router
 from .api.v1.hotspots import router as hotspots_router
 from .api.v1.publish_schedule import router as publish_schedule_router
 from .api.v1.overseas import router as overseas_router
+from .api.v1.batch_endpoints import router as batch_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -56,6 +57,7 @@ app.include_router(knowledge_router)
 app.include_router(hotspots_router)
 app.include_router(publish_schedule_router)
 app.include_router(overseas_router)
+app.include_router(batch_router)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
