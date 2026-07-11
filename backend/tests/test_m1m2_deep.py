@@ -86,7 +86,8 @@ def test_dag_execute_rejects_invalid():
     e = f"dag-{uuid.uuid4().hex[:6]}@nc.dev"
     tok = tc.post("/api/v1/auth/register", json={"email": e, "password": "test1234"}).json()["data"]["access_token"]
     r = tc.post("/api/v1/admin/workflows/nonexistent/execute", headers={"Authorization": f"Bearer {tok}"})
-    assert r.status_code in [401, 404]
+    # 422: project_id/novel_id are now required; 404: unknown workflow; both are rejections
+    assert r.status_code in [401, 404, 422]
 
 
 # --- TASK-030 ---

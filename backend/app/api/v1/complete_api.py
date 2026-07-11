@@ -71,21 +71,27 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
 
 
 @router.post("/review/multi-round")
-def multi_round_review_endpoint(content: str, rounds: int = 3, user: dict = Depends(get_current_user)):
+def multi_round_review_endpoint(content: str, project_id: str, rounds: int = 3,
+                                user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import multi_round_review
-    return ok(multi_round_review(content, rounds))
+    require_project_member(project_id, user)
+    return ok(multi_round_review(content, rounds, project_id=project_id))
 
 
 @router.post("/review/cross-model")
-def cross_model_review(content: str, models: list = ["deepseek", "claude", "openai"], user: dict = Depends(get_current_user)):
+def cross_model_review(content: str, project_id: str, models: list[str] | None = None,
+                       user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import cross_model_audit
-    return ok(cross_model_audit(content, models))
+    require_project_member(project_id, user)
+    return ok(cross_model_audit(content, models, project_id=project_id))
 
 
 @router.post("/prompts/matrix-run")
-def matrix_run(prompt_name: str, variables_list: list[dict], models: list = ["deepseek"], user: dict = Depends(get_current_user)):
+def matrix_run(prompt_name: str, variables_list: list[dict], project_id: str,
+               models: list[str] | None = None, user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import matrix_batch_run
-    return ok(matrix_batch_run(prompt_name, variables_list, models))
+    require_project_member(project_id, user)
+    return ok(matrix_batch_run(prompt_name, variables_list, models, project_id=project_id))
 
 
 @router.post("/books/analyze")
