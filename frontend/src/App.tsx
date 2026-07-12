@@ -418,6 +418,9 @@ export default function App() {
       await baseApi("/api/v1/auth/logout", { method: "POST" });
     } finally {
       sessionStorage.removeItem("nc_token");
+      sessionStorage.removeItem("nc_api_key");
+      sessionStorage.removeItem("nc_api_url");
+      sessionStorage.removeItem("nc_model");
       setToken("");
       setUserEmail("");
       setProject(null);

@@ -393,22 +393,25 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
                 chapter_body = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
                 chapter_body = str(chapter_body["body"]) if chapter_body else ""
             if chapter_body:
-                for dim, dim_name in [("review.ooc", "OOC"), ("review.consistency", "一致性"), ("review.rhythm", "节奏")]:
+                for dim, task_name in [("review.ooc", "review_ooc"),
+                                       ("review.consistency", "review_consistency"),
+                                       ("review.rhythm", "review_rhythm")]:
                     try:
                         dim_out = complete(run_id=run_id, node_key=None, project_id=project_id,
-                                          task_type=f"review_{dim_name}", prompt_name=dim,
+                                          task_type=task_name, prompt_name=dim,
                                           variables={"body": chapter_body[:3000]})
                         db.execute(
                             "UPDATE contents SET meta = meta || %s WHERE id = %s",
-                            (encode({f"review_{dim}_score": dim_out.get("ooc_count", dim_out.get("pacing_score", 0))}), cid),
+                            (encode({f"{task_name}_status": "succeeded",
+                                     f"{task_name}_result": dim_out}), cid),
                         )
                     except Exception as exc:
                         # Keep the main review available, but persist the exact
                         # degraded dimension instead of silently claiming it ran.
                         db.execute(
                             "UPDATE contents SET meta = meta || %s WHERE id = %s",
-                            (encode({f"review_{dim}_status": "failed",
-                                     f"review_{dim}_error": str(exc)[:500]}), cid),
+                            (encode({f"{task_name}_status": "failed",
+                                     f"{task_name}_error": str(exc)[:500]}), cid),
                         )
 
     db.execute(
@@ -926,6 +929,29 @@ def purge_stale_autosaves() -> dict:
     db.commit()
     db.close()
     return {"deleted": deleted}
+
+
+@celery_app.task
+def purge_stale_operational_data() -> dict:
+    """Bound unbounded operational tables while retaining recent audit evidence."""
+    import os
+
+    ai_days = max(30, int(os.getenv("AI_CALL_RETENTION_DAYS", "365")))
+    operation_days = max(30, int(os.getenv("OPERATION_LOG_RETENTION_DAYS", "180")))
+    audit_days = max(30, int(os.getenv("AUDIT_LOG_RETENTION_DAYS", "365")))
+    db = connect()
+    deleted = {}
+    for table, days in (("ai_calls", ai_days), ("operation_logs", operation_days),
+                        ("audit_logs", audit_days)):
+        db.execute(
+            f"DELETE FROM {table} WHERE created_at < now() - (%s * interval '1 day')", (days,),
+        )
+        deleted[table] = max(0, int(getattr(db._cur, "rowcount", 0)))
+    db.commit()
+    db.close()
+    return {"deleted": deleted, "retention_days": {
+        "ai_calls": ai_days, "operation_logs": operation_days, "audit_logs": audit_days,
+    }}
 
 
 def check_queue_backlog(threshold: int | None = None) -> str | None:

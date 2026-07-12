@@ -11,7 +11,7 @@ AGENT_REGISTRY = {
         "description": "设计故事结构、分卷大纲、章节脉络",
         "prompt_source": "bootstrap.gen_outline",
         "tools": ["outline_expand", "volume_plan"],
-        "output_schema": {"volume_outline": "list", "chapter_plan": "list"},
+        "output_schema": {"outline": "list"},
     },
     "writer": {
         "name": "Writer",
@@ -19,7 +19,7 @@ AGENT_REGISTRY = {
         "description": "根据大纲和上下文生成章节正文",
         "prompt_source": "bootstrap.gen_chapter1",
         "tools": ["context_assemble", "foreshadow_check"],
-        "output_schema": {"chapter": "dict", "title": "str", "body": "list"},
+        "output_schema": {"chapter": "dict"},
     },
     "reviewer": {
         "name": "Reviewer",
@@ -35,7 +35,7 @@ AGENT_REGISTRY = {
         "description": "检测并清除AI写作痕迹",
         "prompt_source": "editor.deai",
         "tools": ["check_ai_patterns", "normalize_punctuation"],
-        "output_schema": {"text": "str", "changes": "list", "ai_score": "int"},
+        "output_schema": {"text": "str"},
     },
     "trend-analyzer": {
         "name": "TrendAnalyzer",
@@ -43,7 +43,7 @@ AGENT_REGISTRY = {
         "description": "分析榜单趋势、市场热点、选题推荐",
         "prompt_source": "ranking.market_analysis",
         "tools": ["rank_scan", "market_analyze", "topic_suggest"],
-        "output_schema": {"trends": "list", "topics": "list", "analysis": "str"},
+        "output_schema": {"market_signals": "list", "audience": "dict", "topic_candidates": "list"},
     },
     "consistency-checker": {
         "name": "ConsistencyChecker",
@@ -51,7 +51,7 @@ AGENT_REGISTRY = {
         "description": "人物/地点/时间/物品/设定/伏笔六类一致性检查",
         "prompt_source": "review.consistency",
         "tools": ["entity_check", "timeline_check", "foreshadow_check"],
-        "output_schema": {"conflicts": "list", "warnings": "list", "score": "int"},
+        "output_schema": {"score": "int", "issues": "list", "dimensions": "dict"},
     },
     "character-designer": {
         "name": "CharacterDesigner",
@@ -59,7 +59,7 @@ AGENT_REGISTRY = {
         "description": "设计人物背景、性格、关系、弧线",
         "prompt_source": "bootstrap.gen_characters",
         "tools": ["character_card", "relation_map", "arc_design"],
-        "output_schema": {"characters": "list", "relations": "list", "arcs": "list"},
+        "output_schema": {"characters": "list"},
     },
     "narrative-writer": {
         "name": "NarrativeWriter",
@@ -67,7 +67,7 @@ AGENT_REGISTRY = {
         "description": "专注于文字自然度和叙事节奏",
         "prompt_source": "editor.polish",
         "tools": ["prose_check", "rhythm_adjust", "voice_match"],
-        "output_schema": {"text": "str", "readability": "int", "rhythm_score": "int"},
+        "output_schema": {"text": "str"},
     },
 }
 

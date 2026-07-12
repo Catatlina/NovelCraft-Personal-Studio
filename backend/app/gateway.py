@@ -95,6 +95,20 @@ class _ReviewOutput(_StrictOutput):
     issues: list[str]
 
 
+class _OocOutput(_StrictOutput):
+    ooc_count: int = Field(ge=0)
+    violations: list[dict[str, Any]]
+
+
+class _ConsistencyOutput(_StrictOutput):
+    contradictions: list[dict[str, Any]]
+
+
+class _RhythmOutput(_StrictOutput):
+    pacing_score: float = Field(ge=0, le=100)
+    sections: list[dict[str, Any]]
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -103,6 +117,9 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_chapter1": _ChapterOutput,
     "gen_next_chapter": _ChapterOutput,
     "review_7dim": _ReviewOutput,
+    "review_ooc": _OocOutput,
+    "review_consistency": _ConsistencyOutput,
+    "review_rhythm": _RhythmOutput,
 }
 
 
@@ -692,6 +709,12 @@ def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:
                 "主角职业和日常压力可以再落地一些。",
             ],
         }
+    if task_type == "review_ooc":
+        return {"ooc_count": 0, "violations": []}
+    if task_type == "review_consistency":
+        return {"contradictions": []}
+    if task_type == "review_rhythm":
+        return {"pacing_score": 82, "sections": []}
     if task_type.startswith("editor_"):
         selection = variables.get("selection", "")
         instruction = variables.get("instruction", "")

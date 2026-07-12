@@ -47,8 +47,8 @@ jobs:
         run: pip install pip-audit && pip-audit -r backend/requirements.txt
       - name: Verify delivery claims
         run: python scripts/verify_delivery_claims.py
-      - name: Run prompt golden-case gate
-        run: PYTHONPATH=backend python -c "from app.services.fusion_deep import run_golden_case_ci; r=run_golden_case_ci(); print(r); assert r['failed'] == 0"
+      - name: Validate prompt golden-case definitions
+        run: PYTHONPATH=backend python -c "from app.services.fusion_deep import run_golden_case_ci; r=run_golden_case_ci(); print(r); assert r['definition_invalid'] == 0 and r['provider_outputs_verified'] == 0"
 
   frontend:
     runs-on: ubuntu-latest

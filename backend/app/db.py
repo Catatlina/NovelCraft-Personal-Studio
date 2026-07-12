@@ -206,6 +206,7 @@ def init_db() -> None:
     task_types = [
         "gen_titles", "gen_synopsis", "gen_worldview", "gen_characters",
         "gen_outline", "gen_chapter1", "review_7dim",
+        "review_ooc", "review_consistency", "review_rhythm",
         "editor_polish", "editor_rewrite", "editor_continue",
         "editor_expand", "editor_condense", "editor_deai",
         "summarize_chapter", "summarize_volume", "summarize_book",

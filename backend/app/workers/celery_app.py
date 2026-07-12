@@ -43,5 +43,9 @@ celery_app.conf.update(
             "task": "app.workers.tasks.daily_cost_report",
             "schedule": 86400.0,  # Daily — AI 用量/成本日报（Telegram）
         },
+        "purge-stale-operational-data": {
+            "task": "app.workers.tasks.purge_stale_operational_data",
+            "schedule": 86400.0,
+        },
     },
 )

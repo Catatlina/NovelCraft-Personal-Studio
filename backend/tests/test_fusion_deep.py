@@ -85,11 +85,12 @@ def test_run_golden_case_ci_returns_correct_shape():
     result = run_golden_case_ci()
     assert isinstance(result, dict)
     assert "total_prompts" in result
-    assert "passed" in result
-    assert "failed" in result
+    assert "definition_valid" in result
+    assert "definition_invalid" in result
     assert "results" in result
     assert result["total_prompts"] == 10
-    assert result["passed"] + result["failed"] == result["total_prompts"]
+    assert result["definition_valid"] + result["definition_invalid"] == result["total_prompts"]
+    assert result["provider_outputs_verified"] == 0
     assert isinstance(result["results"], dict)
 
 
@@ -97,7 +98,7 @@ def test_run_golden_case_ci_all_pass():
     """All golden case validators are known — CI should have 0 failures."""
     from app.services.fusion_deep import run_golden_case_ci
     result = run_golden_case_ci()
-    assert result["failed"] == 0, f"Unexpected failures: {result['results']}"
+    assert result["definition_invalid"] == 0, f"Invalid definitions: {result['results']}"
 
 
 def test_get_prompt_specs_summary():
