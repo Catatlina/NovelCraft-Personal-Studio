@@ -10,15 +10,16 @@ x-logging: &default-logging
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     logging: *default-logging
     environment:
       POSTGRES_USER: novelcraft
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novelcraft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: novelcraft
     volumes:
       - pg_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U novelcraft"]
       interval: 5s
@@ -27,10 +28,11 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     logging: *default-logging
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -41,16 +43,17 @@ services:
 
   api:
     build: ./backend
+    restart: unless-stopped
     logging: *default-logging
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:-novelcraft}@postgres/novelcraft
+      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       REDIS_URL: redis://redis:6379/0
-      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-development}
-      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:-}
+      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-production}
+      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:?Set NOVELCRAFT_JWT_SECRET}
       NOVELCRAFT_CREDENTIALS_KEY: ${NOVELCRAFT_CREDENTIALS_KEY:-}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       TOKEN_BLACKLIST_FAIL_CLOSED: ${TOKEN_BLACKLIST_FAIL_CLOSED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
@@ -62,7 +65,7 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
     healthcheck:
@@ -73,16 +76,40 @@ services:
 
   worker:
     build: ./backend
+    restart: unless-stopped
     logging: *default-logging
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
     environment:
-      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:-novelcraft}@postgres/novelcraft
+      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       REDIS_URL: redis://redis:6379/0
-      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-development}
-      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:-}
+      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-production}
+      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:?Set NOVELCRAFT_JWT_SECRET}
       NOVELCRAFT_CREDENTIALS_KEY: ${NOVELCRAFT_CREDENTIALS_KEY:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TOKEN_BLACKLIST_FAIL_CLOSED: ${TOKEN_BLACKLIST_FAIL_CLOSED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend:/app
+
+  beat:
+    build: ./backend
+    restart: unless-stopped
+    logging: *default-logging
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres/novelcraft
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
+      NOVELCRAFT_ENV: ${NOVELCRAFT_ENV:-production}
+      NOVELCRAFT_JWT_SECRET: ${NOVELCRAFT_JWT_SECRET:?Set NOVELCRAFT_JWT_SECRET}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TOKEN_BLACKLIST_FAIL_CLOSED: ${TOKEN_BLACKLIST_FAIL_CLOSED:-true}
     depends_on:
       postgres:
@@ -96,6 +123,7 @@ services:
 
   flower:
     image: mher/flower:2.0
+    restart: unless-stopped
     command:
       - celery
       - --broker=redis://redis:6379/0
@@ -110,6 +138,7 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     logging: *default-logging
     ports:
       - "80:80"
@@ -126,7 +155,7 @@ services:
     build: ./backend
     command: alembic upgrade head
     environment:
-      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:-novelcraft}@postgres/novelcraft
+      DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres/novelcraft
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,6 +165,7 @@ services:
   # Daily pg_dump with 7-day retention (C-ops backup baseline)
   backup:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -148,7 +178,7 @@ services:
           sleep 86400
         done
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novelcraft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - ./backups:/backups
     depends_on:

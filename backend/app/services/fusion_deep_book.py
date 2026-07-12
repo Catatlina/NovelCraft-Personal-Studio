@@ -24,26 +24,51 @@ def hundred_chapter_memory(novel_id: str, current_chapter: int) -> dict:
 
 
 def six_dim_consistency_check(novel_id: str) -> dict:
-    """Clean-room: Six-dimension consistency — characters, locations, timeline, items, settings, relationships."""
-    dims = {
-        "characters": "人物名称、关系、状态一致性",
-        "locations": "地点名称、方位、距离一致性",
-        "timeline": "时间顺序、事件间隔、因果链",
-        "items": "物品属性、归属、使用状态",
-        "settings": "世界规则、势力、阶级体系",
-        "relationships": "人物关系图、敌友变化",
-    }
+    """Run six evidence-based structural checks against persisted narrative state."""
+    dimensions = ["characters", "locations", "timeline", "items", "settings", "relationships"]
     db = connect()
+    novel = db.execute("SELECT project_id, meta FROM contents WHERE id=%s AND type='novel'", (novel_id,)).fetchone()
+    if not novel:
+        db.close()
+        return {"status": "not_found", "novel_id": novel_id,
+                "dimensions_checked": dimensions, "checks": {}}
     chars = db.execute(
-        "SELECT meta->>'character_name' as name FROM contents WHERE parent_id=%s AND type='character'", (novel_id,)
+        "SELECT title, meta FROM contents WHERE parent_id=%s AND type='character' AND is_deleted=FALSE",
+        (novel_id,),
     ).fetchall()
+    entities = db.execute(
+        """SELECT es.entity_type, es.entity_name, es.location, es.relationships, es.possessions
+           FROM entity_states es JOIN contents c ON c.id=es.chapter_id
+           WHERE c.parent_id=%s""", (novel_id,),
+    ).fetchall()
+    timeline = db.execute(
+        """SELECT te.event_order FROM timeline_events te JOIN contents c ON c.id=te.chapter_id
+           WHERE c.parent_id=%s ORDER BY (c.meta->>'seq')::int, te.event_order""", (novel_id,),
+    ).fetchall()
+    worldview = db.execute(
+        "SELECT 1 FROM knowledge_items WHERE project_id=%s AND kind='worldview' AND is_deleted=FALSE LIMIT 1",
+        (novel["project_id"],),
+    ).fetchone()
     db.close()
-    character_count = len(chars) if chars else 0
+    names = [str(row.get("title") or "").strip() for row in chars]
+    duplicate_names = sorted({name for name in names if name and names.count(name) > 1})
+    missing_locations = sorted({row["entity_name"] for row in entities if row.get("entity_type") == "character" and not row.get("location")})
+    item_without_owner = sorted({row["entity_name"] for row in entities if row.get("entity_type") == "item" and not row.get("relationships")})
+    missing_relationships = sorted({row["entity_name"] for row in entities if row.get("entity_type") == "character" and not row.get("relationships")})
+    timeline_gaps = sum(1 for row in timeline if row.get("event_order") is None)
+    checks = {
+        "characters": {"status": "pass" if not duplicate_names else "warning", "duplicates": duplicate_names},
+        "locations": {"status": "pass" if not missing_locations else "warning", "missing": missing_locations},
+        "timeline": {"status": "pass" if not timeline_gaps else "warning", "unordered_events": timeline_gaps},
+        "items": {"status": "pass" if not item_without_owner else "warning", "owner_unknown": item_without_owner},
+        "settings": {"status": "pass" if worldview else "warning", "worldview_indexed": bool(worldview)},
+        "relationships": {"status": "pass" if not missing_relationships else "warning", "missing": missing_relationships},
+    }
+    warnings = sum(1 for check in checks.values() if check["status"] != "pass")
     return {
-        "dimensions_checked": list(dims.keys()),
-        "character_count": character_count,
-        "requires_provider": True,  # Full consistency needs LLM comparison
-        "checks": {k: "pending" for k in dims},
+        "status": "pass" if warnings == 0 else "warnings",
+        "dimensions_checked": list(checks), "character_count": len(chars),
+        "warning_dimensions": warnings, "checks": checks,
     }
 
 

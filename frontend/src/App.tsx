@@ -3,7 +3,6 @@ import { Layout } from "./components/Layout";
 import { Wizard } from "./components/Wizard";
 import { Progress } from "./components/Progress";
 import { Review } from "./components/Review";
-import { Editor } from "./components/Editor";
 import { Costs } from "./components/Costs";
 import { CommandPalette } from "./components/CommandPalette";
 import { DagEditor } from "./components/DagEditor";
@@ -37,6 +36,7 @@ type ModelRoute = { id: string; task_type: string; provider: string; model: stri
 type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
 
 const API = "";
+const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
 
 // Thin wrapper over lib/api.ts — adds key + auth, unwraps {data} from API response
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -432,7 +432,7 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
       {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
-      {tab === "editor" && <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} />}
+      {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} /></React.Suspense>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
         <div className="panel"><h2>Prompt 库</h2>

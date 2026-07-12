@@ -106,17 +106,28 @@ async def metrics_guard(request: Request, call_next):
 @app.middleware("http")
 async def capture_api_key(request: Request, call_next):
     from app.gateway import _request_api_key, _request_api_base_url, _request_model
+    from app.core.url_security import validate_ai_base_url
+    tokens = []
     key = request.headers.get("X-Api-Key")
     if key:
-        _request_api_key.set(key)
+        tokens.append((_request_api_key, _request_api_key.set(key)))
     base_url = request.headers.get("X-Api-Base-Url")
     if base_url:
-        _request_api_base_url.set(base_url)
+        if not key:
+            return JSONResponse({"detail": "X-Api-Base-Url requires request-scoped X-Api-Key"}, status_code=400)
+        try:
+            base_url = validate_ai_base_url(base_url)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        tokens.append((_request_api_base_url, _request_api_base_url.set(base_url)))
     model = request.headers.get("X-Model")
     if model:
-        _request_model.set(model)
-    response = await call_next(request)
-    return response
+        tokens.append((_request_model, _request_model.set(model)))
+    try:
+        return await call_next(request)
+    finally:
+        for variable, token in reversed(tokens):
+            variable.reset(token)
 
 
 def ok(data: Any = None) -> ApiResponse:
@@ -131,6 +142,12 @@ def parse_content(row: dict[str, Any]) -> dict[str, Any]:
 
 class BatchChapterRequest(BaseModel):
     chapter_count: int = Field(default=10, ge=1, le=50)
+
+
+class AgentExecuteRequest(BaseModel):
+    project_id: str
+    variables: dict[str, Any] = Field(default_factory=dict)
+    client_mutation_id: str | None = Field(default=None, max_length=100)
 
 
 def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
@@ -1211,3 +1228,20 @@ def get_agent_endpoint(agent_id: str, user: dict = Depends(get_current_user)) ->
     if not agent:
         raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
     return ok({"id": agent_id, **agent})
+
+
+@app.post("/api/v1/agents/{agent_id}/execute")
+@limiter.limit("20/minute")
+def execute_agent_endpoint(request: Request, agent_id: str, payload: AgentExecuteRequest,
+                           user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Execute an Agent contract through the real gateway with project isolation."""
+    conn = connect()
+    ensure_project_member(conn, payload.project_id, user, {"owner", "editor"})
+    conn.close()
+    from app.services.agent_registry import execute_agent
+    try:
+        result = execute_agent(agent_id, payload.project_id, payload.variables,
+                               payload.client_mutation_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
+    return ok(result)

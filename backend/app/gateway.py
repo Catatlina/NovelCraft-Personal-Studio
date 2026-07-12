@@ -427,7 +427,8 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
         "response_format": {"type": "json_object"},
         "temperature": params.get("temperature", 0.7),
     }
-    base_url = (_request_api_base_url.get() or settings.deepseek_base_url).rstrip("/")
+    from .core.url_security import validate_ai_base_url
+    base_url = validate_ai_base_url(_request_api_base_url.get() or settings.deepseek_base_url)
     request = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=json.dumps(body).encode("utf-8"),
@@ -477,7 +478,8 @@ def _deepseek_stream(prompt: str, model: str, params: dict[str, Any], usage_out:
         "stream": True,
         "stream_options": {"include_usage": True},
     }
-    base_url = (_request_api_base_url.get() or settings.deepseek_base_url).rstrip("/")
+    from .core.url_security import validate_ai_base_url
+    base_url = validate_ai_base_url(_request_api_base_url.get() or settings.deepseek_base_url)
     request = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=json.dumps(body).encode("utf-8"),

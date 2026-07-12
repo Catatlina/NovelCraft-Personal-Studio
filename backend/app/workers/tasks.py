@@ -402,8 +402,14 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
                             "UPDATE contents SET meta = meta || %s WHERE id = %s",
                             (encode({f"review_{dim}_score": dim_out.get("ooc_count", dim_out.get("pacing_score", 0))}), cid),
                         )
-                    except Exception:
-                        pass  # Non-critical — skip extended dimensions on failure
+                    except Exception as exc:
+                        # Keep the main review available, but persist the exact
+                        # degraded dimension instead of silently claiming it ran.
+                        db.execute(
+                            "UPDATE contents SET meta = meta || %s WHERE id = %s",
+                            (encode({f"review_{dim}_status": "failed",
+                                     f"review_{dim}_error": str(exc)[:500]}), cid),
+                        )
 
     db.execute(
         "UPDATE run_nodes SET status = 'succeeded', output = %s, finished_at = now() WHERE run_id = %s AND node_key = %s",
@@ -420,8 +426,9 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
         for knowledge_id in knowledge_ids_to_reindex:
             try:
                 rebuild_item_embeddings(knowledge_id)
-            except Exception:
-                pass  # Search retains lexical fallback; generation must not be rolled back.
+            except Exception as exc:
+                from app.core.alerts import send_alert
+                send_alert(f"知识向量重建失败 {knowledge_id}: {exc}", "warning")
 
 
 def _summarize_and_store(db, chapter_id: str, body: list) -> None:

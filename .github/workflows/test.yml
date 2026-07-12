@@ -32,6 +32,12 @@ jobs:
       - name: Run migrations
         run: cd backend && alembic upgrade head
         env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test}
+      - name: Verify migration round trip
+        run: |
+          PGPASSWORD=novelcraft createdb -h localhost -U novelcraft migration_roundtrip
+          cd backend
+          DATABASE_URL=postgresql://novelcraft:novelcraft@localhost/migration_roundtrip alembic upgrade head
+          DATABASE_URL=postgresql://novelcraft:novelcraft@localhost/migration_roundtrip alembic downgrade base
       - name: Run tests
         run: cd backend && pytest tests/ -v
         # Real-provider T3 tests run only when the DEEPSEEK_API_KEY repo secret
