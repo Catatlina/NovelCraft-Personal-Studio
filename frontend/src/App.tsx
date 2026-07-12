@@ -20,7 +20,7 @@ import { VersionTree } from "./components/VersionTree";
 import { ForeshadowingBoard } from "./components/ForeshadowingBoard";
 import { CollaborationPanel } from "./components/Collaboration";
 import { AgentConsole } from "./components/AgentConsole";
-import { ApiError, api as baseApi } from "./lib/api";
+import { ApiError, api as baseApi, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 
@@ -76,6 +76,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [offlineNotice, setOfflineNotice] = useState("");
+  const [streamPreview, setStreamPreview] = useState("");
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
   const replayingOffline = useRef(false);
@@ -223,6 +224,23 @@ export default function App() {
       await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
       setOfflineNotice("AI 操作已排队，联网后自动执行");
       return;
+    }
+    try {
+      // 流式优先：增量预览，完成后一次性替换选区
+      setStreamPreview("");
+      const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
+        delta => setStreamPreview(previous => previous + delta));
+      setStreamPreview("");
+      setEditorText(current => current.replace(selectedText, text)); setSelection("");
+      if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
+      return;
+    } catch (streamError) {
+      setStreamPreview("");
+      if (streamError instanceof ApiError && streamError.status === 404) {
+        // 旧后端无流式端点 → 走非流式
+      } else if (streamError instanceof ApiError && !isOfflineApiError(streamError) && streamError.status !== 502) {
+        throw streamError;
+      }
     }
     try {
       const output = await api<{ text: string }>(url, { method: "POST", body: JSON.stringify(body) });
@@ -402,7 +420,7 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
       {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
-      {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult }} />}
+      {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
         <div className="panel"><h2>Prompt 库</h2>

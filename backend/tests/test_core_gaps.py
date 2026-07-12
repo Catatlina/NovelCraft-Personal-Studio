@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 from app.core.rate_limit import limiter
 from app.main import app
 from app.db import connect, encode, new_id
+from app.core.embeddings import hash_embedding
 from app.services.knowledge_hub import (
     EMBEDDING_DIMENSION,
     _chunk_text,
-    _local_embedding,
     rebuild_item_embeddings,
     search,
 )
@@ -39,9 +39,9 @@ def test_chunk_text_is_stable_and_overlapping():
 
 
 def test_local_embedding_is_deterministic_and_normalized():
-    vector = _local_embedding("这是需要建立索引的世界观文本")
+    vector = hash_embedding("这是需要建立索引的世界观文本")
     assert len(vector) == EMBEDDING_DIMENSION
-    assert vector == _local_embedding("这是需要建立索引的世界观文本")
+    assert vector == hash_embedding("这是需要建立索引的世界观文本")
     assert abs(sum(value * value for value in vector) - 1.0) < 1e-6
 
 

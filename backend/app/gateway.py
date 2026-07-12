@@ -291,6 +291,7 @@ def _load_prompt_and_route(
     prompt_name: str,
     task_type: str,
     variables: dict[str, Any],
+    include_contract: bool = True,
 ) -> tuple[str, str, str, dict[str, Any]]:
     route = _load_route(task_type)
     provider = (route or {}).get("provider", "mock")
@@ -313,7 +314,7 @@ def _load_prompt_and_route(
     enriched_variables = {"task_type": task_type, **variables}
     prompt_text = render_prompt(template, enriched_variables)
     contract = OUTPUT_CONTRACTS.get(task_type) or OUTPUT_CONTRACTS.get(task_type.replace("editor_", "editor_"))
-    if contract:
+    if contract and include_contract:
         prompt_text += "\n\n只输出合法 JSON（不得包含 JSON 以外的任何文本，不得增删字段），结构必须匹配：\n" + contract
     return prompt_text, provider, model, params
 
@@ -374,6 +375,150 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     except json.JSONDecodeError as exc:
         raise ProviderError(f"deepseek returned non-json for {task_type}") from exc
     return parsed, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+
+
+# ===== Streaming (pure-text tasks only) =====
+# Structured tasks (gen_chapter1 etc.) must be validated as a whole JSON object
+# before persisting, so streaming is limited to plain-text editor operations.
+
+TEXT_STREAM_TASKS = {
+    "editor_polish", "editor_rewrite", "editor_continue",
+    "editor_expand", "editor_condense", "editor_deai",
+}
+
+
+def _deepseek_stream(prompt: str, model: str, params: dict[str, Any], usage_out: dict[str, int]):
+    """Yield content deltas from an OpenAI-compatible streaming endpoint."""
+    api_key = _request_api_key.get() or settings.deepseek_api_key
+    if not api_key:
+        raise ProviderError("DEEPSEEK_API_KEY is not configured")
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你是 NovelCraft 的创作助手。直接输出正文文本，不要任何解释、标题或格式包裹。"},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": params.get("temperature", 0.7),
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    base_url = (_request_api_base_url.get() or settings.deepseek_base_url).rstrip("/")
+    request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        method="POST",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+                 "Accept": "text/event-stream"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.request_timeout_seconds) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    payload = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if payload.get("usage"):
+                    usage_out.update(payload["usage"])
+                choices = payload.get("choices") or []
+                if choices:
+                    delta = (choices[0].get("delta") or {}).get("content")
+                    if delta:
+                        yield delta
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise ProviderError(f"deepseek stream failed: {exc}") from exc
+
+
+def complete_stream(
+    *,
+    project_id: str,
+    task_type: str,
+    prompt_name: str,
+    variables: dict[str, Any],
+    client_mutation_id: str | None = None,
+):
+    """Stream text deltas for a pure-text task, then write the ai_calls ledger.
+
+    Same semantics as complete(): budget assert up front, mutation replay from
+    the ledger (yielded as one delta), circuit breaker + failure recording, and
+    a succeeded ai_calls row with usage once the stream finishes."""
+    if task_type not in TEXT_STREAM_TASKS:
+        raise ProviderError(f"streaming is not supported for {task_type}")
+    if client_mutation_id:
+        conn = connect()
+        existing = conn.execute(
+            "SELECT output FROM ai_calls WHERE project_id = %s AND client_mutation_id = %s AND status = 'succeeded'",
+            (project_id, client_mutation_id),
+        ).fetchone()
+        conn.close()
+        if existing:
+            yield decode(existing["output"], {}).get("text", "")
+            return
+
+    start = time.perf_counter()
+    prompt_text, provider, model, params = _load_prompt_and_route(
+        prompt_name, task_type, variables, include_contract=False
+    )
+    _assert_budget(project_id, "bootstrap", _estimate_cost(variables, {"prompt": prompt_text}))
+
+    chunks: list[str] = []
+    usage: dict[str, int] = {}
+    if provider == "mock":
+        environment = os.getenv("NOVELCRAFT_ENV", "development").lower()
+        allow_mock = (os.getenv("NOVELCRAFT_ALLOW_MOCK") or os.getenv("ALLOW_MOCK", "false")).lower() == "true"
+        if environment not in {"test", "testing"} or not allow_mock:
+            raise ProviderError("mock provider requires NOVELCRAFT_ENV=test and NOVELCRAFT_ALLOW_MOCK=true")
+        mock_text = str(_mock_output(task_type, variables).get("text", ""))
+        midpoint = max(1, len(mock_text) // 2)
+        for piece in (mock_text[:midpoint], mock_text[midpoint:]):
+            if piece:
+                chunks.append(piece)
+                yield piece
+        provider_name = model_name = "mock"
+    elif provider == "deepseek":
+        if not circuit_breaker("deepseek"):
+            raise ProviderError("deepseek circuit breaker open — too many failures")
+        model_name = _request_model.get() or model or settings.deepseek_model
+        provider_name = "deepseek"
+        try:
+            for delta in _deepseek_stream(prompt_text, model_name, params, usage):
+                chunks.append(delta)
+                yield delta
+            record_success("deepseek")
+        except ProviderError:
+            record_failure("deepseek")
+            raise
+    else:
+        # Other providers use different auth/protocol implementations in the
+        # non-streaming gateway. Until matching stream adapters exist, fail
+        # explicitly so the client can safely fall back to complete().
+        raise ProviderError(f"streaming is not supported for provider: {provider}")
+
+    full_text = "".join(chunks)
+    prompt_tokens = int(usage.get("prompt_tokens", 0)) or max(1, len(prompt_text) // 4)
+    completion_tokens = int(usage.get("completion_tokens", 0)) or max(1, len(full_text) // 4)
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    conn = connect()
+    conn.execute(
+        """INSERT INTO ai_calls (
+               id, run_id, node_key, provider, model, prompt_name, task_type,
+               input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
+               client_mutation_id, project_id
+           ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (new_id("call"), None, None, provider_name, model_name, prompt_name, task_type,
+         encode({"variables": variables, "prompt": prompt_text, "stream": True}),
+         encode({"text": full_text}),
+         prompt_tokens, completion_tokens,
+         round((prompt_tokens + completion_tokens) * 0.000002, 4), latency_ms,
+         "succeeded", client_mutation_id, project_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:

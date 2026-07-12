@@ -36,7 +36,7 @@
 
 ## 验证基线（2026-07-12 实测）
 
-- 后端测试：**383 passed**（真实 Postgres；AI 路径为 mock，遵循《26》mock 门禁——不能证明真实 Provider 能力）。
+- 后端测试：**417 passed，4 skipped**（真实 Postgres；默认 AI 路径为 mock；真实 Provider/本地语义模型用例按环境显式启用）。
 - 前端：`tsc --noEmit` + `vite build` 通过。
 - Alembic：单头 `nc_audit_workflow_scope`；本地库 upgrade→downgrade→upgrade 往返通过。
 - 浏览器实测（本轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）；书库批次失败→`pending_provider` 原因透传→恢复链路。
@@ -51,7 +51,8 @@
 - 已修复（第二轮，对照审计全量版 §六）：多轮审核/跨模型审计/Prompt 矩阵此前用字符串长度公式伪造评分并宣称"ready"，现真实经 Gateway 调用、Provider 不可用逐项 `pending_provider`，端点补 `project_id` 成员校验；热点采集 `except: continue` 静默空成功改为逐源状态+全失败 502；AgentConsole 硬编码"模拟"数据改为 `/agents/status` 真实 run_nodes 聚合；Collaboration 页面调用不存在的路径（必 404）改为真实 `/collaboration/*`；`/admin/workflows/{name}/execute` 此前无视工作流名一律跑 bootstrap 且 `project_id=''` 必然崩溃，改为权限校验+仅 bootstrap 可执行+其余显式 501；AI 编辑补 `ai_edit` 版本分支（C5-03）；C5-05 自动保存 7 天保留 beat 任务（保留每实体最近 10 份，语义分支永不清理）；assembler 知识层此前按无人写入的列过滤永远为空，改为按小说前提走 Knowledge Hub 检索。
 - 已修复（第三轮，代码/文档/功能契约对账）：工作流保存请求原本必 422 且代码引用不存在的 `workflows.project_id/config`，现新增项目作用域迁移并统一使用 `definition`；系统 Bootstrap 只读，自定义 DAG 明确为设计稿、未接执行器返回 501；清除预算/日报/翻译四组重复路由及其中的跨项目翻译风险；设置页知识导入/导出与预算、知识检索、热点响应、Fanout 响应、多平台发布均对齐真实 API；短篇输入真实落库；Fanout Provider 失败不再复制原文冒充改写成功。
 - 已修复（第四轮，按《27-全仓库审计报告》路线图阶段 0）：P1-A 迁移回滚断裂——性能索引 downgrade 移除 CONCURRENTLY，干净库 upgrade→downgrade base→upgrade 三段实测通过，并加全迁移源码契约测试；P1-B schema 快照契约测试（12 张核心表必需列钉死，防列名漂移复发）；P1-G 交付门禁升级为证据绑定校验（✅/已交付行必须含测试/commit/文件/T级标记，含负例测试）；P1-D 不可信外部文本统一清洗 `sanitize_untrusted`（接入 assembler 知识召回与热点晨报入模路径）；P1-E 备份 pg_dump 每日 sidecar + 7 份保留 + 全服务日志轮转（compose，YAML 校验通过）；P2 清理：PublishPage 死组件删除、`store_ranking_snapshot` 吞错死函数及其 T0 存在性断言删除、bundle 分包（主 chunk 702KB→281KB，消除 >500KB 警告）、版本统一（app `2.2.0` 对齐需求基线 V2.2，README 刷新）。**396 tests 全绿**。
-- 仍开放：B4 Nginx 无 TLS（需域名/证书决策）；无流式生成；真语义 RAG（当前为显式本地 hash embedding）；数据回流/ROI 真实数据；监控（Sentry/Prometheus）与告警实测送达；发布真实平台回执与 auto_publish 调度；`workers/tasks.py` 拆分；Agent 注册表仍为声明式（无独立执行体）；task/日级预算分级。
+- 已修复（第五轮，本轮审查）：纯文本编辑增加 DeepSeek SSE、完成后统一写 ai_calls/版本；流式鉴权支持 token 刷新，预算与 Provider 错误分流，非 DeepSeek 路由安全回退普通网关；Embedding 增加 remote/local/hash 三层适配、来源标记和项目重建，远端部分/非法响应回退 hash，不同后端向量禁止混算；Sentry/Prometheus 可选接线，巡检增加队列积压和成本日报。代码验证 417 passed、前端 build；真实流式 Provider、local semantic 和 Sentry 送达仍未作为验收证据。
+- 仍开放：B4 Nginx 无 TLS（需域名/证书决策）；流式生成真实 Provider/浏览器验收；remote/local 语义质量与全库重建验收；数据回流/ROI 真实数据；Sentry 与告警实测送达；发布真实平台回执与 auto_publish 调度；`workers/tasks.py` 拆分；Agent 注册表仍为声明式（无独立执行体）；task/日级预算分级。
 
 ## 下一顺序
 

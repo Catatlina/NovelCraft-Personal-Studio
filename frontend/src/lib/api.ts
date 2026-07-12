@@ -81,3 +81,52 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
   if (!r.ok) throw new ApiError(r.status, payload);
   return payload;
 }
+
+/** SSE streaming request — same auth headers as api(); onDelta fires per text
+ *  chunk; resolves with the full text from the terminal {done,text} frame. */
+export async function apiStream(
+  url: string,
+  init: RequestInit,
+  onDelta: (delta: string) => void,
+): Promise<{ text: string }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(init.headers as Record<string, string> || {}) };
+  const key = getApiKey(); const apiUrl = getApiUrl(); const model = getModel();
+  if (key) headers["X-Api-Key"] = key;
+  if (apiUrl) headers["X-Api-Base-Url"] = apiUrl;
+  if (model) headers["X-Model"] = model;
+  const token = sessionStorage.getItem("nc_token");
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const csrf = getCookie("csrf_token");
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  const fullUrl = url.startsWith("/api") ? API_BASE + url.slice(4) : url;
+  let response = await fetch(fullUrl, { ...init, headers, credentials: "include" });
+  if (response.status === 401 && token && await tryRefreshToken()) {
+    headers["Authorization"] = `Bearer ${sessionStorage.getItem("nc_token") || ""}`;
+    response = await fetch(fullUrl, { ...init, headers, credentials: "include" });
+  }
+  if (!response.ok || !response.body) {
+    throw new ApiError(response.status, await response.json().catch(() => null));
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalText: string | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const line = frame.trim();
+      if (!line.startsWith("data:")) continue;
+      let payload: any;
+      try { payload = JSON.parse(line.slice(5).trim()); } catch { continue; }
+      if (payload.error) throw new ApiError(payload.code === "PENDING_BUDGET" ? 429 : 502, payload);
+      if (payload.delta) onDelta(payload.delta);
+      if (payload.done) finalText = payload.text ?? "";
+    }
+  }
+  if (finalText === null) throw new ApiError(502, { error: "stream ended without done frame" });
+  return { text: finalText };
+}
