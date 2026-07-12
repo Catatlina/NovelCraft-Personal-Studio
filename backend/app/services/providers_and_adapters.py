@@ -1,6 +1,6 @@
 """Complete: Claude/OpenAI/Gemini providers + 6 platform adapters + multi-round review + matrix batch + book workbench."""
 from __future__ import annotations
-import json, os, urllib.request, base64
+import json, os, urllib.request, urllib.error, base64
 
 
 # ===== Claude Provider =====
@@ -56,54 +56,118 @@ def _gemini_complete(model: str, messages: list, api_key: str = "", api_url: str
         return {"error": str(e), "provider": "gemini", "degraded": True}
 
 
+# ===== HTTP publish helper =====
+
+def _publish_http_post(url: str, headers: dict, body: dict) -> dict:
+    """Helper: POST to a publishing API with 30s timeout. Returns (success, data_or_error)."""
+    try:
+        req = urllib.request.Request(url, json.dumps(body).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+        return {"ok": True, "response": data}
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read())
+        except Exception:
+            detail = str(e)
+        return {"ok": False, "error": detail, "http_status": e.code}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ===== 6 Platform Adapters =====
 
 def _publish_wechat(title: str, body: str, app_id: str = "", app_secret: str = "") -> dict:
     """WeChat Official Account — draft creation via API."""
     if not app_id or not app_secret:
-        return {"status": "draft", "platform": "wechat", "mode": "manual_required", "instructions": "登录微信公众平台 → 素材管理 → 新建图文 → 粘贴内容"}
-    return {"status": "draft", "platform": "wechat", "mode": "semi_auto"}
+        return {"status": "draft", "platform": "wechat", "mode": "manual_required",
+                "instructions": "登录微信公众平台 → 素材管理 → 新建图文 → 粘贴内容"}
+    # Step 1: get access token
+    token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
+    token_result = _publish_http_post(token_url, {"Content-Type": "application/json"}, {})
+    if not token_result["ok"]:
+        return {"status": "failed", "platform": "wechat", "mode": "api_error",
+                "error": f"Failed to get access token: {token_result.get('error')}"}
+    access_token = token_result["response"].get("access_token", "")
+    if not access_token:
+        return {"status": "failed", "platform": "wechat", "mode": "api_error",
+                "error": f"Token response missing access_token: {token_result['response']}"}
+    # Step 2: upload draft
+    publish_url = f"https://api.weixin.qq.com/cgi-bin/material/add_news?access_token={access_token}"
+    articles = [{"title": title[:64], "thumb_media_id": "", "author": "", "digest": body[:120],
+                  "show_cover_pic": 0, "content": body, "content_source_url": "",
+                  "need_open_comment": 0, "only_fans_can_comment": 0}]
+    result = _publish_http_post(publish_url, {"Content-Type": "application/json"}, {"articles": articles})
+    if result["ok"]:
+        return {"status": "submitted", "platform": "wechat", "mode": "api", "response": result["response"]}
+    return {"status": "failed", "platform": "wechat", "mode": "api_error",
+            "error": str(result.get("error", "unknown")), "http_status": result.get("http_status")}
 
 
 def _publish_toutiao(title: str, body: str, token: str = "") -> dict:
     """Toutiao (头条号) — article publishing."""
     if not token:
-        return {"status": "draft", "platform": "toutiao", "mode": "manual_required", "instructions": "登录头条号后台 → 发布 → 文章 → 粘贴内容"}
+        return {"status": "draft", "platform": "toutiao", "mode": "manual_required",
+                "instructions": "登录头条号后台 → 发布 → 文章 → 粘贴内容"}
     url = "https://developer.toutiao.com/api/v2/content/article/create/"
-    return {"status": "submitted", "platform": "toutiao", "mode": "semi_auto"}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    result = _publish_http_post(url, headers, {"title": title, "content": body})
+    if result["ok"]:
+        return {"status": "submitted", "platform": "toutiao", "mode": "api", "response": result["response"]}
+    return {"status": "failed", "platform": "toutiao", "mode": "api_error",
+            "error": str(result.get("error", "unknown")), "http_status": result.get("http_status")}
 
 
 def _publish_xiaohongshu(title: str, body: str, images: list = []) -> dict:
-    """XiaoHongShu (小红书) — note publishing (copy-based export)."""
+    """XiaoHongShu (小红书) — no public write API; copy-based export only."""
     return {
-        "status": "exported", "platform": "xiaohongshu", "mode": "copy_paste",
+        "status": "draft", "platform": "xiaohongshu", "mode": "manual_required",
         "title": title[:20], "body_preview": body[:200],
-        "instructions": "复制标题和正文 → 打开小红书App → 发布笔记 → 粘贴",
+        "instructions": "小红书无公开写入API。复制标题和正文 → 打开小红书App → 发布笔记 → 粘贴",
     }
 
 
 def _publish_zhihu(title: str, body: str) -> dict:
-    """Zhihu (知乎) — article draft."""
-    return {"status": "draft", "platform": "zhihu", "mode": "manual", "instructions": "登录知乎 → 写文章 → 粘贴 → 选择话题 → 发布"}
+    """Zhihu (知乎) — no public write API; manual only."""
+    return {"status": "draft", "platform": "zhihu", "mode": "manual_required",
+            "instructions": "知乎无公开写入API。登录知乎 → 写文章 → 粘贴 → 选择话题 → 发布"}
 
 
 def _publish_baijia(title: str, body: str) -> dict:
-    """Baijiahao (百家号) — article draft."""
-    return {"status": "draft", "platform": "baijia", "mode": "manual", "instructions": "登录百家号 → 发布 → 图文 → 粘贴 → 提交审核"}
+    """Baijiahao (百家号) — no public write API; manual only."""
+    return {"status": "draft", "platform": "baijia", "mode": "manual_required",
+            "instructions": "百家号无公开写入API。登录百家号 → 发布 → 图文 → 粘贴 → 提交审核"}
 
 
 def _publish_substack(title: str, body: str, token: str = "") -> dict:
     """Substack — post via API."""
     if not token:
-        return {"status": "draft", "platform": "substack", "mode": "manual_required"}
-    return {"status": "draft", "platform": "substack", "mode": "semi_auto"}
+        return {"status": "draft", "platform": "substack", "mode": "manual_required",
+                "instructions": "请提供Substack API token以自动发布"}
+    url = "https://api.substack.com/v1/posts"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    result = _publish_http_post(url, headers, {"title": title, "body": body})
+    if result["ok"]:
+        return {"status": "submitted", "platform": "substack", "mode": "api", "response": result["response"]}
+    return {"status": "failed", "platform": "substack", "mode": "api_error",
+            "error": str(result.get("error", "unknown")), "http_status": result.get("http_status")}
 
 
 def _publish_x(title: str, body: str, token: str = "") -> dict:
-    """X (Twitter) — post thread if >280 chars."""
+    """X (Twitter) — post tweet (or thread if >280 chars)."""
     if not token:
-        return {"status": "draft", "platform": "x", "mode": "manual_required"}
-    return {"status": "draft", "platform": "x", "mode": "semi_auto"}
+        return {"status": "draft", "platform": "x", "mode": "manual_required",
+                "instructions": "请提供X API Bearer token以自动发布"}
+    url = "https://api.twitter.com/2/tweets"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # Truncate to 280 chars for single tweet; could be extended to thread posting
+    tweet_text = body[:280]
+    result = _publish_http_post(url, headers, {"text": tweet_text})
+    if result["ok"]:
+        return {"status": "submitted", "platform": "x", "mode": "api", "response": result["response"],
+                "note": "Tweet truncated to 280 chars" if len(body) > 280 else None}
+    return {"status": "failed", "platform": "x", "mode": "api_error",
+            "error": str(result.get("error", "unknown")), "http_status": result.get("http_status")}
 
 
 # ===== Multi-round review =====

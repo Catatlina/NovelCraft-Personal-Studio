@@ -118,13 +118,13 @@ def search(query: str, project_id: str | None = None, kinds: list[str] | None = 
     return [dict(r) for r in rows]
 
 
-def ingest_text(project_id: str, title: str, body: str, kind: str = "article", source_url: str = "") -> str:
+def ingest_text(project_id: str, title: str, body: str, kind: str = "article", source_url: str = "", content_id: str = "") -> str:
     """Ingest text content into knowledge_items."""
     db = connect()
     kid = __import__("uuid").uuid4()
     db.execute(
-        "INSERT INTO knowledge_items (id, project_id, kind, title, body, source_url, meta) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-        (str(kid), project_id, kind, title, body[:50000], source_url, "{}"),
+        "INSERT INTO knowledge_items (id, project_id, kind, title, body, source_url, content_id, meta) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (str(kid), project_id, kind, title, body[:50000], source_url, content_id or None, "{}"),
     )
     db.commit()
     db.close()

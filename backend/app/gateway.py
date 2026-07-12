@@ -327,16 +327,56 @@ def _assert_budget(project_id: str, scope: str, estimated_cost: float) -> None:
             (project_id, scope),
         ).fetchone()
     )
+    if not budget:
+        # Fall back to project-level default budget
+        budget = row_to_dict(
+            conn.execute(
+                "SELECT * FROM budgets WHERE project_id = %s AND scope = 'default'",
+                (project_id,),
+            ).fetchone()
+        )
     conn.close()
-    if budget and float(budget["spent_cny"]) + estimated_cost > float(budget["limit_cny"]):
-        alert_budget(project_id, "bootstrap", float(budget["spent_cny"]), float(budget["limit_cny"]))
-        raise BudgetExceeded(f"{scope} budget exceeded")
+    if not budget:
+        return  # No budget configured → allow (trust-based for development)
+    limit_cny = float(budget.get("limit_cny", 2.0))
+    spent_cny = float(budget.get("spent_cny", 0.0))
+    # Check for monthly reset
+    last_reset = budget.get("updated_at")
+    if last_reset:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if last_reset.tzinfo is None:
+            last_reset = last_reset.replace(tzinfo=timezone.utc)
+        if (now - last_reset).days >= 30:
+            # Reset monthly spending
+            conn2 = connect()
+            conn2.execute(
+                "UPDATE budgets SET spent_cny = 0, updated_at = now() WHERE id = %s",
+                (budget["id"],),
+            )
+            conn2.commit()
+            conn2.close()
+            spent_cny = 0.0
+    if spent_cny + estimated_cost > limit_cny:
+        alert_budget(project_id, scope, spent_cny, limit_cny)
+        raise BudgetExceeded(f"{scope} budget exceeded ({spent_cny:.2f}/{limit_cny:.2f} CNY)")
 
 
-def _estimate_cost(variables: dict[str, Any], output_hint: dict[str, Any]) -> float:
+def _estimate_cost(variables: dict[str, Any], output_hint: dict[str, Any], provider: str = "deepseek") -> float:
+    """Estimate cost based on provider-specific pricing per 1M tokens (CNY)."""
     prompt_tokens = max(80, len(encode(variables)) // 3)
     completion_tokens = max(120, len(encode(output_hint)) // 3)
-    return round((prompt_tokens + completion_tokens) * 0.000002, 4)
+    # Provider pricing per 1M tokens (CNY): (input_price, output_price)
+    pricing = {
+        "deepseek": (1.0, 2.0),      # deepseek-chat: ¥1/M input, ¥2/M output
+        "claude": (21.5, 86.0),       # Claude Sonnet: $3/M input, $12/M output ≈ ¥21.5/86
+        "openai": (18.0, 54.0),       # GPT-4o: $2.5/M input, $7.5/M output ≈ ¥18/54
+        "gemini": (2.5, 7.5),         # Gemini Flash: ~¥2.5/M input, ~¥7.5/M output
+        "mock": (0, 0),
+    }
+    input_price, output_price = pricing.get(provider, (1.0, 2.0))
+    cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
+    return round(cost, 6)
 
 
 def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any]:

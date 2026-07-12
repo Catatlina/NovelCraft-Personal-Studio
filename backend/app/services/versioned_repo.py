@@ -2,6 +2,11 @@
 
 Tables supported: contents, knowledge_items, projects, model_routes, prompts.
 Column whitelisting prevents SQL injection.
+
+⚠️ DEPRECATED — This module has no active callers in the production codebase.
+It is preserved for reference but not loaded by any endpoint or worker.
+Consider removing after the next major release if still unused.
+Audit: 2026-07-12 — confirmed dead code (grep: zero imports found).
 """
 from __future__ import annotations
 

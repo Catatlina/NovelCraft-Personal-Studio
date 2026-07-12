@@ -1,4 +1,5 @@
-"""NC-HM-002 + NC-HM-003: Platform matching, audience, compliance risk + content generation pipeline."""
+"""NC-HM-002 + NC-HM-003: Platform matching, audience, compliance risk + content generation pipeline.
+⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
 from __future__ import annotations
 import json, os
 from app.db import connect, new_id, encode

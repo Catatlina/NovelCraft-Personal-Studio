@@ -11,7 +11,7 @@ export function ForeshadowingBoard({ novelId }: { novelId: string }) {
   const [items, setItems] = useState<Foreshadowing[]>([]);
 
   useEffect(() => {
-    api<Foreshadowing[]>(`/api/v1/novels/${novelId}/foreshadowings`).then(setItems).catch(() => {});
+    api<Foreshadowing[]>(`/api/v1/novels/${novelId}/foreshadowings`).then((resp: any) => setItems(resp.data || [])).catch(() => {});
   }, [novelId]);
 
   const planted = items.filter(i => i.status === "planted");

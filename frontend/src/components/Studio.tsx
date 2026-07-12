@@ -75,7 +75,28 @@ export function Studio() {
             <button className="primary" onClick={createShortStory} disabled={busy} style={{width:"fit-content"}}>
               {busy?<Loader2 className="spin" size={16}/>:<Play size={16}/>}生成短篇
             </button>
-            {result && <pre style={{fontSize:12,color:"var(--text-muted)"}}>{JSON.stringify(result,null,2)}</pre>}
+            {result && (
+              <div style={{marginTop:12, padding:12, background:"var(--bg-subtle)", borderRadius:8}}>
+                {result.data ? (
+                  <>
+                    <h4 style={{margin:0}}>{result.data.title || "短篇已生成"}</h4>
+                    <p style={{fontSize:13, color:"var(--text-secondary)", marginTop:8, maxHeight:200, overflowY:"auto", whiteSpace:"pre-wrap"}}>
+                      {typeof result.data.body === 'string'
+                        ? result.data.body.slice(0,500)
+                        : (() => { try { return (result.data.body?.content || []).map((p:any) => (p.content||[]).map((n:any) => n.text||'').join('')).join('\n\n').slice(0,500) } catch { return JSON.stringify(result.data.body).slice(0,500) } })()
+                      }
+                    </p>
+                    {result.data.word_count != null && <small style={{color:"var(--text-muted)"}}>{result.data.word_count} 字</small>}
+                    {result.data.status && <small style={{color:"var(--text-muted)", marginLeft:8}}>状态: {result.data.status}</small>}
+                  </>
+                ) : (
+                  <>
+                    <h4 style={{margin:0}}>生成完成</h4>
+                    <pre style={{fontSize:11, maxHeight:300, overflowY:"auto"}}>{JSON.stringify(result, null, 2)}</pre>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

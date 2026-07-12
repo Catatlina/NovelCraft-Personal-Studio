@@ -179,23 +179,27 @@ def test_ai_edit_creates_version_branch(authed, monkeypatch):
 
 # --- workflow executor: honest semantics ---------------------------------------
 
-def test_non_bootstrap_workflow_returns_501(authed):
-    from app.db import connect, new_id
+def test_non_bootstrap_workflow_dispatches_with_nodes(authed):
+    from app.db import connect, new_id, encode
 
     client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
     novel_id = client.post(f"/api/v1/projects/{project_id}/novels", headers=headers,
                            json={"idea": "wf 测试", "genre": "科幻", "style": "紧凑", "target_words": 10000}).json()["data"]["id"]
     wf_name = f"custom-{uuid.uuid4().hex[:6]}"
     db = connect()
-    db.execute("INSERT INTO workflows (id, name, definition) VALUES (%s,%s,'{}')", (new_id(), wf_name))
+    db.execute("INSERT INTO workflows (id, name, definition) VALUES (%s,%s,%s)",
+               (new_id(), wf_name,
+                encode({"nodes": [{"key": "n1", "kind": "agent", "title": "测试节点", "task": "gen_titles"}]})))
     db.commit()
     db.close()
 
     response = authed["client"].post(
         f"/api/v1/admin/workflows/{wf_name}/execute?project_id={project_id}&novel_id={novel_id}",
         headers=headers)
-    assert response.status_code == 501
-    assert response.json()["detail"]["code"] == "WORKFLOW_EXECUTOR_NOT_IMPLEMENTED"
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "dispatched"
+    assert data["total_nodes"] == 1
 
 
 def test_workflow_draft_contract_persists_definition_and_is_project_scoped(authed):

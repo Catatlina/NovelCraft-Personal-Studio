@@ -76,7 +76,7 @@ def compute_trend(item_title: str, source: str, current_score: float) -> str:
     return "stable"
 
 
-def store_hotspots(items: list[dict]) -> int:
+def store_hotspots(items: list[dict], project_id: str = "") -> int:
     db = connect()
     count = 0
     now_str = datetime.utcnow().isoformat()
@@ -98,8 +98,8 @@ def store_hotspots(items: list[dict]) -> int:
         freshness = compute_freshness_score(now_str)
 
         db.execute(
-            "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s)",
-            (new_id(), "hotspot", item.get("title", "")[:200],
+            "INSERT INTO knowledge_items (id, project_id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s,%s)",
+            (new_id(), project_id or None, "hotspot", item.get("title", "")[:200],
              json.dumps(item, ensure_ascii=False),
              encode({
                  "source": item.get("source", ""), "score": item.get("raw_score", 0),

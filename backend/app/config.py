@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    environment: str = os.getenv("NOVELCRAFT_ENV", "development")
+    environment: str = os.getenv("NOVELCRAFT_ENV", "production")
     ai_provider: str = os.getenv("NOVELCRAFT_AI_PROVIDER", "deepseek")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -27,6 +27,7 @@ class Settings:
         ).split(",")
         if origin.strip()
     )
+    admin_email: str = os.getenv("NOVELCRAFT_ADMIN_EMAIL", "")
 
     def __post_init__(self) -> None:
         if self.environment.lower() == "production":
@@ -38,6 +39,11 @@ class Settings:
             raise ValueError("COOKIE_SAMESITE 必须是 lax、strict 或 none")
         if self.cookie_samesite == "none" and not self.cookie_secure:
             raise ValueError("COOKIE_SAMESITE=none 时必须设置 COOKIE_SECURE=true")
+        if self.environment.lower() == "production" and not self.admin_email:
+            import logging
+            logging.getLogger("novelcraft").warning(
+                "生产环境未设置 NOVELCRAFT_ADMIN_EMAIL，请手动创建管理员账户。"
+            )
 
 
 settings = Settings()

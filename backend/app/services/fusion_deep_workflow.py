@@ -1,4 +1,5 @@
-"""NC-FUS-DEEP: denova WorkflowPlan + event ledger + show-me-the-story fact chain."""
+"""NC-FUS-DEEP: denova WorkflowPlan + event ledger + show-me-the-story fact chain.
+⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
 from __future__ import annotations
 from datetime import datetime
 from app.db import connect, new_id, encode, decode

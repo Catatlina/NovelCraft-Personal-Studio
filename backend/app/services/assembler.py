@@ -76,7 +76,15 @@ class ContextAssembler:
         db.close()
         if row:
             meta = row["meta"] if isinstance(row["meta"], dict) else {}
-            return meta.get("book_summary", "[全书状态摘要待生成]")
+            book_summary = meta.get("book_summary", "")
+            if book_summary:
+                return book_summary
+            # Fallback: use volume summaries
+            vol_summaries = meta.get("volume_summaries", [])
+            if isinstance(vol_summaries, list) and vol_summaries:
+                return "\n".join(f"[卷{i+1}] {s}" for i, s in enumerate(vol_summaries) if s)
+            # Fallback: collect chapter summaries from last N chapters
+            return self._fallback_chapter_summary() or "[全书状态摘要待生成]"
         return ""
 
     def _volume_summary(self) -> str:
@@ -87,9 +95,30 @@ class ContextAssembler:
         db.close()
         if row:
             meta = row["meta"] if isinstance(row["meta"], dict) else {}
-            vols = meta.get("volume_summaries", [])
-            return vols[-1] if vols else "[卷摘要待生成]"
+            vol_summaries = meta.get("volume_summaries", [])
+            if isinstance(vol_summaries, list) and vol_summaries:
+                return vol_summaries[-1]
+            # Fallback: collect chapter summaries from recent chapters
+            return self._fallback_chapter_summary() or "[卷摘要待生成]"
         return ""
+
+    def _fallback_chapter_summary(self) -> str:
+        """Fallback: aggregate chapter summaries from the last 10 chapters."""
+        db = connect()
+        rows = db.execute(
+            """SELECT meta, title FROM contents
+               WHERE parent_id = %s AND type = 'chapter' AND is_deleted = FALSE
+               ORDER BY (meta->>'seq')::int DESC LIMIT 10""",
+            (self.novel_id,),
+        ).fetchall()
+        db.close()
+        summaries = []
+        for r in reversed(rows):
+            m = r["meta"] if isinstance(r["meta"], dict) else {}
+            s = m.get("chapter_summary", "")
+            if s:
+                summaries.append(f"【{r['title']}】{s}")
+        return "\n".join(summaries) if summaries else ""
 
     def _recent_chapters(self) -> str:
         db = connect()

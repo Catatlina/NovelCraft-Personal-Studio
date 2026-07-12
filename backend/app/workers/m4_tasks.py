@@ -115,16 +115,32 @@ def _is_public_https_url(value: str) -> bool:
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
 def collect_publish_data(self, content_id: str, platform: str) -> dict:
-    """TASK-044: Collect post-publish data (views, engagement) from platforms."""
+    """TASK-044: Collect real publish metrics from the database."""
     from app.db import connect, encode
+    from datetime import datetime, timezone
     db = connect()
+    where_clauses = ["platform = %s"]
+    params = [platform]
+    if content_id:
+        where_clauses.append("content_id = %s")
+        params.append(content_id)
+    where = " AND ".join(where_clauses)
+    row = db.execute(
+        f"SELECT COUNT(*) as total, SUM((meta->>'reads')::int) as reads, "
+        f"SUM((meta->>'likes')::int) as likes, SUM((meta->>'shares')::int) as shares, "
+        f"SUM((meta->>'revenue')::float) as revenue "
+        f"FROM published_posts WHERE {where}",
+        tuple(params),
+    ).fetchone()
     db.execute(
-        "UPDATE publish_records SET result = result || %s WHERE content_id = %s AND platform = %s",
-        (encode({"last_checked": __import__('datetime').datetime.utcnow().isoformat()}), content_id, platform),
+        "UPDATE publish_records SET result = result || %s, updated_at = now() WHERE platform = %s",
+        (encode({"last_checked": datetime.now(timezone.utc).isoformat(),
+                 "reads": int(row["reads"] or 0), "likes": int(row["likes"] or 0)}), platform),
     )
-    db.commit()
-    db.close()
-    return {"status": "collected", "platform": platform, "content_id": content_id}
+    db.commit(); db.close()
+    return {"status": "ok", "platform": platform, "reads": int(row["reads"] or 0),
+            "likes": int(row["likes"] or 0), "shares": int(row["shares"] or 0),
+            "posts": int(row["total"] or 0)}
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
@@ -148,3 +164,35 @@ def publish_retry_handler(self, record_id: str) -> dict:
     db2.commit()
     db2.close()
     return {"status": result.get("status", "failed"), "retry_count": self.request.retries}
+
+
+@celery_app.task(bind=True, max_retries=1)
+def check_scheduled_publishes(self) -> dict:
+    """Periodic task: check for due scheduled publishes and dispatch them."""
+    from app.db import connect, encode
+    from datetime import datetime, timezone
+    db = connect()
+    now = datetime.now(timezone.utc)
+    due = db.execute(
+        "SELECT * FROM publish_records WHERE status = 'scheduled' AND scheduled_at <= %s ORDER BY scheduled_at LIMIT 10",
+        (now,),
+    ).fetchall()
+    db.close()
+    dispatched = 0
+    for record in due:
+        rec = dict(record) if not isinstance(record, dict) else record
+        try:
+            result = auto_publish_article.delay(
+                rec.get("content_id", ""), rec.get("platform", ""), {}
+            )
+            db2 = connect()
+            db2.execute(
+                "UPDATE publish_records SET status = 'submitted', meta = meta || %s WHERE id = %s",
+                (encode({"dispatched_at": now.isoformat(), "celery_task_id": result.id}), rec["id"]),
+            )
+            db2.commit()
+            db2.close()
+            dispatched += 1
+        except Exception:
+            pass
+    return {"status": "ok", "due_count": len(due), "dispatched": dispatched}

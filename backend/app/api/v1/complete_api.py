@@ -67,7 +67,19 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
     }
     fn = adapters.get(platform)
     if not fn: raise HTTPException(404, f"unknown platform: {platform}")
-    return ok(fn(title, body, **credentials) if credentials else fn(title, body))
+    result = fn(title, body, **credentials) if credentials else fn(title, body)
+    # Reflect the adapter's honest status in the response message
+    adapter_status = result.get("status", "unknown")
+    adapter_mode = result.get("mode", "")
+    if adapter_status == "draft" and adapter_mode == "manual_required":
+        msg = f"manual_required — {result.get('instructions', result.get('message', 'manual publish required'))}"
+    elif adapter_status in ("exported", "submitted"):
+        msg = f"exported — {result.get('instructions', result.get('message', 'content exported for copy-paste'))}"
+    elif adapter_status == "draft":
+        msg = "draft — content saved as draft, manual review required"
+    else:
+        msg = adapter_status
+    return {"code": 0, "message": msg, "data": result}
 
 
 @router.post("/review/multi-round")

@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 
 from app.db import connect, new_id, encode
@@ -112,12 +113,18 @@ def publish_state_machine(content_id: str, platform: str, target_state: str) -> 
     }
 
     db = connect()
-    # Use proper UUID for content_id if a raw string is passed
-    from app.db import new_id as gen_id
-    if content_id and len(content_id) < 32:
-        lookup_id = gen_id()
+    # Validate content_id is a proper UUID
+    import uuid as _uuid
+    if content_id:
+        try:
+            _uuid.UUID(content_id)
+            lookup_id = content_id
+        except (ValueError, AttributeError):
+            db.close()
+            return {"status": "error", "message": f"invalid content_id format: {content_id}"}
     else:
-        lookup_id = content_id
+        db.close()
+        return {"status": "error", "message": "content_id is required"}
     record = db.execute(
         "SELECT * FROM publish_records WHERE content_id=%s AND platform=%s ORDER BY created_at DESC LIMIT 1",
         (lookup_id, platform),

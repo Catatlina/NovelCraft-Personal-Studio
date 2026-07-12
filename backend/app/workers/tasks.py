@@ -346,7 +346,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
              f"run:{run_id}:node:{node_key}:version"),
         )
         # M2: auto-summarize chapter
-        _summarize_and_store(db, cid, chapter.get("body", []))
+        _summarize_and_store(db, cid, novel_id, chapter.get("body", []))
 
     if task_type == "review_7dim":
         score = output.get("score", 0)
@@ -393,11 +393,18 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
                 chapter_body = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
                 chapter_body = str(chapter_body["body"]) if chapter_body else ""
             if chapter_body:
+                # Gather character profiles for OOC check
+                char_profiles = context.get("characters", "")
+                prev_summary = context.get("previous_summary", "")
                 for dim, dim_name in [("review.ooc", "OOC"), ("review.consistency", "一致性"), ("review.rhythm", "节奏")]:
                     try:
                         dim_out = complete(run_id=run_id, node_key=None, project_id=project_id,
                                           task_type=f"review_{dim_name}", prompt_name=dim,
-                                          variables={"body": chapter_body[:3000]})
+                                          variables={
+                                              "body": chapter_body[:3000],
+                                              "characters": char_profiles[:2000],
+                                              "summary": prev_summary[:2000],
+                                          })
                         db.execute(
                             "UPDATE contents SET meta = meta || %s WHERE id = %s",
                             (encode({f"review_{dim}_score": dim_out.get("ooc_count", dim_out.get("pacing_score", 0))}), cid),
@@ -424,8 +431,9 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
                 pass  # Search retains lexical fallback; generation must not be rolled back.
 
 
-def _summarize_and_store(db, chapter_id: str, body: list) -> None:
-    """M2: Generate and store chapter summary after generation."""
+def _summarize_and_store(db, chapter_id: str, novel_id: str, body: list) -> None:
+    """M2: Generate and store chapter summary after generation.
+    Triggers volume/book summarization when the last chapter of a volume/book completes."""
     try:
         from app.services.summarizer import summarize_chapter
         texts = []
@@ -444,8 +452,125 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
                 "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
                 (encode({"chapter_summary": summary}), chapter_id),
             )
+        # Check if volume/book summarization should be triggered
+        _maybe_summarize_volume_and_book(db, chapter_id, novel_id)
     except Exception:
         pass  # Non-critical, don't block the workflow
+
+
+def _maybe_summarize_volume_and_book(db, chapter_id: str, novel_id: str) -> None:
+    """Trigger volume/book aggregation if this is the last chapter of a volume."""
+    try:
+        from app.services.summarizer import summarize_volume, summarize_book
+        # Get the novel's meta to find volume structure
+        novel = db.execute(
+            "SELECT meta FROM contents WHERE id = %s", (novel_id,)
+        ).fetchone()
+        if not novel:
+            return
+        meta = novel["meta"] if isinstance(novel["meta"], dict) else {}
+        volume_structure = meta.get("volume_structure")
+        if not volume_structure:
+            return
+
+        # Parse volume structure — expected as list of chapter counts per volume
+        # e.g. [5, 5, 5] means 3 volumes with 5 chapters each
+        if isinstance(volume_structure, dict):
+            # {"volumes": [{"num": 1, "chapters": 5}, ...]}
+            vols = volume_structure.get("volumes", [])
+            chapter_counts = [v.get("chapters", 0) for v in vols]
+        elif isinstance(volume_structure, list):
+            chapter_counts = [int(x) for x in volume_structure]
+        else:
+            return
+
+        if not chapter_counts:
+            return
+
+        # Get this chapter's seq
+        chapter = db.execute(
+            "SELECT meta FROM contents WHERE id = %s", (chapter_id,)
+        ).fetchone()
+        if not chapter:
+            return
+        chapter_meta = chapter["meta"] if isinstance(chapter["meta"], dict) else {}
+        chapter_seq = chapter_meta.get("seq", 0)
+        if not chapter_seq:
+            return
+
+        # Determine which volume this chapter belongs to
+        cumulative = 0
+        current_volume = 0
+        total_chapters = sum(chapter_counts)
+        for i, count in enumerate(chapter_counts):
+            cumulative += count
+            if chapter_seq <= cumulative:
+                current_volume = i + 1
+                break
+
+        if current_volume == 0:
+            return
+
+        # Check if this is the last chapter of the current volume
+        is_last_in_volume = (chapter_seq == cumulative)
+
+        if is_last_in_volume:
+            # Collect all chapter summaries for this volume
+            volume_start = cumulative - chapter_counts[current_volume - 1] + 1
+            chapters = db.execute(
+                """SELECT meta FROM contents
+                   WHERE parent_id = %s AND type = 'chapter' AND is_deleted = FALSE
+                   AND (meta->>'seq')::int BETWEEN %s AND %s
+                   ORDER BY (meta->>'seq')::int""",
+                (novel_id, volume_start, cumulative),
+            ).fetchall()
+
+            chapter_summaries = []
+            for ch in chapters:
+                ch_meta = ch["meta"] if isinstance(ch["meta"], dict) else {}
+                ch_summary = ch_meta.get("chapter_summary", "")
+                if ch_summary:
+                    chapter_summaries.append(ch_summary)
+
+            if chapter_summaries:
+                try:
+                    vol_result = summarize_volume(novel_id, current_volume, chapter_summaries)
+                    vol_summary = vol_result.get("summary", "")
+                    if vol_summary:
+                        # Store in novel meta -> volume_summaries array
+                        existing_vols = meta.get("volume_summaries", [])
+                        if isinstance(existing_vols, list):
+                            # Extend if needed
+                            while len(existing_vols) < current_volume:
+                                existing_vols.append("")
+                            existing_vols[current_volume - 1] = vol_summary
+                        else:
+                            existing_vols = [""] * (current_volume - 1) + [vol_summary]
+                        db.execute(
+                            "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                            (encode({"volume_summaries": existing_vols}), novel_id),
+                        )
+                except Exception:
+                    pass
+
+            # Check if this is the last volume of the book
+            is_last_volume = (current_volume == len(chapter_counts))
+
+            if is_last_volume:
+                try:
+                    vol_summaries_list = meta.get("volume_summaries", [])
+                    if isinstance(vol_summaries_list, list) and vol_summaries_list:
+                        book_result = summarize_book(novel_id, vol_summaries_list)
+                        book_summary = book_result.get("summary", "")
+                        if book_summary:
+                            db.execute(
+                                "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                                (encode({"book_summary": book_summary}), novel_id),
+                            )
+                except Exception:
+                    pass
+    except Exception:
+        pass  # Non-critical enrichment
 
 
 @celery_app.task(bind=True, max_retries=2)
@@ -608,7 +733,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
         list(chapter["body"]), continuity,
     )
     db = connect()
-    _summarize_and_store(db, cid, review["body"])
+    _summarize_and_store(db, cid, novel_id, review["body"])
     db.commit(); db.close()
     return {"chapter_id": cid, "title": chapter.get("title", ""), "seq": next_seq,
             "continuity": continuity, "accepted": review["accepted"],

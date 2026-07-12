@@ -1,4 +1,5 @@
-"""NC-FUS-DEEP: oh-story 33 PromptSpec with golden cases + CI runner."""
+"""NC-FUS-DEEP: oh-story 33 PromptSpec with golden cases + CI runner.
+⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
 from __future__ import annotations
 import json
 

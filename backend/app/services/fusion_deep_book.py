@@ -1,4 +1,5 @@
-"""NC-FUS-DEEP: AI_NovelGenerator + AI-auto-generates + harnessNovel clean-room integration."""
+"""NC-FUS-DEEP: AI_NovelGenerator + AI-auto-generates + harnessNovel clean-room integration.
+⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
 from __future__ import annotations
 from app.db import connect, new_id, encode
 

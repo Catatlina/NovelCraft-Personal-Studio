@@ -159,7 +159,7 @@ def init_db() -> None:
         )
         db.execute(
             "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s, %s, %s, %s, %s)",
-            (new_id("bdg"), project_id, "bootstrap", 2.0, 0),
+            (new_id("bdg"), project_id, "default", 50.0, 0),
         )
     # Keep project ownership and authorization membership consistent, including
     # databases created by older builds that omitted the owner membership row.
@@ -239,5 +239,4 @@ def init_db() -> None:
 
 
 def row_to_dict(row: dict[str, Any] | None) -> dict[str, Any] | None:
-    return row
     return row

@@ -4,22 +4,26 @@ import { CharacterCard, OutlineTree } from "./CharacterOutline";
 
 type Content = { id: string; title: string; meta: Record<string, unknown> };
 
-export function Review({ chapter, characters, timeline, arcs }: {
+export function Review({ chapter, review, characters, timeline, arcs }: {
   chapter: Content | null;
+  review?: { score?: number; dimensions?: Record<string, number>; issues?: string[] };
   characters: any[];
   timeline: any[];
   arcs: any[];
 }) {
   const meta = chapter?.meta || {};
-  const dims = [
-    { name: "文学性", score: (meta as any).review_literary || 0 },
-    { name: "逻辑", score: (meta as any).review_logic || 0 },
-    { name: "节奏", score: (meta as any).review_rhythm || meta.review_rhythm_score || 0 },
-    { name: "角色", score: (meta as any).review_character || 0 },
-    { name: "对话", score: (meta as any).review_dialogue || 0 },
-    { name: "描写", score: (meta as any).review_description || 0 },
-    { name: "创新", score: (meta as any).review_innovation || 0 },
-  ];
+  const review7dim = (meta as any).review_7dim;
+  const dims = review7dim?.dimensions
+    ? Object.entries(review7dim.dimensions as Record<string, number>).map(([name, score]) => ({ name, score: score as number }))
+    : [
+      { name: "文学性", score: (meta as any).review_literary || 0 },
+      { name: "逻辑", score: (meta as any).review_logic || 0 },
+      { name: "节奏", score: (meta as any).review_rhythm || meta.review_rhythm_score || 0 },
+      { name: "角色", score: (meta as any).review_character || 0 },
+      { name: "对话", score: (meta as any).review_dialogue || 0 },
+      { name: "描写", score: (meta as any).review_description || 0 },
+      { name: "创新", score: (meta as any).review_innovation || 0 },
+    ];
   const totalScore = dims.reduce((s, d) => s + d.score, 0) / dims.length;
 
   return (

@@ -54,6 +54,9 @@ class BudgetUpdate(BaseModel):
 
 
 class ModelRouteUpdate(BaseModel):
+    # User-level route override: only deepseek/mock allowed for non-admin users.
+    # Admin users can configure any provider via /api/v1/admin/model-routes
+    # which has its own unrestricted ModelRouteUpdate in api/v1/config.py.
     provider: str = Field(pattern="^(mock|deepseek)$")
     model: str = Field(min_length=1, max_length=120)
     params: dict[str, Any] = Field(default_factory=dict)

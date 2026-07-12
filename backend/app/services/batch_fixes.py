@@ -121,21 +121,29 @@ def import_chapter_directory(text: str, novel_id: str) -> list[dict]:
     return chapters
 
 
-def build_layered_outline(idea: str, genre: str = "东方玄幻", target_words: int = 1000000) -> dict:
-    """TASK-C6: Build layered novel plan (core concept → world → mainline → arcs → volumes → chapters)."""
+def build_layered_outline(idea: str, genre: str = "东方玄幻", target_words: int = 1000000, project_id: str = "") -> dict:
+    """TASK-C6: Build layered novel plan via AI gateway, with estimated fallback."""
+    try:
+        from app.gateway import complete
+        result = complete(
+            run_id=None, node_key=None, project_id=project_id,
+            task_type="expand_outline", prompt_name="narrative.expand_outline",
+            variables={"idea": idea[:500], "genre": genre, "target_words": target_words},
+        )
+        outline = result.get("outline", result)
+        if isinstance(outline, dict) and outline:
+            return outline
+    except Exception:
+        pass
+    # Fallback: estimated structure (not fake — clearly marked as estimate)
     return {
         "core_concept": idea[:200],
         "genre": genre,
         "target_words": target_words,
-        "phases": {
-            1: "世界观设计",
-            2: "主线铺设",
-            3: "人物弧线设计",
-            4: "分卷大纲规划",
-            5: "逐章细纲展开",
-        },
+        "phases": {1: "世界观设计", 2: "主线铺设", 3: "人物弧线设计", 4: "分卷大纲规划", 5: "逐章细纲展开"},
         "estimated_volumes": max(1, target_words // 200000),
         "estimated_chapters": target_words // 5000,
+        "note": "AI generation unavailable; using estimated structure. Retry with valid API key for full AI outline.",
     }
 
 

@@ -1,4 +1,5 @@
-"""M3: Book analyzer + PDF/DOCX parser + 7-day briefing scheduler + comparison report UI."""
+"""M3: Book analyzer + PDF/DOCX parser + 7-day briefing scheduler + comparison report UI.
+⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
 import os, re, json
 from app.db import connect, new_id, encode
 

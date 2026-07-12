@@ -26,7 +26,7 @@ import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } fro
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
-type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string }> };
+type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string; content?: Array<{ type: string; text?: string }> }> };
 type RunNode = { node_key: string; kind: string; agent: string | null; title: string; status: string; output: Record<string, unknown> };
 type Run = { id: string; project_id: string; novel_id: string; status: string; current_node_key: string | null; context: Record<string, unknown>; nodes: RunNode[] };
 type AiCall = { id: string; provider: string; model: string; prompt_name: string; task_type: string; prompt_tokens: number; completion_tokens: number; cost_cny: number; latency_ms: number; status: string; created_at: string };
@@ -45,11 +45,26 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function docToText(doc: TipTapDoc): string {
-  return doc.content?.map(i => i.text ?? "").join("\n\n") ?? "";
+  // Handle Tiptap nested structure: paragraphs contain text nodes
+  if (!doc.content) return "";
+  return doc.content.map(para => {
+    if (para.text) return para.text;
+    // Handle nested: {type:"paragraph", content:[{type:"text", text:"..."}]}
+    if (para.content && Array.isArray(para.content)) {
+      return para.content.map((n: any) => n.text ?? "").join("");
+    }
+    return "";
+  }).join("\n\n");
 }
 
 function textToDoc(text: string): TipTapDoc {
-  return { type: "doc", content: text.split(/\n{2,}/).map(t => t.trim()).filter(Boolean).map(t => ({ type: "paragraph", text: t })) };
+  return {
+    type: "doc",
+    content: text.split(/\n{2,}/).map(t => t.trim()).filter(Boolean).map(t => ({
+      type: "paragraph",
+      content: [{ type: "text", text: t }]
+    }))
+  };
 }
 
 export default function App() {
@@ -157,6 +172,10 @@ export default function App() {
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
     void cacheSet("currentNovel", n);
+    const charNode = r.nodes.find(n => n.node_key === 'n4' || n.kind === 'gen_characters');
+    if (charNode?.output?.characters) {
+      setCharacters(charNode.output.characters as any[]);
+    }
     if (r.status === "succeeded") setTab("review");
   }
 
@@ -419,13 +438,28 @@ export default function App() {
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
-      {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
+      {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
-        <div className="panel"><h2>Prompt 库</h2>
-        <table><thead><tr><th>名称</th><th>版本</th><th>模型</th></tr></thead>
-        <tbody>{prompts.map((p: any) => <tr key={p.id}><td>{p.name}</td><td>{p.version}</td><td>{p.model}</td></tr>)}</tbody></table>
+        <div className="panel">
+          <h2>Prompt 库</h2>
+          <table>
+            <thead><tr><th>名称</th><th>版本</th><th>模型</th><th>模板预览</th></tr></thead>
+            <tbody>
+              {prompts.map((p: any) => (
+                <tr key={p.id}>
+                  <td>{p.name}</td>
+                  <td>{p.version}</td>
+                  <td>{p.model}</td>
+                  <td style={{maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                    {(p.template || '').slice(0, 80)}...
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {prompts.length === 0 && <p style={{color: 'var(--text-muted)', fontSize: 13}}>暂无 Prompt 数据</p>}
         </div>
       )}
       {tab === "dag" && <DagEditor projectId={project?.id || ""} />}

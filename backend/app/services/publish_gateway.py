@@ -1,4 +1,5 @@
-"""M4: Publishing gateway — multi-platform publishing with 3 modes."""
+"""M4: Publishing gateway — multi-platform publishing with 3 modes.
+⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
 from __future__ import annotations
 
 import os

@@ -54,21 +54,43 @@ TERMINOLOGY_DB: dict[str, dict[str, dict[str, str]]] = {
 
 
 def translate_text(text: str, source_lang: str = "zh", target_lang: str = "en") -> dict:
-    """NC-SEA-002: Translate with terminology consistency."""
+    """NC-SEA-002: Translate via AI gateway with terminology consistency."""
+    import os
     terms = TERMINOLOGY_DB.get(source_lang, {}).get(target_lang, {})
-    result = text
-    applied = []
-    for zh, tl in terms.items():
-        if zh in result:
-            result = result.replace(zh, tl)
-            applied.append(f"{zh}→{tl}")
-
-    return {
-        "source_lang": source_lang, "target_lang": target_lang,
-        "original_length": len(text), "translated_length": len(result),
-        "terminology_applied": len(applied), "terms_used": applied,
-        "text": result,
-    }
+    glossary = "\n".join(f"{k} → {v}" for k, v in terms.items())
+    try:
+        from app.gateway import complete
+        result = complete(
+            run_id=None, node_key=None, project_id=os.getenv("NOVELCRAFT_DEFAULT_PROJECT", ""),
+            task_type="translate_segment", prompt_name="overseas.translate_segment",
+            variables={
+                "body": text[:5000],
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+                "glossary": glossary if terms else "(无)",
+            },
+        )
+        translated = result.get("text", result.get("translated", text))
+        return {
+            "source_lang": source_lang, "target_lang": target_lang,
+            "original_length": len(text), "translated_length": len(translated),
+            "terminology_applied": len(terms), "text": translated,
+            "method": "ai_gateway" if "text" in result else "fallback_term_only",
+        }
+    except Exception:
+        # Fallback: terminology-only (graceful degradation)
+        result = text
+        applied = []
+        for zh, tl in terms.items():
+            if zh in result:
+                result = result.replace(zh, tl)
+                applied.append(f"{zh}→{tl}")
+        return {
+            "source_lang": source_lang, "target_lang": target_lang,
+            "original_length": len(text), "translated_length": len(result),
+            "terminology_applied": len(applied), "terms_used": applied,
+            "text": result, "method": "fallback_terminology_only",
+        }
 
 
 def localize_names(chinese_name: str, target_market: str) -> str:
@@ -111,7 +133,9 @@ def publish_overseas(content_id: str, market: str, platform: str) -> dict:
     db.execute(
         "INSERT INTO published_posts (id, project_id, platform, content_id, title, status, meta) VALUES (%s,%s,%s,%s,%s,%s,%s)",
         (pid, None, f"overseas_{platform}", content_id, f"Overseas publish: {market}/{platform}",
-         "published", encode({"market": market, "platform": platform, "published_at": datetime.utcnow().isoformat()})),
+         "draft", encode({"market": market, "platform": platform, "published_at": datetime.utcnow().isoformat(),
+         "mode": "manual_required", "instructions": f"Manual publish required to {platform} in {market} market"})),
     )
     db.commit(); db.close()
-    return {"status": "ok", "market": market, "platform": platform, "post_id": pid}
+    return {"status": "draft", "market": market, "platform": platform, "post_id": pid,
+            "mode": "manual_required", "message": f"Overseas publishing is manual only. Content saved as draft in {platform}."}

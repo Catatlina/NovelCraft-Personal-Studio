@@ -61,14 +61,14 @@ def reindex_project(project_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/import")
-async def import_knowledge(project_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+def import_knowledge(project_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Import a bounded document into the caller's project and index every parsed section."""
     _require_project_editor(project_id, user)
     filename = file.filename or "upload.txt"
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
         raise HTTPException(status_code=415, detail="unsupported document type")
-    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    raw = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file exceeds 20 MB")
     try:

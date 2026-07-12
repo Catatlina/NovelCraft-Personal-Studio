@@ -43,5 +43,9 @@ celery_app.conf.update(
             "task": "app.workers.tasks.daily_cost_report",
             "schedule": 86400.0,  # Daily — AI 用量/成本日报（Telegram）
         },
+        "process-scheduled-publishes": {
+            "task": "app.workers.m4_tasks.check_scheduled_publishes",
+            "schedule": 60.0,  # Every 60 seconds — TASK-043 due publishes
+        },
     },
 )
