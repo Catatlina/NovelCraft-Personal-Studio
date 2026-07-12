@@ -34,7 +34,9 @@ jobs:
         env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test}
       - name: Run tests
         run: cd backend && pytest tests/ -v
-        env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test, REDIS_URL: redis://localhost:6379/0, NOVELCRAFT_ENV: ci}
+        # Real-provider T3 tests run only when the DEEPSEEK_API_KEY repo secret
+        # is configured; without it they self-skip (forks never see secrets).
+        env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test, REDIS_URL: redis://localhost:6379/0, NOVELCRAFT_ENV: ci, DEEPSEEK_API_KEY: "${{ secrets.DEEPSEEK_API_KEY }}"}
       - name: Verify delivery claims
         run: python scripts/verify_delivery_claims.py
 

@@ -355,6 +355,10 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict) ->
             review_issues = output.get("issues", [])
             rewrite_count = context.get("rewrite_count", 0)
             if rewrite_count < 2:
+                # Local import: the gen_chapter1 branch's import doesn't run when this
+                # node executes alone — mock reviews always scored 84 so this rework
+                # path was never exercised until real-provider T3 (2026-07-12).
+                from app.services.text_metrics import count_content_chars
                 # Auto-rewrite: regenerate chapter with review feedback
                 db.execute(
                     "UPDATE contents SET meta = meta || %s WHERE id = %s",

@@ -314,7 +314,7 @@ def _load_prompt_and_route(
     prompt_text = render_prompt(template, enriched_variables)
     contract = OUTPUT_CONTRACTS.get(task_type) or OUTPUT_CONTRACTS.get(task_type.replace("editor_", "editor_"))
     if contract:
-        prompt_text += "\n\n只输出合法 JSON，结构必须匹配：\n" + contract
+        prompt_text += "\n\n只输出合法 JSON（不得包含 JSON 以外的任何文本，不得增删字段），结构必须匹配：\n" + contract
     return prompt_text, provider, model, params
 
 

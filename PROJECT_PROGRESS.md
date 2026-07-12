@@ -40,7 +40,8 @@
 - 前端：`tsc --noEmit` + `vite build` 通过。
 - Alembic：单头 `nc_audit_workflow_scope`；本地库 upgrade→downgrade→upgrade 往返通过。
 - 浏览器实测（本轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）；书库批次失败→`pending_provider` 原因透传→恢复链路。
-- 真实 Provider T3/T4/T5、长周期运行：**无证据，未验收**。
+- **真实 Provider T3（2026-07-12，deepseek-chat）**：扫榜导入 20 条→市场分析（4 信号+3 原创候选，候选与源榜单零重合）→建书→策划全链 n3~n8（简介/世界观/人物/大纲/第一章 1028 字/七维审核 75 分含 1 次真实返工）→run succeeded→第二章 15s 生成（实体 7 条、时间线 6 条真实抽取、连续性 clean）→导出含真实正文。11 次调用 7924 tokens ≈¥0.016，全部记录于 ai_calls。真实链暴露并修复 2 个 mock 测不出的缺陷：①OUTPUT_CONTRACTS 章节示例 2 段与 Schema ≥3 冲突（模型照抄示例必失败）；②审核低分返工路径 UnboundLocalError（mock 恒 84 分从未触达）。验收测试固化于 `test_real_provider_t3.py`（无 key 自动 skip；CI 配 `DEEPSEEK_API_KEY` secret 即跑）。
+- 真实 T4 浏览器自动化、T5 长周期运行：仍无证据，未验收。
 
 ## 审计对照（外部审计报告 2026-07-11）
 

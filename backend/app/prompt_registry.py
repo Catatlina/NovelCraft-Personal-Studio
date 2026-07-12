@@ -53,7 +53,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_worldview": '{"worldview":{"name":"世界观名称","rules":["规则一","规则二","规则三"]}}',
     "gen_characters": '{"characters":[{"name":"姓名","role":"角色定位","arc":"人物弧线"}]}',
     "gen_outline": '{"outline":["第一卷：...","第二卷：...","第三卷：..."]}',
-    "gen_chapter1": '{"chapter":{"title":"第一章 标题","body":["段落一","段落二"]}}',
+    "gen_chapter1": '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四"]}}（body 至少 3 段、建议 6-12 段，每段为完整叙事段落；不得增加任何额外字段）',
     "review_7dim": '{"score":80,"dimensions":{"prose":80,"plot":80,"character_ooc":80,"world_conflict":80,"logic_consistency":80,"pace":80,"foreshadowing":80},"issues":["问题"]}',
     "editor_polish": '{"text":"润色后的文本"}',
     "editor_rewrite": '{"text":"改写后的文本"}',
@@ -64,7 +64,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_chapter": '{"summary":"章节摘要"}',
     "summarize_volume": '{"summary":"卷摘要"}',
     "summarize_book": '{"summary":"全书摘要"}',
-    "gen_next_chapter": '{"chapter":{"title":"第N章 标题","body":["段落一"]}}',
+    "gen_next_chapter": '{"chapter":{"title":"第N章 标题","body":["段落一","段落二","段落三","段落四"]}}（body 至少 3 段、建议 6-12 段，每段为完整叙事段落；不得增加任何额外字段）',
     "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":""}]}',
 }
 
