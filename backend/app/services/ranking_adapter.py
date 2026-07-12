@@ -137,26 +137,3 @@ def normalize_ranking_items(source: str, items: list[dict], fetched_at: datetime
         if previous is None or item["rank_no"] < previous["rank_no"]:
             best_by_key[dedupe_key] = item
     return sorted(best_by_key.values(), key=lambda item: item["rank_no"])
-
-
-def store_ranking_snapshot(rankings: dict) -> int:
-    """Store ranking data as knowledge_items."""
-    from app.db import connect, new_id, encode
-    db = connect()
-    count = 0
-    for source, books in rankings.items():
-        for book in books:
-            if "error" in book:
-                continue
-            try:
-                db.execute(
-                    "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s)",
-                    (new_id(), "ranking", f"[{book['rank']}] {book['title'][:120]}",
-                     json.dumps(book, ensure_ascii=False),
-                     encode({"source": source, "rank": book["rank"], "author": book.get("author", ""), "url": book.get("url", "")})),
-                )
-                count += 1
-            except Exception:
-                pass
-    db.commit(); db.close()
-    return count

@@ -38,8 +38,7 @@ def test_collect_all_returns_dict():
 
 
 def test_ranking_adapter_imports():
-    from app.services.ranking_adapter import fetch_fanqie_ranking, fetch_qidian_ranking, fetch_zongheng_ranking, store_ranking_snapshot
+    from app.services.ranking_adapter import fetch_fanqie_ranking, fetch_qidian_ranking, fetch_zongheng_ranking
     assert callable(fetch_fanqie_ranking)
     assert callable(fetch_qidian_ranking)
     assert callable(fetch_zongheng_ranking)
-    assert callable(store_ranking_snapshot)

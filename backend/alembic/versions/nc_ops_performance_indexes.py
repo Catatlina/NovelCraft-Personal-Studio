@@ -54,4 +54,7 @@ def downgrade():
         "idx_audit_logs_entity", "idx_account_trackings_platform",
         "idx_published_posts_platform", "idx_published_posts_created",
     ]:
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {idx}")
+        # No CONCURRENTLY here: alembic runs downgrades inside a transaction,
+        # where concurrent index drops abort with ActiveSqlTransaction — that
+        # broke `downgrade base` entirely (audit 2026-07-12, P1-A).
+        op.execute(f"DROP INDEX IF EXISTS {idx}")

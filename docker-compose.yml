@@ -1,9 +1,16 @@
 # NovelCraft Personal Studio — Docker Compose (M1)
 # Usage: docker compose up -d
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    logging: *default-logging
     environment:
       POSTGRES_USER: novelcraft
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novelcraft}
@@ -20,6 +27,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *default-logging
     command: redis-server --appendonly yes
     ports:
       - "6379:6379"
@@ -33,6 +41,7 @@ services:
 
   api:
     build: ./backend
+    logging: *default-logging
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:-novelcraft}@postgres/novelcraft
@@ -64,6 +73,7 @@ services:
 
   worker:
     build: ./backend
+    logging: *default-logging
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
     environment:
       DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:-novelcraft}@postgres/novelcraft
@@ -100,6 +110,7 @@ services:
 
   frontend:
     build: ./frontend
+    logging: *default-logging
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
     ports:
@@ -126,6 +137,29 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+
+  # Daily pg_dump with 7-day retention (C-ops backup baseline)
+  backup:
+    image: pgvector/pgvector:pg16
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          PGPASSWORD=$${POSTGRES_PASSWORD:-novelcraft} pg_dump -h postgres -U novelcraft novelcraft \
+            | gzip > /backups/novelcraft-$$(date +%Y%m%d-%H%M%S).sql.gz \
+            && echo "backup done: $$(date)" \
+            || echo "backup FAILED: $$(date)"
+          ls -1t /backups/novelcraft-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
+          sleep 86400
+        done
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novelcraft}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
 
 volumes:
   pg_data:

@@ -37,14 +37,16 @@ def generate_daily_briefing(project_id: str) -> dict:
 
     # Generate platform-specific drafts
     briefing = {"topics": topics, "generated": []}
+    from app.prompt_registry import sanitize_untrusted
     for topic in topics[:3]:
         try:
             draft = complete(
                 run_id=None, node_key=None, project_id=project_id,
                 task_type="gen_daily_brief", prompt_name="social.gen_daily_brief",
-                variables={"topic": topic.get("title", ""), "angle": topic.get("angle", "")},
+                variables={"topic": sanitize_untrusted(topic.get("title", ""), 120),
+                           "angle": sanitize_untrusted(topic.get("angle", ""), 200)},
             )
             briefing["generated"].append({"topic": topic.get("title"), "draft": draft})
-        except Exception:
-            pass
+        except Exception as exc:
+            briefing["generated"].append({"topic": topic.get("title"), "status": "failed", "error": str(exc)})
     return briefing
