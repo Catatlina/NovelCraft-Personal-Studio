@@ -6,7 +6,11 @@ from app.db import connect, encode, new_id
 
 def extract_and_store(chapter_id: str, novel_id: str, chapter_body: str) -> list[dict]:
     """Extract entity states from chapter text and store in entity_states table."""
-    states = _extract_via_ai(chapter_body)
+    db = connect()
+    row = db.execute("SELECT project_id FROM contents WHERE id = %s", (chapter_id,)).fetchone()
+    db.close()
+    states = [item for item in _extract_via_ai(chapter_body, row["project_id"] if row else "")
+              if isinstance(item, dict)]
     if not states:
         return []
 
@@ -23,15 +27,12 @@ def extract_and_store(chapter_id: str, novel_id: str, chapter_body: str) -> list
     return states
 
 
-def _extract_via_ai(text: str) -> list[dict]:
+def _extract_via_ai(text: str, project_id: str) -> list[dict]:
     """Use AI to extract entity states from chapter text."""
     try:
         from app.gateway import complete
-        from app.db import connect as db_connect
-        row = db_connect().execute("SELECT id FROM projects LIMIT 1").fetchone()
-        pid = row["id"] if row else ""
         result = complete(
-            run_id=None, node_key=None, project_id=pid,
+            run_id=None, node_key=None, project_id=project_id,
             task_type="extract_entities", prompt_name="narrative.extract_entities",
             variables={"body": text[:6000]},
         )

@@ -491,9 +491,16 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
         if existing:
             db.close()
             meta = existing["meta"] if isinstance(existing.get("meta"), dict) else {}
+            continuity = meta.get("continuity")
+            if not isinstance(continuity, dict):
+                continuity = _continuity_report(novel_id, int(meta.get("seq") or 0))
+                repair_db = connect()
+                repair_db.execute("UPDATE contents SET meta=meta || %s,updated_at=now() WHERE id=%s",
+                                  (encode({"continuity": continuity}), existing["id"]))
+                repair_db.commit(); repair_db.close()
             if existing["status"] in {"reviewed", "needs_rewrite"}:
                 return {"chapter_id": existing["id"], "title": existing["title"], "seq": meta.get("seq"),
-                        "continuity": meta.get("continuity", {"status": "unchecked"}),
+                        "continuity": continuity,
                         "accepted": existing["status"] == "reviewed",
                         "review_status": existing["status"], "final_score": meta.get("review_score"),
                         "rewrite_attempts": meta.get("rewrite_attempts", 0), "reused": True}
@@ -501,7 +508,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
             paragraphs = [part for part in extract_body_text(existing.get("body", "")).splitlines() if part.strip()]
             review = _review_and_finalize_chapter(
                 existing["id"], novel_id, project_id, int(meta.get("seq") or 0), slot_key,
-                existing["title"], paragraphs, meta.get("continuity", {"status": "unchecked"}),
+                existing["title"], paragraphs, continuity,
             )
             return {"chapter_id": existing["id"], "title": review["title"], "seq": meta.get("seq"),
                     "continuity": meta.get("continuity", {"status": "unchecked"}),
@@ -568,17 +575,21 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
     db.commit()
     db.close()
 
-    # Extract entity states
-    extract_and_store(cid, novel_id, text)
-
-    # Extract foreshadowing
+    # Enrichments must never prevent the persisted draft from reaching the
+    # continuity/review gates. Failures are recorded for later reconciliation.
     from app.services.foreshadowing import extract_and_store_foreshadowing
-    extract_and_store_foreshadowing(cid, next_seq, text)
-
-    # Extract timeline events and arc progress
     from app.services.timeline import extract_timeline, update_arcs
-    extract_timeline(cid, text)
-    update_arcs(novel_id, text)
+    enrichment_errors = []
+    for label, action in (
+        ("entities", lambda: extract_and_store(cid, novel_id, text)),
+        ("foreshadowing", lambda: extract_and_store_foreshadowing(cid, next_seq, text)),
+        ("timeline", lambda: extract_timeline(cid, text)),
+        ("arcs", lambda: update_arcs(novel_id, text)),
+    ):
+        try:
+            action()
+        except Exception as exc:
+            enrichment_errors.append({"stage": label, "error": str(exc)[:300]})
 
     # Continuity check + risk report (DB comparison, no extra AI spend); a check
     # failure is recorded as unchecked, never silently dropped.
@@ -588,7 +599,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
     db = connect()
     db.execute(
         "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
-        (encode({"continuity": continuity}), cid),
+        (encode({"continuity": continuity, "enrichment_errors": enrichment_errors}), cid),
     )
     db.commit()
     db.close()
@@ -697,6 +708,13 @@ def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str =
     db.close()
     if existing:
         meta = existing["meta"] if isinstance(existing.get("meta"), dict) else {}
+        continuity = meta.get("continuity")
+        if not isinstance(continuity, dict):
+            continuity = _continuity_report(batch["novel_id"], int(meta.get("seq") or 0))
+            repair_db = connect()
+            repair_db.execute("UPDATE contents SET meta=meta || %s,updated_at=now() WHERE id=%s",
+                              (encode({"continuity": continuity}), existing["id"]))
+            repair_db.commit(); repair_db.close()
         if existing.get("status") in {"reviewed", "needs_rewrite"}:
             accepted = existing["status"] == "reviewed"
             return {"chapter_id": existing["id"], "accepted": accepted,
@@ -706,7 +724,7 @@ def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str =
         review = _review_and_finalize_chapter(
             existing["id"], batch["novel_id"], batch["project_id"], int(meta.get("seq") or 0),
             generation_key, existing["title"], paragraphs,
-            meta.get("continuity", {"status": "unchecked"}),
+            continuity,
         )
         return {"chapter_id": existing["id"], **review, "reused": True}
     return gen_next_chapter_task.run(

@@ -50,6 +50,9 @@ def test_resume_reuses_persisted_draft_and_continues_review(monkeypatch):
                 return _Cursor(existing)
             return _Cursor()
 
+        def commit(self):
+            pass
+
         def close(self):
             pass
 
