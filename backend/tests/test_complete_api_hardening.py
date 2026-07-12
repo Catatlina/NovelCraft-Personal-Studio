@@ -2,8 +2,13 @@
 and real chapter-body extraction for exports (docs 23/25 gates)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
+
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class _Cursor:
@@ -80,10 +85,8 @@ def test_model_routes_have_one_canonical_api():
 
 
 def test_gemini_credentials_are_sent_in_header_not_url():
-    from pathlib import Path
-
     sources = "\n".join(
-        Path(path).read_text(encoding="utf-8")
+        (ROOT / path).read_text(encoding="utf-8")
         for path in ("backend/app/ai/providers.py", "backend/app/services/providers_and_adapters.py")
     )
     assert "generateContent?key=" not in sources
