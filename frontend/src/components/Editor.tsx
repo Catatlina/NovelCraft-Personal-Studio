@@ -5,8 +5,9 @@ import { RichEditor } from "./RichEditor";
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 
-export function Editor({ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }: {
-  chapter: Content | null; editorText: string; setEditorText: (t: string) => void;
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }: {
+  chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
+  editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
   saveChapter: () => void; runEditorOp: (op: string) => void;
   versions: Version[]; restoreVersion: (id: string) => void;
@@ -30,6 +31,9 @@ export function Editor({ chapter, editorText, setEditorText, selection, setSelec
     <div className="editor-grid">
       <div className="panel">
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <select value={chapter?.id ?? ""} onChange={event => selectChapter(event.target.value)} disabled={!chapters.length} aria-label="选择章节">
+            {chapters.map((item, index) => <option key={item.id} value={item.id}>{Number(item.meta?.seq || index + 1)}. {item.title}</option>)}
+          </select>
           <input value={chapter?.title ?? ""} readOnly style={{ flex: 1, background: "transparent", border: "none", fontSize: 18, fontWeight: 600 }} />
           <button onClick={saveChapter} disabled={!chapter}><Save size={16} />保存</button>
         </div>

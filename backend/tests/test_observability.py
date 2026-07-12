@@ -83,14 +83,22 @@ def test_sentry_is_optin_and_scrubbed(monkeypatch):
     assert "include_local_variables=False" in source  # 章节正文/凭据不出境
 
 
-def test_metrics_endpoint_exposed():
+def test_metrics_endpoint_is_private_by_default():
     from fastapi.testclient import TestClient
 
     from app.main import app
 
     response = TestClient(app).get("/metrics")
-    assert response.status_code == 200
-    assert "http_request" in response.text  # prometheus 指标族存在
+    assert response.status_code == 404
+
+
+def test_metrics_requires_token_when_enabled(monkeypatch):
+    from app.core.observability import init_metrics
+
+    monkeypatch.setenv("METRICS_ENABLED", "true")
+    monkeypatch.delenv("METRICS_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="METRICS_TOKEN"):
+        init_metrics(object())
 
 
 def test_beat_schedule_has_cost_report():

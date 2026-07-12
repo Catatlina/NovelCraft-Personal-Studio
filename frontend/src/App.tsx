@@ -61,6 +61,7 @@ export default function App() {
   const [characters, setCharacters] = useState<any[]>([]);
   const [narrative, setNarrative] = useState<{ timeline: any[]; arcs: any[] }>({ timeline: [], arcs: [] });
   const [chapter, setChapter] = useState<Content | null>(null);
+  const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
@@ -114,6 +115,7 @@ export default function App() {
     const contentsKey = `contents:${novel.id}`;
     const knowledgeKey = `knowledge:${novel.id}`;
     cacheGet<Content[]>(contentsKey).then(items => {
+      setChapters((items || []).filter(item => item.type === "chapter"));
       const cachedChapter = items?.find(item => item.type === "chapter") ?? null;
       if (cachedChapter) {
         setChapter(cachedChapter); setEditorText(docToText(cachedChapter.body)); void loadVersions(cachedChapter.id);
@@ -125,7 +127,9 @@ export default function App() {
     cacheGet<Knowledge[]>(knowledgeKey).then(cached => { if (cached) setKnowledge(cached); });
     api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`).then(items => {
       void cacheSet(contentsKey, items);
-      const ch = items.find(i => i.type === "chapter") ?? null;
+      const chapterItems = items.filter(i => i.type === "chapter").sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+      setChapters(chapterItems);
+      const ch = chapterItems.find(item => item.id === chapter?.id) ?? chapterItems[0] ?? null;
       setChapter(ch);
       if (ch) { setEditorText(docToText(ch.body)); loadVersions(ch.id); }
     }).catch(() => undefined);
@@ -134,11 +138,19 @@ export default function App() {
     }).catch(() => undefined);
   }, [novel?.id, run?.status]);
 
+  function selectChapter(chapterId: string) {
+    const selected = chapters.find(item => item.id === chapterId) ?? null;
+    setChapter(selected);
+    setEditorText(selected ? docToText(selected.body) : "");
+    setVersions([]);
+    if (selected) void loadVersions(selected.id);
+  }
+
   useEffect(() => { if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls); }, [run?.id, run?.status]);
   useEffect(() => {
     if (!project) return;
     api<Budget[]>(`/api/v1/admin/budgets?project_id=${project.id}`).then(setBudgets);
-    api<ModelRoute[]>("/api/v1/model-routes").then(setRoutes);
+    api<{ data: ModelRoute[] }>("/api/v1/admin/model-routes").then(response => setRoutes(response.data));
   }, [project?.id, run?.status]);
 
   useEffect(() => {
@@ -420,7 +432,7 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
       {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
-      {tab === "editor" && <Editor {...{ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} />}
+      {tab === "editor" && <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} />}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
         <div className="panel"><h2>Prompt 库</h2>

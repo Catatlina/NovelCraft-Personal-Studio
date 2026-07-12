@@ -67,8 +67,8 @@ def test_provider_names():
     assert hasattr(settings, 'ai_provider') or hasattr(settings, 'deepseek_model')
 
 def test_multi_provider_route_exists():
-    from app.gateway import complete
-    assert "deepseek" in str(complete.__code__.co_names) if hasattr(complete, '__code__') else True
+    from app.gateway import _complete_impl
+    assert "deepseek" in str(_complete_impl.__code__.co_consts)
 
 
 # --- M2-2: 伏笔+时间线 ---

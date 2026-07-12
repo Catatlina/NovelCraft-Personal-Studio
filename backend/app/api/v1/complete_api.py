@@ -1,6 +1,6 @@
 """Complete API endpoints: providers, adapters, multi-review, cross-model, matrix, book analysis, V1 migration."""
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 import os
@@ -48,26 +48,42 @@ def require_project_member(project_id: str, user: dict, write: bool = False) -> 
         db.close()
 
 
+def require_content_member(content_id: str, user: dict, write: bool = False) -> str:
+    db = connect()
+    try:
+        content = db.execute(
+            "SELECT project_id FROM contents WHERE id=%s AND is_deleted=FALSE", (content_id,)
+        ).fetchone()
+        if not content:
+            raise HTTPException(404, "content not found")
+        require_member(db, content["project_id"], user, write=write)
+        return str(content["project_id"])
+    finally:
+        db.close()
+
+
+def user_project_ids(user: dict) -> list[str]:
+    db = connect()
+    rows = db.execute(
+        "SELECT project_id FROM project_members WHERE user_id=%s", (user["id"],)
+    ).fetchall()
+    db.close()
+    return [str(row["project_id"]) for row in rows]
+
+
 @router.get("/providers/test/{provider}")
-def test_provider(provider: str, model: str = "", user: dict = Depends(get_current_user)):
+def test_provider(provider: str, project_id: str, model: str = "",
+                  api_key: str = Header("", alias="X-Api-Key"),
+                  user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import _claude_complete, _openai_complete, _gemini_complete
     providers = {"claude": _claude_complete, "openai": _openai_complete, "gemini": _gemini_complete}
     fn = providers.get(provider)
-    if not fn: raise HTTPException(404, f"unknown provider: {provider}")
-    return ok(fn(model, [{"role": "user", "content": "Hello"}]))
-
-
-@router.post("/publish/{platform}")
-def publish_to_platform(platform: str, title: str, body: str, credentials: dict = {}, user: dict = Depends(get_current_user)):
-    from app.services.providers_and_adapters import (_publish_wechat, _publish_toutiao, _publish_xiaohongshu,
-                                                     _publish_zhihu, _publish_baijia, _publish_substack, _publish_x)
-    adapters = {
-        "wechat": _publish_wechat, "toutiao": _publish_toutiao, "xiaohongshu": _publish_xiaohongshu,
-        "zhihu": _publish_zhihu, "baijia": _publish_baijia, "substack": _publish_substack, "x": _publish_x,
-    }
-    fn = adapters.get(platform)
-    if not fn: raise HTTPException(404, f"unknown platform: {platform}")
-    return ok(fn(title, body, **credentials) if credentials else fn(title, body))
+    if not fn:
+        raise HTTPException(404, f"unknown provider: {provider}")
+    require_project_member(project_id, user, write=True)
+    if not api_key:
+        raise HTTPException(422, "X-Api-Key is required for provider tests")
+    return ok(fn(model, [{"role": "user", "content": "Hello"}], api_key=api_key))
 
 
 @router.post("/review/multi-round")
@@ -95,9 +111,11 @@ def matrix_run(prompt_name: str, variables_list: list[dict], project_id: str,
 
 
 @router.post("/books/analyze")
-def analyze_book(title: str, content: str, user: dict = Depends(get_current_user)):
+def analyze_book(title: str, content: str, project_id: str,
+                 user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import book_analysis_workbench
-    return ok(book_analysis_workbench(title, content))
+    require_project_member(project_id, user, write=True)
+    return ok(book_analysis_workbench(title, content, project_id=project_id))
 
 
 @router.post("/v1/migrate")
@@ -224,37 +242,41 @@ def list_publish_accounts(user: dict = Depends(get_current_user)):
 @router.post("/publish/state")
 def update_publish_state(content_id: str, platform: str, target_state: str, user: dict = Depends(get_current_user)):
     from app.services.publish_hub import publish_state_machine
+    require_content_member(content_id, user, write=True)
     return ok(publish_state_machine(content_id, platform, target_state))
 
 
 @router.get("/publish/history")
 def get_publish_history(content_id: str = "", platform: str = "", user: dict = Depends(get_current_user)):
     from app.services.publish_hub import get_publishing_history
-    return ok(get_publishing_history(content_id, platform))
+    if content_id:
+        require_content_member(content_id, user)
+    return ok(get_publishing_history(content_id, platform, project_ids=user_project_ids(user)))
 
 
 @router.post("/publish/data/collect")
 def collect_engagement_data(platform: str, content_id: str, data: dict, user: dict = Depends(get_current_user)):
     from app.services.publish_hub import collect_platform_data
-    return ok(collect_platform_data(platform, content_id, data))
+    project_id = require_content_member(content_id, user, write=True)
+    return ok(collect_platform_data(platform, content_id, {**data, "project_id": project_id}))
 
 
 @router.get("/publish/stats")
 def get_platform_stats(platform: str = "", user: dict = Depends(get_current_user)):
     from app.services.publish_hub import aggregate_platform_stats
-    return ok(aggregate_platform_stats(platform))
+    return ok(aggregate_platform_stats(platform, project_ids=user_project_ids(user)))
 
 
 @router.get("/publish/roi")
 def get_roi_report(user: dict = Depends(get_current_user)):
     from app.services.publish_hub import generate_roi_report
-    return ok(generate_roi_report())
+    return ok(generate_roi_report(project_ids=user_project_ids(user)))
 
 
 @router.get("/publish/topic-suggestions")
 def get_topic_suggestions_from_performance(user: dict = Depends(get_current_user)):
     from app.services.publish_hub import generate_topic_suggestions_from_data
-    return ok(generate_topic_suggestions_from_data())
+    return ok(generate_topic_suggestions_from_data(project_ids=user_project_ids(user)))
 
 
 # --- NC-SEA-001~003: Overseas markets, translation, publishing ---

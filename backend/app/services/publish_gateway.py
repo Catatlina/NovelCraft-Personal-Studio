@@ -7,8 +7,8 @@ from app.db import connect, encode, new_id
 
 PUBLISH_MODES = {
     "medium": {"mode": "auto", "api": True},
-    "substack": {"mode": "auto", "api": True},
-    "twitter": {"mode": "auto", "api": True},
+    "substack": {"mode": "semi", "api": False},
+    "twitter": {"mode": "semi", "api": False},
     "wordpress": {"mode": "auto", "api": True},
     "wechat": {"mode": "semi", "api": False},
     "toutiao": {"mode": "semi", "api": False},
@@ -17,14 +17,15 @@ PUBLISH_MODES = {
     "baijia": {"mode": "semi", "api": False},
     "dayu": {"mode": "semi", "api": False},
     "wangyi": {"mode": "semi", "api": False},
-    "royalroad": {"mode": "auto", "api": True},
+    "royalroad": {"mode": "semi", "api": False},
     "webnovel": {"mode": "semi", "api": False},
-    "scribblehub": {"mode": "auto", "api": True},
+    "scribblehub": {"mode": "semi", "api": False},
     "kdp": {"mode": "manual", "api": False},
 }
 
 
-def publish_content(content_id: str, platform: str, mode: str | None = None) -> dict:
+def publish_content(content_id: str, platform: str, mode: str | None = None,
+                    user_id: str = "") -> dict:
     """Queue content for publishing to a platform."""
     pub_config = PUBLISH_MODES.get(platform)
     if not pub_config:
@@ -45,7 +46,23 @@ def publish_content(content_id: str, platform: str, mode: str | None = None) -> 
     )
     db.commit()
     db.close()
-    return {"publish_id": pid, "platform": platform, "mode": actual_mode, "status": "pending"}
+    try:
+        from app.services.publish_hub import get_platform_credentials
+        from app.workers.m4_tasks import auto_publish_article
+
+        credentials = get_platform_credentials(user_id, platform) if user_id else None
+        auto_publish_article.delay(content_id, platform, credentials or {}, pid)
+    except Exception as exc:
+        db = connect()
+        db.execute(
+            "UPDATE publish_records SET status='dispatch_failed', error=%s, updated_at=now() WHERE id=%s",
+            (str(exc)[:2000], pid),
+        )
+        db.commit()
+        db.close()
+        return {"publish_id": pid, "platform": platform, "mode": actual_mode,
+                "status": "dispatch_failed", "error": str(exc)}
+    return {"publish_id": pid, "platform": platform, "mode": actual_mode, "status": "queued"}
 
 
 def list_publish_records(content_id: str | None = None, project_ids: list[str] | None = None) -> list[dict]:

@@ -47,7 +47,8 @@ def close_pool() -> None:
         _pool = None
 
 
-def new_id(prefix: str = "") -> str:
+def new_id(_legacy_prefix: str = "") -> str:
+    """Return a database-compatible UUID; the legacy prefix is intentionally ignored."""
     return str(uuid.uuid4())
 
 
@@ -239,5 +240,4 @@ def init_db() -> None:
 
 
 def row_to_dict(row: dict[str, Any] | None) -> dict[str, Any] | None:
-    return row
     return row

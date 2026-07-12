@@ -111,17 +111,12 @@ services:
   frontend:
     build: ./frontend
     logging: *default-logging
-    environment:
-      VITE_API_PROXY_TARGET: http://api:8000
     ports:
-      - "5173:5173"
-    command: npm run dev -- --host 0.0.0.0
-    volumes:
-      - ./frontend/src:/app/src
+      - "80:80"
     depends_on:
       - api
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80"]
       interval: 10s
       timeout: 3s
       retries: 3

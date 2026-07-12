@@ -70,6 +70,24 @@ def reindex_project_embeddings(project_id: str) -> dict:
 def search(query: str, project_id: str | None = None, kinds: list[str] | None = None, limit: int = 10) -> list[dict]:
     """Search indexed knowledge by vector distance, with lexical fallback."""
     db = connect()
+    lexical_sql = """SELECT id, kind, title, body, meta, source_url, -1.0 AS distance
+                     FROM knowledge_items WHERE is_deleted=FALSE
+                       AND (title ILIKE %s OR body ILIKE %s)"""
+    lexical_params: list = [f"%{query}%", f"%{query}%"]
+    if project_id:
+        lexical_sql += " AND project_id=%s"
+        lexical_params.append(project_id)
+    if kinds:
+        lexical_sql += " AND kind = ANY(%s)"
+        lexical_params.append(kinds)
+    lexical_sql += " ORDER BY created_at DESC LIMIT %s"
+    lexical_params.append(limit)
+    lexical_rows = db.execute(lexical_sql, tuple(lexical_params)).fetchall()
+    # Exact lexical evidence must outrank approximate semantic neighbors.
+    if len(lexical_rows) >= limit:
+        db.close()
+        return [dict(row) for row in lexical_rows]
+
     query_vector, query_backend = embed_query_with_backend(query)
     vector_sql = """
         SELECT ki.id, ki.kind, ki.title, ki.body, ki.meta, ki.source_url,
@@ -91,8 +109,10 @@ def search(query: str, project_id: str | None = None, kinds: list[str] | None = 
     try:
         rows = db.execute(vector_sql, tuple(vector_params)).fetchall()
         db.close()
-        if rows:
-            return [dict(row) for row in rows]
+        if rows or lexical_rows:
+            seen = {str(row["id"]) for row in lexical_rows}
+            combined = list(lexical_rows) + [row for row in rows if str(row["id"]) not in seen]
+            return [dict(row) for row in combined[:limit]]
     except Exception:
         db.rollback()
         db.close()

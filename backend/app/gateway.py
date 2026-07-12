@@ -124,7 +124,7 @@ def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
         raise OutputValidationError(f"provider output schema mismatch for {task_type}: {exc}") from exc
 
 
-def complete(
+def _complete_impl(
     *,
     run_id: str | None,
     node_key: str | None,
@@ -207,8 +207,8 @@ def complete(
     if provider_name == "mock":
         output["_meta"] = {"provider": "mock", "synthetic": True}
 
-    latency_ms = int((time.perf_counter() - start) * 1000) + 60
-    cost_cny = round((prompt_tokens + completion_tokens) * 0.000002, 4)
+    latency_ms = int((time.perf_counter() - start) * 1000)
+    cost_cny = _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens)
 
     conn = connect()
     conn.execute(
@@ -250,6 +250,58 @@ def complete(
     conn.commit()
     conn.close()
     return output
+
+
+def complete(
+    *,
+    run_id: str | None,
+    node_key: str | None,
+    project_id: str,
+    task_type: str,
+    prompt_name: str,
+    variables: dict[str, Any],
+    client_mutation_id: str | None = None,
+) -> dict[str, Any]:
+    """Execute an AI call and keep both successful and failed attempts in the ledger."""
+    started = time.perf_counter()
+    try:
+        return _complete_impl(
+            run_id=run_id, node_key=node_key, project_id=project_id,
+            task_type=task_type, prompt_name=prompt_name, variables=variables,
+            client_mutation_id=client_mutation_id,
+        )
+    except Exception as exc:
+        _record_failed_call(
+            run_id=run_id, node_key=node_key, project_id=project_id, task_type=task_type,
+            prompt_name=prompt_name, variables=variables, client_mutation_id=client_mutation_id,
+            started=started, error=exc,
+        )
+        raise
+
+
+def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id: str,
+                        task_type: str, prompt_name: str, variables: dict[str, Any],
+                        client_mutation_id: str | None, started: float, error: Exception) -> None:
+    try:
+        route = _load_route(task_type) or {}
+        provider = str(route.get("provider") or settings.ai_provider or "unknown")
+        model = str(route.get("model") or settings.deepseek_model or "unknown")
+        conn = connect()
+        conn.execute(
+            """INSERT INTO ai_calls (
+                   id, run_id, node_key, provider, model, prompt_name, task_type,
+                   input, output, prompt_tokens, completion_tokens, cost_cny,
+                   latency_ms, status, error, client_mutation_id, project_id
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s)""",
+            (new_id("call"), run_id, node_key, provider, model, prompt_name, task_type,
+             encode({"variables": variables}), encode({}),
+             int((time.perf_counter() - started) * 1000), str(error)[:2000],
+             client_mutation_id, project_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Preserve the original provider/budget error if the ledger is unavailable.
 
 
 def _try_fallback(fb: dict, task_type: str, prompt_text: str, variables: dict, params: dict) -> tuple:
@@ -337,6 +389,29 @@ def _estimate_cost(variables: dict[str, Any], output_hint: dict[str, Any]) -> fl
     prompt_tokens = max(80, len(encode(variables)) // 3)
     completion_tokens = max(120, len(encode(output_hint)) // 3)
     return round((prompt_tokens + completion_tokens) * 0.000002, 4)
+
+
+def _calculate_cost(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Provider-aware CNY pricing; deployments may override the full table as JSON."""
+    default_rates = {
+        "deepseek": {"input": 2.0, "output": 3.0},
+        "openai": {"input": 18.0, "output": 72.0},
+        "anthropic": {"input": 21.0, "output": 105.0},
+        "claude": {"input": 21.0, "output": 105.0},
+        "gemini": {"input": 0.75, "output": 3.0},
+        "mock": {"input": 0.0, "output": 0.0},
+    }
+    try:
+        overrides = json.loads(os.getenv("AI_PRICE_CNY_PER_MILLION", "{}"))
+        if isinstance(overrides, dict):
+            default_rates.update(overrides)
+    except json.JSONDecodeError:
+        pass
+    rate = default_rates.get(provider, default_rates.get(model, {"input": 0.0, "output": 0.0}))
+    return round(
+        (prompt_tokens * float(rate.get("input", 0)) + completion_tokens * float(rate.get("output", 0))) / 1_000_000,
+        6,
+    )
 
 
 def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -434,7 +509,7 @@ def _deepseek_stream(prompt: str, model: str, params: dict[str, Any], usage_out:
         raise ProviderError(f"deepseek stream failed: {exc}") from exc
 
 
-def complete_stream(
+def _complete_stream_impl(
     *,
     project_id: str,
     task_type: str,
@@ -514,11 +589,31 @@ def complete_stream(
          encode({"variables": variables, "prompt": prompt_text, "stream": True}),
          encode({"text": full_text}),
          prompt_tokens, completion_tokens,
-         round((prompt_tokens + completion_tokens) * 0.000002, 4), latency_ms,
+         _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens), latency_ms,
          "succeeded", client_mutation_id, project_id),
     )
     conn.commit()
     conn.close()
+
+
+def complete_stream(
+    *, project_id: str, task_type: str, prompt_name: str,
+    variables: dict[str, Any], client_mutation_id: str | None = None,
+):
+    """Public streaming wrapper with the same failed-call ledger contract as complete()."""
+    started = time.perf_counter()
+    try:
+        yield from _complete_stream_impl(
+            project_id=project_id, task_type=task_type, prompt_name=prompt_name,
+            variables=variables, client_mutation_id=client_mutation_id,
+        )
+    except Exception as exc:
+        _record_failed_call(
+            run_id=None, node_key=None, project_id=project_id, task_type=task_type,
+            prompt_name=prompt_name, variables={**variables, "stream": True},
+            client_mutation_id=client_mutation_id, started=started, error=exc,
+        )
+        raise
 
 
 def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:

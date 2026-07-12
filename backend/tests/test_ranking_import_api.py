@@ -20,7 +20,7 @@ def _valid_item(rank: int = 1, title: str = "雾城修理铺") -> dict:
 def test_ranking_import_route_is_registered():
     from app.main import app
 
-    routes = {(route.path, method) for route in app.routes for method in getattr(route, "methods", set())}
+    routes = {(path, method.upper()) for path, operations in app.openapi()["paths"].items() for method in operations}
     assert ("/api/v1/ranking/import", "POST") in routes
 
 

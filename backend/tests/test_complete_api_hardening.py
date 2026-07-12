@@ -71,6 +71,25 @@ def test_project_scoped_endpoints_require_project_id():
     assert exc_info.value.status_code == 422
 
 
+def test_model_routes_have_one_canonical_api():
+    from app.main import app
+
+    paths = list(app.openapi()["paths"])
+    assert "/api/v1/model-routes" not in paths
+    assert paths.count("/api/v1/admin/model-routes") == 1
+
+
+def test_gemini_credentials_are_sent_in_header_not_url():
+    from pathlib import Path
+
+    sources = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in ("backend/app/ai/providers.py", "backend/app/services/providers_and_adapters.py")
+    )
+    assert "generateContent?key=" not in sources
+    assert "x-goog-api-key" in sources
+
+
 def test_export_routes_enforce_membership_before_service(monkeypatch):
     from app.api.v1 import complete_api
 
@@ -89,7 +108,7 @@ def test_export_routes_enforce_membership_before_service(monkeypatch):
 def test_stealth_scrape_endpoint_is_removed():
     from app.main import app
 
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/api/v1/scrape/browseract" not in paths
 
 

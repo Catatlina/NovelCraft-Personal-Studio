@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 
 from app.db import connect
 from app.config import settings
@@ -69,7 +70,7 @@ def create_refresh_token(user_id: str, token_version: int = 0) -> str:
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except JWTError:
+    except PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
 
 
@@ -82,7 +83,7 @@ def decode_token_payload(token: str, expected_type: str | None = None) -> dict |
         if expected_type == "refresh" and not _refresh_jti_is_active(payload.get("sub"), payload.get("jti")):
             return None
         return payload
-    except JWTError:
+    except PyJWTError:
         return None
 
 
@@ -90,7 +91,7 @@ def revoke_refresh_token(token: str) -> None:
     """Revoke a refresh token without raising for already-invalid tokens."""
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except JWTError:
+    except PyJWTError:
         return
     if payload.get("type") == "refresh":
         _revoke_refresh_jti(payload.get("sub"), payload.get("jti"))

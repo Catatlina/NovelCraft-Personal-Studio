@@ -71,7 +71,9 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
   async function saveSetting() {
     if (!editSetting) return;
-    await api(`/api/v1/admin/settings/${editSetting.key}?value=${encodeURIComponent(editSetting.value)}`, {method:"PUT"});
+    await api(`/api/v1/admin/settings/${editSetting.key}`, {
+      method:"PUT", body: JSON.stringify({value: editSetting.value}),
+    });
     setMsg(`${editSetting.key} 已保存`);
     setEditSetting(null);
     const r = await api("/api/v1/admin/settings");
@@ -95,6 +97,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         {subtab==="appsettings" && (
           <div>
             <h3>全局系统配置</h3>
+            <p style={{fontSize:12,color:"var(--text-muted)"}}>下方 API 配置仅保存在当前浏览器会话（BYOK）；定时任务和 Worker 请通过环境变量配置并重启服务。</p>
             <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
               <input placeholder="DeepSeek API Key" value={apiKey}
                 onChange={e => { setApiKeyLocal(e.target.value); setSaved(false); }}

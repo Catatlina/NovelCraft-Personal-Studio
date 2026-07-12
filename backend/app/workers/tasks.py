@@ -973,8 +973,16 @@ def patrol_check() -> dict:
     # Check for overdue foreshadowing (planted but past planned chapter)
     overdue = db.execute(
         """SELECT f.id, f.content, f.planned_resolve_chapter, c.title as chapter_title
-           FROM foreshadowings f JOIN contents c ON f.chapter_id = c.id
-           WHERE f.status = 'planted'"""
+           FROM foreshadowings f
+           JOIN contents c ON f.chapter_id = c.id
+           WHERE f.status = 'planted'
+             AND f.planned_resolve_chapter IS NOT NULL
+             AND f.planned_resolve_chapter <= (
+               SELECT COALESCE(MAX((latest.meta->>'seq')::int), 0)
+               FROM contents latest
+               WHERE latest.parent_id = c.parent_id AND latest.type = 'chapter'
+                 AND latest.is_deleted = FALSE
+             )"""
     ).fetchall()
 
     # Check for chapters needing rewrite
@@ -1003,7 +1011,7 @@ def patrol_check() -> dict:
     # Send alerts for issues
     if issues:
         from app.core.alerts import send_alert
-        send_alert("巡检发现问题:\\n" + "\\n".join(f"• {i}" for i in issues), "warning")
+        send_alert("巡检发现问题:\n" + "\n".join(f"• {i}" for i in issues), "warning")
 
     return {
         "status": "ok" if not issues else "issues_found",

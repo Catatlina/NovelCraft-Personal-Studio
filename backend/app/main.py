@@ -21,7 +21,6 @@ from .schemas import (
     ApiResponse,
     ContentUpdate,
     HumanConfirm,
-    ModelRouteUpdate,
     NovelCreate,
     ShortStoryCreate,
     VersionRestore,
@@ -90,6 +89,17 @@ async def csrf_guard(request: Request, call_next):
         header_token = request.headers.get("X-CSRF-Token")
         if not cookie_token or not header_token or not secrets.compare_digest(cookie_token, header_token):
             return JSONResponse({"code": "CSRF_FAILED", "message": "CSRF 校验失败", "data": None}, status_code=403)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def metrics_guard(request: Request, call_next):
+    """Keep operational metrics private even when explicitly enabled."""
+    if request.url.path == "/metrics":
+        expected = os.getenv("METRICS_TOKEN", "").strip()
+        supplied = request.headers.get("Authorization", "")
+        if not expected or not secrets.compare_digest(supplied, f"Bearer {expected}"):
+            return JSONResponse({"detail": "not found"}, status_code=404)
     return await call_next(request)
 
 # Middleware: capture X-Api-* headers for this request
@@ -679,16 +689,20 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
             yield f"id: {seq}\n\n"
             await asyncio.sleep(1)
             conn = connect()
-            row = conn.execute(
-                "SELECT status, nodes FROM workflow_runs WHERE id = %s", (run_id,)
-            ).fetchone()
+            row = conn.execute("SELECT status FROM workflow_runs WHERE id = %s", (run_id,)).fetchone()
+            nodes = conn.execute(
+                "SELECT node_key, status, output, error, updated_at FROM run_nodes "
+                "WHERE run_id = %s ORDER BY node_key", (run_id,),
+            ).fetchall()
             conn.close()
             if row and row["status"] in ("succeeded", "failed", "cancelled"):
-                nodes = decode(row["nodes"], [])
                 for n in nodes:
                     seq += 1
-                    yield f"id: {seq}\ndata: {json.dumps(n)}\n\n"
-                yield f"id: {seq+1}\ndata: {{\"status\": \"completed\"}}\n\n"
+                    event = dict(n)
+                    event["output"] = decode(event.get("output"), {})
+                    event["updated_at"] = str(event.get("updated_at") or "")
+                    yield f"id: {seq}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield f"id: {seq+1}\ndata: {json.dumps({'status': row['status']})}\n\n"
                 break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -913,37 +927,6 @@ def list_prompts(user: dict = Depends(get_current_user)) -> ApiResponse:
     return ok(rows)
 
 
-@app.get("/api/v1/model-routes")
-def list_model_routes(user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn = connect()
-    rows = [dict(row) for row in conn.execute("SELECT * FROM model_routes ORDER BY task_type").fetchall()]
-    for row in rows:
-        row["params"] = decode(row["params"], {})
-        row["fallback_json"] = decode(row["fallback_json"], [])
-    conn.close()
-    return ok(rows)
-
-
-@app.put("/api/v1/model-routes/{task_type}")
-def update_model_route(task_type: str, payload: ModelRouteUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn = connect()
-    conn.execute(
-        """
-        INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json)
-        VALUES (%s, %s, %s ,%s, %s, '[]')
-        ON CONFLICT(task_type)
-        DO UPDATE SET provider = excluded.provider, model = excluded.model, params = excluded.params, updated_at = CURRENT_TIMESTAMP
-        """,
-        (new_id("rte"), task_type, payload.provider, payload.model, encode(payload.params)),
-    )
-    conn.commit()
-    row = dict(conn.execute("SELECT * FROM model_routes WHERE task_type = %s", (task_type,)).fetchone())
-    row["params"] = decode(row["params"], {})
-    row["fallback_json"] = decode(row["fallback_json"], [])
-    conn.close()
-    return ok(row)
-
-
 @app.get("/api/v1/knowledge")
 def list_knowledge(
     project_id: str,
@@ -1069,7 +1052,7 @@ def publish(
             safety = check_sensitive(body_text[:5000])
             if not safety["passed"]:
                 return ok({"blocked": True, "words": safety["blocked_words"]})
-    result = publish_content(content_id, platform, mode)
+    result = publish_content(content_id, platform, mode, user_id=user["id"])
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return ok(result)
