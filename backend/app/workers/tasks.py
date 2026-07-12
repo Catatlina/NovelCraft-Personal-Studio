@@ -803,6 +803,8 @@ def batch_generate_chapters_task(
         )
         db.commit()
         db.close()
+        from app.core.alerts import send_alert
+        send_alert(f"批次 {batch_id} 进入 pending_provider：{exc}", "warning")
         return {"status": "pending_provider", "batch_id": batch_id, "reason": str(exc)}
     except Exception as exc:
         db = connect()
@@ -812,6 +814,8 @@ def batch_generate_chapters_task(
         )
         db.commit()
         db.close()
+        from app.core.alerts import send_alert
+        send_alert(f"批次 {batch_id} 失败：{exc}", "error")
         raise
 
     db = connect()
@@ -899,6 +903,51 @@ def purge_stale_autosaves() -> dict:
     return {"deleted": deleted}
 
 
+def check_queue_backlog(threshold: int | None = None) -> str | None:
+    """Alert when the celery queue piles up (e.g. stale dispatches burning
+    provider credits — 404 messages were found queued on 2026-07-12)."""
+    import os
+
+    import redis as redis_lib
+
+    limit = threshold if threshold is not None else int(os.getenv("QUEUE_BACKLOG_THRESHOLD", "50"))
+    try:
+        client = redis_lib.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        depth = int(client.llen("celery"))
+    except Exception:
+        return None  # Redis 不可达由 healthz 负责，不在这里重复告警
+    if depth > limit:
+        return f"celery queue backlog: {depth} messages (threshold {limit})"
+    return None
+
+
+@celery_app.task
+def daily_cost_report() -> dict:
+    """Beat: 昨日 AI 成本日报 — 个人部署最实用的一条监控。"""
+    from app.core.alerts import send_alert
+
+    db = connect()
+    rows = db.execute(
+        """SELECT task_type, COUNT(*) AS n, COALESCE(SUM(prompt_tokens),0) AS pt,
+                  COALESCE(SUM(completion_tokens),0) AS ct, COALESCE(SUM(cost_cny),0) AS cost
+           FROM ai_calls
+           WHERE created_at >= now() - interval '24 hours' AND status = 'succeeded'
+           GROUP BY task_type ORDER BY cost DESC"""
+    ).fetchall()
+    failed = db.execute(
+        "SELECT COUNT(*) AS n FROM ai_calls WHERE created_at >= now() - interval '24 hours' AND status != 'succeeded'"
+    ).fetchone()["n"]
+    db.close()
+    total_calls = sum(r["n"] for r in rows)
+    total_tokens = sum(r["pt"] + r["ct"] for r in rows)
+    total_cost = float(sum(r["cost"] for r in rows))
+    if total_calls or failed:
+        lines = [f"过去24h：{total_calls} 次调用 / {total_tokens} tokens / ¥{total_cost:.4f}，失败 {failed} 次"]
+        lines += [f"• {r['task_type']}: {r['n']} 次, {r['pt'] + r['ct']} tokens" for r in rows[:6]]
+        send_alert("AI 成本日报\n" + "\n".join(lines), "info")
+    return {"calls": total_calls, "tokens": total_tokens, "cost_cny": round(total_cost, 4), "failed": failed}
+
+
 @celery_app.task
 def patrol_check() -> dict:
     """M2 beat: consistency patrol — check foreshadowing, chapter gaps, quality."""
@@ -929,6 +978,9 @@ def patrol_check() -> dict:
         issues.append(f"{len(needs_rewrite)} chapters need rewrite")
     if orphans:
         issues.append(f"{len(orphans)} orphan chapters")
+    backlog = check_queue_backlog()
+    if backlog:
+        issues.append(backlog)
 
     # Send alerts for issues
     if issues:

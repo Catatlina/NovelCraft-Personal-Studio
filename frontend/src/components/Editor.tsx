@@ -5,7 +5,7 @@ import { RichEditor } from "./RichEditor";
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 
-export function Editor({ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult }: {
+export function Editor({ chapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }: {
   chapter: Content | null; editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
   saveChapter: () => void; runEditorOp: (op: string) => void;
@@ -13,6 +13,7 @@ export function Editor({ chapter, editorText, setEditorText, selection, setSelec
   offlineNotice?: string; offlineQueueCount?: number;
   offlineAiResults?: Array<{ id: string; text: string }>;
   applyOfflineAiResult?: (id: string, text: string) => void;
+  streamPreview?: string;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
   const docText = (body: any) => body?.content?.map((item: any) => item?.text || "").join("\n\n") || "";
@@ -32,6 +33,12 @@ export function Editor({ chapter, editorText, setEditorText, selection, setSelec
           <input value={chapter?.title ?? ""} readOnly style={{ flex: 1, background: "transparent", border: "none", fontSize: 18, fontWeight: 600 }} />
           <button onClick={saveChapter} disabled={!chapter}><Save size={16} />保存</button>
         </div>
+        {streamPreview ? (
+          <div className="panel" style={{ maxHeight: 160, overflowY: "auto", fontSize: 13, whiteSpace: "pre-wrap" }}>
+            <small className="muted">AI 生成中…</small>
+            <div>{streamPreview}</div>
+          </div>
+        ) : null}
         {(offlineNotice || offlineQueueCount) ? (
           <div className="pill pending" style={{ marginBottom: 8 }}>
             {offlineNotice || `离线队列 ${offlineQueueCount} 项`}

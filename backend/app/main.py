@@ -44,6 +44,10 @@ from .core.rate_limit import install_rate_limiter, limiter
 setup_logging()
 logger = get_logger(__name__)
 
+from .core.observability import init_metrics, init_sentry  # noqa: E402
+
+init_sentry("fastapi")
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -62,6 +66,7 @@ app.include_router(overseas_router)
 app.include_router(batch_router)
 app.include_router(complete_router)
 app.include_router(ranking_router)
+init_metrics(app)
 install_rate_limiter(app)
 app.add_middleware(
     CORSMiddleware,
@@ -789,6 +794,61 @@ def ai_edit(
     conn.commit()
     conn.close()
     return ok(output)
+
+
+@app.post("/api/v1/contents/{content_id}/ai/{op}/stream")
+@limiter.limit("20/minute")
+def ai_edit_stream(
+    request: Request,
+    content_id: str,
+    op: AiOperation,
+    payload: AiEditRequest,
+    user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    """SSE streaming variant of ai_edit for pure-text operations.
+
+    Frames: {"delta": str}* then {"done": true, "text": full}; provider/budget
+    failures emit a single {"error", "code"} frame instead of an HTTP error so
+    the client can fall back to the non-streaming path."""
+    from .gateway import BudgetExceeded, ProviderError, complete_stream
+
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
+    conn.close()
+    project_id = content["project_id"]
+
+    def event_source():
+        chunks: list[str] = []
+        try:
+            for delta in complete_stream(
+                project_id=project_id,
+                task_type=f"editor_{op}",
+                prompt_name=f"editor.{op}",
+                variables={"selection": payload.selection, "instruction": payload.instruction},
+                client_mutation_id=payload.client_mutation_id,
+            ):
+                chunks.append(delta)
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+        except (ProviderError, BudgetExceeded) as exc:
+            code = "PENDING_BUDGET" if isinstance(exc, BudgetExceeded) else "PROVIDER_FAILED"
+            yield f"data: {json.dumps({'error': str(exc), 'code': code}, ensure_ascii=False)}\n\n"
+            return
+        full_text = "".join(chunks)
+        version_conn = connect()
+        version_conn.execute(
+            """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id, client_mutation_id)
+               VALUES (%s, 'content', %s, 'ai_edit', %s, %s, %s, %s)
+               ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL DO NOTHING""",
+            (new_id("ver"), content_id,
+             encode({"op": str(op), "selection": payload.selection[:2000],
+                     "instruction": payload.instruction[:500], "output": {"text": full_text}}),
+             f"editor_{op}", user["id"], payload.client_mutation_id),
+        )
+        version_conn.commit()
+        version_conn.close()
+        yield f"data: {json.dumps({'done': True, 'text': full_text}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/v1/agents/status")

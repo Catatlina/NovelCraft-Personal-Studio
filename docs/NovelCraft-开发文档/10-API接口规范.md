@@ -49,6 +49,8 @@
 | POST | `/api/v1/admin/workflows/{name}/execute` | 需 `project_id`+`novel_id`+owner/editor；仅 `bootstrap` 可执行，其余显式 501 `WORKFLOW_EXECUTOR_NOT_IMPLEMENTED` |
 | PUT | `/api/v1/admin/workflows/{name}` | 请求体 `{project_id,nodes}`；保存项目级 DAG 设计稿。`bootstrap` 为只读系统工作流，禁止覆盖；自定义 DAG 未接执行器时仅保存、不宣称可运行 |
 | POST | `/api/v1/contents/{id}/ai/{op}` | AI 编辑成功后写 `versions(label='ai_edit')` 分支（C5-03），`client_mutation_id` 幂等 |
+| POST | `/api/v1/contents/{id}/ai/{op}/stream` | 仅纯文本编辑操作；SSE `delta* → done`，DeepSeek 流式适配，其他 Provider 显式错误并由前端回退普通网关；预算错误为 `PENDING_BUDGET` |
+| POST | `/api/v1/knowledge/reindex-project?project_id=` | owner/editor 在切换 Embedding backend 后重建项目向量；响应包含实际 backend/items/chunks |
 
 所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。Provider 或预算不可用时批次进入 `pending_provider` 并保留已完成进度，禁止伪装成功或清零重跑。曾存在的 `POST /scrape/browseract` 因违反《25》采集合规边界已移除，不得恢复。
 

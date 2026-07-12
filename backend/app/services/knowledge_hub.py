@@ -1,29 +1,14 @@
-"""M3: Knowledge Hub — vector search + ingest."""
+"""M3: Knowledge Hub — vector search + ingest.
+
+Embeddings come from app.core.embeddings (remote API / local ONNX bge /
+hash fallback); vectors are padded to the 1536-dim pgvector column."""
 from __future__ import annotations
 
-import hashlib
-import math
-import re
-
+from app.core.embeddings import embed_query_with_backend, embed_texts
 from app.db import connect
 from app.db import new_id
 
 EMBEDDING_DIMENSION = 1536
-
-
-def _local_embedding(text: str) -> list[float]:
-    """Create a deterministic, normalized hashing embedding without an external service."""
-    vector = [0.0] * EMBEDDING_DIMENSION
-    normalized = re.sub(r"\s+", "", (text or "").lower())
-    tokens = [normalized[i:i + 2] for i in range(max(0, len(normalized) - 1))]
-    if len(normalized) == 1:
-        tokens = [normalized]
-    for token in tokens:
-        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
-        index = int.from_bytes(digest[:4], "big") % EMBEDDING_DIMENSION
-        vector[index] += 1.0 if digest[4] & 1 else -1.0
-    norm = math.sqrt(sum(value * value for value in vector))
-    return [value / norm for value in vector] if norm else vector
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -46,38 +31,55 @@ def _chunk_text(text: str, size: int = 800, overlap: int = 100) -> list[str]:
 
 
 def rebuild_item_embeddings(item_id: str) -> int:
-    """Atomically replace an item's chunks; embeddings can be filled by the configured model worker.
-
-    Uses a deterministic local hashing embedding so indexing works offline and remains rebuildable.
-    """
+    """Atomically replace an item's chunks with embeddings from the configured backend."""
     db = connect()
     item = db.execute("SELECT body FROM knowledge_items WHERE id = %s AND is_deleted = FALSE", (item_id,)).fetchone()
     if not item:
         db.close()
         return 0
     chunks = _chunk_text(item.get("body", ""))
+    vectors, backend = embed_texts(chunks)
     db.execute("DELETE FROM knowledge_vectors WHERE item_id = %s", (item_id,))
-    for chunk_no, chunk in enumerate(chunks):
+    for chunk_no, (chunk, vector) in enumerate(zip(chunks, vectors)):
         db.execute(
             "INSERT INTO knowledge_vectors (id, item_id, chunk_no, embedding, chunk_text) VALUES (%s, %s, %s, %s::vector, %s)",
-            (new_id(), item_id, chunk_no, _vector_literal(_local_embedding(chunk)), chunk),
+            (new_id(), item_id, chunk_no, _vector_literal(vector), chunk),
         )
+    # provenance: which backend produced this item's vectors (for reindex audits)
+    db.execute(
+        "UPDATE knowledge_items SET meta = COALESCE(meta,'{}'::jsonb) || jsonb_build_object('embedding_backend', %s::text) WHERE id = %s",
+        (backend, item_id),
+    )
     db.commit()
     db.close()
     return len(chunks)
 
 
+def reindex_project_embeddings(project_id: str) -> dict:
+    """Re-embed every item in a project — run after switching EMBEDDING_BACKEND."""
+    db = connect()
+    ids = [r["id"] for r in db.execute(
+        "SELECT id FROM knowledge_items WHERE project_id = %s AND is_deleted = FALSE", (project_id,)
+    ).fetchall()]
+    db.close()
+    chunks_total = sum(rebuild_item_embeddings(item_id) for item_id in ids)
+    from app.core.embeddings import resolve_backend
+    return {"items": len(ids), "chunks": chunks_total, "backend": resolve_backend()}
+
+
 def search(query: str, project_id: str | None = None, kinds: list[str] | None = None, limit: int = 10) -> list[dict]:
     """Search indexed knowledge by vector distance, with lexical fallback."""
     db = connect()
+    query_vector, query_backend = embed_query_with_backend(query)
     vector_sql = """
         SELECT ki.id, ki.kind, ki.title, ki.body, ki.meta, ki.source_url,
                MIN(kv.embedding <=> %s::vector) AS distance
         FROM knowledge_items ki
         JOIN knowledge_vectors kv ON kv.item_id = ki.id
         WHERE ki.is_deleted = FALSE AND kv.embedding IS NOT NULL
+          AND COALESCE(ki.meta->>'embedding_backend', 'hash') = %s
     """
-    vector_params = [_vector_literal(_local_embedding(query))]
+    vector_params = [_vector_literal(query_vector), query_backend]
     if project_id:
         vector_sql += " AND ki.project_id = %s"
         vector_params.append(project_id)

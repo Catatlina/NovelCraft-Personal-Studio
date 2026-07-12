@@ -5,6 +5,10 @@ import os
 
 from celery import Celery
 
+from app.core.observability import init_sentry
+
+init_sentry("celery")
+
 celery_app = Celery(
     "novelcraft",
     broker=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
@@ -34,6 +38,10 @@ celery_app.conf.update(
         "purge-stale-autosaves": {
             "task": "app.workers.tasks.purge_stale_autosaves",
             "schedule": 86400.0,  # Daily — C5-05 7-day retention
+        },
+        "daily-cost-report": {
+            "task": "app.workers.tasks.daily_cost_report",
+            "schedule": 86400.0,  # Daily — AI 用量/成本日报（Telegram）
         },
     },
 )
