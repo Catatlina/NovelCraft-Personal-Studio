@@ -41,7 +41,8 @@
 - Alembic：单头 `nc_audit_workflow_scope`；本地库 upgrade→downgrade→upgrade 往返通过。
 - 浏览器实测（本轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）；书库批次失败→`pending_provider` 原因透传→恢复链路。
 - **真实 Provider T3（2026-07-12，deepseek-chat）**：扫榜导入 20 条→市场分析（4 信号+3 原创候选，候选与源榜单零重合）→建书→策划全链 n3~n8（简介/世界观/人物/大纲/第一章 1028 字/七维审核 75 分含 1 次真实返工）→run succeeded→第二章 15s 生成（实体 7 条、时间线 6 条真实抽取、连续性 clean）→导出含真实正文。11 次调用 7924 tokens ≈¥0.016，全部记录于 ai_calls。真实链暴露并修复 2 个 mock 测不出的缺陷：①OUTPUT_CONTRACTS 章节示例 2 段与 Schema ≥3 冲突（模型照抄示例必失败）；②审核低分返工路径 UnboundLocalError（mock 恒 84 分从未触达）。验收测试固化于 `test_real_provider_t3.py`（无 key 自动 skip；CI 配 `DEEPSEEK_API_KEY` secret 即跑）。
-- 真实 T4 浏览器自动化、T5 长周期运行：仍无证据，未验收。
+- **浏览器自动化 E2E（P0-2，2026-07-12 落地）**：Playwright 脚手架（`frontend/playwright.config.ts` 双 webServer：uvicorn:8100 + vite:5273 代理），主链用例①注册→CSV 导入→快照落库→刷新持久→书库空态（无 AI 确定性，本地 2.2s passed）；用例②AI 分析→原创选题→建书→书库可见（protected，带 key 本地 16.1s passed / 无 key skipped）；CI 新增 e2e job（postgres+redis 服务、失败上传 trace 报告）。**首条 T4 自动化验收达成。**
+- T5 长周期运行：仍无证据，未验收。
 
 ## 审计对照（外部审计报告 2026-07-11）
 
@@ -50,7 +51,7 @@
 - 已修复（第二轮，对照审计全量版 §六）：多轮审核/跨模型审计/Prompt 矩阵此前用字符串长度公式伪造评分并宣称"ready"，现真实经 Gateway 调用、Provider 不可用逐项 `pending_provider`，端点补 `project_id` 成员校验；热点采集 `except: continue` 静默空成功改为逐源状态+全失败 502；AgentConsole 硬编码"模拟"数据改为 `/agents/status` 真实 run_nodes 聚合；Collaboration 页面调用不存在的路径（必 404）改为真实 `/collaboration/*`；`/admin/workflows/{name}/execute` 此前无视工作流名一律跑 bootstrap 且 `project_id=''` 必然崩溃，改为权限校验+仅 bootstrap 可执行+其余显式 501；AI 编辑补 `ai_edit` 版本分支（C5-03）；C5-05 自动保存 7 天保留 beat 任务（保留每实体最近 10 份，语义分支永不清理）；assembler 知识层此前按无人写入的列过滤永远为空，改为按小说前提走 Knowledge Hub 检索。
 - 已修复（第三轮，代码/文档/功能契约对账）：工作流保存请求原本必 422 且代码引用不存在的 `workflows.project_id/config`，现新增项目作用域迁移并统一使用 `definition`；系统 Bootstrap 只读，自定义 DAG 明确为设计稿、未接执行器返回 501；清除预算/日报/翻译四组重复路由及其中的跨项目翻译风险；设置页知识导入/导出与预算、知识检索、热点响应、Fanout 响应、多平台发布均对齐真实 API；短篇输入真实落库；Fanout Provider 失败不再复制原文冒充改写成功。
 - 已修复（第四轮，按《27-全仓库审计报告》路线图阶段 0）：P1-A 迁移回滚断裂——性能索引 downgrade 移除 CONCURRENTLY，干净库 upgrade→downgrade base→upgrade 三段实测通过，并加全迁移源码契约测试；P1-B schema 快照契约测试（12 张核心表必需列钉死，防列名漂移复发）；P1-G 交付门禁升级为证据绑定校验（✅/已交付行必须含测试/commit/文件/T级标记，含负例测试）；P1-D 不可信外部文本统一清洗 `sanitize_untrusted`（接入 assembler 知识召回与热点晨报入模路径）；P1-E 备份 pg_dump 每日 sidecar + 7 份保留 + 全服务日志轮转（compose，YAML 校验通过）；P2 清理：PublishPage 死组件删除、`store_ranking_snapshot` 吞错死函数及其 T0 存在性断言删除、bundle 分包（主 chunk 702KB→281KB，消除 >500KB 警告）、版本统一（app `2.2.0` 对齐需求基线 V2.2，README 刷新）。**396 tests 全绿**。
-- 仍开放：B4 Nginx 无 TLS（需域名/证书决策）；P0-1 真实 Provider 集成测试（需 API Key 的 protected CI）；P0-2 浏览器自动化 E2E 脚手架；无流式生成；真语义 RAG（当前为显式本地 hash embedding）；数据回流/ROI 真实数据；监控（Sentry/Prometheus）与告警实测送达；发布真实平台回执与 auto_publish 调度；`workers/tasks.py` 拆分；Agent 注册表仍为声明式（无独立执行体）；task/日级预算分级。
+- 仍开放：B4 Nginx 无 TLS（需域名/证书决策）；无流式生成；真语义 RAG（当前为显式本地 hash embedding）；数据回流/ROI 真实数据；监控（Sentry/Prometheus）与告警实测送达；发布真实平台回执与 auto_publish 调度；`workers/tasks.py` 拆分；Agent 注册表仍为声明式（无独立执行体）；task/日级预算分级。
 
 ## 下一顺序
 

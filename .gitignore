@@ -20,3 +20,5 @@ __pycache__/
 backups/
 .env
 .env.*
+frontend/playwright-report/
+frontend/test-results/
