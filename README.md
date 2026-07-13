@@ -111,20 +111,18 @@ docker-compose.yml
 
 ## AI 配置系统
 
-所有 AI 配置均可在前端「系统设置 → 全局配置」页面可视化编辑，即时生效：
+交互请求可在前端「系统设置 → 全局配置」填写 BYOK，密钥仅保存在当前浏览器 `sessionStorage`，关闭会话后清除。Worker、定时任务及服务端默认配置只读取环境变量，并在服务重启后生效：
 
 | 配置项 | 说明 | 存储位置 |
 |---|---|---|
-| `deepseek_api_key` | DeepSeek API Key | DB (settings 表) |
-| `deepseek_base_url` | DeepSeek API 地址 | DB，默认 `https://api.deepseek.com` |
-| `deepseek_model` | DeepSeek 默认模型 | DB，默认 `deepseek-chat` |
-| `claude_api_key` / `openai_api_key` / `gemini_api_key` | 各 Provider API Key | DB |
-| `claude_base_url` / `openai_base_url` / `gemini_base_url` | 各 Provider API 地址 | DB |
-| `bootstrap_budget_cny` | Bootstrap 预算上限(¥) | DB，默认 2.0 |
-| `request_timeout_seconds` | AI 请求超时 | DB，默认 45 |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key | 环境变量 |
+| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | 环境变量，默认 `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | DeepSeek 默认模型 | 环境变量，默认 `deepseek-chat` |
+| `CLAUDE_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | 各 Provider API Key | 环境变量 |
+| `AI_PRICE_CNY_PER_MILLION` | 各 Provider 输入/输出每百万 token 单价 JSON | 环境变量 |
 
-**配置优先级**: 环境变量 > 数据库设置。修改后无需重启，即时生效。
-**API Key 安全**: API Key 字段在前端为密码输入框，API 返回时自动脱敏（仅显示前8后4字符）。
+**配置优先级**：当前请求的 BYOK Header > 服务环境变量。数据库 `settings` 表中的历史 Provider 值不再作为运行时密钥来源。
+**API Key 安全**：前端 BYOK 字段为密码输入框且不落库；生产/定时任务密钥由部署环境注入，不通过管理 API 返回。
 
 ## 启动命令
 

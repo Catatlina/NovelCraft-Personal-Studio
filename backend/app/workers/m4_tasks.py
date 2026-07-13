@@ -13,7 +13,8 @@ from app.workers.celery_app import celery_app
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def auto_publish_article(self, content_id: str, platform: str, credentials: dict | None = None) -> dict:
+def auto_publish_article(self, content_id: str, platform: str, credentials: dict | None = None,
+                         record_id: str | None = None) -> dict:
     """TASK-041: Auto-publish content to target platform with adapter dispatch."""
     from app.db import connect, encode, new_id, row_to_dict
 
@@ -48,12 +49,19 @@ def auto_publish_article(self, content_id: str, platform: str, credentials: dict
         # Semi-auto: store as draft for manual review
         result = {"status": "draft", "url": "", "message": f"{platform} requires manual review"}
 
-    # Record publish
+    # Update the queued record; direct task invocations create one for compatibility.
     db2 = connect()
-    db2.execute(
-        "INSERT INTO publish_records (id, content_id, platform, status, result) VALUES (%s,%s,%s,%s,%s)",
-        (new_id(), content_id, platform, result.get("status", "failed"), encode(result)),
-    )
+    if record_id:
+        db2.execute(
+            "UPDATE publish_records SET status=%s, result=%s, error=%s, updated_at=now() WHERE id=%s",
+            (result.get("status", "failed"), encode(result),
+             result.get("message") if result.get("status") == "error" else None, record_id),
+        )
+    else:
+        db2.execute(
+            "INSERT INTO publish_records (id, content_id, platform, status, result) VALUES (%s,%s,%s,%s,%s)",
+            (new_id(), content_id, platform, result.get("status", "failed"), encode(result)),
+        )
     db2.commit()
     db2.close()
 
@@ -157,12 +165,17 @@ def publish_retry_handler(self, record_id: str) -> dict:
     if not content:
         return {"status": "error", "message": "content not found"}
 
-    result = auto_publish_article(record.get("content_id", ""), record.get("platform", ""), {})
-    db2 = connect()
-    db2.execute("UPDATE publish_records SET status = %s, result = %s WHERE id = %s",
-                (result.get("status", "failed"), encode(result), record_id))
-    db2.commit()
-    db2.close()
+    owner = connect()
+    member = owner.execute(
+        "SELECT pm.user_id FROM project_members pm WHERE pm.project_id=%s AND pm.role='owner' LIMIT 1",
+        (content["project_id"],),
+    ).fetchone()
+    owner.close()
+    from app.services.publish_hub import get_platform_credentials
+    credentials = get_platform_credentials(str(member["user_id"]), record["platform"]) if member else {}
+    result = auto_publish_article.run(
+        record.get("content_id", ""), record.get("platform", ""), credentials or {}, record_id,
+    )
     return {"status": result.get("status", "failed"), "retry_count": self.request.retries}
 
 

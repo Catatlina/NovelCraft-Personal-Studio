@@ -76,10 +76,10 @@ def call_gemini(prompt: str, model: str = "gemini-2.0-flash", params: dict | Non
         "generationConfig": {"response_mime_type": "application/json"},
     }
     req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         data=json.dumps(body).encode(),
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
     )
     with urllib.request.urlopen(req, timeout=60) as r:
         payload = json.loads(r.read())

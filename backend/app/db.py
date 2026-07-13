@@ -47,7 +47,8 @@ def close_pool() -> None:
         _pool = None
 
 
-def new_id(prefix: str = "") -> str:
+def new_id(_legacy_prefix: str = "") -> str:
+    """Return a database-compatible UUID; the legacy prefix is intentionally ignored."""
     return str(uuid.uuid4())
 
 
@@ -205,6 +206,7 @@ def init_db() -> None:
     task_types = [
         "gen_titles", "gen_synopsis", "gen_worldview", "gen_characters",
         "gen_outline", "gen_chapter1", "review_7dim",
+        "review_ooc", "review_consistency", "review_rhythm",
         "editor_polish", "editor_rewrite", "editor_continue",
         "editor_expand", "editor_condense", "editor_deai",
         "summarize_chapter", "summarize_volume", "summarize_book",

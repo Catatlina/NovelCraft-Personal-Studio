@@ -18,7 +18,7 @@ MIGRATION = ROOT / "backend/alembic/versions/b73d14f0c2a1_add_ranking_product_fl
 def test_ranking_routes_are_registered_on_application():
     from app.main import app
 
-    routes = {(route.path, method) for route in app.routes for method in getattr(route, "methods", set())}
+    routes = {(path, method.upper()) for path, operations in app.openapi()["paths"].items() for method in operations}
     required = {
         ("/api/v1/ranking/sources", "GET"),
         ("/api/v1/ranking/sources/{source_key}/scan", "POST"),

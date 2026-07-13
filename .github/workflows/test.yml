@@ -32,13 +32,23 @@ jobs:
       - name: Run migrations
         run: cd backend && alembic upgrade head
         env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test}
+      - name: Verify migration round trip
+        run: |
+          PGPASSWORD=novelcraft createdb -h localhost -U novelcraft migration_roundtrip
+          cd backend
+          DATABASE_URL=postgresql://novelcraft:novelcraft@localhost/migration_roundtrip alembic upgrade head
+          DATABASE_URL=postgresql://novelcraft:novelcraft@localhost/migration_roundtrip alembic downgrade base
       - name: Run tests
         run: cd backend && pytest tests/ -v
         # Real-provider T3 tests run only when the DEEPSEEK_API_KEY repo secret
         # is configured; without it they self-skip (forks never see secrets).
         env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test, REDIS_URL: redis://localhost:6379/0, NOVELCRAFT_ENV: ci, DEEPSEEK_API_KEY: "${{ secrets.DEEPSEEK_API_KEY }}"}
+      - name: Dependency audit
+        run: pip install pip-audit && pip-audit -r backend/requirements.txt
       - name: Verify delivery claims
         run: python scripts/verify_delivery_claims.py
+      - name: Validate prompt golden-case definitions
+        run: PYTHONPATH=backend python -c "from app.services.fusion_deep import run_golden_case_ci; r=run_golden_case_ci(); print(r); assert r['definition_invalid'] == 0 and r['provider_outputs_verified'] == 0"
 
   frontend:
     runs-on: ubuntu-latest
@@ -48,6 +58,8 @@ jobs:
         with: {node-version: "20"}
       - name: Install & build
         run: cd frontend && npm ci && npm run build
+      - name: Dependency audit
+        run: cd frontend && npm audit --omit=dev --audit-level=high
 
   e2e:
     runs-on: ubuntu-latest

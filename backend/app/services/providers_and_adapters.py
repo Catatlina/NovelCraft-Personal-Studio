@@ -43,12 +43,13 @@ def _gemini_complete(model: str, messages: list, api_key: str = "", api_url: str
     """Gemini API call."""
     key = api_key or os.getenv("GEMINI_API_KEY", "")
     url = api_url or os.getenv("GEMINI_API_URL", f"https://generativelanguage.googleapis.com/v1beta/models/{model or 'gemini-pro'}:generateContent")
-    if "?key=" not in url:
-        url += f"?key={key}"
     contents = [{"parts": [{"text": m["content"]}], "role": "user" if m["role"] == "user" else "model"} for m in messages]
     body = {"contents": contents}
     try:
-        req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            url, json.dumps(body).encode(),
+            {"Content-Type": "application/json", "x-goog-api-key": key}, method="POST",
+        )
         with urllib.request.urlopen(req, timeout=60) as r:
             data = json.loads(r.read())
         return {"text": data["candidates"][0]["content"]["parts"][0]["text"], "model": model, "provider": "gemini"}
@@ -280,7 +281,7 @@ def matrix_batch_run(prompt_name: str, variables_list: list[dict], models: list[
 
 # ===== Book analysis workbench =====
 
-def book_analysis_workbench(title: str, content: str) -> dict:
+def book_analysis_workbench(title: str, content: str, project_id: str) -> dict:
     """TASK-041: Full book analysis — structure, tropes, rhythm, style."""
     import re
     paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
@@ -297,7 +298,7 @@ def book_analysis_workbench(title: str, content: str) -> dict:
     rhythm = "快节奏" if avg_para_len < 80 else "中速" if avg_para_len < 150 else "慢热"
     
     return {
-        "title": title, "total_paragraphs": len(paragraphs),
+        "title": title, "project_id": project_id, "total_paragraphs": len(paragraphs),
         "opening_hook": opening, "detected_tropes": tropes,
         "rhythm": rhythm, "avg_paragraph_length": round(avg_para_len),
         "structure_cards": {

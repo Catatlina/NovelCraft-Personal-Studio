@@ -5,7 +5,7 @@ from typing import Any
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.responses import JSONResponse
@@ -21,7 +21,6 @@ from .schemas import (
     ApiResponse,
     ContentUpdate,
     HumanConfirm,
-    ModelRouteUpdate,
     NovelCreate,
     ShortStoryCreate,
     VersionRestore,
@@ -92,21 +91,43 @@ async def csrf_guard(request: Request, call_next):
             return JSONResponse({"code": "CSRF_FAILED", "message": "CSRF 校验失败", "data": None}, status_code=403)
     return await call_next(request)
 
+
+@app.middleware("http")
+async def metrics_guard(request: Request, call_next):
+    """Keep operational metrics private even when explicitly enabled."""
+    if request.url.path == "/metrics":
+        expected = os.getenv("METRICS_TOKEN", "").strip()
+        supplied = request.headers.get("Authorization", "")
+        if not expected or not secrets.compare_digest(supplied, f"Bearer {expected}"):
+            return JSONResponse({"detail": "not found"}, status_code=404)
+    return await call_next(request)
+
 # Middleware: capture X-Api-* headers for this request
 @app.middleware("http")
 async def capture_api_key(request: Request, call_next):
     from app.gateway import _request_api_key, _request_api_base_url, _request_model
+    from app.core.url_security import validate_ai_base_url
+    tokens = []
     key = request.headers.get("X-Api-Key")
     if key:
-        _request_api_key.set(key)
+        tokens.append((_request_api_key, _request_api_key.set(key)))
     base_url = request.headers.get("X-Api-Base-Url")
     if base_url:
-        _request_api_base_url.set(base_url)
+        if not key:
+            return JSONResponse({"detail": "X-Api-Base-Url requires request-scoped X-Api-Key"}, status_code=400)
+        try:
+            base_url = validate_ai_base_url(base_url)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        tokens.append((_request_api_base_url, _request_api_base_url.set(base_url)))
     model = request.headers.get("X-Model")
     if model:
-        _request_model.set(model)
-    response = await call_next(request)
-    return response
+        tokens.append((_request_model, _request_model.set(model)))
+    try:
+        return await call_next(request)
+    finally:
+        for variable, token in reversed(tokens):
+            variable.reset(token)
 
 
 def ok(data: Any = None) -> ApiResponse:
@@ -121,6 +142,17 @@ def parse_content(row: dict[str, Any]) -> dict[str, Any]:
 
 class BatchChapterRequest(BaseModel):
     chapter_count: int = Field(default=10, ge=1, le=50)
+
+
+class ProjectCreate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class AgentExecuteRequest(BaseModel):
+    project_id: str
+    variables: dict[str, Any] = Field(default_factory=dict)
+    client_mutation_id: str | None = Field(default=None, max_length=100)
 
 
 def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
@@ -199,12 +231,18 @@ def list_projects(user: dict = Depends(get_current_user)) -> ApiResponse:
 
 
 @app.post("/api/v1/projects")
-def create_project(name: str = "新项目", user: dict = Depends(get_current_user)) -> ApiResponse:
+def create_project(payload: ProjectCreate | None = Body(default=None), name: str = "新项目",
+                   user: dict = Depends(get_current_user)) -> ApiResponse:
+    # Prefer the request body's name; fall back to the ?name= query param so older
+    # callers keep working. Ignoring a provided name was BUG-006.
+    body_name = payload.name.strip() if payload and payload.name and payload.name.strip() else ""
+    project_name = body_name or name
+    description = payload.description if payload else ""
     conn = connect()
     pid = new_id()
     conn.execute(
-        "INSERT INTO projects (id, name, owner_id) VALUES (%s, %s, %s)",
-        (pid, name, user["id"]),
+        "INSERT INTO projects (id, name, description, owner_id) VALUES (%s, %s, %s, %s)",
+        (pid, project_name, description, user["id"]),
     )
     conn.execute(
         "INSERT INTO project_members (id, project_id, user_id, role) VALUES (%s, %s, %s, 'owner') ON CONFLICT DO NOTHING",
@@ -673,23 +711,32 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
 
     async def event_stream():
         import asyncio
+        # Cap the long-poll so an abandoned or stuck run can never hold a
+        # connection/worker forever; the client reconnects with EventSource.
+        MAX_TICKS = int(os.getenv("SSE_RUN_EVENTS_MAX_TICKS", "600"))  # ~10 min at 1s
         seq = 0
-        while True:
+        for _tick in range(MAX_TICKS):
             seq += 1
             yield f"id: {seq}\n\n"
             await asyncio.sleep(1)
             conn = connect()
-            row = conn.execute(
-                "SELECT status, nodes FROM workflow_runs WHERE id = %s", (run_id,)
-            ).fetchone()
+            row = conn.execute("SELECT status FROM workflow_runs WHERE id = %s", (run_id,)).fetchone()
+            nodes = conn.execute(
+                "SELECT node_key, status, output, error, updated_at FROM run_nodes "
+                "WHERE run_id = %s ORDER BY node_key", (run_id,),
+            ).fetchall()
             conn.close()
             if row and row["status"] in ("succeeded", "failed", "cancelled"):
-                nodes = decode(row["nodes"], [])
                 for n in nodes:
                     seq += 1
-                    yield f"id: {seq}\ndata: {json.dumps(n)}\n\n"
-                yield f"id: {seq+1}\ndata: {{\"status\": \"completed\"}}\n\n"
-                break
+                    event = dict(n)
+                    event["output"] = decode(event.get("output"), {})
+                    event["updated_at"] = str(event.get("updated_at") or "")
+                    yield f"id: {seq}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield f"id: {seq+1}\ndata: {json.dumps({'status': row['status']})}\n\n"
+                return
+        # Timed out without a terminal state: tell the client to reconnect.
+        yield f"id: {seq+1}\ndata: {json.dumps({'status': 'timeout', 'reconnect': True})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -913,37 +960,6 @@ def list_prompts(user: dict = Depends(get_current_user)) -> ApiResponse:
     return ok(rows)
 
 
-@app.get("/api/v1/model-routes")
-def list_model_routes(user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn = connect()
-    rows = [dict(row) for row in conn.execute("SELECT * FROM model_routes ORDER BY task_type").fetchall()]
-    for row in rows:
-        row["params"] = decode(row["params"], {})
-        row["fallback_json"] = decode(row["fallback_json"], [])
-    conn.close()
-    return ok(rows)
-
-
-@app.put("/api/v1/model-routes/{task_type}")
-def update_model_route(task_type: str, payload: ModelRouteUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn = connect()
-    conn.execute(
-        """
-        INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json)
-        VALUES (%s, %s, %s ,%s, %s, '[]')
-        ON CONFLICT(task_type)
-        DO UPDATE SET provider = excluded.provider, model = excluded.model, params = excluded.params, updated_at = CURRENT_TIMESTAMP
-        """,
-        (new_id("rte"), task_type, payload.provider, payload.model, encode(payload.params)),
-    )
-    conn.commit()
-    row = dict(conn.execute("SELECT * FROM model_routes WHERE task_type = %s", (task_type,)).fetchone())
-    row["params"] = decode(row["params"], {})
-    row["fallback_json"] = decode(row["fallback_json"], [])
-    conn.close()
-    return ok(row)
-
-
 @app.get("/api/v1/knowledge")
 def list_knowledge(
     project_id: str,
@@ -1069,7 +1085,7 @@ def publish(
             safety = check_sensitive(body_text[:5000])
             if not safety["passed"]:
                 return ok({"blocked": True, "words": safety["blocked_words"]})
-    result = publish_content(content_id, platform, mode)
+    result = publish_content(content_id, platform, mode, user_id=user["id"])
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return ok(result)
@@ -1228,3 +1244,20 @@ def get_agent_endpoint(agent_id: str, user: dict = Depends(get_current_user)) ->
     if not agent:
         raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
     return ok({"id": agent_id, **agent})
+
+
+@app.post("/api/v1/agents/{agent_id}/execute")
+@limiter.limit("20/minute")
+def execute_agent_endpoint(request: Request, agent_id: str, payload: AgentExecuteRequest,
+                           user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Execute an Agent contract through the real gateway with project isolation."""
+    conn = connect()
+    ensure_project_member(conn, payload.project_id, user, {"owner", "editor"})
+    conn.close()
+    from app.services.agent_registry import execute_agent
+    try:
+        result = execute_agent(agent_id, payload.project_id, payload.variables,
+                               payload.client_mutation_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
+    return ok(result)

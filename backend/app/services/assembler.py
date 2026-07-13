@@ -53,18 +53,18 @@ class ContextAssembler:
             text = self.layers_built.get(name, "")
             if not text:
                 continue
-            est = len(text) // 2  # Rough token estimate
-            if total + est > self.MAX_TOKENS:
-                if priority <= 3:
-                    sections.insert(0, f"## {self._label(name)}\n{text}")
-                else:
-                    truncated = text[:max(0, (self.MAX_TOKENS - total) * 2)]
-                    if truncated:
-                        sections.append(f"## {self._label(name)} [截断]\n{truncated}")
-                    self.discarded.append(name)
-            else:
-                sections.append(f"## {self._label(name)}\n{text}")
-                total += est
+            remaining = self.MAX_TOKENS - total
+            allowed = min(budget, remaining)
+            if allowed <= 0:
+                self.discarded.append(name)
+                continue
+            estimated = max(1, len(text) // 2)  # conservative Chinese token estimate
+            truncated = estimated > allowed
+            selected = text[: allowed * 2] if truncated else text
+            sections.append(f"## {self._label(name)}{' [截断]' if truncated else ''}\n{selected}")
+            total += min(estimated, allowed)
+            if truncated:
+                self.discarded.append(name)
 
         return "\n\n".join(sections)
 

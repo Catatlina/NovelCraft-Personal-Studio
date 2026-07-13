@@ -14,7 +14,11 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [settings, setAppSettings] = useState<AppSetting[]>([]);
-  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"data">("appsettings");
+  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"data"|"account">("appsettings");
+  const [pwOld, setPwOld] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+  const [showKey, setShowKey] = useState(false);
   const [apiKey, setApiKeyLocal] = useState("");
   const [apiUrl, setApiUrlLocal] = useState("");
   const [model, setModelLocal] = useState("");
@@ -71,7 +75,9 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
   async function saveSetting() {
     if (!editSetting) return;
-    await api(`/api/v1/admin/settings/${editSetting.key}?value=${encodeURIComponent(editSetting.value)}`, {method:"PUT"});
+    await api(`/api/v1/admin/settings/${editSetting.key}`, {
+      method:"PUT", body: JSON.stringify({value: editSetting.value}),
+    });
     setMsg(`${editSetting.key} 已保存`);
     setEditSetting(null);
     const r = await api("/api/v1/admin/settings");
@@ -87,6 +93,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         <button className={subtab==="budgets"?"active":""} onClick={()=>setSubtab("budgets")} style={{justifyContent:"flex-start"}}><DollarSign size={16}/> 预算</button>
         <button className={subtab==="prompts"?"active":""} onClick={()=>setSubtab("prompts")} style={{justifyContent:"flex-start"}}><Code2 size={16}/> Prompts</button>
         <button className={subtab==="data"?"active":""} onClick={()=>setSubtab("data")} style={{justifyContent:"flex-start"}}><Save size={16}/> 数据</button>
+        <button className={subtab==="account"?"active":""} onClick={()=>setSubtab("account")} style={{justifyContent:"flex-start"}}><Key size={16}/> 账号</button>
       </div>
 
       <div className="panel" style={{overflow:"auto"}}>
@@ -95,10 +102,15 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         {subtab==="appsettings" && (
           <div>
             <h3>全局系统配置</h3>
+            <p style={{fontSize:12,color:"var(--text-muted)"}}>下方 API 配置仅保存在当前浏览器会话（BYOK）；定时任务和 Worker 请通过环境变量配置并重启服务。</p>
             <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-              <input placeholder="DeepSeek API Key" value={apiKey}
+              <input type={showKey ? "text" : "password"} placeholder="DeepSeek API Key" value={apiKey}
+                autoComplete="off"
                 onChange={e => { setApiKeyLocal(e.target.value); setSaved(false); }}
                 style={{flex:1}} />
+              <button type="button" onClick={() => setShowKey(v => !v)} style={{whiteSpace:"nowrap"}}>
+                {showKey ? "隐藏" : "显示"}
+              </button>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
               <input placeholder="API 地址，例 https://api.deepseek.com/v1" value={apiUrl}
@@ -218,6 +230,25 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                 )}
               </tbody></table>
             </div>
+          </div>
+        )}
+
+        {subtab==="account" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:420}}>
+            <h3>修改密码</h3>
+            <input type="password" placeholder="当前密码" value={pwOld} onChange={e=>setPwOld(e.target.value)} />
+            <input type="password" placeholder="新密码（至少 8 位）" value={pwNew} onChange={e=>setPwNew(e.target.value)} />
+            <button disabled={!pwOld || pwNew.length < 8} onClick={async()=>{
+              setPwMsg("");
+              try {
+                await api("/api/v1/auth/change-password",{method:"POST",body:JSON.stringify({old_password:pwOld,new_password:pwNew})});
+                setPwOld(""); setPwNew(""); setPwMsg("密码已修改，其他设备的登录已失效。");
+              } catch (err:any) {
+                const detail = err?.payload?.detail;
+                setPwMsg(typeof detail==="string" ? detail : "修改失败，请检查当前密码。");
+              }
+            }}>更新密码</button>
+            {pwMsg && <small className="muted">{pwMsg}</small>}
           </div>
         )}
       </div>

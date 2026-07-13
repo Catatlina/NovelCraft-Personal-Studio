@@ -2,10 +2,12 @@
 import os
 
 import pytest
-from app.db import close_pool
 
 os.environ["NOVELCRAFT_ENV"] = "test"
 os.environ["NOVELCRAFT_ALLOW_MOCK"] = "true"
+os.environ["NOVELCRAFT_JWT_SECRET"] = "novelcraft-test-secret-at-least-32-characters"
+
+from app.db import close_pool
 
 
 @pytest.fixture(autouse=True)

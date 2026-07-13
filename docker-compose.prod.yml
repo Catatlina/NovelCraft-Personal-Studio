@@ -1,0 +1,34 @@
+# Production override for the Singapore host (43.156.17.78).
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --scale flower=0
+#
+# Why this file exists:
+#  - xray already occupies host ports 80 / 8080 / 8443 on Singapore, so the
+#    frontend container must NOT publish host 80. It binds 127.0.0.1:8090 and is
+#    reached only by the host nginx TLS terminator (nginx/novelcraft-singapore.conf).
+#  - The base compose only injects a handful of critical vars into each container's
+#    `environment:` block. Optional runtime vars (TELEGRAM_*, SENTRY_DSN, METRICS_*,
+#    EMBEDDING_*, CORS_ORIGINS, retention, pricing) live only in .env and would NOT
+#    reach the containers without this `env_file`. env_file loads the whole .env so
+#    Telegram alerts / Sentry / memory tuning actually take effect.
+#  - 3.6G RAM is tight, so the worker runs single-process; start with
+#    `--scale flower=0` to skip the optional Flower monitor.
+#
+# Requires Docker Compose v2.24+ for the `!override` list tag (Docker 27+ ships it).
+services:
+  api:
+    env_file:
+      - .env
+
+  worker:
+    env_file:
+      - .env
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1
+
+  beat:
+    env_file:
+      - .env
+
+  frontend:
+    ports: !override
+      - "127.0.0.1:8090:80"        # host nginx (443) → 127.0.0.1:8090 → this container

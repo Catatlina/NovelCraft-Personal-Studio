@@ -85,11 +85,12 @@ def test_run_golden_case_ci_returns_correct_shape():
     result = run_golden_case_ci()
     assert isinstance(result, dict)
     assert "total_prompts" in result
-    assert "passed" in result
-    assert "failed" in result
+    assert "definition_valid" in result
+    assert "definition_invalid" in result
     assert "results" in result
     assert result["total_prompts"] == 10
-    assert result["passed"] + result["failed"] == result["total_prompts"]
+    assert result["definition_valid"] + result["definition_invalid"] == result["total_prompts"]
+    assert result["provider_outputs_verified"] == 0
     assert isinstance(result["results"], dict)
 
 
@@ -97,7 +98,7 @@ def test_run_golden_case_ci_all_pass():
     """All golden case validators are known — CI should have 0 failures."""
     from app.services.fusion_deep import run_golden_case_ci
     result = run_golden_case_ci()
-    assert result["failed"] == 0, f"Unexpected failures: {result['results']}"
+    assert result["definition_invalid"] == 0, f"Invalid definitions: {result['results']}"
 
 
 def test_get_prompt_specs_summary():
@@ -366,15 +367,29 @@ def test_hundred_chapter_memory_empty_novel():
 
 
 def test_six_dim_consistency_check():
-    """six_dim_consistency_check returns all 6 dimension keys."""
+    """six_dim_consistency_check is explicit for an unknown novel, never fake-passes."""
     from app.services.fusion_deep_book import six_dim_consistency_check
     r = six_dim_consistency_check(str(uuid.uuid4()))
     assert len(r["dimensions_checked"]) == 6
     for dim in ["characters", "locations", "timeline", "items", "settings", "relationships"]:
         assert dim in r["dimensions_checked"]
-        assert dim in r["checks"]
-    assert r["character_count"] >= 0
-    assert r["requires_provider"] is True
+    assert r["status"] == "not_found"
+    assert r["checks"] == {}
+
+
+def test_agent_execution_routes_through_gateway(monkeypatch):
+    from app.services.agent_registry import execute_agent
+
+    captured = {}
+    def fake_complete(**kwargs):
+        captured.update(kwargs)
+        return {"outline": ["第一卷", "第二卷", "第三卷"]}
+    monkeypatch.setattr("app.gateway.complete", fake_complete)
+    result = execute_agent("story-architect", "project-1", {"idea": "旧城谜案"}, "agent-mutation")
+    assert result["status"] == "succeeded"
+    assert captured["project_id"] == "project-1"
+    assert captured["prompt_name"] == "bootstrap.gen_outline"
+    assert captured["client_mutation_id"] == "agent-mutation"
 
 
 def test_write_retrieval_and_merge():

@@ -13,8 +13,8 @@ export function LoginPage({ onLogin }: Props) {
   const [showPw, setShowPw] = useState(false);
 
   async function submit() {
-    if (!email.includes("@") || password.length < 6) {
-      setError(mode === "register" ? "密码至少6位" : "请输入正确邮箱和密码");
+    if (!email.includes("@") || password.length < 8) {
+      setError(mode === "register" ? "密码至少8位" : "请输入正确邮箱和密码");
       return;
     }
     setBusy(true); setError("");

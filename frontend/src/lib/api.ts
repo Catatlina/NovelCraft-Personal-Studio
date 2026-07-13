@@ -3,9 +3,9 @@ const K_API_KEY = "nc_api_key";
 const K_API_URL = "nc_api_url";
 const K_MODEL = "nc_model";
 
-/* Vite dev server has proxy; production (npm build) needs absolute API URL */
-const IS_DEV = typeof import.meta !== "undefined" && !!(import.meta as any).env?.DEV;
-const API_BASE = IS_DEV ? "/api" : `${window.location.protocol}//${window.location.hostname}:8000/api`;
+/* Same-origin by default: Vite proxies in development and nginx proxies in production. */
+const CONFIGURED_API_BASE = ((import.meta as any).env?.VITE_API_BASE as string | undefined)?.replace(/\/$/, "");
+const API_BASE = CONFIGURED_API_BASE || "/api";
 let refreshInFlight: Promise<boolean> | null = null;
 
 export class ApiError extends Error {

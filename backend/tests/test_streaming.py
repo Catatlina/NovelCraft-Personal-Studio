@@ -118,9 +118,12 @@ def test_stream_provider_failure_emits_error_frame_only(ctx, monkeypatch):
     assert frames[0]["code"] == "PROVIDER_FAILED"
 
     db = connect()
-    call = db.execute("SELECT 1 AS x FROM ai_calls WHERE client_mutation_id=%s", (mutation,)).fetchone()
+    call = db.execute(
+        "SELECT status, error FROM ai_calls WHERE client_mutation_id=%s", (mutation,)
+    ).fetchone()
     db.close()
-    assert call is None  # 失败不入账为成功
+    assert call and call["status"] == "failed"
+    assert "no key" in call["error"]
 
 
 def test_stream_budget_failure_has_distinct_code(ctx, monkeypatch):

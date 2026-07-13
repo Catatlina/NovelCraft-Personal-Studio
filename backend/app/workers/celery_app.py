@@ -47,5 +47,9 @@ celery_app.conf.update(
             "task": "app.workers.m4_tasks.check_scheduled_publishes",
             "schedule": 60.0,  # Every 60 seconds — TASK-043 due publishes
         },
+        "purge-stale-operational-data": {
+            "task": "app.workers.tasks.purge_stale_operational_data",
+            "schedule": 86400.0,
+        },
     },
 )

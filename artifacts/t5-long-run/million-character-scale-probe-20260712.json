@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "scope": "storage_and_context_budget_only",
+  "ai_quality_claim": false,
+  "chapters": 1000,
+  "persisted_characters": 1028893,
+  "insert_seconds": 0.148,
+  "count_query_ms": 0.926,
+  "assembled_context_characters": 2454,
+  "assemble_ms": 1174.506,
+  "note": "This proves storage/query/context-budget scale only. It does not claim one-million-character AI narrative quality; real-provider evidence remains the separate 100-chapter T5 run."
+}

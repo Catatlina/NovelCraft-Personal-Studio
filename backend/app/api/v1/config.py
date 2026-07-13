@@ -60,6 +60,10 @@ class BudgetLimitRequest(BaseModel):
     limit_cny: float = Field(ge=0.000001, le=10000)
 
 
+class SettingUpdateRequest(BaseModel):
+    value: str = Field(max_length=4000)
+
+
 @router.get("/providers")
 def list_providers(user: dict = Depends(get_current_user)):
     """List all configured AI providers with masked keys."""
@@ -182,12 +186,17 @@ def list_settings(user: dict = Depends(require_admin)):
 
 
 @router.put("/settings/{key}")
-def update_setting(key: str, value: str, user: dict = Depends(require_admin)) -> dict:
-    """Update a single setting."""
+def update_setting(key: str, payload: SettingUpdateRequest, user: dict = Depends(require_admin)) -> dict:
+    """Update non-runtime metadata. Provider runtime configuration is env/BYOK only."""
+    runtime_keys = {f"{provider}_{suffix}" for provider in ("deepseek", "claude", "openai", "gemini")
+                    for suffix in ("api_key", "base_url", "model")}
+    runtime_keys |= {"request_timeout_seconds", "bootstrap_budget_cny"}
+    if key.lower() in runtime_keys:
+        raise HTTPException(409, "运行时 AI 配置请使用环境变量（服务重启生效）或浏览器 BYOK 会话配置")
     db = connect()
     db.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT(key) DO UPDATE SET value=%s, updated_at=now()",
-        (key, value, value),
+        (key, payload.value, payload.value),
     )
     db.commit()
     row = db.execute("SELECT * FROM settings WHERE key = %s", (key,)).fetchone()
@@ -209,12 +218,12 @@ def env_check(user: dict = Depends(require_admin)):
     checks = []
     for provider in ["deepseek", "claude", "openai", "gemini"]:
         env_key = os.getenv(f"{provider.upper()}_API_KEY", "")
-        db_val = db_settings.get(f"{provider}_api_key", "")
         checks.append({
             "provider": provider,
             "env_configured": bool(env_key),
-            "db_configured": bool(db_val),
-            "effective_source": "env" if env_key else ("db" if db_val else "none"),
+            "db_configured": bool(db_settings.get(f"{provider}_api_key", "")),
+            "effective_source": "env" if env_key else "none",
+            "note": "DB 中的旧值不参与运行时调用，请迁移到环境变量后删除",
         })
     return {"code": 0, "message": "ok", "data": checks}
 

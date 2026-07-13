@@ -89,7 +89,7 @@ def test_schema_records_fetch_time_capture_time_and_snapshot_identity():
 def test_failed_snapshot_has_a_registered_replay_endpoint():
     from app.main import app
 
-    routes = {(route.path, method) for route in app.routes for method in getattr(route, "methods", set())}
+    routes = {(path, method.upper()) for path, operations in app.openapi()["paths"].items() for method in operations}
     assert ("/api/v1/ranking/snapshots/{snapshot_id}/retry", "POST") in routes
 
 

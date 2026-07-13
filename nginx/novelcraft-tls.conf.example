@@ -1,5 +1,5 @@
-# Production reverse proxy. Replace example.com and certificate paths before
-# enabling; the HTTP listener only redirects and never serves credentials.
+# Production TLS template. Replace example.com and provision the two certificate
+# files (for example with certbot) before enabling this virtual host.
 server {
     listen 80;
     server_name example.com;
@@ -9,6 +9,7 @@ server {
 server {
     listen 443 ssl http2;
     server_name example.com;
+
     ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;

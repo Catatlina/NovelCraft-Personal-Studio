@@ -242,10 +242,10 @@ def test_no_duplicate_method_path_routes_are_registered():
     from app.main import app
 
     pairs = [
-        (method, route.path)
-        for route in app.routes
-        for method in (getattr(route, "methods", set()) or set())
-        if method not in {"HEAD", "OPTIONS"}
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        for method in operations
+        if method.upper() not in {"HEAD", "OPTIONS"}
     ]
     assert [pair for pair, count in Counter(pairs).items() if count > 1] == []
 

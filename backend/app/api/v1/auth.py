@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     display_name: str = Field(default="", max_length=100)
 
 
@@ -38,6 +38,11 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 def _set_session_cookies(response: Response, refresh: str) -> str:
@@ -175,3 +180,35 @@ def me(user: dict = Depends(get_current_user)):
     return {"code": 0, "message": "ok", "data": {
         "id": user["id"], "email": user["email"], "display_name": user["display_name"],
     }}
+
+
+@router.post("/change-password")
+@limiter.limit("5/minute")
+def change_password(
+    request: Request,
+    response: Response,
+    payload: ChangePasswordRequest = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Authenticated password change. Bumping token_version invalidates every
+    previously issued access/refresh token, so all other sessions are logged out."""
+    db = connect()
+    row = db.execute("SELECT password_hash, token_version FROM users WHERE id = %s", (user["id"],)).fetchone()
+    if row is None or not verify_password(payload.old_password, row["password_hash"]):
+        db.close()
+        raise HTTPException(status_code=401, detail="current password is incorrect")
+    if verify_password(payload.new_password, row["password_hash"]):
+        db.close()
+        raise HTTPException(status_code=400, detail="new password must differ from the current one")
+    new_version = int(row["token_version"] or 0) + 1
+    db.execute(
+        "UPDATE users SET password_hash = %s, token_version = %s WHERE id = %s",
+        (hash_password(payload.new_password), new_version, user["id"]),
+    )
+    db.commit()
+    db.close()
+    # Re-issue this session's tokens at the new version so the caller stays logged in.
+    access = create_access_token(user["id"], new_version)
+    refresh = create_refresh_token(user["id"], new_version)
+    _set_session_cookies(response, refresh)
+    return {"code": 0, "message": "ok", "data": {"access_token": access}}

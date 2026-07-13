@@ -118,7 +118,6 @@ def publish_state_machine(content_id: str, platform: str, target_state: str) -> 
     if content_id:
         try:
             _uuid.UUID(content_id)
-            lookup_id = content_id
         except (ValueError, AttributeError):
             db.close()
             return {"status": "error", "message": f"invalid content_id format: {content_id}"}
@@ -127,7 +126,7 @@ def publish_state_machine(content_id: str, platform: str, target_state: str) -> 
         return {"status": "error", "message": "content_id is required"}
     record = db.execute(
         "SELECT * FROM publish_records WHERE content_id=%s AND platform=%s ORDER BY created_at DESC LIMIT 1",
-        (lookup_id, platform),
+        (content_id, platform),
     ).fetchone()
 
     if record:
@@ -135,6 +134,10 @@ def publish_state_machine(content_id: str, platform: str, target_state: str) -> 
         if target_state not in valid_transitions.get(current_state, []):
             db.close()
             return {"status": "error", "message": f"invalid transition: {current_state}→{target_state}"}
+
+    elif target_state != "draft":
+        db.close()
+        return {"status": "error", "message": "first state must be draft"}
 
     rid = new_id()
     db.execute(
@@ -146,19 +149,21 @@ def publish_state_machine(content_id: str, platform: str, target_state: str) -> 
     return {"status": "ok", "record_id": rid, "from": record["status"] if record else "none", "to": target_state}
 
 
-def get_publishing_history(content_id: str = "", platform: str = "") -> list[dict]:
+def get_publishing_history(content_id: str = "", platform: str = "",
+                           project_ids: list[str] | None = None) -> list[dict]:
     """NC-PUB-001: Full publishing history with state transitions."""
-    clauses, params = [], []
+    clauses, params = ["c.project_id = ANY(%s::uuid[])"], [project_ids or []]
     if content_id:
-        clauses.append("content_id=%s")
+        clauses.append("pr.content_id=%s")
         params.append(content_id)
     if platform:
-        clauses.append("platform=%s")
+        clauses.append("pr.platform=%s")
         params.append(platform)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     db = connect()
     rows = db.execute(
-        f"SELECT * FROM publish_records {where} ORDER BY created_at DESC LIMIT 50",
+        f"SELECT pr.* FROM publish_records pr JOIN contents c ON c.id=pr.content_id {where} "
+        "ORDER BY pr.created_at DESC LIMIT 50",
         tuple(params),
     ).fetchall()
     db.close()
@@ -188,15 +193,18 @@ def collect_platform_data(platform: str, content_id: str, data: dict) -> dict:
     return {"status": "ok", "post_id": pid, "platform": platform}
 
 
-def aggregate_platform_stats(platform: str = "") -> dict:
+def aggregate_platform_stats(platform: str = "", project_ids: list[str] | None = None) -> dict:
     """NC-PUB-002: Aggregate engagement stats across all platforms or per platform."""
     db = connect()
-    where = "WHERE platform = %s" if platform else ""
-    params = (platform,) if platform else ()
+    clauses, params = ["project_id = ANY(%s::uuid[])"], [project_ids or []]
+    if platform:
+        clauses.append("platform=%s")
+        params.append(platform)
+    where = "WHERE " + " AND ".join(clauses)
     total = db.execute(
         f"SELECT SUM((meta->>'reads')::int) as reads, SUM((meta->>'likes')::int) as likes, "
         f"SUM((meta->>'shares')::int) as shares, SUM((meta->>'revenue')::float) as revenue, "
-        f"COUNT(*) as posts FROM published_posts {where}", params
+        f"COUNT(*) as posts FROM published_posts {where}", tuple(params)
     ).fetchone()
     db.close()
     return {
@@ -208,7 +216,7 @@ def aggregate_platform_stats(platform: str = "") -> dict:
 
 # ===== NC-PUB-003: ROI dashboard + topic feedback =====
 
-def generate_roi_report() -> dict:
+def generate_roi_report(project_ids: list[str] | None = None) -> dict:
     """NC-PUB-003: ROI report — cost vs engagement per platform."""
     db = connect()
     rows = db.execute("""
@@ -216,8 +224,8 @@ def generate_roi_report() -> dict:
                SUM((meta->>'reads')::int) as reads,
                SUM((meta->>'likes')::int) as likes,
                SUM((meta->>'revenue')::float) as revenue
-        FROM published_posts GROUP BY platform
-    """).fetchall()
+        FROM published_posts WHERE project_id = ANY(%s::uuid[]) GROUP BY platform
+    """, (project_ids or [],)).fetchall()
     db.close()
 
     roi = []
@@ -233,12 +241,13 @@ def generate_roi_report() -> dict:
     return {"roi_by_platform": sorted(roi, key=lambda x: x["revenue"], reverse=True)}
 
 
-def generate_topic_suggestions_from_data() -> list[str]:
+def generate_topic_suggestions_from_data(project_ids: list[str] | None = None) -> list[str]:
     """NC-PUB-003: Derive topic suggestions from successful published content."""
     db = connect()
     top = db.execute(
-        "SELECT meta->>'title' as title FROM published_posts "
-        "WHERE (meta->>'reads')::int > 100 ORDER BY (meta->>'reads')::int DESC LIMIT 5"
+        "SELECT title FROM published_posts WHERE project_id = ANY(%s::uuid[]) "
+        "AND COALESCE((meta->>'reads')::int, 0) > 100 "
+        "ORDER BY (meta->>'reads')::int DESC LIMIT 5", (project_ids or [],)
     ).fetchall()
     db.close()
     suggestions = [f"「{t['title']}」表现优异 → 继续深耕此领域" for t in top if t["title"]]

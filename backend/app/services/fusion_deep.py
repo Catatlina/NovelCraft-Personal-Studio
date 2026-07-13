@@ -108,34 +108,35 @@ GOLDEN_VALIDATORS = {
 
 
 def run_golden_case_ci() -> dict:
-    """Run all golden case validations. Returns pass/fail per prompt."""
+    """Validate golden-case definitions only; never claim model quality without execution."""
     results = {}
     for name, spec in PROMPT_SPECS.items():
         cases = spec.get("golden_cases", [])
         if not cases:
-            results[name] = {"status": "skip", "reason": "no golden cases"}
+            results[name] = {"status": "unverified", "reason": "no golden cases"}
             continue
         passed, failed = 0, 0
         details = []
         for i, case in enumerate(cases):
             expects = case.get("expect", {})
-            # In real CI: would call render_prompt + validate_output
-            # For now: validate expected keys exist in spec schema
             for key, rule in expects.items():
                 validator = GOLDEN_VALIDATORS.get(rule)
-                if validator:
+                if validator and key in spec.get("output_schema", {}):
                     passed += 1
                 else:
                     failed += 1
-                    details.append(f"case_{i}.{key}: unknown validator '{rule}'")
+                    details.append(f"case_{i}.{key}: missing output key or unknown validator '{rule}'")
         results[name] = {
-            "status": "pass" if failed == 0 else "fail",
-            "golden_cases": len(cases), "passed": passed, "failed": failed,
+            "status": "definition_valid" if failed == 0 else "definition_invalid",
+            "execution_status": "unverified_provider_output",
+            "golden_cases": len(cases), "definition_checks": passed, "failed": failed,
             "details": details[:5],
         }
     total = len(results)
-    passed = sum(1 for r in results.values() if r["status"] in ("pass", "skip"))
-    return {"total_prompts": total, "passed": passed, "failed": total - passed, "results": results}
+    invalid = sum(1 for r in results.values() if r["status"] == "definition_invalid")
+    return {"total_prompts": total, "definition_valid": total - invalid,
+            "definition_invalid": invalid, "provider_outputs_verified": 0,
+            "results": results}
 
 
 def get_prompt_specs_summary() -> dict:
