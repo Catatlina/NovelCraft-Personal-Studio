@@ -185,6 +185,28 @@ sudo apt install -y rclone && rclone config      # 交互式配 sftp: us-vps →
 
 ---
 
+## 8.5 热点采集走代理（BUG-001：海外服务器直连知乎/微博 502）
+
+新加坡直连抓不到知乎/微博（海外 IP 被反爬/风控），`/api/v1/hotspots` 会 502。热点抓取已支持**独立 HTTP 代理**（只作用于热点，DeepSeek 等仍直连）。
+
+1. 给新加坡的 xray 加一个**本地 HTTP 入站**（xray 支持 `"protocol":"http"`），例如监听 `127.0.0.1:10809`，其出站走一个能访问知乎/微博的链路：
+   ```json
+   { "listen": "127.0.0.1", "port": 10809, "protocol": "http", "tag": "http-in" }
+   ```
+2. `.env` 指向它：
+   ```bash
+   HOTSPOT_HTTP_PROXY=http://127.0.0.1:10809
+   HOTSPOT_FETCH_TIMEOUT=10
+   ```
+3. 重启并验证：
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api worker beat
+   curl -s https://novel.xyjin.xyz/api/v1/hotspots -H "Authorization: Bearer <token>" | head -c 300
+   ```
+   返回热点列表 = 通；仍 502 说明该代理链路本身访问不到源（换一个能到知乎/微博的出站）。
+
+> 注意：SOCKS 不支持，必须是 **HTTP 入站**；代理只对热点生效，不影响 DeepSeek 直连速度。若你的所有节点都在海外、无法抵达知乎/微博，则该功能受限于代理可达性，与本应用无关。
+
 ## 9. 监控现状（本轮口径）
 
 - **Telegram**：✅ 启用（第 6 步）。个人部署最实用的一条。

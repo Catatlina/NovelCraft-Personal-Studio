@@ -11,6 +11,23 @@ HOTSPOT_SOURCES = {
 
 DUPLICATE_WINDOW_HOURS = 24
 
+# A browser-like UA reduces anti-bot rejections from the Chinese source APIs.
+_BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+
+def _hotspot_opener() -> "urllib.request.OpenerDirector":
+    """Route hotspot fetches through HOTSPOT_HTTP_PROXY when set (e.g. an xray HTTP
+    inbound at http://127.0.0.1:10809). Scoped to hotspots only — the AI gateway and
+    everything else keep their direct route. Overseas hosts (e.g. the Singapore VPS)
+    often cannot reach zhihu/weibo directly; this lets that traffic go via a proxy."""
+    proxy = os.getenv("HOTSPOT_HTTP_PROXY", "").strip()
+    if proxy:
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+    return urllib.request.build_opener()
+
 
 def _dedup_key(title: str, source: str) -> str:
     return hashlib.sha256(f"{source}:{title}".encode()).hexdigest()[:32]
@@ -20,10 +37,14 @@ def fetch_hotspots() -> tuple[list[dict], dict[str, str]]:
     """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4)."""
     results: list[dict] = []
     source_status: dict[str, str] = {}
+    opener = _hotspot_opener()
+    timeout = int(os.getenv("HOTSPOT_FETCH_TIMEOUT", "10"))
     for key, cfg in HOTSPOT_SOURCES.items():
         try:
-            req = urllib.request.Request(cfg["url"], headers={"User-Agent": "NovelCraft/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            req = urllib.request.Request(
+                cfg["url"], headers={"User-Agent": _BROWSER_UA, "Accept": "application/json"}
+            )
+            with opener.open(req, timeout=timeout) as resp:
                 data = json.loads(resp.read())
             items = data.get("data", data.get("realtime", []))[:15]
             count = 0
