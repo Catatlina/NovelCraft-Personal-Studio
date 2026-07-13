@@ -35,11 +35,12 @@ class _TaskDb:
 @pytest.mark.parametrize(
     ("node_key", "task_type", "invalid_output"),
     [
-        ("n3", "gen_synopsis", {}),
-        ("n4", "gen_worldview", {"worldview": {}}),
-        ("n5", "gen_characters", {"characters": []}),
-        ("n6", "gen_outline", {"outline": []}),
-        ("n7", "gen_chapter1", {"chapter": {"title": "", "body": []}}),
+        # V2 four-stage nodes: malformed output must never persist as success.
+        ("plan_idea", "plan_idea", {}),
+        ("plan_world_architecture", "plan_world_architecture", {"worldview": {}}),
+        ("plan_character_system", "plan_character_system", {"characters": []}),
+        ("blueprint_chapter_outline", "blueprint_chapter_outline", {"chapter_outlines": []}),
+        ("write_chapter_draft", "write_chapter_draft", {"chapter": {"title": "", "body": []}}),
     ],
 )
 def test_invalid_or_empty_bootstrap_output_is_not_persisted_or_succeeded(
@@ -51,6 +52,11 @@ def test_invalid_or_empty_bootstrap_output_is_not_persisted_or_succeeded(
     monkeypatch.setattr(tasks, "connect", lambda: db)
     monkeypatch.setattr(tasks.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(tasks, "complete", lambda **_kwargs: invalid_output)
+    # Stage enrichment reads real tables; irrelevant to this contract.
+    monkeypatch.setattr(tasks, "_enrich_blueprint_context", lambda context, _novel_id: context)
+    monkeypatch.setattr(tasks, "_enrich_finalization_context", lambda context, _novel_id: context)
+    monkeypatch.setattr(tasks, "_write_before_search", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(tasks, "_create_checkpoint", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(
         tasks,
         "_persist_output",
@@ -138,28 +144,31 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
     calls = []
     monkeypatch.setattr(tasks, "connect", lambda: db)
     monkeypatch.setattr(tasks.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(tasks, "_create_checkpoint", lambda *_args, **_kwargs: "")
 
     def complete(**kwargs):
         calls.append(kwargs)
-        return {"synopsis": "这是一个满足严格长度要求并具备明确冲突与目标的有效故事简介。",
-                "selling_points": ["明确的开篇冲突", "可持续升级的核心目标"]}
+        return {"idea_expanded": "一位创作者发现自己写下的故事正在现实中逐字发生，必须找出幕后执笔者。",
+                "core_hook": "你写的每一个字都在杀人",
+                "target_audience": "18-35 岁悬疑读者",
+                "title_candidates": ["《甲》", "《乙》", "《丙》"]}
 
     monkeypatch.setattr(tasks, "complete", complete)
     monkeypatch.setattr(tasks, "_persist_output", lambda *_args: None)
-    # Stop after n3: n4 lookup returns missing once n3 has completed.
+    # Stop after plan_idea: the next node lookup returns missing.
     original_execute = db.execute
 
     def execute(sql, params=()):
-        if "SELECT * FROM run_nodes" in sql and params[1] != "n3":
+        if "SELECT * FROM run_nodes" in sql and params[1] != "plan_idea":
             return _Cursor(None)
         return original_execute(sql, params)
 
     db.execute = execute
 
-    result = tasks.execute_bootstrap.run("run-1", "n3")
+    result = tasks.execute_bootstrap.run("run-1", "plan_idea")
 
     assert result["status"] == "error"
-    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:n3"
+    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:v2"
 
 
 def test_gateway_replay_by_mutation_id_returns_existing_output_without_new_writes(monkeypatch):

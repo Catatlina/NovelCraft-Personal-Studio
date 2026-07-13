@@ -26,7 +26,9 @@ def upgrade():
 
         CREATE TABLE IF NOT EXISTS subscriptions (
             id VARCHAR(36) PRIMARY KEY,
-            user_id VARCHAR(36) NOT NULL REFERENCES users(id),
+            -- users.id is uuid; a varchar FK aborts the whole migration chain
+            -- on a clean database (audit BUG-03, 2026-07-13).
+            user_id UUID NOT NULL REFERENCES users(id),
             plan_id VARCHAR(36) REFERENCES plans(id),
             status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'expired', 'trial')),
             started_at TIMESTAMPTZ DEFAULT now(),

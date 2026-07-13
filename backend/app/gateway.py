@@ -22,7 +22,9 @@ _request_api_base_url: ContextVar[str | None] = ContextVar("request_api_base_url
 _request_model: ContextVar[str | None] = ContextVar("request_model", default=None)
 
 
-MODEL = "deepseek-v4-pro"
+# Default model when no route exists. Must be a model that actually exists on
+# the DeepSeek API — a fictional name here fails every unrouted task at call time.
+MODEL = "deepseek-chat"
 PROVIDER = "deepseek"
 
 
@@ -109,6 +111,122 @@ class _RhythmOutput(_StrictOutput):
     sections: list[dict[str, Any]]
 
 
+# ── V2 four-stage bootstrap output models ──────────────────────────────────
+# Real models are non-deterministic and often add extra fields; per the
+# 2026-07-13 audit remediation these tolerate extras (ignore) while still
+# requiring the fields downstream nodes consume.
+class _LenientOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class _PlanIdeaOutput(_LenientOutput):
+    idea_expanded: str = Field(min_length=20)
+    core_hook: str = Field(min_length=5)
+    target_audience: str = Field(min_length=2)
+    title_candidates: list[str] = Field(min_length=3, max_length=8)
+
+
+class _PlanMarketFitOutput(_LenientOutput):
+    market_score: float = Field(ge=0, le=100)
+    competitive_landscape: str = Field(min_length=5)
+    market_gap: str = Field(min_length=5)
+
+
+class _PlanStoryPatternOutput(_LenientOutput):
+    story_model: str = Field(min_length=2)
+    act_structure: list[str] = Field(min_length=1)
+    turning_points: list[Any]
+
+
+class _PlanCoreGameplayOutput(_LenientOutput):
+    power_system: str = Field(min_length=5)
+    progression_path: str = Field(min_length=5)
+    pleasure_points: list[str] = Field(min_length=2)
+
+
+class _LenientWorldviewBody(_LenientOutput):
+    name: str = Field(min_length=2)
+    rules: list[str] = Field(min_length=3)
+
+
+class _PlanWorldArchitectureOutput(_LenientOutput):
+    worldview: _LenientWorldviewBody
+
+
+class _LenientCharacterBody(_LenientOutput):
+    name: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    arc: str = Field(min_length=2)
+
+
+class _PlanCharacterSystemOutput(_LenientOutput):
+    characters: list[_LenientCharacterBody] = Field(min_length=3, max_length=10)
+
+
+class _PlanConflictMapOutput(_LenientOutput):
+    conflicts: list[dict[str, Any]] = Field(min_length=1)
+
+
+class _BlueprintVolumePlanOutput(_LenientOutput):
+    volumes: list[dict[str, Any]] = Field(min_length=1)
+
+
+class _BlueprintChapterOutlineOutput(_LenientOutput):
+    chapter_outlines: list[dict[str, Any]] = Field(min_length=3)
+
+
+class _BlueprintSceneBeatOutput(_LenientOutput):
+    scene_beats: list[dict[str, Any]] = Field(min_length=3)
+
+
+class _LenientChapterBody(_LenientOutput):
+    title: str = Field(min_length=2)
+    body: list[str] = Field(min_length=4)
+
+
+class _WriteChapterDraftOutput(_LenientOutput):
+    chapter: _LenientChapterBody
+
+
+class _WriteSelfReviewOutput(_LenientOutput):
+    self_score: float = Field(ge=0, le=100)
+    strengths: list[str]
+    weaknesses: list[str]
+
+
+class _LenientPolishedBody(_LenientOutput):
+    body: list[str] = Field(min_length=4)
+
+
+class _WritePolishOutput(_LenientOutput):
+    polished: _LenientPolishedBody
+    changes_summary: str
+
+
+class _WriteLengthCheckOutput(_LenientOutput):
+    actual_chars: int = Field(ge=0)
+    is_acceptable: bool
+    advice: str = ""
+
+
+class _WriteFactReconcileOutput(_LenientOutput):
+    reconciliation: dict[str, Any]
+
+
+class _FinalConsistencyCheckOutput(_LenientOutput):
+    checks: dict[str, Any]
+    overall_status: str = Field(min_length=2)
+
+
+class _FinalContinuityAuditOutput(_LenientOutput):
+    continuity: dict[str, Any]
+
+
+class _FinalHumanizeOutput(_LenientOutput):
+    humanized_text: str = Field(min_length=50)
+    changes: list[str]
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -120,6 +238,25 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "review_ooc": _OocOutput,
     "review_consistency": _ConsistencyOutput,
     "review_rhythm": _RhythmOutput,
+    # V2 four-stage bootstrap (18 agent nodes)
+    "plan_idea": _PlanIdeaOutput,
+    "plan_market_fit": _PlanMarketFitOutput,
+    "plan_story_pattern": _PlanStoryPatternOutput,
+    "plan_core_gameplay": _PlanCoreGameplayOutput,
+    "plan_world_architecture": _PlanWorldArchitectureOutput,
+    "plan_character_system": _PlanCharacterSystemOutput,
+    "plan_conflict_map": _PlanConflictMapOutput,
+    "blueprint_volume_plan": _BlueprintVolumePlanOutput,
+    "blueprint_chapter_outline": _BlueprintChapterOutlineOutput,
+    "blueprint_scene_beat": _BlueprintSceneBeatOutput,
+    "write_chapter_draft": _WriteChapterDraftOutput,
+    "write_self_review": _WriteSelfReviewOutput,
+    "write_polish": _WritePolishOutput,
+    "write_length_check": _WriteLengthCheckOutput,
+    "write_fact_reconcile": _WriteFactReconcileOutput,
+    "final_consistency_check": _FinalConsistencyCheckOutput,
+    "final_continuity_audit": _FinalContinuityAuditOutput,
+    "final_humanize": _FinalHumanizeOutput,
 }
 
 
@@ -780,6 +917,112 @@ def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:
         else:
             text = f"润色版：{selection.strip()}（语言更顺，节奏更稳。）"
         return {"text": text}
+    # ── V2 four-stage bootstrap mocks (schema-conformant so the mock T2
+    # pipeline exercises the same validation the real provider faces) ──
+    if task_type == "plan_idea":
+        return {
+            "idea_expanded": f"基于灵感「{idea}」展开：一位普通创作者发现自己写下的{genre}故事正在现实中逐字发生，"
+                             "他必须在故事完结前找出幕后执笔者，否则自己的人生将被彻底改写。",
+            "core_hook": "你写的每一个字都在杀人，而你停不下笔。",
+            "target_audience": "18-35 岁悬疑/脑洞向读者",
+            "title_candidates": ["《墨晶来信》", "《回声城邦》", "《第七封回信》", "《执笔者》", "《雾灯纪元》"],
+        }
+    if task_type == "plan_market_fit":
+        return {"market_score": 78.0,
+                "competitive_landscape": "同类元叙事悬疑作品头部集中在无限流框架，普遍弱化现实锚点。",
+                "market_gap": "现实系元叙事+创作者身份代入，现有作品未覆盖。"}
+    if task_type == "plan_story_pattern":
+        return {"story_model": "悬疑解谜+成长",
+                "act_structure": ["第一幕：发现故事成真", "第二幕：追查执笔者", "第三幕：自我审判与改写"],
+                "turning_points": [{"point": "墨晶第一次出现", "chapter_hint": "第1章"},
+                                    {"point": "盟友身份反转", "chapter_hint": "第15章"}],
+                "emotional_arc": "好奇→惊惧→掌控→释然"}
+    if task_type == "plan_core_gameplay":
+        return {"power_system": "墨晶记忆体系：重要记忆凝结为墨晶，可读取、交易、改写",
+                "progression_path": "读者→执笔者→修档人→叙事仲裁者，四级",
+                "pleasure_points": ["信息差反杀", "伏笔跨章回收", "以文字改写现实的代价抉择"],
+                "power_ceiling": "每次改写都留下不可擦除的旁证，滥用即暴露"}
+    if task_type == "plan_world_architecture":
+        return {"worldview": {"name": "回声城邦",
+                               "rules": ["重要记忆凝结成可交易的墨晶", "改写历史留下不可擦除的旁证",
+                                          "夜航者修补叙事裂缝", "城邦每夜按已出版文本自我校对"],
+                               "forces": ["修档馆：维护正史", "执笔会：垄断改写权"],
+                               "geography": "环河七区，修档馆居中",
+                               "history": "百年前的大改写抹去了城邦第一任执笔者"}}
+    if task_type == "plan_character_system":
+        return {"characters": [
+            {"name": "林序", "role": "主角", "arc": "从逃避表达走向主动书写", "motivation": "夺回人生的著作权",
+             "flaw": "习惯性自我怀疑", "relationships": [{"with": "沈微澜", "type": "互信盟友"}]},
+            {"name": "沈微澜", "role": "盟友", "arc": "在秩序与真相间重新选择", "motivation": "修正家族档案",
+             "flaw": "过度守序", "relationships": [{"with": "闻烬", "type": "旧识决裂"}]},
+            {"name": "闻烬", "role": "反派", "arc": "相信牺牲少数即可拯救多数", "motivation": "阻止第二次大改写",
+             "flaw": "目的正义化手段", "relationships": [{"with": "林序", "type": "镜像对照"}]},
+        ]}
+    if task_type == "plan_conflict_map":
+        return {"conflicts": [
+            {"type": "external", "between": ["林序", "执笔会"], "stakes": "人生著作权",
+             "escalation": "从躲避追踪到正面夺权"},
+            {"type": "internal", "between": ["林序", "林序"], "stakes": "表达的勇气",
+             "escalation": "每次改写都在考验他是否敢署名"},
+        ]}
+    if task_type == "blueprint_volume_plan":
+        return {"volumes": [{"number": 1, "title": "墨晶来信", "arc": "发现与卷入",
+                              "start_chapter": 1, "end_chapter": 50,
+                              "climax": "修档馆之夜", "hook": "第一枚墨晶里是主角自己的记忆"}],
+                "chapter_tree": [{"volume": 1, "start_chapter": 1, "end_chapter": 50}]}
+    if task_type == "blueprint_chapter_outline":
+        return {"chapter_outlines": [
+            {"volume": 1, "seq": i, "title": f"第{i}章", "outline": f"第{i}章：目标受阻后的转折与代价。",
+             "beats": ["建立目标", "遭遇阻碍", "付出代价", "转折钩子"],
+             "foreshadow_plant": ["墨晶微光" if i == 1 else ""], "foreshadow_reap": []}
+            for i in range(1, 11)
+        ]}
+    if task_type == "blueprint_scene_beat":
+        return {"scene_beats": [
+            {"scene": 1, "pov": "林序", "location": "出租屋", "goal": "赶稿", "conflict": "文档自行改写",
+             "outcome": "意外", "emotional_shift": "烦躁→惊惧"},
+            {"scene": 2, "pov": "林序", "location": "楼道", "goal": "查敲门声", "conflict": "无人却有墨晶",
+             "outcome": "失败", "emotional_shift": "惊惧→好奇"},
+            {"scene": 3, "pov": "林序", "location": "便利店", "goal": "求证现实", "conflict": "店员说出他草稿台词",
+             "outcome": "成功", "emotional_shift": "好奇→下定决心"},
+        ]}
+    if task_type == "write_chapter_draft":
+        return {"chapter": {"title": "第一章 墨晶来信", "body": [
+            f"{title}的第一章开始于一场不合时宜的停电。林序盯着屏幕上最后一行字，发现它并不是自己刚刚写下的。",
+            "窗外的雨声像无数细小的指节敲在玻璃上。楼下便利店的灯牌忽明忽暗，而他文档里的城市名，正好也叫回声城邦。",
+            "手机弹出一条陌生短信：不要删掉下一段。林序以为是谁的恶作剧，直到门外响起三下敲门声，节奏和他草稿里的描写完全一致。",
+            "他打开门，门外没有人，只有一枚黑色墨晶躺在脚垫中央。",
+            "墨晶内部像困着一盏灯，照亮了他从未告诉过任何人的一句话：如果故事能救人，我愿意先被故事审判。",
+            "林序握紧墨晶，转身回屋。屏幕上，光标正停在一行新出现的字后面——「现在，轮到你写了。」",
+        ]}}
+    if task_type == "write_self_review":
+        return {"overall": "开篇钩子成立，节奏可控", "strengths": ["悬念递进清晰", "现实锚点扎实"],
+                "weaknesses": ["主角职业压力可再落地"], "suggestions": ["结尾补一个明确的行动目标"],
+                "self_score": 84.0}
+    if task_type == "write_polish":
+        return {"polished": {"title": "第一章 墨晶来信", "body": [
+            "停电来得不合时宜。林序盯着屏幕上最后一行字——那不是他写的。",
+            "雨点敲着玻璃，楼下便利店的灯牌忽明忽暗。他文档里的城市，也叫回声城邦。",
+            "陌生短信弹出来：不要删掉下一段。门外接着响起三下敲门声，和他草稿里写的一模一样。",
+            "门外没有人。只有一枚黑色墨晶，躺在脚垫中央。",
+            "墨晶里像困着一盏灯，照亮他从未说出口的那句话：如果故事能救人，我愿意先被故事审判。",
+            "他握紧墨晶回屋。光标停在一行新字后面——「现在，轮到你写了。」",
+        ]}, "changes_summary": "打散雷同句式，收紧开篇三段，强化结尾钩子。"}
+    if task_type == "write_length_check":
+        return {"actual_chars": 3200, "is_acceptable": True, "advice": "无需调整"}
+    if task_type == "write_fact_reconcile":
+        return {"reconciliation": {"conflicts_found": 0, "issues": [], "passed": True}}
+    if task_type == "final_consistency_check":
+        return {"checks": {dim: {"status": "pass", "issues": []} for dim in
+                            ("characters", "locations", "timeline", "objects", "settings", "foreshadowing")},
+                "overall_status": "pass", "warning_count": 0}
+    if task_type == "final_continuity_audit":
+        return {"continuity": {"status": "continuous", "gaps": [], "narrative_flow": "场景因果链完整，情绪曲线连续"}}
+    if task_type == "final_humanize":
+        return {"humanized_text": "停电来得不合时宜。林序盯着屏幕上最后一行字——那不是他写的。"
+                                   "雨点敲着玻璃，楼下便利店的灯牌忽明忽暗。他文档里的城市，也叫回声城邦。"
+                                   "门外没有人，只有一枚黑色墨晶躺在脚垫中央。他握紧墨晶回屋，光标停在一行新字后面——「现在，轮到你写了。」",
+                "changes": ["删去两处总结式收尾", "长短句交替"], "ai_patterns_removed": ["章末总结体"]}
     return {"text": f"{style}：围绕“{idea}”生成的内容。"}
 
 

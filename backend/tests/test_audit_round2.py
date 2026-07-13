@@ -93,15 +93,16 @@ def test_matrix_batch_run_actually_executes(authed, monkeypatch):
 # --- hotspots: source failures are explicit ------------------------------------
 
 def test_hotspot_source_failures_are_reported(monkeypatch):
-    import urllib.request
+    from app.services import hotspot_collector as hc
 
-    from app.services.hotspot_collector import fetch_hotspots
+    class _DownOpener:
+        def open(self, *_args, **_kwargs):
+            raise OSError("connection refused")
 
-    def _down(*args, **kwargs):
-        raise OSError("connection refused")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _down)
-    items, status = fetch_hotspots()
+    # The collector routes through its own opener (proxy support); patching
+    # urllib.request.urlopen no longer intercepts — and would hit real network.
+    monkeypatch.setattr(hc, "_hotspot_opener", lambda: _DownOpener())
+    items, status = hc.fetch_hotspots()
     assert items == []
     assert all(value.startswith("error") for value in status.values())
 

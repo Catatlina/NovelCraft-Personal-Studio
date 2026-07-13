@@ -37,6 +37,7 @@ from .api.v1.overseas import router as overseas_router
 from .api.v1.batch_endpoints import router as batch_router
 from .api.v1.complete_api import router as complete_router
 from .api.v1.ranking import router as ranking_router
+from .api.v1.fusion import router as fusion_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -65,6 +66,7 @@ app.include_router(overseas_router)
 app.include_router(batch_router)
 app.include_router(complete_router)
 app.include_router(ranking_router)
+app.include_router(fusion_router, prefix="/api/v1")
 init_metrics(app)
 install_rate_limiter(app)
 app.add_middleware(
@@ -197,7 +199,10 @@ def load_run_for_user(run_id: str, user: dict, roles: set[str] | None = None) ->
 
 @app.get("/api/v1/healthz")
 def healthz() -> ApiResponse:
-    checks = {"status": "ok", "ai_provider": settings.ai_provider}
+    checks = {"status": "ok", "ai_provider": settings.ai_provider,
+              # BUG-07: lets the UI warn before a keyless bootstrap fails.
+              # Boolean only — never the key material.
+              "ai_key_configured": bool(settings.deepseek_api_key)}
     try:
         conn = connect()
         conn.execute("SELECT 1").fetchone()
@@ -212,8 +217,25 @@ def healthz() -> ApiResponse:
             socket_connect_timeout=2,
         )
         r.ping()
-        r.close()
         checks["redis"] = "ok"
+        # QA-001 follow-up: a dead Celery worker previously looked healthy here
+        # while every async run sat pending forever. Surface worker liveness
+        # (heartbeat keys kept by celery's redis transport) and queue depth.
+        try:
+            queue_depth = int(r.llen("celery"))
+            checks["queue_depth"] = queue_depth
+            worker_keys = r.keys("_kombu.binding.celery*")
+            from .workers.celery_app import celery_app as _celery
+            replies = _celery.control.inspect(timeout=1.0).ping() or {}
+            if replies:
+                checks["worker"] = f"ok: {len(replies)} online"
+            elif queue_depth > 0 or worker_keys:
+                checks["worker"] = "error: no worker responding (queue exists but nothing consumes it)"
+            else:
+                checks["worker"] = "error: no worker responding"
+        except Exception as worker_exc:  # inspection is best-effort, never 500s healthz
+            checks["worker"] = f"error: {worker_exc}"
+        r.close()
     except Exception as e:
         checks["redis"] = f"error: {e}"
     return ok(checks)
@@ -768,6 +790,41 @@ async def retry_node(run_id: str, node_key: str, user: dict = Depends(get_curren
     from .workers.tasks import execute_bootstrap
     execute_bootstrap.delay(run_id, node_key)
     return ok({"run_id": run_id, "node_key": node_key})
+
+
+@app.delete("/api/v1/contents/{content_id}")
+def delete_content(content_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """QA-004: soft-delete a content row; deleting a novel cascades to its
+    chapters and knowledge items. Versions are retained for recovery."""
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
+    deleted_children = 0
+    if content["type"] == "novel":
+        cur = conn.execute(
+            "UPDATE contents SET is_deleted = TRUE, updated_at = now() WHERE parent_id = %s AND is_deleted = FALSE",
+            (content_id,),
+        )
+        deleted_children = getattr(cur, "rowcount", 0) or 0
+        conn.execute(
+            "UPDATE knowledge_items SET is_deleted = TRUE, updated_at = now() WHERE content_id = %s AND is_deleted = FALSE",
+            (content_id,),
+        )
+    conn.execute(
+        "UPDATE contents SET is_deleted = TRUE, updated_at = now() WHERE id = %s",
+        (content_id,),
+    )
+    conn.commit()
+    conn.close()
+    return ok({"deleted": content_id, "type": content["type"], "children_deleted": deleted_children})
+
+
+@app.delete("/api/v1/novels/{novel_id}")
+def delete_novel(novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """QA-004 alias: novels are contents of type 'novel'."""
+    conn, content = load_content_for_user(novel_id, user, {"owner", "editor"})
+    conn.close()
+    if content["type"] != "novel":
+        raise HTTPException(status_code=404, detail="novel not found")
+    return delete_content(novel_id, user)
 
 
 @app.get("/api/v1/contents/{content_id}/versions")

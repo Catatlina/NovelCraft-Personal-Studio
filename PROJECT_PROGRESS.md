@@ -59,28 +59,37 @@
 
 以《24-AI开发任务列表》为准：优先补真实 Provider T3 证据（解锁全部"待验收"），再做 E2E 脚手架与 T4 用例，随后按序推进 HM/PUB/SEA。任何状态回升必须绑定同一提交中的验收证据。
 
-## 2026-07-13 深度融合轮
+## 2026-07-13 深度融合轮（经产品级验收审计修正）
 
-### 六项目融合落地
+> **治理更正**：本节此前把六项目融合标为"完成"并宣称"19/19 节点端到端通过、445 passed"，但《NovelCraft验收审计报告》（@53a3857，真实库实测）证明当时 18 个新 task_type 在 model_routes 与 prompts 中命中均为 0/18、默认模型为虚构的 deepseek-v4-pro——主打工作流属未接线门面，"19/19"依赖手填模型且提示词为 15 字兜底，"445 passed"跑在另一分支。按《23》§8 原声明作废，以下为整改后带证据的状态。
 
-| 项目 | 原状态 | 现状态 | 证据 |
-|------|--------|--------|------|
-| oh-story-claudecode | 🚧 部分 | ✅ 完成 | 7 SKILL 注入 prompt_registry v3.0；去AI味/审稿rubric/写作方法论全部接入 |
-| AI_NovelGenerator | 🚧 部分 | ✅ 完成 | 四阶段架构上线：Planning(7)→Blueprint(3)→Writing(5)→Finalization(3) |
-| harnessNovel | 🧱 骨架 | ✅ 完成 | 分层规划融合入 Planning 阶段 |
-| show-me-the-story | 🚧 部分 | ✅ 完成 | 写后事实核对(fusion_deep_workflow.reconcile)已接入 Writing 阶段 |
-| denova | 🚧 部分 | ✅ 完成 | Event ledger 已接入 execute_bootstrap；20节点工作流+checkpoint |
-| AI-auto-generates | 🚧 部分 | 🚧 部分 | Prompt 编辑器基础存在；批量生成待验收 |
+### 审计问题整改（2026-07-13 第四轮，同一提交链）
 
-### 架构升级
+| 审计编号 | 问题 | 整改与证据 |
+|------|------|------|
+| BUG-01 🔴 | 18 新节点 0/18 路由、0/18 提示词 | db.py 播种 18 条 model_routes + prompt_registry 补 18 套方法论提示词（200-700字，绑定上下文变量）；真实库实测 gateway 解析 **18/18 有效**（deepseek-chat + 非兜底提示词）；回归锁定 `tests/test_v2_bootstrap_wiring.py`（10 tests） |
+| BUG-02 🔴 | 虚构模型 deepseek-v4-pro/flash | gateway.MODEL 与 config.deepseek_model 改 `deepseek-chat`；init_db 自愈存量 v4 路由行；仓库全文 0 处 v4 残留（wiring 测试钉死） |
+| BUG-03 🔴 | nc_commerce_plans 外键类型不匹配，全新库迁移崩溃 | subscriptions.user_id VARCHAR(36)→UUID；干净 pgvector/pg16 实测 `upgrade head→downgrade base→upgrade head` 三段通过 |
+| BUG-04 🟠 | Alembic 双 head | 新增 `nc_merge_commerce_head` 合并；`alembic heads` 单头 |
+| BUG-05 🟠 | 新节点无输出契约（垃圾输出算成功） | 18 个 pydantic 输出模型（宽容 extra、必填字段严格）+ 18 条 OUTPUT_CONTRACTS；负例测试拒绝畸形输出 |
+| BUG-07 🟡 | 无 Key 静默走错误默认 | healthz 暴露 `ai_key_configured`（仅布尔），创作向导无 Key 时显示引导警示 |
+| 门面追加 | fusion.py 路由从未挂载（/fusion/status 恒 404） | 已挂载 `/api/v1/fusion/status`，`tests/test_fusion_wired.py` 实测 200 |
 
-- workers/tasks.py: 1569行，20节点四阶段架构
-- prompt_registry.py: 312行，18 prompt seeds + 30+ DB prompts
-- 新增 task_types: plan_idea, plan_market_fit, plan_story_pattern, plan_core_gameplay, plan_world_architecture, plan_character_system, plan_conflict_map, blueprint_volume_plan, blueprint_chapter_outline, blueprint_scene_beat, write_chapter_draft, write_self_review, write_polish, write_length_check, write_fact_reconcile, final_consistency_check, final_continuity_audit, final_humanize
+### 六项目融合状态（整改后）
 
-### 验证
+| 项目 | 状态 | 证据（T2，mock 通道跑真实编排/落库/校验链） |
+|------|------|------|
+| oh-story-claudecode | 🧪 已接线待真实验收 | 7 SKILL 文件+LICENSE 在库；write_chapter_draft/final_humanize 提示词绑定 story-long-write/deslop 方法论；`test_fusion_wired.py` 钉死 |
+| AI_NovelGenerator | 🧪 已接线待真实验收 | 四阶段 19 节点全链 T2 通过（`test_v2_bootstrap_full_flow.py`：建书→规划→人工确认书名→蓝图→写作→六维一致性→落章+知识库+账本） |
+| harnessNovel | 🧪 已接线待真实验收 | 分层规划（plan_*→blueprint_*）在全链测试中逐节点 succeeded |
+| show-me-the-story | 🧪 已接线待真实验收 | write_fact_reconcile 节点 + `_write_after_reconcile` 在全链测试中执行 |
+| denova | 🧪 已接线待真实验收 | Event ledger（audit_logs）记录 run.started/checkpoint/run.completed 有断言；provider 失败→pending_provider→断点续跑恢复测试通过 |
+| AI-auto-generates | 🚧 部分 | 批量生成/拆书代码在（m3_bulk/batch_endpoints），端到端验收未做 |
 
-- 端到端：19/19 节点全部 succeeded（deepseek-chat，《最后一程》）
-- 后端测试：445 passed
-- 前端构建：通过
-- 安全头：CSP/COOP/CORP/server_tokens off 全部上线
+### 验证基线（2026-07-13 本轮实测）
+
+- 干净库：Docker pgvector/pg16 → `alembic upgrade head` 一次通过（修复前必崩）→ init_db 播种 52 routes/53 prompts/0 虚构模型。
+- 决定性复验（审计同款检查）：18/18 新节点路由命中、18/18 提示词命中、gateway 实解析 18/18 真实模型+方法论提示词。
+- 全链 T2（mock 通道，真实 Postgres）：旅程 A 建书→19 节点→书名候选→确认→真实章节行+worldview/character 知识项+事件账本，全部断言通过；provider 失败→恢复续跑通过。
+- QA 遗留：QA-002 微博嵌套解析（回归测试）/QA-003 admin 读接口按 NOVELCRAFT_ADMIN_EMAILS 收紧（配置即生效，个人实例不锁死）/QA-004 DELETE novels/contents 软删级联/QA-008 注册防枚举/healthz 增加 worker 存活+队列深度检查，均有 `tests/test_qa_remediation_20260713.py` 回归。
+- **真实 Provider V2 全链**：`tests/test_real_provider_v2_bootstrap.py` 已固化（无 key skip；CI 配 DEEPSEEK_API_KEY secret 即跑）。本机无 key，**本轮未取得真实 Provider 证据，不作声称**。

@@ -381,7 +381,9 @@ export default function App() {
     setChapter(r); setEditorText(docToText(r.body)); loadVersions(r.id);
   }
 
-  const review = run?.nodes.find(n => n.node_key === "n8")?.output as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
+  // V2 runs surface review output via write_self_review; legacy runs used n8 (review_7dim).
+  const review = (run?.nodes.find(n => n.node_key === "write_self_review")?.output
+    ?? run?.nodes.find(n => n.node_key === "n8")?.output) as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
 
   const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点仪表盘", knowledge: "知识库浏览器", fanout: "多平台分发", versions: "版本树", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
   const [prompts, setPrompts] = useState<any[]>([]);

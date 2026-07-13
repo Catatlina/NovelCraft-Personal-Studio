@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Loader2, Play, AlertTriangle } from "lucide-react";
+import { api, getApiKey } from "../lib/api";
 
 const GENRES = ["都市","科幻","玄幻","仙侠","悬疑","历史","游戏","轻小说","短篇","其他"];
 
@@ -11,6 +12,15 @@ export function Wizard({ idea, setIdea, genre, setGenre, style, setStyle, target
   busy: boolean; startBootstrap: () => void;
 }) {
   const [errors, setErrors] = useState<Record<string,string>>({});
+  const [keyMissing, setKeyMissing] = useState(false);
+
+  // BUG-07: warn before a keyless bootstrap dies at the first AI node.
+  useEffect(() => {
+    if (getApiKey()) { setKeyMissing(false); return; }
+    api<{ data?: { ai_key_configured?: boolean } }>("/api/v1/healthz")
+      .then(h => setKeyMissing(!(h?.data?.ai_key_configured)))
+      .catch(() => setKeyMissing(false));
+  }, []);
 
   function validate() {
     const e: Record<string,string> = {};
@@ -26,6 +36,13 @@ export function Wizard({ idea, setIdea, genre, setGenre, style, setStyle, target
 
   return (
     <div className="panel" style={{ maxWidth: 720 }}>
+      {keyMissing && (
+        <p style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 12px", marginBottom:16,
+                    border:"1px solid var(--warning)", borderRadius:8, color:"var(--warning)", fontSize:14 }}>
+          <AlertTriangle size={14}/>
+          尚未配置 AI API Key（服务器也未配置全局 Key）。生成会在第一个 AI 节点失败——请先到「系统设置」填入 DeepSeek API Key。
+        </p>
+      )}
       <label style={{ display: "flex", flexDirection: "column", gap: 8, fontWeight: 600, marginBottom: 16 }}>
         灵感 *
         <textarea

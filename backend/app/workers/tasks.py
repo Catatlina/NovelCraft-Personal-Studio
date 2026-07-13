@@ -482,10 +482,12 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
                                     payload={"reason": "invalid_output"})
             return {"status": "invalid_output", "node_key": node_key}
-        except ProviderError:
-            _mark_node(run_id, node_key, "pending_provider", "provider error")
+        except ProviderError as exc:
+            # Keep the real provider message — "provider error" alone made
+            # production diagnosis (and the 2026-07-13 QA P0) needlessly blind.
+            _mark_node(run_id, node_key, "pending_provider", f"provider error: {exc}"[:500])
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
-                                    payload={"reason": "provider_error"})
+                                    payload={"reason": "provider_error", "detail": str(exc)[:200]})
             return {"status": "pending_provider", "node_key": node_key}
         except Exception as exc:
             _mark_node(run_id, node_key, "failed", str(exc))

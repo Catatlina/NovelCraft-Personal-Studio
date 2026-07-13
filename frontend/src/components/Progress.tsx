@@ -5,7 +5,15 @@ type RunNode = { node_key: string; kind: string; agent: string | null; title: st
 type Run = { id: string; nodes: RunNode[]; context: Record<string, unknown> };
 type Wrapped<T> = { data: T };
 
-const PLANNING_NODES = new Set(["n3", "n4", "n5", "n6"]);
+const PLANNING_NODES = new Set([
+  // V2 four-stage keys
+  "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
+  "plan_world_architecture", "plan_character_system", "plan_conflict_map",
+  "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
+  // legacy runs
+  "n3", "n4", "n5", "n6",
+]);
+const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
 const RETRYABLE_STATUSES = new Set(["pending_provider", "failed", "pending_budget"]);
 
 function readableLabel(key: string): string {
@@ -30,7 +38,7 @@ function formatTime(value?: string | null): string {
 
 export function Progress({ run, onConfirm }: { run: Run | null; onConfirm: (title: string) => void }) {
   const nodes = run?.nodes ?? [];
-  const human = nodes.find(n => n.node_key === "n2");
+  const human = nodes.find(n => HUMAN_NODE_KEYS.has(n.node_key));
   const titles = (run?.context?.title_candidates as string[]) ?? [];
   const selectedTitle = typeof run?.context?.selected_title === "string" ? run.context.selected_title : "";
   const rankingTitleAccepted = human?.status === "succeeded" && (human.output?.source === "ranking_topic" || (!!selectedTitle && titles.length === 0));

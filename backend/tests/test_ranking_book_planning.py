@@ -92,16 +92,19 @@ def test_ranking_planning_nodes_use_gateway_and_have_structured_contracts():
     from app.workers import tasks
 
     expected = {
-        "n3": ("gen_synopsis", {"synopsis", "selling_points"}),
-        "n4": ("gen_worldview", {"worldview"}),
-        "n5": ("gen_characters", {"characters"}),
-        "n6": ("gen_outline", {"outline"}),
+        "plan_idea": ("plan_idea", {"idea_expanded", "core_hook", "target_audience", "title_candidates"}),
+        "plan_world_architecture": ("plan_world_architecture", {"worldview"}),
+        "plan_character_system": ("plan_character_system", {"characters"}),
+        "blueprint_chapter_outline": ("blueprint_chapter_outline", {"chapter_outlines"}),
     }
     nodes = {node_key: task_type for node_key, _kind, _agent, _title, task_type in tasks.BOOTSTRAP_NODES}
     for node_key, (task_type, required_keys) in expected.items():
         assert nodes[node_key] == task_type
         assert task_type in OUTPUT_CONTRACTS
-        assert required_keys <= json.loads(OUTPUT_CONTRACTS[task_type]).keys()
+        contract = OUTPUT_CONTRACTS[task_type]
+        # Contracts may carry a trailing human annotation after the JSON example
+        contract_json = contract[: contract.rfind("}") + 1]
+        assert required_keys <= json.loads(contract_json).keys()
     task_impl = getattr(tasks.execute_bootstrap.run, "__wrapped__", tasks.execute_bootstrap.run)
     assert "complete" in task_impl.__code__.co_names
 
@@ -128,9 +131,9 @@ def test_provider_failure_keeps_retryable_run_state_without_fabricated_output(mo
     monkeypatch.setattr(tasks, "complete", lambda **_kwargs: (_ for _ in ()).throw(ProviderError("offline")))
     monkeypatch.setattr(tasks, "_persist_output", lambda *_args: pytest.fail("provider failure must not persist AI output"))
 
-    result = tasks.execute_bootstrap.run("run-1", "n3")
+    result = tasks.execute_bootstrap.run("run-1", "plan_idea")
 
-    assert result == {"status": "pending_provider", "node_key": "n3"}
+    assert result == {"status": "pending_provider", "node_key": "plan_idea"}
     writes = [(sql, params) for sql, params in db.statements if sql.startswith("UPDATE")]
     assert any(params and params[0] == "pending_provider" for _sql, params in writes)
     assert not any("output =" in sql for sql, _params in writes)

@@ -16,3 +16,19 @@ def _reset_db_pool():
     close_pool()
     yield
     close_pool()
+
+
+@pytest.fixture(autouse=True)
+def _reset_circuit_breaker():
+    """Provider failures recorded by one test must not open the breaker for
+    the next (shared Redis) — that cross-pollution failed whole test files."""
+    try:
+        from app.core.circuit_breaker import _get_redis, BREAKER_PREFIX
+
+        r = _get_redis()
+        keys = r.keys(f"{BREAKER_PREFIX}*")
+        if keys:
+            r.delete(*keys)
+    except Exception:
+        pass
+    yield

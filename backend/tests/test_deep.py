@@ -26,15 +26,15 @@ def test_workflow_nodes_have_human_suspension():
     from app.workers.tasks import BOOTSTRAP_NODES
     human_nodes = [n for n in BOOTSTRAP_NODES if n[1] == "human"]
     assert len(human_nodes) >= 1  # n2 is human
-    assert human_nodes[0][0] == "n2"
+    assert human_nodes[0][0] == "human_confirm_title"
 
 
-def test_workflow_can_resume_to_n3():
-    """TASK-008: N3 follows N2 human node."""
+def test_workflow_can_resume_to_blueprint():
+    """TASK-008/V2: blueprint_volume_plan follows the human title gate."""
     from app.workers.tasks import BOOTSTRAP_NODES
     keys = [n[0] for n in BOOTSTRAP_NODES]
-    n2_idx = keys.index("n2")
-    assert keys[n2_idx + 1] == "n3"  # Next after human is n3
+    human_idx = keys.index("human_confirm_title")
+    assert keys[human_idx + 1] == "blueprint_volume_plan"
 
 
 # --- TASK-010: SSE ---

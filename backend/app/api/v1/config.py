@@ -24,6 +24,20 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     raise HTTPException(status_code=403, detail="admin access required")
 
 
+def require_admin_reads(user: dict = Depends(get_current_user)) -> dict:
+    """QA-003: admin-namespace read guard.
+
+    When NOVELCRAFT_ADMIN_EMAILS is configured, reads are restricted to those
+    admins like the write endpoints. A single-user personal instance without
+    the variable keeps authenticated read access (the data is non-secret
+    prompt/route configuration), so upgrading does not lock the owner out.
+    """
+    allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
+    if allowed and user["email"].lower() not in allowed:
+        raise HTTPException(status_code=403, detail="admin access required")
+    return user
+
+
 def ensure_project_member(project_id: str, user: dict, roles: set[str] | None = None) -> None:
     db = connect()
     member = db.execute(
@@ -65,7 +79,7 @@ class SettingUpdateRequest(BaseModel):
 
 
 @router.get("/providers")
-def list_providers(user: dict = Depends(get_current_user)):
+def list_providers(user: dict = Depends(require_admin_reads)):
     """List all configured AI providers with masked keys."""
     providers = [
         {"name": "deepseek", "key_configured": bool(os.getenv("DEEPSEEK_API_KEY","")),
@@ -81,7 +95,7 @@ def list_providers(user: dict = Depends(get_current_user)):
 
 
 @router.get("/model-routes")
-def list_routes(user: dict = Depends(get_current_user)):
+def list_routes(user: dict = Depends(require_admin_reads)):
     db = connect()
     rows = db.execute("SELECT * FROM model_routes ORDER BY task_type").fetchall()
     db.close()
@@ -158,7 +172,7 @@ def update_budget(
 
 
 @router.get("/prompts")
-def list_prompts(user: dict = Depends(get_current_user)):
+def list_prompts(user: dict = Depends(require_admin_reads)):
     db = connect()
     rows = db.execute("SELECT * FROM prompts ORDER BY name, version DESC").fetchall()
     db.close()

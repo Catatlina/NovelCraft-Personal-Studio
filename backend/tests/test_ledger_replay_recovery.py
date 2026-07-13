@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 
-from app.db import connect, new_id
+from app.db import connect, encode, new_id
 from app.gateway import complete, ProviderError
 
 
@@ -27,6 +27,19 @@ def _seed_project() -> str:
     db.commit()
     db.close()
     return pid
+
+
+def _seed_mock_route(task_type: str) -> None:
+    """V2 defaults unrouted tasks to the real deepseek provider; this test
+    drives the ledger via the guarded mock, so it declares its route."""
+    db = connect()
+    db.execute(
+        "INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json) "
+        "VALUES (%s,%s,'mock','mock',%s,%s) ON CONFLICT(task_type) DO NOTHING",
+        (new_id(), task_type, encode({}), encode([])),
+    )
+    db.commit()
+    db.close()
 
 
 def _mutation_rows(project_id: str, mutation_id: str) -> list[dict]:
@@ -44,8 +57,8 @@ def test_failed_call_then_successful_retry_same_mutation_id(monkeypatch):
     the failed row is upgraded in place, and a third call replays cleanly."""
     pid = _seed_project()
     mutation = f"resume:{uuid.uuid4().hex}"
-    # No model_routes seeded for this task -> provider defaults to mock.
     task = f"probe_{uuid.uuid4().hex[:6]}"  # arbitrary non-structured task_type
+    _seed_mock_route(task)
 
     # Attempt 1: mock gate closed -> ProviderError, a failed row is written.
     monkeypatch.setenv("NOVELCRAFT_ENV", "development")

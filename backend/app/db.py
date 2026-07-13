@@ -97,6 +97,12 @@ class DB:
         self._cur.execute(sql, params)
         return self
 
+    @property
+    def rowcount(self) -> int:
+        """Rows affected by the last execute (execute returns self, so callers
+        can read `db.execute(...).rowcount` like a DB-API cursor)."""
+        return self._cur.rowcount
+
     def fetchone(self) -> dict[str, Any] | None:
         row = self._cur.fetchone()
         if row is None:
@@ -215,16 +221,34 @@ def init_db() -> None:
         "gen_short_titles", "gen_short_story", "review_short",
         "gen_video_script", "fetch_hotspots", "gen_daily_brief",
         "translate_segment", "cultural_localize", "ranking_market_analysis",
+        # V2 four-stage bootstrap (18 agent nodes) — every node must resolve a
+        # real model route or the flagship flow fails at its first node.
+        "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
+        "plan_world_architecture", "plan_character_system", "plan_conflict_map",
+        "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
+        "write_chapter_draft", "write_self_review", "write_polish",
+        "write_length_check", "write_fact_reconcile",
+        "final_consistency_check", "final_continuity_audit", "final_humanize",
     ]
+    # Creative long-form nodes get a slightly higher temperature; structured
+    # planning/audit nodes stay at 0.7 default.
+    CREATIVE_TASKS = {"write_chapter_draft", "write_polish", "final_humanize",
+                      "gen_chapter1", "gen_next_chapter"}
     for task_type in task_types:
+        temperature = 1.0 if task_type in CREATIVE_TASKS else 0.7
         db.execute(
             """
             INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT(task_type) DO NOTHING
             """,
-            (new_id(), task_type, "deepseek", "deepseek-chat", encode({"temperature": 0.7}), encode([])),
+            (new_id(), task_type, "deepseek", "deepseek-chat", encode({"temperature": temperature}), encode([])),
         )
+    # Heal rows that were seeded while the default pointed at a model that does
+    # not exist on the DeepSeek API (audit BUG-02, 2026-07-13).
+    db.execute(
+        "UPDATE model_routes SET model = 'deepseek-chat' WHERE provider = 'deepseek' AND model LIKE 'deepseek-v4%%'"
+    )
     # Seed sensitive word list
     SENSITIVE_WORDS = ["政治敏感", "色情", "暴力恐怖", "赌博", "毒品", "枪支", "诈骗", "传销", "邪教", "违禁内容",
                        "分裂国家", "颠覆政权", "民族仇恨", "宗教极端", "淫秽", "凶杀", "校园暴力", "自杀",

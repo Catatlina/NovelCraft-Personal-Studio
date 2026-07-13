@@ -72,7 +72,9 @@ def register(request: Request, response: Response, payload: RegisterRequest = Bo
     existing = db.execute("SELECT id FROM users WHERE email = %s", (payload.email,)).fetchone()
     if existing:
         db.close()
-        raise HTTPException(status_code=409, detail="email already registered")
+        # QA-008: generic message + shared 400 status keeps registration from
+        # confirming which emails exist (rate limiting above bounds probing).
+        raise HTTPException(status_code=400, detail="registration failed")
 
     user_id = new_id()
     password_hash = hash_password(payload.password)

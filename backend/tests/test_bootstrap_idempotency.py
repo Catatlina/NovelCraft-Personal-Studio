@@ -74,8 +74,9 @@ def test_existing_undispatched_idempotent_run_is_redriven(monkeypatch):
 
 def test_generated_business_outputs_use_stable_keys_and_conflict_handling():
     source = (ROOT / "backend/app/workers/tasks.py").read_text(encoding="utf-8")
-    assert "run:{run_id}:node:{node_key}:worldview" in source
-    assert "run:{run_id}:node:{node_key}:character:{index}" in source
-    assert "run:{run_id}:node:{node_key}:chapter:1" in source
+    assert "run:{run_id}:node:{node_key}:worldview:v2" in source
+    assert "run:{run_id}:node:{node_key}:character:{index}:v2" in source
+    # V2 chapters key by stable novel+seq slot, not by run
+    assert "novel:{novel_id}:chapter:{chapter_seq}:bootstrap:v2" in source
     assert source.count("ON CONFLICT") >= 3
-    assert "client_mutation_id=f\"bootstrap:{run_id}:{node_key}\"" in source
+    assert 'client_mutation_id = f"bootstrap:{run_id}:{node_key}:v2"' in source
