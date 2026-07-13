@@ -1,7 +1,6 @@
-"""NC-FUS-DEEP: denova WorkflowPlan + event ledger + show-me-the-story fact chain.
-⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
+"""NC-FUS-DEEP: denova WorkflowPlan + event ledger + show-me-the-story fact chain."""
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from app.db import connect, new_id, encode, decode
 
 
@@ -54,8 +53,8 @@ def record_event(run_id: str, event_type: str, node_key: str = "", payload: dict
     db.execute(
         "INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
         (eid, "workflow_run", run_id, event_type,
-         encode({"node": node_key, "payload": payload, "timestamp": datetime.utcnow().isoformat()}),
-         datetime.utcnow()),
+         encode({"node": node_key, "payload": payload, "timestamp": datetime.now(timezone.utc).isoformat()}),
+         datetime.now(timezone.utc)),
     )
     db.commit(); db.close()
     return {"event_id": eid, "run_id": run_id, "type": event_type, "node": node_key}
@@ -130,7 +129,7 @@ def create_fact_transaction(operation: str, content_id: str, previous_value: dic
         "INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
         (tid, "fact_mutation", content_id, operation,
          encode({"previous": previous_value, "new": new_value, "reversible": True}),
-         datetime.utcnow()),
+         datetime.now(timezone.utc)),
     )
     db.commit(); db.close()
     return {"transaction_id": tid, "operation": operation, "reversible": True}

@@ -1,6 +1,6 @@
 """NC-HM-001: Hotspot ingestion — fetch, dedup, trend, freshness scoring."""
 from __future__ import annotations
-import json, os, urllib.request, hashlib
+import json, os, urllib.request, hashlib, urllib.parse
 from datetime import datetime, timedelta
 from app.db import connect, encode, new_id
 
@@ -11,6 +11,27 @@ HOTSPOT_SOURCES = {
 
 DUPLICATE_WINDOW_HOURS = 24
 
+# A browser-like UA reduces anti-bot rejections from the Chinese source APIs.
+_BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+
+def _hotspot_opener() -> "urllib.request.OpenerDirector":
+    """Route hotspot fetches through HOTSPOT_HTTP_PROXY when set (e.g. an xray HTTP
+    inbound at http://127.0.0.1:10809). Scoped to hotspots only — the AI gateway and
+    everything else keep their direct route. Overseas hosts (e.g. the Singapore VPS)
+    often cannot reach zhihu/weibo directly; this lets that traffic go via a proxy."""
+    proxy = os.getenv("HOTSPOT_HTTP_PROXY", "").strip()
+    if proxy:
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+    return urllib.request.build_opener()
+
+def _source_cookie(source_key: str) -> str:
+    """Read per-source cookie from env HOTSPOT_<SOURCE>_COOKIE."""
+    return os.getenv(f"HOTSPOT_{source_key.upper()}_COOKIE", "").strip()
+
 
 def _dedup_key(title: str, source: str) -> str:
     return hashlib.sha256(f"{source}:{title}".encode()).hexdigest()[:32]
@@ -20,12 +41,21 @@ def fetch_hotspots() -> tuple[list[dict], dict[str, str]]:
     """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4)."""
     results: list[dict] = []
     source_status: dict[str, str] = {}
+    opener = _hotspot_opener()
+    timeout = int(os.getenv("HOTSPOT_FETCH_TIMEOUT", "10"))
     for key, cfg in HOTSPOT_SOURCES.items():
         try:
-            req = urllib.request.Request(cfg["url"], headers={"User-Agent": "NovelCraft/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json", "Referer": "https://www." + key + ".com/"}
+            cookie = _source_cookie(key)
+            if cookie:
+                headers["Cookie"] = cookie
+            req = urllib.request.Request(cfg["url"], headers=headers)
+            with opener.open(req, timeout=timeout) as resp:
                 data = json.loads(resp.read())
-            items = data.get("data", data.get("realtime", []))[:15]
+            raw = data.get("data", data.get("realtime", []))
+            if isinstance(raw, dict):
+                raw = raw.get("realtime", raw.get("list", []))
+            items = (raw if isinstance(raw, list) else [])[:15]
             count = 0
             for item in items:
                 title = item.get("target", {}).get("title", item.get("word", ""))
@@ -44,6 +74,17 @@ def fetch_hotspots() -> tuple[list[dict], dict[str, str]]:
             source_status[key] = f"error: {exc}"
     return results, source_status
 
+
+def _safe_score(raw: str) -> float:
+    """Extract numeric score from Chinese-format strings like '1181 万热度'."""
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    import re
+    m = re.search(r"(\d+(?:\.\d+)?)\s*万", str(raw))
+    if m:
+        return float(m.group(1)) * 10000
+    m = re.search(r"(\d+(?:\.\d+)?)", str(raw))
+    return float(m.group(1)) if m else 0.0
 
 def compute_freshness_score(fetched_at: str) -> float:
     """Decay score: 1.0 at fetch time, decays to 0.5 after 24h."""
@@ -76,7 +117,7 @@ def compute_trend(item_title: str, source: str, current_score: float) -> str:
     return "stable"
 
 
-def store_hotspots(items: list[dict], project_id: str = "") -> int:
+def store_hotspots(items: list[dict]) -> int:
     db = connect()
     count = 0
     now_str = datetime.utcnow().isoformat()
@@ -94,12 +135,12 @@ def store_hotspots(items: list[dict], project_id: str = "") -> int:
             )
             continue
 
-        trend = compute_trend(item.get("title", ""), item.get("source", ""), float(item.get("raw_score", 0)))
+        trend = compute_trend(item.get("title", ""), item.get("source", ""), _safe_score(item.get("raw_score", 0)))
         freshness = compute_freshness_score(now_str)
 
         db.execute(
-            "INSERT INTO knowledge_items (id, project_id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s,%s)",
-            (new_id(), project_id or None, "hotspot", item.get("title", "")[:200],
+            "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s)",
+            (new_id(), "hotspot", item.get("title", "")[:200],
              json.dumps(item, ensure_ascii=False),
              encode({
                  "source": item.get("source", ""), "score": item.get("raw_score", 0),

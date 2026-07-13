@@ -6,11 +6,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    environment: str = os.getenv("NOVELCRAFT_ENV", "production")
+    environment: str = os.getenv("NOVELCRAFT_ENV", "development")
     ai_provider: str = os.getenv("NOVELCRAFT_AI_PROVIDER", "deepseek")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "45"))
     bootstrap_budget_cny: float = float(os.getenv("NOVELCRAFT_BOOTSTRAP_BUDGET_CNY", "2.0"))
     jwt_secret: str = os.getenv("NOVELCRAFT_JWT_SECRET", "")
@@ -27,7 +27,6 @@ class Settings:
         ).split(",")
         if origin.strip()
     )
-    admin_email: str = os.getenv("NOVELCRAFT_ADMIN_EMAIL", "")
 
     def __post_init__(self) -> None:
         if self.environment.lower() == "production":
@@ -39,11 +38,6 @@ class Settings:
             raise ValueError("COOKIE_SAMESITE 必须是 lax、strict 或 none")
         if self.cookie_samesite == "none" and not self.cookie_secure:
             raise ValueError("COOKIE_SAMESITE=none 时必须设置 COOKIE_SECURE=true")
-        if self.environment.lower() == "production" and not self.admin_email:
-            import logging
-            logging.getLogger("novelcraft").warning(
-                "生产环境未设置 NOVELCRAFT_ADMIN_EMAIL，请手动创建管理员账户。"
-            )
 
 
 settings = Settings()

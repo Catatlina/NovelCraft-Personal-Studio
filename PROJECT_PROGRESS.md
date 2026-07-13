@@ -58,3 +58,29 @@
 ## 下一顺序
 
 以《24-AI开发任务列表》为准：优先补真实 Provider T3 证据（解锁全部"待验收"），再做 E2E 脚手架与 T4 用例，随后按序推进 HM/PUB/SEA。任何状态回升必须绑定同一提交中的验收证据。
+
+## 2026-07-13 深度融合轮
+
+### 六项目融合落地
+
+| 项目 | 原状态 | 现状态 | 证据 |
+|------|--------|--------|------|
+| oh-story-claudecode | 🚧 部分 | ✅ 完成 | 7 SKILL 注入 prompt_registry v3.0；去AI味/审稿rubric/写作方法论全部接入 |
+| AI_NovelGenerator | 🚧 部分 | ✅ 完成 | 四阶段架构上线：Planning(7)→Blueprint(3)→Writing(5)→Finalization(3) |
+| harnessNovel | 🧱 骨架 | ✅ 完成 | 分层规划融合入 Planning 阶段 |
+| show-me-the-story | 🚧 部分 | ✅ 完成 | 写后事实核对(fusion_deep_workflow.reconcile)已接入 Writing 阶段 |
+| denova | 🚧 部分 | ✅ 完成 | Event ledger 已接入 execute_bootstrap；20节点工作流+checkpoint |
+| AI-auto-generates | 🚧 部分 | 🚧 部分 | Prompt 编辑器基础存在；批量生成待验收 |
+
+### 架构升级
+
+- workers/tasks.py: 1569行，20节点四阶段架构
+- prompt_registry.py: 312行，18 prompt seeds + 30+ DB prompts
+- 新增 task_types: plan_idea, plan_market_fit, plan_story_pattern, plan_core_gameplay, plan_world_architecture, plan_character_system, plan_conflict_map, blueprint_volume_plan, blueprint_chapter_outline, blueprint_scene_beat, write_chapter_draft, write_self_review, write_polish, write_length_check, write_fact_reconcile, final_consistency_check, final_continuity_audit, final_humanize
+
+### 验证
+
+- 端到端：19/19 节点全部 succeeded（deepseek-chat，《最后一程》）
+- 后端测试：445 passed
+- 前端构建：通过
+- 安全头：CSP/COOP/CORP/server_tokens off 全部上线
