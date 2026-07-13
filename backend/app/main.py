@@ -700,8 +700,11 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
 
     async def event_stream():
         import asyncio
+        # Cap the long-poll so an abandoned or stuck run can never hold a
+        # connection/worker forever; the client reconnects with EventSource.
+        MAX_TICKS = int(os.getenv("SSE_RUN_EVENTS_MAX_TICKS", "600"))  # ~10 min at 1s
         seq = 0
-        while True:
+        for _tick in range(MAX_TICKS):
             seq += 1
             yield f"id: {seq}\n\n"
             await asyncio.sleep(1)
@@ -720,7 +723,9 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
                     event["updated_at"] = str(event.get("updated_at") or "")
                     yield f"id: {seq}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 yield f"id: {seq+1}\ndata: {json.dumps({'status': row['status']})}\n\n"
-                break
+                return
+        # Timed out without a terminal state: tell the client to reconnect.
+        yield f"id: {seq+1}\ndata: {json.dumps({'status': 'timeout', 'reconnect': True})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -147,7 +147,9 @@ def test_analysis_uses_gateway_contract_and_persists_schema(monkeypatch):
     assert call["task_type"] == "ranking_market_analysis"
     assert call["prompt_name"] == "ranking.market_analysis"
     assert call["project_id"] == "project-1"
-    assert call["client_mutation_id"] == "ranking-analysis:snapshot-1"
+    # Per-attempt mutation id (…:0 first try) so a schema-retry regenerates
+    # instead of replaying the same invalid output from the ledger.
+    assert call["client_mutation_id"] == "ranking-analysis:snapshot-1:0"
     assert "NEVER_SEND_FULL_BOOK_BODY" not in json.dumps(call["variables"], ensure_ascii=False)
     assert REQUIRED_OUTPUT_KEYS <= data.keys()
     assert REQUIRED_OUTPUT_KEYS <= _provider_output().keys()

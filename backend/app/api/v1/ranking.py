@@ -86,7 +86,9 @@ class SnapshotMetadataValidationRequest(BaseModel):
 
 
 class MarketTopicOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Tolerate extra keys the model volunteers (a common non-deterministic flake);
+    # required fields and the originality dedup below are still enforced.
+    model_config = ConfigDict(extra="ignore")
     title: str = Field(min_length=2, max_length=80)
     premise: str = Field(min_length=10, max_length=1000)
     genre: str = Field(min_length=1, max_length=100)
@@ -99,7 +101,7 @@ class MarketTopicOutput(BaseModel):
 
 
 class MarketAnalysisOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     market_signals: list[dict]
     audience: dict
     title_patterns: list[dict]
@@ -416,22 +418,34 @@ def analyze_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
                   VALUES (%s,%s,%s,'',%s,'pending','ai','ranking.market_analysis','1.0.0',%s)""",
                (analysis_id, snapshot["project_id"], snapshot_id, encode({"input_summary": variables}), input_hash))
     db.commit()
-    try:
-        output = complete(run_id=None, node_key=None, project_id=snapshot["project_id"],
-                          task_type="ranking_market_analysis", prompt_name="ranking.market_analysis",
-                          variables=variables, client_mutation_id=f"ranking-analysis:{snapshot_id}")
-    except (ProviderError, BudgetExceeded) as exc:
-        db.execute("UPDATE market_analyses SET status='pending_provider', error=%s WHERE id=%s", (str(exc), analysis_id))
-        db.commit(); db.close()
-        raise HTTPException(503, {"code": "MARKET_ANALYSIS_PROVIDER_FAILED", "status": "pending_provider",
-                                  "analysis_id": analysis_id, "reason": str(exc)}) from exc
-    try:
-        validated = _validate_market_analysis_output(output, [item["title"] for item in items])
-    except (TypeError, ValueError) as exc:
-        db.execute("UPDATE market_analyses SET status='failed', error=%s WHERE id=%s", (str(exc), analysis_id))
+    # Real models occasionally emit a payload that violates the strict market
+    # schema or reuses a source title. Regenerate up to 3 times (fresh mutation id
+    # per attempt so the ledger replay does not return the same bad output) before
+    # surfacing a 502, mirroring the gateway's structured-output retry contract.
+    validated = None
+    last_validation_error = ""
+    for analysis_attempt in range(3):
+        try:
+            output = complete(run_id=None, node_key=None, project_id=snapshot["project_id"],
+                              task_type="ranking_market_analysis", prompt_name="ranking.market_analysis",
+                              variables=variables,
+                              client_mutation_id=f"ranking-analysis:{snapshot_id}:{analysis_attempt}")
+        except (ProviderError, BudgetExceeded) as exc:
+            db.execute("UPDATE market_analyses SET status='pending_provider', error=%s WHERE id=%s", (str(exc), analysis_id))
+            db.commit(); db.close()
+            raise HTTPException(503, {"code": "MARKET_ANALYSIS_PROVIDER_FAILED", "status": "pending_provider",
+                                      "analysis_id": analysis_id, "reason": str(exc)}) from exc
+        try:
+            validated = _validate_market_analysis_output(output, [item["title"] for item in items])
+            break
+        except (TypeError, ValueError) as exc:
+            last_validation_error = str(exc)
+            continue
+    if validated is None:
+        db.execute("UPDATE market_analyses SET status='failed', error=%s WHERE id=%s", (last_validation_error, analysis_id))
         db.commit(); db.close()
         raise HTTPException(502, {"code": "MARKET_ANALYSIS_OUTPUT_INVALID", "status": "failed",
-                                  "analysis_id": analysis_id, "reason": str(exc)}) from exc
+                                  "analysis_id": analysis_id, "reason": last_validation_error})
     summary = "; ".join(str(signal.get("signal", "")) for signal in validated["market_signals"][:3])
     db.execute("""UPDATE market_analyses SET summary=%s, signals=%s, status='succeeded', completed_at=now()
                   WHERE id=%s""", (summary, encode(validated), analysis_id))

@@ -166,61 +166,77 @@ def _complete_impl(
     _assert_budget(project_id, "bootstrap", estimated_cost)
 
     prompt_tokens, completion_tokens = 0, 0  # default
+    provider_name = model_name = ""
+    output: dict[str, Any] = {}
 
-    # Route to provider
-    if provider == "mock":
-        environment = os.getenv("NOVELCRAFT_ENV", "development").lower()
-        allow_mock = (os.getenv("NOVELCRAFT_ALLOW_MOCK") or os.getenv("ALLOW_MOCK", "false")).lower() == "true"
-        if environment not in {"test", "testing"} or not allow_mock:
-            raise ProviderError("mock provider requires NOVELCRAFT_ENV=test and NOVELCRAFT_ALLOW_MOCK=true")
-        output = _mock_output(task_type, variables)
-        provider_name = "mock"
-        model_name = "mock"
-    elif provider == "deepseek":
-        if not circuit_breaker("deepseek"):
-            raise ProviderError("deepseek circuit breaker open — too many failures")
-        try:
-            model_ = _request_model.get() or model or settings.deepseek_model
-            output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
-            record_success("deepseek")
-            # Dynamic provider name based on model prefix
-            provider_name = "openai" if model_.startswith("gpt") else ("anthropic" if model_.startswith("claude") else "deepseek")
-            model_name = model_
-        except ProviderError:
-            record_failure("deepseek")
-            # Try fallback chain
-            route = _load_route(task_type)
-            fallbacks = route.get("fallback_json", []) if route else []
-            if isinstance(fallbacks, str):
-                fallbacks = json.loads(fallbacks)
-            for fb in fallbacks:
-                try:
-                    output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
-                    break
-                except Exception:
-                    continue
-            else:
-                raise ProviderError(f"deepseek failed and all fallbacks exhausted for {task_type}")
-    elif provider in ("claude", "openai", "gemini"):
-        try:
-            output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(
-                {"provider": provider, "model": model or ""}, task_type, prompt_text, variables, params
-            )
-        except Exception:
-            route = _load_route(task_type)
-            fallbacks = route.get("fallback_json", []) if route else []
-            for fb in fallbacks:
-                try:
-                    output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
-                    break
-                except Exception:
-                    continue
-            else:
-                raise ProviderError(f"provider {provider} failed and all fallbacks exhausted for {task_type}")
-    else:
-        raise ProviderError(f"unsupported provider: {provider}")
+    # Route to provider, retrying schema-contract violations. Real models are
+    # non-deterministic, so a malformed structured payload is retried (FR-C3-07,
+    # ≤2 retries) before it is surfaced as a failure. Mock output is always valid,
+    # so it never loops.
+    MAX_SCHEMA_ATTEMPTS = 3
+    for schema_attempt in range(MAX_SCHEMA_ATTEMPTS):
+        prompt_tokens, completion_tokens = 0, 0
+        if provider == "mock":
+            environment = os.getenv("NOVELCRAFT_ENV", "development").lower()
+            allow_mock = (os.getenv("NOVELCRAFT_ALLOW_MOCK") or os.getenv("ALLOW_MOCK", "false")).lower() == "true"
+            if environment not in {"test", "testing"} or not allow_mock:
+                raise ProviderError("mock provider requires NOVELCRAFT_ENV=test and NOVELCRAFT_ALLOW_MOCK=true")
+            output = _mock_output(task_type, variables)
+            provider_name = "mock"
+            model_name = "mock"
+        elif provider == "deepseek":
+            if not circuit_breaker("deepseek"):
+                raise ProviderError("deepseek circuit breaker open — too many failures")
+            try:
+                model_ = _request_model.get() or model or settings.deepseek_model
+                output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
+                record_success("deepseek")
+                # Dynamic provider name based on model prefix
+                provider_name = "openai" if model_.startswith("gpt") else ("anthropic" if model_.startswith("claude") else "deepseek")
+                model_name = model_
+            except ProviderError:
+                record_failure("deepseek")
+                # Try fallback chain
+                route = _load_route(task_type)
+                fallbacks = route.get("fallback_json", []) if route else []
+                if isinstance(fallbacks, str):
+                    fallbacks = json.loads(fallbacks)
+                for fb in fallbacks:
+                    try:
+                        output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
+                        break
+                    except Exception:
+                        continue
+                else:
+                    raise ProviderError(f"deepseek failed and all fallbacks exhausted for {task_type}")
+        elif provider in ("claude", "openai", "gemini"):
+            try:
+                output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(
+                    {"provider": provider, "model": model or ""}, task_type, prompt_text, variables, params
+                )
+            except Exception:
+                route = _load_route(task_type)
+                fallbacks = route.get("fallback_json", []) if route else []
+                for fb in fallbacks:
+                    try:
+                        output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
+                        break
+                    except Exception:
+                        continue
+                else:
+                    raise ProviderError(f"provider {provider} failed and all fallbacks exhausted for {task_type}")
+        else:
+            raise ProviderError(f"unsupported provider: {provider}")
 
-    output = validate_task_output(task_type, output)
+        try:
+            output = validate_task_output(task_type, output)
+            break
+        except OutputValidationError:
+            # Deterministic providers (mock) can't self-correct; a real model may
+            # succeed on a fresh sample. Exhausted retries re-raise for the caller.
+            if provider_name == "mock" or schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
+                raise
+
     if provider_name == "mock":
         output["_meta"] = {"provider": "mock", "synthetic": True}
 
@@ -228,44 +244,56 @@ def _complete_impl(
     cost_cny = _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens)
 
     conn = connect()
-    conn.execute(
-        """
-        INSERT INTO ai_calls (
-            id, run_id, node_key, provider, model, prompt_name, task_type,
-            input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
-            client_mutation_id, project_id
-        ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s)
-        """,
-        (
-            new_id("call"),
-            run_id,
-            node_key,
-            provider_name,
-            model_name,
-            prompt_name,
-            task_type,
-            encode({"variables": variables, "prompt": prompt_text}),
-            encode(output),
-            prompt_tokens,
-            completion_tokens,
-            cost_cny,
-            latency_ms,
-            "succeeded",
-            client_mutation_id,
-            project_id,
-        ),
-    )
-    conn.execute(
-        """
-        INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
-        VALUES (%s, %s, 'bootstrap', 2.0, %s)
-        ON CONFLICT(project_id, scope)
-        DO UPDATE SET spent_cny = budgets.spent_cny + excluded.spent_cny, updated_at = CURRENT_TIMESTAMP
-        """,
-        (new_id("bdg"), project_id, cost_cny),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        # ON CONFLICT lets a successful retry overwrite the failed-attempt ledger
+        # row that shares this mutation id, instead of colliding on the unique
+        # index and permanently breaking pending_provider/resume recovery.
+        conn.execute(
+            """
+            INSERT INTO ai_calls (
+                id, run_id, node_key, provider, model, prompt_name, task_type,
+                input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
+                client_mutation_id, project_id
+            ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s)
+            ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
+            DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model,
+                prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
+                input = EXCLUDED.input, output = EXCLUDED.output,
+                prompt_tokens = EXCLUDED.prompt_tokens, completion_tokens = EXCLUDED.completion_tokens,
+                cost_cny = EXCLUDED.cost_cny, latency_ms = EXCLUDED.latency_ms,
+                status = 'succeeded', error = NULL
+            """,
+            (
+                new_id("call"),
+                run_id,
+                node_key,
+                provider_name,
+                model_name,
+                prompt_name,
+                task_type,
+                encode({"variables": variables, "prompt": prompt_text}),
+                encode(output),
+                prompt_tokens,
+                completion_tokens,
+                cost_cny,
+                latency_ms,
+                "succeeded",
+                client_mutation_id,
+                project_id,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
+            VALUES (%s, %s, 'bootstrap', 2.0, %s)
+            ON CONFLICT(project_id, scope)
+            DO UPDATE SET spent_cny = budgets.spent_cny + excluded.spent_cny, updated_at = CURRENT_TIMESTAMP
+            """,
+            (new_id("bdg"), project_id, cost_cny),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     return output
 
 
@@ -299,26 +327,34 @@ def complete(
 def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id: str,
                         task_type: str, prompt_name: str, variables: dict[str, Any],
                         client_mutation_id: str | None, started: float, error: Exception) -> None:
+    conn = None
     try:
         route = _load_route(task_type) or {}
         provider = str(route.get("provider") or settings.ai_provider or "unknown")
         model = str(route.get("model") or settings.deepseek_model or "unknown")
         conn = connect()
+        # DO NOTHING keeps the first attempt's row and never clobbers a prior
+        # succeeded row; a later successful retry upgrades the row via complete()'s
+        # own ON CONFLICT DO UPDATE.
         conn.execute(
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
                    input, output, prompt_tokens, completion_tokens, cost_cny,
                    latency_ms, status, error, client_mutation_id, project_id
-               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s)""",
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s)
+               ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
+               DO NOTHING""",
             (new_id("call"), run_id, node_key, provider, model, prompt_name, task_type,
              encode({"variables": variables}), encode({}),
              int((time.perf_counter() - started) * 1000), str(error)[:2000],
              client_mutation_id, project_id),
         )
         conn.commit()
-        conn.close()
     except Exception:
         pass  # Preserve the original provider/budget error if the ledger is unavailable.
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _try_fallback(fb: dict, task_type: str, prompt_text: str, variables: dict, params: dict) -> tuple:
@@ -598,21 +634,32 @@ def _complete_stream_impl(
     completion_tokens = int(usage.get("completion_tokens", 0)) or max(1, len(full_text) // 4)
     latency_ms = int((time.perf_counter() - start) * 1000)
     conn = connect()
-    conn.execute(
-        """INSERT INTO ai_calls (
-               id, run_id, node_key, provider, model, prompt_name, task_type,
-               input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
-               client_mutation_id, project_id
-           ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-        (new_id("call"), None, None, provider_name, model_name, prompt_name, task_type,
-         encode({"variables": variables, "prompt": prompt_text, "stream": True}),
-         encode({"text": full_text}),
-         prompt_tokens, completion_tokens,
-         _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens), latency_ms,
-         "succeeded", client_mutation_id, project_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        # Same replay-safety as complete(): a successful stream upgrades any prior
+        # failed-attempt row sharing this mutation id instead of colliding.
+        conn.execute(
+            """INSERT INTO ai_calls (
+                   id, run_id, node_key, provider, model, prompt_name, task_type,
+                   input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
+                   client_mutation_id, project_id
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
+               DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model,
+                   prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
+                   input = EXCLUDED.input, output = EXCLUDED.output,
+                   prompt_tokens = EXCLUDED.prompt_tokens, completion_tokens = EXCLUDED.completion_tokens,
+                   cost_cny = EXCLUDED.cost_cny, latency_ms = EXCLUDED.latency_ms,
+                   status = 'succeeded', error = NULL""",
+            (new_id("call"), None, None, provider_name, model_name, prompt_name, task_type,
+             encode({"variables": variables, "prompt": prompt_text, "stream": True}),
+             encode({"text": full_text}),
+             prompt_tokens, completion_tokens,
+             _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens), latency_ms,
+             "succeeded", client_mutation_id, project_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def complete_stream(
