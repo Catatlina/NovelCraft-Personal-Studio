@@ -18,6 +18,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [pwOld, setPwOld] = useState("");
   const [pwNew, setPwNew] = useState("");
   const [pwMsg, setPwMsg] = useState("");
+  const [showKey, setShowKey] = useState(false);
   const [apiKey, setApiKeyLocal] = useState("");
   const [apiUrl, setApiUrlLocal] = useState("");
   const [model, setModelLocal] = useState("");
@@ -103,9 +104,13 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
             <h3>全局系统配置</h3>
             <p style={{fontSize:12,color:"var(--text-muted)"}}>下方 API 配置仅保存在当前浏览器会话（BYOK）；定时任务和 Worker 请通过环境变量配置并重启服务。</p>
             <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-              <input placeholder="DeepSeek API Key" value={apiKey}
+              <input type={showKey ? "text" : "password"} placeholder="DeepSeek API Key" value={apiKey}
+                autoComplete="off"
                 onChange={e => { setApiKeyLocal(e.target.value); setSaved(false); }}
                 style={{flex:1}} />
+              <button type="button" onClick={() => setShowKey(v => !v)} style={{whiteSpace:"nowrap"}}>
+                {showKey ? "隐藏" : "显示"}
+              </button>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
               <input placeholder="API 地址，例 https://api.deepseek.com/v1" value={apiUrl}

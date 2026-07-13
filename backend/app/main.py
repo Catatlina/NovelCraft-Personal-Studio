@@ -5,7 +5,7 @@ from typing import Any
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.responses import JSONResponse
@@ -144,6 +144,11 @@ class BatchChapterRequest(BaseModel):
     chapter_count: int = Field(default=10, ge=1, le=50)
 
 
+class ProjectCreate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
 class AgentExecuteRequest(BaseModel):
     project_id: str
     variables: dict[str, Any] = Field(default_factory=dict)
@@ -226,12 +231,18 @@ def list_projects(user: dict = Depends(get_current_user)) -> ApiResponse:
 
 
 @app.post("/api/v1/projects")
-def create_project(name: str = "新项目", user: dict = Depends(get_current_user)) -> ApiResponse:
+def create_project(payload: ProjectCreate | None = Body(default=None), name: str = "新项目",
+                   user: dict = Depends(get_current_user)) -> ApiResponse:
+    # Prefer the request body's name; fall back to the ?name= query param so older
+    # callers keep working. Ignoring a provided name was BUG-006.
+    body_name = payload.name.strip() if payload and payload.name and payload.name.strip() else ""
+    project_name = body_name or name
+    description = payload.description if payload else ""
     conn = connect()
     pid = new_id()
     conn.execute(
-        "INSERT INTO projects (id, name, owner_id) VALUES (%s, %s, %s)",
-        (pid, name, user["id"]),
+        "INSERT INTO projects (id, name, description, owner_id) VALUES (%s, %s, %s, %s)",
+        (pid, project_name, description, user["id"]),
     )
     conn.execute(
         "INSERT INTO project_members (id, project_id, user_id, role) VALUES (%s, %s, %s, 'owner') ON CONFLICT DO NOTHING",
