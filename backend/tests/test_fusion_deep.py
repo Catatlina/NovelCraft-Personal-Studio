@@ -121,23 +121,17 @@ def _unique_name():
     return f"fusion-deep-test-{uuid.uuid4().hex[:8]}"
 
 
-def test_workflow_plan_create():
-    """WorkflowPlan.create inserts a workflow and returns metadata."""
-    from app.services.fusion_deep_workflow import WorkflowPlan
-    name = _unique_name()
-    pid = str(uuid.uuid4())
-    nodes = [
-        {"key": "n1", "type": "auto", "label": "Step 1"},
-        {"key": "n2", "type": "human", "label": "Review"},
-        {"key": "n3", "type": "auto", "label": "Step 3"},
-    ]
-    edges = [{"from": "n1", "to": "n2"}, {"from": "n2", "to": "n3"}]
-    result = WorkflowPlan.create(name, pid, nodes, edges)
-    assert result["name"] == name
-    assert result["node_count"] == 3
-    assert result["edge_count"] == 2
-    assert "workflow_id" in result
-    assert len(result["workflow_id"]) == 36  # UUID
+def test_workflow_plan_lives_in_product_path_only():
+    """denova 行为对照：workflow plan 由 config/dag_exec 产品链承担；
+    无产品调用的 WorkflowPlan 助手类已删除（docs/23）。"""
+    import app.services.fusion_deep_workflow as fdw
+    assert not hasattr(fdw, "WorkflowPlan")
+    assert not hasattr(fdw, "reconcile_chapter_facts")
+    # 产品路径存在且可调用
+    from app.api.v1.config import router as config_router
+    from app.api.v1.dag_exec import execute_workflow
+    assert callable(execute_workflow)
+    assert any("/workflows" in getattr(r, "path", "") for r in config_router.routes)
 
 
 def test_record_event_valid():
@@ -184,12 +178,14 @@ def test_get_event_ledger_includes_recorded_event():
         assert "created_at" in event
 
 
-def test_reconcile_chapter_facts_nonexistent():
-    """reconcile_chapter_facts returns error for missing chapter."""
-    from app.services.fusion_deep_workflow import reconcile_chapter_facts
-    r = reconcile_chapter_facts(str(uuid.uuid4()), str(uuid.uuid4()))
-    assert r["status"] == "error"
-    assert "chapter not found" in r["message"]
+def test_event_ledger_detail_payload_roundtrip():
+    """账本读取返回真实 details 负载（回归：曾因 detail/details 键名错位恒为空）。"""
+    from app.services.fusion_deep_workflow import get_event_ledger, record_event
+    run_id = str(uuid.uuid4())
+    record_event(run_id, "checkpoint.created", node_key="n7", payload={"chapter": 7})
+    ledger = get_event_ledger(run_id, limit=5)
+    assert ledger and ledger[0]["detail"]["node"] == "n7"
+    assert ledger[0]["detail"]["payload"] == {"chapter": 7}
 
 
 def test_create_fact_transaction():
@@ -208,6 +204,49 @@ def test_get_fact_chain_empty():
     from app.services.fusion_deep_workflow import get_fact_chain
     chain = get_fact_chain(str(uuid.uuid4()))
     assert isinstance(chain, list)
+
+
+def test_fact_chain_roundtrip_preserves_mutation_payload():
+    """事实事务链读取返回 previous/new 负载与可回溯标记。"""
+    from app.services.fusion_deep_workflow import create_fact_transaction, get_fact_chain
+    content_id = str(uuid.uuid4())
+    create_fact_transaction("fact_reconcile", content_id, {"loc": "青云城"}, {"loc": "魔都"})
+    chain = get_fact_chain(content_id)
+    assert len(chain) == 1
+    assert chain[0]["operation"] == "fact_reconcile"
+    assert chain[0]["detail"]["previous"] == {"loc": "青云城"}
+    assert chain[0]["detail"]["new"] == {"loc": "魔都"}
+    assert chain[0]["detail"]["reversible"] is True
+
+
+def test_persist_fact_reconcile_writes_fact_transaction():
+    """真实 reconcile 落库路径写入事实事务（show-me-the-story 事务链接线证据）。"""
+    from app.db import connect, encode, new_id
+    from app.services.fusion_deep_workflow import get_fact_chain
+    from app.workers.tasks import _persist_fact_reconcile
+
+    db = connect()
+    project = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
+    novel_id, chapter_id = new_id(), new_id()
+    db.execute(
+        "INSERT INTO contents (id,project_id,type,title,body,meta,status) VALUES (%s,%s,'novel','事务链小说',%s,%s,'draft')",
+        (novel_id, project["id"], encode({"type": "doc", "content": []}), encode({})),
+    )
+    db.execute(
+        "INSERT INTO contents (id,project_id,parent_id,type,title,body,meta,status) VALUES (%s,%s,%s,'chapter','第一章',%s,%s,'draft')",
+        (chapter_id, project["id"], novel_id, encode({"type": "doc", "content": []}), encode({"seq": 1})),
+    )
+    db.commit()
+
+    output = {"reconciliation": {"conflicts_found": 0, "issues": [], "passed": True}}
+    _persist_fact_reconcile(db, "write_fact_reconcile", output,
+                            {"chapter_id": chapter_id}, novel_id, str(uuid.uuid4()))
+    db.commit(); db.close()
+
+    chain = get_fact_chain(chapter_id)
+    assert len(chain) == 1
+    assert chain[0]["operation"] == "fact_reconcile"
+    assert chain[0]["detail"]["new"]["passed"] is True
 
 
 # ============================================================================

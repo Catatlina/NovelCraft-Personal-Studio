@@ -45,6 +45,8 @@ jobs:
         env: {DATABASE_URL: postgresql://novelcraft:novelcraft@localhost/test, REDIS_URL: redis://localhost:6379/0, NOVELCRAFT_ENV: ci, DEEPSEEK_API_KEY: "${{ secrets.DEEPSEEK_API_KEY }}"}
       - name: Dependency audit
         run: pip install pip-audit && pip-audit -r backend/requirements.txt
+      - name: Verify AI truthfulness gate
+        run: python scripts/verify_ai_truthfulness.py
       - name: Verify delivery claims
         run: python scripts/verify_delivery_claims.py
       - name: Validate prompt golden-case definitions

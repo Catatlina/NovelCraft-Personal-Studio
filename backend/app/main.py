@@ -748,6 +748,24 @@ def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     return ok(run)
 
 
+@app.get("/api/v1/runs/{run_id}/ledger")
+def get_run_ledger(run_id: str, limit: int = 50, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """denova 融合：run 级不可变事件账本（audit_logs）。"""
+    conn, _run = load_run_for_user(run_id, user)
+    conn.close()
+    from app.services.fusion_deep_workflow import get_event_ledger
+    return ok(get_event_ledger(run_id, limit=min(max(limit, 1), 200)))
+
+
+@app.get("/api/v1/contents/{content_id}/fact-chain")
+def get_content_fact_chain(content_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """show-me-the-story 融合：章节事实事务链（可回溯的 reconcile 变更记录）。"""
+    conn, _content = load_content_for_user(content_id, user)
+    conn.close()
+    from app.services.fusion_deep_workflow import get_fact_chain
+    return ok(get_fact_chain(content_id))
+
+
 @app.get("/api/v1/runs/{run_id}/events")
 async def run_events(run_id: str, user: dict = Depends(get_current_user)):
     conn, _run = load_run_for_user(run_id, user)

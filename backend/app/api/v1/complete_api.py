@@ -1,6 +1,7 @@
 """Complete API endpoints: providers, adapters, multi-review, cross-model, matrix, book analysis, V1 migration."""
 from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 import os
@@ -228,10 +229,15 @@ def account_diagnostics(platform: str, account_id: str, project_id: str, user: d
     return ok(get_account_diagnostics(platform, account_id, project_id))
 
 
+class ComplianceCheckRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=100_000)
+
+
 @router.post("/content/check-compliance")
-def check_content_compliance(text: str, user: dict = Depends(get_current_user)):
+def check_content_compliance(payload: ComplianceCheckRequest, user: dict = Depends(get_current_user)):
+    """insprira 融合：违禁词检测。正文走请求体，不进 URL/查询串。"""
     from app.services.fusion_browseract_insprira import check_compliance
-    return ok(check_compliance(text))
+    return ok(check_compliance(payload.text))
 
 
 @router.get("/skills/community")

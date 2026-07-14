@@ -79,6 +79,10 @@ else
 fi
 
 echo
+echo "== AST truthfulness gate: AI provenance + hard-coded capability claims =="
+python3 scripts/verify_ai_truthfulness.py
+
+echo
 echo "== Git whitespace check =="
 git diff --check
 

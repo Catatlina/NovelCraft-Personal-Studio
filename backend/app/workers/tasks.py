@@ -971,9 +971,17 @@ def _persist_fact_reconcile(db, node_key: str, output: dict, context: dict,
         return
     # Record reconciliation result in chapter meta
     reconc_result = output.get("reconciliation", output)
+    prev_meta = db.execute("SELECT meta->'fact_reconcile' AS prev FROM contents WHERE id = %s", (cid,)).fetchone()
     db.execute(
         "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
         (encode({"fact_reconcile": reconc_result}), cid),
+    )
+    # show-me-the-story fact chain: every reconcile is a reversible fact transaction
+    from app.services.fusion_deep_workflow import create_fact_transaction
+    create_fact_transaction(
+        "fact_reconcile", cid,
+        previous_value=(prev_meta or {}).get("prev") or {},
+        new_value=reconc_result if isinstance(reconc_result, dict) else {"value": reconc_result},
     )
     # Run cross-reference reconciliation
     chapter_text = context.get("chapter_text", "")
