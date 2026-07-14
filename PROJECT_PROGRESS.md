@@ -10,6 +10,18 @@
 
 ## 当前主线 (main)
 
+### 2026-07-14 待验收推进轮证据（部分完成/骨架 → 待验收）
+
+按《24》顺序推进，每模块独立提交并绑定测试证据；全部状态最高为 🧪 待验收，未标任何 ✅：
+
+- **NC-LIB-002/003（@9d1786f）**：`/library/books` 服务端检索(q)/状态筛选/白名单排序（含 SQL 注入回退负例）；前端「最近编辑」排序；编辑器 3s 防抖自动保存（脏检查、冲突处理期间暂停）。`test_library_contract.py` 2 passed。
+- **NC-HM-001/002/003（@9d1786f）**：hm_content 4 个真实 AI 函数首次获得产品入口（platform-match/title-variants/video-script/material-suggestions + Dashboard 选题工具箱）；去重/趋势/时效评分与可恢复工作流回归。`test_hm_media_pipeline.py` 7 passed。
+- **长篇一致性（@7481791）**：卷级门禁 + 批量生成 409 enforcement + 百章真库压力 + 摘要失败显式化。`test_long_novel_consistency.py` 7 passed。
+- **发布中心（@df778e4）**：指标回流 sweep（beat 6h）+ 状态机/60s 调度行为测试。`test_publish_center.py` 4 passed。
+- **融合与骨架项目（@4a27eb9）**：事件账本/事实链负载修复与产品端点、事实事务接入真实 reconcile、分层规划/审计/humanize/insprira/BrowserAct removed 诚信回归。`test_skeleton_fusion_projects.py` 5 passed + `test_fusion_deep.py` 行为对照补强。
+- 验证命令：`cd backend && .venv/bin/pytest -q` → **519 passed, 8 skipped**（2026-07-14）；`npm --prefix frontend run build` → 通过。
+- 协作说明：`scripts/verify_ai_truthfulness.py` 存在一处并行会话的未提交改动（放宽否定语境误报），本轮未触碰、未代提交。
+
 ### 2026-07-14 本轮整改证据
 
 - P0 成本追踪白屏：已改为读取 `/api/v1/admin/budgets` 与 `/api/v1/admin/model-routes` 的 `response.data`，组件侧增加数组保护；证据：`npm --prefix frontend run test:e2e` 通过，含 `主链①d：成本追踪页无白屏并展示预算与模型路由`。
@@ -30,27 +42,27 @@
 | 扫榜自动建书 | 🧪 待验收 | 幂等键建书、来源血缘、跳过人工选名 | 真实 Provider 批次成功路径 |
 | 连续章节流水线 | 🧪 待验收 | 严格 Schema、章节幂等键、连续性风险报告、批次 `failed`/resume 断点续跑；浏览器实测失败→恢复链与导出正文 | 真实 Provider 多章样本与批次成功路径 |
 | 统一书库 | 🧪 待验收 | 书库 API/页面、检索/筛选/排序、目录导入（权限+seq+幂等落库）、导出 TXT/MD | 完整 E2E 验收 |
-| 灵感 Bootstrap | 🚧 部分完成 | 灵感→书名→设定→第一章→审核基础链 | 真实 Provider 质量验收 |
-| 热点自媒体 | 🚧 部分完成 | 知乎/微博采集器、Dashboard、社媒生成基础 | 去重/趋势/时效评分；可恢复工作流 |
-| 长篇一致性 | 🚧 部分完成 | 上下文/摘要/实体/伏笔/时间线组件；伏笔与矛盾检查已按真实 schema 重写并有真库回归测试 | 百章压力、写后 reconcile、卷级门禁 |
-| 发布中心 | 🚧 部分完成 | 平台账号 Fernet 加密落库（platform_accounts 启用）、发布状态机、敏感词前后端检查、发布记录 | 真实平台发布回执、数据回流、全自动 worker 调度 |
+| 灵感 Bootstrap | 🧪 待验收 | 灵感→书名→设定→第一章→审核基础链；真实 Provider V2 全链 `test_real_provider_v2_bootstrap.py` 已跑通（2026-07-14） | 产出质量人工验收 |
+| 热点自媒体 | 🧪 待验收 | 采集器去重(24h窗口)/趋势/时效评分 + 趋势报告端点；平台匹配/受众/合规风险、AI 标题变体/短视频脚本/素材建议 4 新端点+Dashboard 选题工具箱；批次失败回滚零残留→重试幂等键复用（`test_hm_media_pipeline.py` 7 tests，@9d1786f） | 真实源长周期稳定性；真实 Provider 成稿质量验收 |
+| 长篇一致性 | 🧪 待验收 | 真库百章写前检索窗口(<5s)、写后 reconcile 接线+新实体标记、卷级门禁（缺章/未过审/到期伏笔/实体矛盾4类阻断，批量生成 409 enforcement，通过时生成卷摘要落库）；摘要 AI 失败显式化不再落伪摘要（`test_long_novel_consistency.py` 7 tests，@7481791） | 真实 Provider 百章 T5 长跑 |
+| 发布中心 | 🧪 待验收 | Fernet 凭据、状态机全生命周期+非法迁移拒绝、beat 60s 到期派发+6h 指标回流 sweep（只聚合真实采集数据）（`test_publish_center.py` 4 tests，@df778e4） | 真实平台发布回执与真实回流数据（需有效平台凭据） |
 
 ## 八上游项目融合
 
 | 项目 | 状态 | 真实边界 |
 |---|---|---|
-| oh-story-claudecode | 🚧 部分完成 | 7 个上游 Skill 与许可证已保存；PromptSpec/golden cases 接入证据不完整 |
-| denova | 🚧 部分完成 | run/node/SSE 基础与部分 WorkflowPlan/事件账本代码；未见完整行为对照测试 |
-| show-me-the-story | 🚧 部分完成 | 伏笔、上下文和审核组件；章节事实事务链证据不完整 |
-| AI_NovelGenerator | 🚧 部分完成 | 目录解析、通用审核与部分记忆组件；百章验收无证据 |
-| AI-auto-generates | 🚧 部分完成 | 批量生成、拆书、Prompt 基础与章节目录导入落库 |
-| harnessNovel | 🧱 骨架 | 阶段规划函数；分层规划/合理性审计/humanize 无验收证据 |
-| BrowserAct (MIT) | 🧱 骨架 | 仅保留合规部分（用户已登录会话半自动发布包装）；anti-bot 能力按《25》不予融合、已删除 |
-| insprira (AGPL 洁净室) | 🧱 骨架 | 账号追踪/诊断、违禁词检测独立实现，有 API/迁移/权限隔离；真实平台数据验收无证据 |
+| oh-story-claudecode | 🧪 待验收 | 7 上游 Skill+许可证在库；PromptSpec/golden cases 播种并有汇总校验（`test_fusion_deep.py` golden case 断言、`/batch` golden-case 检查端点）；write_chapter_draft/final_humanize 绑定方法论提示词（`test_fusion_wired.py`） |
+| denova | 🧪 待验收 | 事件账本行为对照测试（负载 roundtrip、非法事件类型拒绝、detail/details 键名错位回归修复）；run 账本查询端点 `/runs/{id}/ledger`；workflow plan 由 config+dag_exec 产品链承担，无调用的 WorkflowPlan 助手类已删（@4a27eb9） |
+| show-me-the-story | 🧪 待验收 | 章节事实事务链接入真实 reconcile 落库路径（每次 reconcile 写可回溯事务），查询端点 `/contents/{id}/fact-chain`，roundtrip 测试钉住 previous/new 负载（@4a27eb9） |
+| AI_NovelGenerator | 🧪 待验收 | 目录解析/四阶段20节点全链 T2；真库百章检索窗口与一致性组件回归（`test_long_novel_consistency.py`）；真实 Provider 百章 T5 未做 |
+| AI-auto-generates | 🧪 待验收 | 批量生成批次幂等恢复、书本分析真实 Gateway（`/books/analyze` 写 ai_calls）、章节目录导入落库均有回归 |
+| harnessNovel | 🧪 待验收 | 分层规划 `/novels/layered-plan` 走真实网关（空响应显式失败）；合理性审计/humanize 由 bootstrap 末段节点承担且次序钉死（`test_skeleton_fusion_projects.py`，@4a27eb9） |
+| BrowserAct (MIT) | 🧪 待验收（合规缩减版） | 按《25》仅保留用户已登录会话半自动发布包装；anti-bot 已删除，fusion 状态如实上报 removed（有回归测试钉死） |
+| insprira (AGPL 洁净室) | 🧪 待验收 | 账号追踪幂等 + 真库诊断计算（发帖数/互动均值/redfox 指数/评级）、违禁词三类命中与洁净放行回归；check-compliance 改 JSON body；真实平台数据验收仍需真实账号 |
 
 ## 验证基线（2026-07-14 本轮工作树实测）
 
-- 后端测试：**490 passed，8 skipped**（2026-07-14，本地真实 DeepSeek key；真实 Postgres；业务运行时不再提供 mock provider）。新增覆盖：仿写相似度红线、热点生成持久化/回滚、书库正式路径、出海翻译项目归属、平台连接可视化配置、审计报告 P0/P1 整改（伪热点下线、书本分析真实网关、预算真实同步、发布读取存储凭据、融合 removed 状态、Provider 诊断失败语义、移动端响应式/env 示例）、真实编辑器/热点/仿写 Provider 冒烟。
+- 后端测试：**519 passed，8 skipped**（2026-07-14 待验收推进轮后，本地真实 DeepSeek key；真实 Postgres；业务运行时不再提供 mock provider）。新增覆盖：仿写相似度红线、热点生成持久化/回滚、书库正式路径、出海翻译项目归属、平台连接可视化配置、审计报告 P0/P1 整改（伪热点下线、书本分析真实网关、预算真实同步、发布读取存储凭据、融合 removed 状态、Provider 诊断失败语义、移动端响应式/env 示例）、真实编辑器/热点/仿写 Provider 冒烟。
 - 前端：`npm run build` 通过（仅保留 Vite 关于 `api.ts` 动静态混合导入和空 `react` chunk 的既有警告）。
 - Alembic：单头 `nc_audit_workflow_scope`；本地库 upgrade→downgrade→upgrade 往返通过。
 - 浏览器实测（上一轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）。当前整改要求 AI provider 失败直接失败/报错，不再把 provider 失败作为可伪恢复的成功态。
@@ -99,7 +111,7 @@
 | harnessNovel | 🧪 已接线待真实验收 | 分层规划（plan_*→blueprint_*）在全链测试中逐节点 succeeded |
 | show-me-the-story | 🧪 已接线待真实验收 | write_fact_reconcile 节点 + `_write_after_reconcile` 在全链测试中执行 |
 | denova | 🧪 已接线待真实验收 | Event ledger（audit_logs）记录 run.started/checkpoint/run.completed 有断言；provider 失败按当前规则进入 failed/报错，待真实 provider 长链验收 |
-| AI-auto-generates | 🚧 部分 | 批量生成/拆书代码在（m3_bulk/batch_endpoints），端到端验收未做 |
+| AI-auto-generates | 🧪 已接线待真实验收 | 批量生成批次幂等恢复、书本分析真实 Gateway、目录导入落库均有回归（2026-07-14 待验收推进轮） |
 
 ### 验证基线（2026-07-13 本轮实测）
 
