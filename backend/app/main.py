@@ -5,6 +5,7 @@ from typing import Any
 
 from contextlib import asynccontextmanager
 
+import psycopg2.pool
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -74,6 +75,17 @@ app.include_router(ranking_router)
 app.include_router(fusion_router, prefix="/api/v1")
 init_metrics(app)
 install_rate_limiter(app)
+
+
+@app.exception_handler(psycopg2.pool.PoolError)
+async def database_pool_exhausted(_request: Request, exc: psycopg2.pool.PoolError):
+    logger.error("database connection pool exhausted: %s", exc)
+    return JSONResponse(status_code=503, content={
+        "code": 503,
+        "message": "database connection pool exhausted",
+        "data": {"retryable": True},
+    })
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -533,11 +545,15 @@ async def batch_generate_chapters(
 @app.get("/api/v1/novels/{novel_id}/generation-batches")
 def list_novel_generation_batches(novel_id: str, limit: int = 20, offset: int = 0,
                                   user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn, novel = load_content_for_user(novel_id, user)
-    batches = conn.execute("""SELECT * FROM generation_batches WHERE novel_id=%s
-                              ORDER BY created_at DESC LIMIT %s OFFSET %s""",
-                           (novel_id, min(max(limit, 1), 100), max(offset, 0))).fetchall()
-    conn.close()
+    conn = None
+    try:
+        conn, novel = load_content_for_user(novel_id, user)
+        batches = conn.execute("""SELECT * FROM generation_batches WHERE novel_id=%s
+                                  ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+                               (novel_id, min(max(limit, 1), 100), max(offset, 0))).fetchall()
+    finally:
+        if conn is not None:
+            conn.close()
     items = []
     for batch in batches:
         requested = max(int(batch.get("requested_count") or 0), 1)
