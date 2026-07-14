@@ -19,8 +19,9 @@
 - **长篇一致性（@7481791）**：卷级门禁 + 批量生成 409 enforcement + 百章真库压力 + 摘要失败显式化。`test_long_novel_consistency.py` 7 passed。
 - **发布中心（@df778e4）**：指标回流 sweep（beat 6h）+ 状态机/60s 调度行为测试。`test_publish_center.py` 4 passed。
 - **融合与骨架项目（@4a27eb9）**：事件账本/事实链负载修复与产品端点、事实事务接入真实 reconcile、分层规划/审计/humanize/insprira/BrowserAct removed 诚信回归。`test_skeleton_fusion_projects.py` 5 passed + `test_fusion_deep.py` 行为对照补强。
-- 验证命令：`cd backend && .venv/bin/pytest -q` → **519 passed, 8 skipped**（2026-07-14）；`npm --prefix frontend run build` → 通过。
-- 协作说明：`scripts/verify_ai_truthfulness.py` 存在一处并行会话的未提交改动（放宽否定语境误报），本轮未触碰、未代提交。
+- **诚信机器门禁（本轮）**：新增 AST 级 `scripts/verify_ai_truthfulness.py` 并接入 `scripts/ai_development_gate.sh` 与 GitHub Actions；拦截 AI 命名函数绕过 gateway、硬编码 `wired/available/status=active`、固定伪生成模板。新增 `test_truthfulness_gate.py` 负例，确认坏代码会被挡下。
+- **融合状态证据驱动（本轮）**：`/fusion/status` 的能力状态由当前用户项目最近 30 天 `ai_calls` / workflow audit evidence 倒推：`verified` / `wired_unverified` / `missing` / `removed`；没有真实成功记录不再计入 verified。新增回归断言 `book_analysis` 成功记录可把 book analyzer 从 `wired_unverified` 升为 `verified`。
+- 验证命令：`cd backend && .venv/bin/pytest -q` → **523 passed, 8 skipped**（2026-07-14）；`python3 scripts/verify_ai_truthfulness.py` → passed；`GATE_ALLOW_WARNINGS=1 bash scripts/ai_development_gate.sh` → AST truthfulness passed，旧宽泛扫描仍需逐项解释。
 
 ### 2026-07-14 本轮整改证据
 

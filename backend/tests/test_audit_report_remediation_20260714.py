@@ -177,6 +177,31 @@ def test_fusion_browseract_removed_not_active():
     assert status["entries"]["BrowserAct.chrome_publish"]["status"] == "removed"
 
 
+def test_fusion_status_is_driven_by_ai_call_evidence():
+    from app.db import connect, encode, new_id
+    from app.services.fusion_governance import get_fusion_integration_status
+
+    _client, _headers, project_id = _auth_project()
+    before = get_fusion_integration_status(project_ids=[project_id])
+    assert before["entries"]["AI-auto-generates.book_analyzer"]["status"] == "wired_unverified"
+
+    db = connect()
+    db.execute(
+        """INSERT INTO ai_calls (id, project_id, provider, model, prompt_name, task_type,
+               input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status)
+           VALUES (%s,%s,'deepseek','deepseek-chat','book.analysis_workbench','book_analysis',
+                  %s,%s,10,20,0.01,100,'succeeded')""",
+        (new_id("call"), project_id, encode({}), encode({"title": "证据"})),
+    )
+    db.commit()
+    db.close()
+
+    after = get_fusion_integration_status(project_ids=[project_id])
+    entry = after["entries"]["AI-auto-generates.book_analyzer"]
+    assert entry["status"] == "verified"
+    assert entry["evidence"]["success_count"] >= 1
+
+
 def test_publish_execution_reads_stored_platform_credentials(monkeypatch):
     from app.db import connect, encode, new_id
     from app.services.publish_hub import register_platform_account

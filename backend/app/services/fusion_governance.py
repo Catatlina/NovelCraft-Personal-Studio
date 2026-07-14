@@ -80,14 +80,19 @@ def validate_fusion_contracts() -> dict:
 # ===== NC-FUS-003: Integration — capability mapping with entry points =====
 
 FUSION_ENTRY_MAP = {
-    "oh-story.prompts": {"route": "/api/v1/prompts", "file": "app/prompt_registry.py"},
-    "oh-story.scan_protocol": {"route": "/api/v1/ranking/*", "file": "app/services/ranking_adapter.py"},
-    "denova.workflow_engine": {"route": "/api/v1/runs/{id}/*", "file": "app/workers/tasks.py"},
-    "denova.agent_trace": {"route": "/api/v1/agents", "file": "app/services/agent_registry.py"},
-    "show-me-the-story.foreshadow": {"route": "/api/v1/novels/{id}/foreshadowings", "file": "app/services/narrative_engine.py"},
-    "AI_NovelGenerator.chapter_parser": {"route": "/api/v1/novels/{id}/import-chapters", "file": "app/services/batch_fixes.py"},
-    "AI-auto-generates.book_analyzer": {"route": "/api/v1/books/analyze", "file": "app/services/providers_and_adapters.py"},
-    "harnessNovel.layered_planning": {"route": "/api/v1/novels/layered-plan", "file": "app/services/batch_fixes.py"},
+    "oh-story.prompts": {"route": "/api/v1/prompts", "file": "app/prompt_registry.py", "evidence": "route"},
+    "oh-story.scan_protocol": {"route": "/api/v1/ranking/*", "file": "app/services/ranking_adapter.py",
+                               "task_types": ["ranking_market_analysis"]},
+    "denova.workflow_engine": {"route": "/api/v1/runs/{id}/*", "file": "app/workers/tasks.py", "evidence": "audit_logs"},
+    "denova.agent_trace": {"route": "/api/v1/agents", "file": "app/services/agent_registry.py", "evidence": "run_nodes"},
+    "show-me-the-story.foreshadow": {"route": "/api/v1/novels/{id}/foreshadowings", "file": "app/services/narrative_engine.py",
+                                     "task_types": ["extract_foreshadowing"]},
+    "AI_NovelGenerator.chapter_parser": {"route": "/api/v1/novels/{id}/import-chapters", "file": "app/services/batch_fixes.py",
+                                         "evidence": "contents.chapter"},
+    "AI-auto-generates.book_analyzer": {"route": "/api/v1/books/analyze", "file": "app/services/providers_and_adapters.py",
+                                        "task_types": ["book_analysis"]},
+    "harnessNovel.layered_planning": {"route": "/api/v1/novels/layered-plan", "file": "app/services/batch_fixes.py",
+                                      "task_types": ["plan_idea", "plan_market_fit", "plan_world_architecture"]},
     "BrowserAct.chrome_publish": {"route": None, "file": "app/services/fusion_browseract_insprira.py",
                                   "expected_state": "removed",
                                   "reason": "BrowserAct scraping/anti-bot publish route was removed by compliance hardening; manual logged-in publishing remains outside API automation."},
@@ -104,24 +109,120 @@ def _file_exists(app_file: str) -> bool:
     return os.path.exists(os.path.join(_repo_root(), app_file))
 
 
-def _entry_state(entry: dict) -> str:
+def _recent_ai_evidence(task_types: list[str], project_ids: list[str] | None = None, days: int = 30) -> dict:
+    if not task_types:
+        return {"success_count": 0, "latest_at": None, "provider_count": 0}
+    if project_ids is not None and not project_ids:
+        return {"success_count": 0, "latest_at": None, "provider_count": 0}
+    db = connect()
+    try:
+        if project_ids is None:
+            row = db.execute(
+                """
+                SELECT COUNT(*) AS success_count, MAX(created_at) AS latest_at,
+                       COUNT(DISTINCT provider) AS provider_count
+                FROM ai_calls
+                WHERE status='succeeded'
+                  AND provider <> 'mock'
+                  AND task_type = ANY(%s)
+                  AND created_at > now() - (%s * interval '1 day')
+                """,
+                (task_types, days),
+            ).fetchone()
+        else:
+            row = db.execute(
+                """
+                SELECT COUNT(*) AS success_count, MAX(created_at) AS latest_at,
+                       COUNT(DISTINCT provider) AS provider_count
+                FROM ai_calls
+                WHERE status='succeeded'
+                  AND provider <> 'mock'
+                  AND task_type = ANY(%s)
+                  AND project_id = ANY(%s::uuid[])
+                  AND created_at > now() - (%s * interval '1 day')
+                """,
+                (task_types, project_ids, days),
+            ).fetchone()
+    finally:
+        db.close()
+    return {
+        "success_count": int(row["success_count"] or 0) if row else 0,
+        "latest_at": str(row["latest_at"]) if row and row["latest_at"] else None,
+        "provider_count": int(row["provider_count"] or 0) if row else 0,
+    }
+
+
+def _recent_workflow_evidence(project_ids: list[str] | None = None, days: int = 30) -> dict:
+    if project_ids is not None and not project_ids:
+        return {"success_count": 0, "latest_at": None}
+    db = connect()
+    try:
+        if project_ids is None:
+            row = db.execute(
+                """
+                SELECT COUNT(*) AS success_count, MAX(al.created_at) AS latest_at
+                FROM audit_logs al
+                JOIN workflow_runs wr ON wr.id = al.entity_id
+                WHERE al.entity_type='workflow_run'
+                  AND al.action IN ('run.completed','node.completed','checkpoint.created')
+                  AND al.created_at > now() - (%s * interval '1 day')
+                """,
+                (days,),
+            ).fetchone()
+        else:
+            row = db.execute(
+                """
+                SELECT COUNT(*) AS success_count, MAX(al.created_at) AS latest_at
+                FROM audit_logs al
+                JOIN workflow_runs wr ON wr.id = al.entity_id
+                WHERE al.entity_type='workflow_run'
+                  AND al.action IN ('run.completed','node.completed','checkpoint.created')
+                  AND wr.project_id = ANY(%s::uuid[])
+                  AND al.created_at > now() - (%s * interval '1 day')
+                """,
+                (project_ids, days),
+            ).fetchone()
+    finally:
+        db.close()
+    return {
+        "success_count": int(row["success_count"] or 0) if row else 0,
+        "latest_at": str(row["latest_at"]) if row and row["latest_at"] else None,
+    }
+
+
+def _entry_state(entry: dict, project_ids: list[str] | None = None) -> tuple[str, dict]:
     if entry.get("expected_state") == "removed":
-        return "removed"
+        return "removed", {"success_count": 0, "latest_at": None}
     route = entry.get("route")
     app_file = entry.get("file", "")
-    if route and _file_exists(app_file):
-        return "verified"
-    return "missing"
+    wired = bool(route and _file_exists(app_file))
+    if not wired:
+        return "missing", {"success_count": 0, "latest_at": None}
+
+    if entry.get("task_types"):
+        evidence = _recent_ai_evidence(entry["task_types"], project_ids=project_ids)
+        return ("verified" if evidence["success_count"] > 0 else "wired_unverified"), evidence
+
+    if entry.get("evidence") == "audit_logs":
+        evidence = _recent_workflow_evidence(project_ids=project_ids)
+        return ("verified" if evidence["success_count"] > 0 else "wired_unverified"), evidence
+
+    return "wired_unverified", {"success_count": 0, "latest_at": None, "evidence": entry.get("evidence", "route")}
 
 
-def get_fusion_integration_status() -> dict:
+def get_fusion_integration_status(project_ids: list[str] | None = None) -> dict:
     """NC-FUS-003: Integration status — which upstream capabilities have NovelCraft entry points."""
-    entries = {key: {**entry, "status": _entry_state(entry)} for key, entry in FUSION_ENTRY_MAP.items()}
+    entries = {}
+    for key, entry in FUSION_ENTRY_MAP.items():
+        status, evidence = _entry_state(entry, project_ids=project_ids)
+        entries[key] = {**entry, "status": status, "evidence": evidence}
     verified = [key for key, item in entries.items() if item["status"] == "verified"]
+    wired_unverified = [key for key, item in entries.items() if item["status"] == "wired_unverified"]
     return {
         "total_capabilities": len(FUSION_ENTRY_MAP),
         "integrated": len(verified),
-        "pending": len(FUSION_ENTRY_MAP) - len(verified),
+        "wired_unverified": len(wired_unverified),
+        "pending": len(FUSION_ENTRY_MAP) - len(verified) - len(wired_unverified),
         "entries": entries,
     }
 

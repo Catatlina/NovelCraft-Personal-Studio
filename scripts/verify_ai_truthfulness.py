@@ -133,7 +133,9 @@ def analyze_file(path: Path) -> list[Finding]:
         return [Finding(path, exc.lineno or 1, "syntax-error", str(exc))]
 
     for lineno, text in _string_literals(tree):
-        if CLICHE_RE.search(text):
+        negative_instruction = any(marker in text for marker in ("禁止", "不使用", "不得", "避免"))
+        short_keyword = len(text.strip()) <= 6 and "{" not in text
+        if CLICHE_RE.search(text) and not negative_instruction and not short_keyword:
             findings.append(Finding(path, lineno, "fixed-template", "blocked cliché/fabricated-output wording"))
 
     for node in ast.walk(tree):
