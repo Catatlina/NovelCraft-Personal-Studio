@@ -192,6 +192,7 @@ def main() -> int:
     parser.add_argument("--headless", action="store_true", help="Run browser headlessly; useful for scheduled public pages.")
     parser.add_argument("--no-pause", action="store_true", help="Do not wait for manual login/challenge completion.")
     parser.add_argument("--ocr", choices=("auto", "none"), default="auto", help="Use local OCR for Fanqie private-use glyph pages when available.")
+    parser.add_argument("--browser-channel", default="", help="Optional Playwright channel, e.g. chrome. Empty uses bundled Chromium.")
     args = parser.parse_args()
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -203,7 +204,10 @@ def main() -> int:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(str(profile), headless=args.headless, channel="chrome")
+        launch_options = {"headless": args.headless}
+        if args.browser_channel:
+            launch_options["channel"] = args.browser_channel
+        context = playwright.chromium.launch_persistent_context(str(profile), **launch_options)
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(URLS[args.source], wait_until="domcontentloaded", timeout=60_000)
         if not args.no_pause:
