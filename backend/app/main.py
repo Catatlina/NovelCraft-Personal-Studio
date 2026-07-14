@@ -439,10 +439,22 @@ async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(
     conn.close()
     if novel["type"] != "novel":
         raise HTTPException(status_code=400, detail="content is not a novel")
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:
+        payload = {}
+    raw_auto_confirm_title = payload.get("auto_confirm_title", True)
+    if isinstance(raw_auto_confirm_title, str):
+        auto_confirm_title = raw_auto_confirm_title.strip().lower() not in {"0", "false", "no", "off"}
+    else:
+        auto_confirm_title = bool(raw_auto_confirm_title)
     run_id = create_run(novel["project_id"], novel_id,
                         api_key=request.headers.get("X-Api-Key", ""),
                         api_url=request.headers.get("X-Api-Base-Url", ""),
-                        model=request.headers.get("X-Model", ""))
+                        model=request.headers.get("X-Model", ""),
+                        auto_confirm_title=auto_confirm_title)
     return ok({"run_id": run_id})
 
 

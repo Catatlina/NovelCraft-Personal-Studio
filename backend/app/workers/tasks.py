@@ -428,6 +428,69 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
 
         # ── Human node ──────────────────────────────────────────────────
         if kind == "human":
+            run_context = run["context"] if isinstance(run["context"], dict) else {}
+            if run_context.get("auto_confirm_title") and node_key == "human_confirm_title":
+                title_candidates = run_context.get("title_candidates") or []
+                selected_title = str(title_candidates[0]).strip() if title_candidates else ""
+                if not selected_title:
+                    conn.execute(
+                        """UPDATE run_nodes
+                           SET status = 'failed',
+                               started_at = COALESCE(started_at, now()),
+                               finished_at = now(),
+                               error = %s
+                           WHERE run_id = %s AND node_key = %s""",
+                        ("missing title candidates for auto confirm", run_id, node_key),
+                    )
+                    conn.execute(
+                        "UPDATE workflow_runs SET status = 'failed', current_node_key = %s, updated_at = now() WHERE id = %s",
+                        (node_key, run_id),
+                    )
+                    conn.commit()
+                    conn.close()
+                    _record_bootstrap_event(
+                        run_id,
+                        "human.rejected",
+                        node_key=node_key,
+                        payload={"reason": "missing_title_candidates"},
+                    )
+                    return {"status": "error", "detail": "missing title candidates for auto confirm"}
+                run_context["selected_title"] = selected_title
+                conn.execute(
+                    """UPDATE contents
+                       SET title = %s,
+                           meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{selected_title}', to_jsonb(%s::text), true),
+                           updated_at = now()
+                       WHERE id = %s""",
+                    (selected_title, selected_title, run["novel_id"]),
+                )
+                conn.execute(
+                    """UPDATE run_nodes
+                       SET status = 'succeeded',
+                           started_at = COALESCE(started_at, now()),
+                           finished_at = now(),
+                           output = %s
+                       WHERE run_id = %s AND node_key = %s""",
+                    (encode({"selected_title": selected_title, "source": "auto_confirm"}), run_id, node_key),
+                )
+                conn.execute(
+                    """UPDATE workflow_runs
+                       SET status = 'pending',
+                           current_node_key = 'blueprint_volume_plan',
+                           context = %s,
+                           updated_at = now()
+                       WHERE id = %s""",
+                    (encode(run_context), run_id),
+                )
+                conn.commit()
+                conn.close()
+                _record_bootstrap_event(
+                    run_id,
+                    "human.confirmed",
+                    node_key=node_key,
+                    payload={"selected_title": selected_title, "action": "auto_confirmed"},
+                )
+                continue
             conn.execute(
                 "UPDATE run_nodes SET status = 'waiting_human', started_at = COALESCE(started_at, now()) WHERE run_id = %s AND node_key = %s",
                 (run_id, node_key),
@@ -657,7 +720,8 @@ def _estimate_node_cost(run_id: str, node_key: str, output: dict) -> dict:
 
 def create_run(project_id: str, novel_id: str,
                api_key: str = "", api_url: str = "", model: str = "",
-               selected_title: str = "", idempotency_key: str | None = None) -> str:
+               selected_title: str = "", idempotency_key: str | None = None,
+               auto_confirm_title: bool = False) -> str:
     """Create a workflow run and its nodes in the database with the 4-stage architecture.
 
     If selected_title is provided, skips planning stage + human confirm
@@ -687,6 +751,8 @@ def create_run(project_id: str, novel_id: str,
     context = {"novel_id": novel_id, "idea": meta.get("idea", ""), **meta}
     if selected_title:
         context["selected_title"] = selected_title
+    if auto_confirm_title:
+        context["auto_confirm_title"] = True
 
     run_id = new_id()
     db.execute(
@@ -727,7 +793,10 @@ def create_run(project_id: str, novel_id: str,
 
     # Record ledger event
     _record_bootstrap_event(run_id, "run.created", node_key=start_key,
-                            payload={"selected_title": selected_title if selected_title else None})
+                            payload={
+                                "selected_title": selected_title if selected_title else None,
+                                "auto_confirm_title": bool(auto_confirm_title),
+                            })
 
     dispatch_bootstrap_run(run_id, start_key, api_key, api_url, model)
     return run_id

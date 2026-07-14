@@ -156,6 +156,51 @@ def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
     db.close()
 
 
+def test_bootstrap_auto_confirms_title_for_unattended_basic_chain(seeded_novel, monkeypatch):
+    from app.workers import tasks
+
+    project_id, novel_id = seeded_novel
+    monkeypatch.setattr(tasks, "complete", lambda **kwargs: _provider_output(kwargs["task_type"]))
+    monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
+
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
+        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+
+    original_delay = tasks.execute_bootstrap.delay
+    tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]
+    try:
+        run_id = tasks.create_run(project_id, novel_id, auto_confirm_title=True)
+    finally:
+        tasks.execute_bootstrap.delay = original_delay  # type: ignore[assignment]
+
+    run, node_status = _run_state(run_id)
+    assert run["status"] == "succeeded", (run["status"], node_status)
+    assert node_status["human_confirm_title"] == "succeeded"
+
+    db = connect()
+    human = db.execute(
+        "SELECT output FROM run_nodes WHERE run_id=%s AND node_key='human_confirm_title'",
+        (run_id,),
+    ).fetchone()
+    novel = db.execute("SELECT title FROM contents WHERE id=%s", (novel_id,)).fetchone()
+    events = [r["action"] for r in db.execute(
+        "SELECT action FROM audit_logs WHERE entity_type='workflow_run' AND entity_id=%s ORDER BY created_at",
+        (run_id,),
+    ).fetchall()]
+    human_events = db.execute(
+        """SELECT details FROM audit_logs
+           WHERE entity_type='workflow_run' AND entity_id=%s AND action='human.confirmed'
+           ORDER BY created_at""",
+        (run_id,),
+    ).fetchall()
+    db.close()
+
+    assert human["output"]["source"] == "auto_confirm"
+    assert novel["title"] == "《回声来信》"
+    assert "human.confirmed" in events
+    assert any((event["details"].get("payload") or {}).get("action") == "auto_confirmed" for event in human_events)
+
+
 def test_journey_a_resumes_after_provider_failure(seeded_novel, monkeypatch):
     """Checkpoint contract: a provider failure marks failed, and a
     redrive resumes from the failed node instead of restarting or crashing
