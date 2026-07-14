@@ -1101,7 +1101,7 @@ def daily_briefing(request: Request, project_id: str, user: dict = Depends(get_c
     ensure_project_member(conn, project_id, user, {"owner", "editor"})
     conn.close()
     from .services.hotspot import generate_daily_briefing
-    return ok(generate_daily_briefing(project_id))
+    return ok(generate_daily_briefing(project_id, user_id=user["id"]))
 
 
 @app.post("/api/v1/knowledge/style-learn")

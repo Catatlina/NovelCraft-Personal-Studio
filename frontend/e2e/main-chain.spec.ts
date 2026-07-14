@@ -86,6 +86,14 @@ test("主链①c：平台连接可视化填写并保存（无 AI，确定性）"
   await expect(page.locator("table").filter({ hasText: "WordPress" })).toContainText("已配置");
 });
 
+test("主链①d：成本追踪页无白屏并展示预算与模型路由（无 AI，确定性）", async ({ page }) => {
+  await registerFreshUser(page);
+  await page.getByRole("button", { name: "成本追踪" }).click();
+  await expect(page.getByRole("heading", { name: "预算" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("heading", { name: "模型路由" })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("TypeError");
+});
+
 test("主链②：AI 分析→原创选题→建书入库（protected，真实 Provider）", async ({ page }) => {
   test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY（repo secret / 本地 env）");
   test.setTimeout(240_000);

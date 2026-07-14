@@ -220,7 +220,8 @@ def init_db() -> None:
         "extract_timeline", "extract_arcs",
         "gen_short_titles", "gen_short_story", "review_short",
         "gen_video_script", "fetch_hotspots", "gen_daily_brief",
-        "translate_segment", "cultural_localize", "ranking_market_analysis",
+        "hm_daily_brief", "hm_title_variants", "hm_material_suggestions",
+        "translate_segment", "cultural_localize", "ranking_market_analysis", "book_analysis",
         # V2 four-stage bootstrap (18 agent nodes) — every node must resolve a
         # real model route or the flagship flow fails at its first node.
         "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",

@@ -5,8 +5,22 @@
 > 更新：2026-07-11（审计修复轮）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
 >
 > **治理说明**：此前版本宣称"20/20 任务全部完成、6/6 深度融合、8/8 整合、真实 Provider T3/T5 通过、真实源 7 天稳定运行、浏览器 E2E 验收通过"，均无《23》§6 要求的验收证据（commit/命令/日期/输出），且"7 天 T5"与文档同日更新在时间上不可能成立。按《23》§8 全部降级为证据可查的状态；重建证据台账前不得恢复 ✅。外部审计报告（2026-07-11）的 §三/P1-6 亦指认了同一问题。
+>
+> **开发前强制门禁**：任何后续开发、整改、审计修复、提交前，必须先阅读并遵守 `docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md`。未通过该规范的状态口径、反撒谎扫描、证据等级和交付格式时，不得使用高等级交付口径。
 
 ## 当前主线 (main)
+
+### 2026-07-14 本轮整改证据
+
+- P0 成本追踪白屏：已改为读取 `/api/v1/admin/budgets` 与 `/api/v1/admin/model-routes` 的 `response.data`，组件侧增加数组保护；证据：`npm --prefix frontend run test:e2e` 通过，含 `主链①d：成本追踪页无白屏并展示预算与模型路由`。
+- P1 自媒体生成真实 AI 化：`hm_content` 的文章、标题、短视频脚本、素材建议均走 `app.gateway.complete()`；新增/补齐 `gen_daily_brief`、`hm_daily_brief`、`hm_title_variants`、`gen_video_script`、`hm_material_suggestions` 输出契约；失败按网关错误暴露，不返回模板成品。
+- P1 融合状态诚信：`fusion_governance` 不再硬编码 active；`BrowserAct.chrome_publish` 明确为 removed；`fusion.py` 中 Deep Workflow / Deep Book 状态按真实导入与替代模块可调用性计算。
+- P2 embedding：remote/local 失败不再静默切 hash；hash 仅允许测试/显式离线开发模式，产品路径缺少语义后端会直接报错。
+- 验证命令：
+  - `cd backend && .venv/bin/pytest -q` → `493 passed, 8 skipped`
+  - `npm --prefix frontend run build` → passed
+  - `set -a; source .env.local; set +a; npm --prefix frontend run test:e2e` → `5 passed`（含真实 DeepSeek 主链②）
+  - `bash scripts/ai_development_gate.sh` → 关键项通过；剩余宽泛警告为 UI placeholder、`fallback_json` 历史字段名、空集合自然返回等，不能作为完成声明证据，交付时需继续说明。
 
 | 能力 | 状态 | 已有证据 | 尚未覆盖 |
 |---|---|---|---|
@@ -36,12 +50,13 @@
 
 ## 验证基线（2026-07-14 本轮工作树实测）
 
-- 后端测试：**481 passed，8 skipped**（2026-07-14，本地真实 DeepSeek key；真实 Postgres；业务运行时不再提供 mock provider）。新增覆盖：仿写相似度红线、热点生成持久化/回滚、书库正式路径、出海翻译项目归属、平台连接可视化配置、真实编辑器/热点/仿写 Provider 冒烟。
+- 后端测试：**490 passed，8 skipped**（2026-07-14，本地真实 DeepSeek key；真实 Postgres；业务运行时不再提供 mock provider）。新增覆盖：仿写相似度红线、热点生成持久化/回滚、书库正式路径、出海翻译项目归属、平台连接可视化配置、审计报告 P0/P1 整改（伪热点下线、书本分析真实网关、预算真实同步、发布读取存储凭据、融合 removed 状态、Provider 诊断失败语义、移动端响应式/env 示例）、真实编辑器/热点/仿写 Provider 冒烟。
 - 前端：`npm run build` 通过（仅保留 Vite 关于 `api.ts` 动静态混合导入和空 `react` chunk 的既有警告）。
 - Alembic：单头 `nc_audit_workflow_scope`；本地库 upgrade→downgrade→upgrade 往返通过。
 - 浏览器实测（上一轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）。当前整改要求 AI provider 失败直接失败/报错，不再把 provider 失败作为可伪恢复的成功态。
 - **真实 Provider T3/V2/新增功能（2026-07-14，deepseek-chat）**：本地开发 key 仅保存在 `.env.local`（Git 忽略）。`test_real_provider_t3.py`、`test_real_provider_v2_bootstrap.py`、`test_real_provider_new_features.py` 均已跑通。新增功能真实冒烟覆盖：编辑器整章重写→七维评分→下一章规划、热点生成公众号草稿落库、仿写生成原创样稿并返回相似度报告。
 - **浏览器自动化 E2E（2026-07-14 复验）**：Playwright `npm run test:e2e` 实测 **4 passed, 26.2s**。用例①注册→CSV 导入→快照落库→刷新持久→书库空态；用例②书库详情页可进入并展示简介/最新章节/全部章节；用例③平台连接可视化填写、加密保存、不回显密钥；用例④真实 AI 分析→原创选题→建书→书库可见。
+- **审计报告整改（2026-07-14，commit 后工作树）**：针对《审计报告_NovelCraft_2026-07-14.md》新增 `tests/test_audit_report_remediation_20260714.py`，9 条专项回归通过；受影响老回归 77 条通过。`knowledge/daily-briefing` 仅消费真实采集/已采集热点，不再由 AI 编造当前热点；`/books/analyze` 改为真实 Gateway `book_analysis` 并写 ai_calls；worker `_track_budget` 由 ai_calls 重算并同步 budgets；发布 worker/一次性发布读取 Fernet 存储凭据；BrowserAct.chrome_publish 标 removed；移动端媒体查询改为真实 `.layout`；`.env.example` 补齐凭据/DB/Redis/Provider/热点/告警配置。
 - T5 长周期运行：仍无证据，未验收。
 
 ## 审计对照（外部审计报告 2026-07-11）

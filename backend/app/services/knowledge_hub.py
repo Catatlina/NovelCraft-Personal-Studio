@@ -1,7 +1,7 @@
 """M3: Knowledge Hub — vector search + ingest.
 
 Embeddings come from app.core.embeddings (remote API / local ONNX bge /
-hash fallback); vectors are padded to the 1536-dim pgvector column."""
+explicit hash test backend); vectors are padded to the 1536-dim pgvector column."""
 from __future__ import annotations
 
 from app.core.embeddings import embed_query_with_backend, embed_texts

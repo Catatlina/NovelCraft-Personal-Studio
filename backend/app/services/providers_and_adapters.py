@@ -282,27 +282,25 @@ def matrix_batch_run(prompt_name: str, variables_list: list[dict], models: list[
 # ===== Book analysis workbench =====
 
 def book_analysis_workbench(title: str, content: str, project_id: str) -> dict:
-    """TASK-041: Full book analysis — structure, tropes, rhythm, style."""
-    import re
-    paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
-    # Opening analysis
-    opening = paragraphs[0][:200] if paragraphs else ""
-    # Trope detection
-    tropes = []
-    if "重生" in content: tropes.append("重生/穿越")
-    if "系统" in content: tropes.append("系统流")
-    if "打脸" in content: tropes.append("打脸爽文")
-    if "反派" in content: tropes.append("反派路线")
-    # Rhythm scoring
-    avg_para_len = sum(len(p) for p in paragraphs[:20]) / max(len(paragraphs[:20]), 1)
-    rhythm = "快节奏" if avg_para_len < 80 else "中速" if avg_para_len < 150 else "慢热"
-    
-    return {
-        "title": title, "project_id": project_id, "total_paragraphs": len(paragraphs),
-        "opening_hook": opening, "detected_tropes": tropes,
-        "rhythm": rhythm, "avg_paragraph_length": round(avg_para_len),
-        "structure_cards": {
-            "three_act": "act1_setup, act2_confrontation, act3_resolution",
-            "save_the_cat": len(paragraphs) // 15,  # Estimated beats
-        },
-    }
+    """TASK-041: Full book analysis via real AI gateway.
+
+    This used to be a regex/length heuristic but was exposed as "Full book
+    analysis". The hard product rule is: if it is an AI analysis feature, it
+    must go through the real provider path and create an ai_calls ledger row.
+    """
+    import hashlib
+
+    from app.gateway import complete
+    from app.prompt_registry import sanitize_untrusted
+
+    digest = hashlib.sha256((title + "\n" + content).encode()).hexdigest()[:16]
+    sample = sanitize_untrusted(content[:12000], 12000)
+    return complete(
+        run_id=None,
+        node_key=None,
+        project_id=project_id,
+        task_type="book_analysis",
+        prompt_name="book.analysis_workbench",
+        variables={"title": sanitize_untrusted(title, 160), "content": sample},
+        client_mutation_id=f"book-analysis:{project_id}:{digest}",
+    )

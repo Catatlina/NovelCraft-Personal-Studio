@@ -14,7 +14,7 @@ FUSION_CAPABILITY_MATRIX = {
     "AI_NovelGenerator": {"chapter_parser": "keep", "vector_kb": "merge", "six_dim_consistency": "keep"},
     "AI-auto-generates": {"batch_production": "merge", "book_analyzer": "keep", "mind_map": "drop"},
     "harnessNovel": {"layered_planning": "merge", "world_knowledge": "keep", "reasonability_audit": "drop"},
-    "BrowserAct": {"stealth_extract": "keep", "chrome_publish": "merge", "captcha_solve": "keep"},
+    "BrowserAct": {"stealth_extract": "keep", "chrome_publish": "drop", "captcha_solve": "drop"},
     "insprira": {"account_tracking": "keep", "compliance_check": "keep", "skill_center": "merge", "dashboards": "drop"},
 }
 
@@ -43,7 +43,7 @@ UNIFIED_CONTRACTS = {
     },
     "model_routing": {
         "provider_registry": "config.py + model_routes table",
-        "fallback_chain": "deepseek → claude → openai → gemini",
+        "fallback_chain": "none; real provider failure is terminal and explicit",
         "budget_per_run": "project budget model, three-tier circuit breaker",
     },
     "storage": {
@@ -80,28 +80,49 @@ def validate_fusion_contracts() -> dict:
 # ===== NC-FUS-003: Integration — capability mapping with entry points =====
 
 FUSION_ENTRY_MAP = {
-    "oh-story.prompts": {"route": "/api/v1/prompts", "file": "app/prompt_registry.py", "status": "active"},
-    "oh-story.scan_protocol": {"route": "/api/v1/ranking/*", "file": "app/services/ranking_adapter.py", "status": "active"},
-    "denova.workflow_engine": {"route": "/api/v1/runs/{id}/*", "file": "app/workers/tasks.py", "status": "active"},
-    "denova.agent_trace": {"route": "/api/v1/agents", "file": "app/services/agent_registry.py", "status": "active"},
-    "show-me-the-story.foreshadow": {"route": "/api/v1/novels/{id}/foreshadowings", "file": "app/services/narrative_engine.py", "status": "active"},
-    "AI_NovelGenerator.chapter_parser": {"route": "/api/v1/novels/{id}/import-chapters", "file": "app/services/batch_fixes.py", "status": "active"},
-    "AI-auto-generates.book_analyzer": {"route": "/api/v1/books/analyze", "file": "app/services/providers_and_adapters.py", "status": "active"},
-    "harnessNovel.layered_planning": {"route": "/api/v1/novels/layered-plan", "file": "app/services/batch_fixes.py", "status": "active"},
-    "BrowserAct.chrome_publish": {"route": "/api/v1/scrape/browseract", "file": "app/services/fusion_browseract_insprira.py", "status": "active"},
-    "insprira.account_tracking": {"route": "/api/v1/accounts/track", "file": "app/services/fusion_browseract_insprira.py", "status": "active"},
-    "insprira.compliance_check": {"route": "/api/v1/content/check-compliance", "file": "app/services/fusion_browseract_insprira.py", "status": "active"},
+    "oh-story.prompts": {"route": "/api/v1/prompts", "file": "app/prompt_registry.py"},
+    "oh-story.scan_protocol": {"route": "/api/v1/ranking/*", "file": "app/services/ranking_adapter.py"},
+    "denova.workflow_engine": {"route": "/api/v1/runs/{id}/*", "file": "app/workers/tasks.py"},
+    "denova.agent_trace": {"route": "/api/v1/agents", "file": "app/services/agent_registry.py"},
+    "show-me-the-story.foreshadow": {"route": "/api/v1/novels/{id}/foreshadowings", "file": "app/services/narrative_engine.py"},
+    "AI_NovelGenerator.chapter_parser": {"route": "/api/v1/novels/{id}/import-chapters", "file": "app/services/batch_fixes.py"},
+    "AI-auto-generates.book_analyzer": {"route": "/api/v1/books/analyze", "file": "app/services/providers_and_adapters.py"},
+    "harnessNovel.layered_planning": {"route": "/api/v1/novels/layered-plan", "file": "app/services/batch_fixes.py"},
+    "BrowserAct.chrome_publish": {"route": None, "file": "app/services/fusion_browseract_insprira.py",
+                                  "expected_state": "removed",
+                                  "reason": "BrowserAct scraping/anti-bot publish route was removed by compliance hardening; manual logged-in publishing remains outside API automation."},
+    "insprira.account_tracking": {"route": "/api/v1/accounts/track", "file": "app/services/fusion_browseract_insprira.py"},
+    "insprira.compliance_check": {"route": "/api/v1/content/check-compliance", "file": "app/services/fusion_browseract_insprira.py"},
 }
+
+
+def _repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _file_exists(app_file: str) -> bool:
+    return os.path.exists(os.path.join(_repo_root(), app_file))
+
+
+def _entry_state(entry: dict) -> str:
+    if entry.get("expected_state") == "removed":
+        return "removed"
+    route = entry.get("route")
+    app_file = entry.get("file", "")
+    if route and _file_exists(app_file):
+        return "verified"
+    return "missing"
 
 
 def get_fusion_integration_status() -> dict:
     """NC-FUS-003: Integration status — which upstream capabilities have NovelCraft entry points."""
-    active = [k for k, v in FUSION_ENTRY_MAP.items() if v["status"] == "active"]
+    entries = {key: {**entry, "status": _entry_state(entry)} for key, entry in FUSION_ENTRY_MAP.items()}
+    verified = [key for key, item in entries.items() if item["status"] == "verified"]
     return {
         "total_capabilities": len(FUSION_ENTRY_MAP),
-        "integrated": len(active),
-        "pending": len(FUSION_ENTRY_MAP) - len(active),
-        "entries": FUSION_ENTRY_MAP,
+        "integrated": len(verified),
+        "pending": len(FUSION_ENTRY_MAP) - len(verified),
+        "entries": entries,
     }
 
 

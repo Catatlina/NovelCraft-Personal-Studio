@@ -1,5 +1,4 @@
-"""Oh-Story prompt loader — reads upstream SKILL.md files and registers them as NovelCraft prompts.
-⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
+"""Oh-Story prompt loader — reads upstream SKILL.md files and registers them as NovelCraft prompts."""
 from __future__ import annotations
 
 import os

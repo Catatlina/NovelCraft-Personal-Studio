@@ -1,5 +1,9 @@
 """NC-HM-002 + NC-HM-003: Platform matching, audience, compliance risk + content generation pipeline.
-⚠️ DEPRECATED — No active callers (audit 2026-07-12). Preserved for reference."""
+
+Generation helpers in this module must use the real AI gateway. They must not
+return fixed templates or deterministic "viral title" strings, because that
+would look like AI output without creating ai_calls provenance.
+"""
 from __future__ import annotations
 import json, os
 from app.db import connect, new_id, encode
@@ -65,56 +69,77 @@ def get_compliance_risks(platform: str, content: str) -> list[str]:
 
 # ===== NC-HM-003: Content generation pipeline =====
 
-def generate_article_variants(topic: dict, platform: str) -> dict:
-    """NC-HM-003: Generate multi-platform article drafts from a hot topic."""
+def _require_project(project_id: str) -> str:
+    if not project_id:
+        raise ValueError("project_id is required for real AI generation")
+    return project_id
+
+
+def generate_article_variants(topic: dict, platform: str, project_id: str = "") -> dict:
+    """NC-HM-003: Generate multi-platform article drafts from a hot topic via real AI."""
+    from app.gateway import complete
+    from app.prompt_registry import sanitize_untrusted
     from app.services.social_media import PLATFORMS
+
+    project_id = _require_project(project_id)
     p = PLATFORMS.get(platform, {})
     if not p: return {"status": "error", "message": f"unknown platform: {platform}"}
-    return {
-        "status": "ok", "platform": platform,
-        "draft": f"# {topic.get('title','')}\n\n风格: {p['style']}\n受众: {p['name']}",
-        "meta_fields": ["title", "summary", "tags", "cover_text", "cta"],
-    }
+    output = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="gen_daily_brief", prompt_name="social.gen_hotspot_content",
+        variables={
+            "hotspot_title": sanitize_untrusted(str(topic.get("title", "")), 200),
+            "hotspot_source": sanitize_untrusted(str(topic.get("source", "")), 80),
+            "hotspot_url": sanitize_untrusted(str(topic.get("url", "")), 1000),
+            "platform": p.get("name", platform),
+            "style": p.get("style", ""),
+        },
+    )
+    return {"status": "ok", "platform": platform, "draft": output,
+            "meta_fields": ["title", "summary", "tags", "cover_text", "cta"]}
 
 
-def generate_title_variants(topic: str, count: int = 5) -> list[str]:
-    """NC-HM-003: Generate multiple title variants for A/B testing."""
-    variants = [
-        f"震惊！{topic}背后的真相",
-        f"{topic}，你不知道的5个秘密",
-        f"为什么人人都该关注{topic}",
-        f"深度解析：{topic}将如何改变我们的生活",
-        f"{topic}：一个被忽视的底层逻辑",
-    ]
-    return variants[:count]
+def generate_title_variants(topic: str, count: int = 5, project_id: str = "") -> list[str]:
+    """NC-HM-003: Generate multiple title variants for A/B testing via real AI."""
+    from app.gateway import complete
+    from app.prompt_registry import sanitize_untrusted
+
+    project_id = _require_project(project_id)
+    output = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="hm_title_variants", prompt_name="social.hm_title_variants",
+        variables={"topic": sanitize_untrusted(topic, 200), "count": min(max(count, 1), 20)},
+    )
+    titles = output.get("titles", [])
+    return [str(title) for title in titles][:count]
 
 
-def generate_video_script(topic: str, platform: str = "douyin") -> dict:
-    """NC-HM-003: Generate short video script (douyin/xiaohongshu/bilibili)."""
+def generate_video_script(topic: str, platform: str = "douyin", project_id: str = "") -> dict:
+    """NC-HM-003: Generate short video script via real AI."""
+    from app.gateway import complete
+    from app.prompt_registry import sanitize_untrusted
     from app.services.social_media import VIDEO_PLATFORMS, VIDEO_SCRIPT_FIELDS
+
+    project_id = _require_project(project_id)
     p = VIDEO_PLATFORMS.get(platform, {})
     if not p: return {"status": "error", "message": f"unknown video platform: {platform}"}
-
-    max_dur = p.get("max_duration", 60)
-    scenes = [
-        {"time": "0-3s", "action": "hook开头", "text": f"关于'{topic}'，99%的人都不知道的真相"},
-        {"time": f"3-{max_dur//3}s", "action": "核心内容", "text": f"深入解析{topic}"},
-        {"time": f"{max_dur//3}-{max_dur*2//3}s", "action": "案例/论证", "text": "真实案例与数据支撑"},
-        {"time": f"{max_dur*2//3}-{max_dur}s", "action": "结尾CTA", "text": "关注我，每天分享更多干货"},
-    ]
-    return {
-        "status": "ok", "platform": platform, "max_duration_sec": max_dur,
-        "title": f"{topic} — {p['style']}", "scenes": scenes,
-        "narration_style": p["style"], "cover_text": f"#{topic} #短视频",
-        "fields": VIDEO_SCRIPT_FIELDS,
-    }
+    output = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="gen_video_script", prompt_name="social.gen_video_script",
+        variables={"topic": sanitize_untrusted(topic, 200), "platform": platform,
+                   "max_duration": p.get("max_duration", 60), "style": p.get("style", "")},
+    )
+    return {"status": "ok", "platform": platform, **output, "fields": VIDEO_SCRIPT_FIELDS}
 
 
-def generate_material_suggestions(topic: str, content: str) -> dict:
-    """NC-HM-003: Suggest cover images, charts, data sources."""
-    return {
-        "cover_image_prompt": f"Minimalist illustration about {topic}, dark theme, neon orange accents",
-        "suggested_charts": ["趋势对比图", "受众画像图"] if "trend" in content.lower() else ["概念图", "流程图"],
-        "data_sources": ["百度指数", "微信指数", "微博热搜趋势"],
-        "recommended_tags": [topic[:8], "热点", "分析"],
-    }
+def generate_material_suggestions(topic: str, content: str, project_id: str = "") -> dict:
+    """NC-HM-003: Suggest cover images, charts and data sources via real AI."""
+    from app.gateway import complete
+    from app.prompt_registry import sanitize_untrusted
+
+    project_id = _require_project(project_id)
+    return complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="hm_material_suggestions", prompt_name="social.hm_material_suggestions",
+        variables={"topic": sanitize_untrusted(topic, 200), "content": sanitize_untrusted(content, 4000)},
+    )

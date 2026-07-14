@@ -24,37 +24,40 @@ def fusion_status(user: dict = Depends(get_current_user)):
     integration = get_fusion_integration_status()
     integrity = validate_fusion_data_integrity()
 
-    # Deep workflow availability
+    # Deep workflow availability is evidence-driven: importable module +
+    # expected exported contract. Never hard-code "wired".
     deep_workflow_status = {
         "module": "fusion_deep_workflow",
-        "available": True,
+        "available": False,
+        "wired": False,
         "capabilities": ["event_ledger", "fact_reconciliation", "workflow_plan"],
     }
     try:
         from app.services.fusion_deep_workflow import EVENT_TYPES
         deep_workflow_status["event_types"] = len(EVENT_TYPES)
+        deep_workflow_status["available"] = bool(EVENT_TYPES)
+        deep_workflow_status["wired"] = bool(EVENT_TYPES)
     except Exception:
-        deep_workflow_status["available"] = False
+        deep_workflow_status["error"] = "module import failed"
 
-    # Deep book availability
+    # Deep book legacy module is intentionally deprecated. Its functions are
+    # not counted as active integration; active book analysis now lives in
+    # providers_and_adapters.book_analysis_workbench and goes through Gateway.
     deep_book_status = {
         "module": "fusion_deep_book",
-        "available": True,
-        "capabilities": [
-            "hundred_chapter_memory",
-            "six_dim_consistency_check",
-            "book_analysis_workbench",
-            "layered_ai_planning",
-            "adaptive_draft_window",
-            "reasonability_audit",
-            "knowledge_merge",
-        ],
+        "available": False,
+        "wired": False,
+        "deprecated": True,
+        "reason": "Legacy clean-room helpers are not active product paths; active book analysis uses Gateway task_type=book_analysis.",
+        "active_replacement": "app.services.providers_and_adapters.book_analysis_workbench",
+        "capabilities": [],
     }
     try:
-        from app.services.fusion_deep_book import six_dim_consistency_check
-        deep_book_status["import_verified"] = True
+        from app.services.providers_and_adapters import book_analysis_workbench
+        deep_book_status["replacement_import_verified"] = callable(book_analysis_workbench)
+        deep_book_status["wired"] = callable(book_analysis_workbench)
     except Exception:
-        deep_book_status["available"] = False
+        deep_book_status["replacement_import_verified"] = False
 
     return ok({
         "fusion_governance": {
@@ -70,7 +73,7 @@ def fusion_status(user: dict = Depends(get_current_user)):
             "integrity_pass": integrity.get("integrity_pass", False),
             "total_capabilities": integration.get("total_capabilities", 0),
             "integrated_capabilities": integration.get("integrated", 0),
-            "deep_workflow_wired": True,
-            "deep_book_wired": True,
+            "deep_workflow_wired": bool(deep_workflow_status.get("wired")),
+            "deep_book_wired": bool(deep_book_status.get("wired")),
         },
     })

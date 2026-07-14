@@ -1,5 +1,5 @@
 """Stage-3 ③: semantic embeddings — backend resolution, zero-pad ordering
-invariant, remote protocol, hash fallback, and (opt-in) real semantic quality."""
+invariant, remote protocol, explicit hash test backend, and semantic quality."""
 from __future__ import annotations
 
 import json
@@ -35,11 +35,14 @@ def test_backend_resolution_and_hash_forcing(monkeypatch):
     from app.core import embeddings
 
     monkeypatch.setenv("EMBEDDING_BACKEND", "hash")
+    monkeypatch.setenv("NOVELCRAFT_ALLOW_HASH_EMBEDDING", "true")
     assert embeddings.resolve_backend() == "hash"
 
     monkeypatch.setenv("EMBEDDING_BACKEND", "remote")
+    monkeypatch.delenv("NOVELCRAFT_ALLOW_HASH_EMBEDDING", raising=False)
     monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
-    assert embeddings.resolve_backend() == "hash"  # 无 key 显式降级
+    with pytest.raises(RuntimeError, match="remote API key is missing"):
+        embeddings.resolve_backend()
 
     monkeypatch.setenv("EMBEDDING_API_KEY", "sk-test")
     assert embeddings.resolve_backend() == "remote"
@@ -75,7 +78,7 @@ def test_remote_backend_protocol(monkeypatch):
     assert vectors[0][0] == 1.0  # 按 index 还原顺序
 
 
-def test_remote_failure_degrades_to_hash(monkeypatch):
+def test_remote_failure_is_terminal(monkeypatch):
     import urllib.request
 
     from app.core import embeddings
@@ -87,9 +90,8 @@ def test_remote_failure_degrades_to_hash(monkeypatch):
         raise OSError("network unreachable")
 
     monkeypatch.setattr(urllib.request, "urlopen", down)
-    vectors, backend = embeddings.embed_texts(["离线也要能入库"])
-    assert backend == "hash"
-    assert len(vectors[0]) == 1536
+    with pytest.raises(OSError, match="network unreachable"):
+        embeddings.embed_texts(["离线时不得伪装语义入库"])
 
 
 def test_partial_remote_response_cannot_silently_drop_chunks(monkeypatch):
@@ -98,9 +100,18 @@ def test_partial_remote_response_cannot_silently_drop_chunks(monkeypatch):
     monkeypatch.setenv("EMBEDDING_BACKEND", "remote")
     monkeypatch.setenv("EMBEDDING_API_KEY", "sk-test")
     monkeypatch.setattr(embeddings, "_embed_remote", lambda _texts: [[1.0, 0.0]])
-    vectors, backend = embeddings.embed_texts(["第一块", "第二块"])
-    assert backend == "hash"
-    assert len(vectors) == 2
+    with pytest.raises(ValueError, match="embedding count mismatch"):
+        embeddings.embed_texts(["第一块", "第二块"])
+
+
+def test_hash_backend_disallowed_outside_explicit_test_mode(monkeypatch):
+    from app.core import embeddings
+
+    monkeypatch.setenv("EMBEDDING_BACKEND", "hash")
+    monkeypatch.setenv("NOVELCRAFT_ENV", "production")
+    monkeypatch.delenv("NOVELCRAFT_ALLOW_HASH_EMBEDDING", raising=False)
+    with pytest.raises(RuntimeError, match="hash vectors are non-semantic"):
+        embeddings.resolve_backend()
 
 
 def test_search_filters_vectors_by_embedding_backend():

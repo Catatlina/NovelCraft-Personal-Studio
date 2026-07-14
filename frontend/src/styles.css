@@ -151,13 +151,16 @@ th { color: var(--text-muted); font-size: 13px; }
 
 /* M5: Mobile responsive */
 @media (max-width: 768px) {
-  .app-shell { flex-direction: column; }
-  .sidebar { width: 100%; flex-shrink: 0; padding: var(--space-2); }
-  .sidebar nav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .layout { display: flex; flex-direction: column; min-height: 100vh; overflow-x: hidden; }
+  .sidebar { width: 100%; height: auto; max-height: none; flex-shrink: 0; padding: var(--space-2); position: sticky; top: 0; z-index: 10; }
+  .brand { margin-bottom: var(--space-2); }
+  .sidebar nav { flex-direction: row; flex-wrap: nowrap; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
   .sidebar nav button { padding: 6px 8px; font-size: 12px; }
-  .workspace { padding: var(--space-3); }
+  .sidebar nav button svg { flex-shrink: 0; }
+  .workspace { padding: var(--space-3); width: 100%; overflow-x: hidden; }
   .panel { padding: var(--space-3); }
   .grid-2 { grid-template-columns: 1fr; }
   .book-row, .book-detail-grid, .editor-review-panel { grid-template-columns: 1fr; }
-  table { font-size: 12px; }
+  table { font-size: 12px; display: block; overflow-x: auto; white-space: nowrap; }
+  input, textarea, select { max-width: 100%; }
 }

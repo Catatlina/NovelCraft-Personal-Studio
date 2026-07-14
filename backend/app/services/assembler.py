@@ -79,12 +79,11 @@ class ContextAssembler:
             book_summary = meta.get("book_summary", "")
             if book_summary:
                 return book_summary
-            # Fallback: use volume summaries
+            # Use persisted volume summaries when the book summary is not set.
             vol_summaries = meta.get("volume_summaries", [])
             if isinstance(vol_summaries, list) and vol_summaries:
                 return "\n".join(f"[卷{i+1}] {s}" for i, s in enumerate(vol_summaries) if s)
-            # Fallback: collect chapter summaries from last N chapters
-            return self._fallback_chapter_summary() or "[全书状态摘要待生成]"
+            return self._recent_chapter_summary() or "[全书状态摘要待生成]"
         return ""
 
     def _volume_summary(self) -> str:
@@ -98,12 +97,11 @@ class ContextAssembler:
             vol_summaries = meta.get("volume_summaries", [])
             if isinstance(vol_summaries, list) and vol_summaries:
                 return vol_summaries[-1]
-            # Fallback: collect chapter summaries from recent chapters
-            return self._fallback_chapter_summary() or "[卷摘要待生成]"
+            return self._recent_chapter_summary() or "[卷摘要待生成]"
         return ""
 
-    def _fallback_chapter_summary(self) -> str:
-        """Fallback: aggregate chapter summaries from the last 10 chapters."""
+    def _recent_chapter_summary(self) -> str:
+        """Aggregate persisted chapter summaries from the last 10 chapters."""
         db = connect()
         rows = db.execute(
             """SELECT meta, title FROM contents

@@ -251,11 +251,40 @@ $instructions
 输出 JSON: {"summary":"章节摘要","entities":[{"type":"character/location/item","name":"名称","state":"状态"}],"timeline":[{"event":"事件","chapter_seq":1}],"foreshadowings":[{"content":"伏笔内容","status":"planted/progressed/resolved"}]}"""),
 
     # ── Social / Hotspot ──
-    ("social.fetch_hotspots", "3.0.0", "deepseek",
-     "列出当前最热门的5个话题。输出JSON: {\"topics\":[{\"title\":\"\",\"category\":\"\",\"score\":85,\"angle\":\"\"}]}"),
+    ("social.fetch_hotspots", "3.1.0", "deepseek",
+     "仅分析调用方提供的已采集热点列表，禁止编造当前热点。输入：$items。输出JSON: {\"topics\":[{\"title\":\"原始标题\",\"category\":\"分类\",\"score\":85,\"angle\":\"创作角度\"}]}"),
 
     ("social.gen_daily_brief", "3.0.0", "deepseek",
      "根据话题生成每日内容简报。话题：$topic 角度：$angle。输出JSON: {\"wechat_draft\":\"\",\"toutiao_draft\":\"\",\"xhs_draft\":\"\"}"),
+
+    ("social.hm_title_variants", "1.0.0", "deepseek",
+     """你是自媒体标题编辑。请基于真实热点/选题生成可选标题，不得伪造数据或平台背书。
+
+话题：$topic
+数量：$count
+
+要求：
+1. 标题要覆盖信息流、公众号、小红书/短视频三类风格。
+2. 不使用“震惊”“爆了”等无事实依据的夸张词。
+3. 只输出 JSON。
+
+输出 JSON: {"titles":["标题1","标题2"]}"""),
+
+    ("social.gen_video_script", "1.0.0", "deepseek",
+     """你是短视频编导。请围绕给定话题生成适合指定平台的短视频脚本，事实只来自输入，不得编造热点来源。
+
+话题：$topic
+平台：$platform
+
+输出 JSON: {"title":"视频标题","scenes":[{"time":"0-3s","action":"画面动作","text":"口播/字幕"}],"narration_style":"口播风格","cover_text":"封面文案"}"""),
+
+    ("social.hm_material_suggestions", "1.0.0", "deepseek",
+     """你是自媒体素材策划。请基于话题与正文给出素材建议，不生成不存在的素材链接，不声称已采集未提供的数据。
+
+话题：$topic
+正文：$content
+
+输出 JSON: {"cover_image_prompt":"封面图生成提示词","suggested_charts":["可制作图表"],"data_sources":["建议核验的数据源"],"recommended_tags":["标签"]}"""),
 
     ("social.gen_hotspot_content", "3.0.0", "deepseek",
      """你是自媒体内容主编。请根据热点生成适合指定平台的原创内容，不得编造事实，不得声称已验证未给出的信息。
@@ -273,6 +302,22 @@ $instructions
 4. 不确定的信息明确写“据公开热榜显示/需进一步核实”，不要伪造数据。
 
 输出 JSON: {"title":"标题","body":["段落或脚本分镜"],"meta":{"tags":["标签"],"summary":"摘要","cta":"互动引导"}}"""),
+
+    ("book.analysis_workbench", "1.0.0", "deepseek",
+     """你是网文结构分析师。请对用户提供的书稿样本做真实结构分析，不要使用套话或字数公式冒充结论。
+
+书名：$title
+正文样本：
+$content
+
+请分析：
+1. 开篇钩子是否成立。
+2. 类型套路/爽点/风险。
+3. 节奏与段落密度。
+4. 三幕/起承转合/关键节点。
+5. 文风画像与可改进建议。
+
+输出 JSON: {"title":"书名","total_paragraphs":0,"opening_hook":"开篇钩子分析","detected_tropes":["套路"],"rhythm":"节奏判断","avg_paragraph_length":0,"structure_cards":{"three_act":"三幕结构判断","save_the_cat":"关键节拍判断"},"style_profile":{"tone":"文风","strengths":["优点"]},"risks":["风险"],"recommendations":["建议"]}"""),
 
     ("ranking.market_analysis", "3.0.0", "deepseek",
      """你是网文市场分析师。分析以下榜单数据并生成独立原创选题。
@@ -664,6 +709,12 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "editor_deai":          '{"text":"去AI味后文本"}',
     "summarize_chapter":    '{"summary":"","entities":[],"timeline":[],"foreshadowings":[]}',
     "gen_next_chapter":     '{"chapter":{"title":"第N章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}} (body 至少 6 段)',
+    "book_analysis":        '{"title":"书名","total_paragraphs":0,"opening_hook":"开篇钩子分析","detected_tropes":["套路"],"rhythm":"节奏判断","avg_paragraph_length":0,"structure_cards":{"three_act":"三幕结构判断","save_the_cat":"关键节拍判断"},"style_profile":{"tone":"文风","strengths":["优点"]},"risks":["风险"],"recommendations":["建议"]}',
+    "gen_daily_brief":      '{"title":"标题","body":["段落或脚本分镜"],"meta":{"tags":["标签"],"summary":"摘要","cta":"互动引导"}}',
+    "hm_daily_brief":       '{"wechat_draft":"公众号草稿","toutiao_draft":"头条草稿","xhs_draft":"小红书草稿"}',
+    "hm_title_variants":    '{"titles":["标题1","标题2","标题3"]}',
+    "gen_video_script":     '{"title":"视频标题","scenes":[{"time":"0-3s","action":"画面动作","text":"口播/字幕"}],"narration_style":"口播风格","cover_text":"封面文案"}',
+    "hm_material_suggestions": '{"cover_image_prompt":"封面图提示词","suggested_charts":["图表"],"data_sources":["核验数据源"],"recommended_tags":["标签"]}',
     "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":""}]}',
     "editor_expand":        '{"text":"扩写后文本"}',
     "editor_condense":      '{"text":"缩写后文本"}',

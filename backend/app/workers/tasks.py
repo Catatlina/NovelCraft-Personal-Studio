@@ -258,8 +258,49 @@ def _extract_names_from_text(text: str) -> set[str]:
             names.add(m)
     return names
 def _track_budget(run_id, node_key, cost_cny):
-    """Budget tracking — placeholder."""
-    return {"status": "ok", "spent": 0, "limit": 0}
+    """Synchronize workflow budget with the real ai_calls ledger.
+
+    The gateway already records every real provider call and increments
+    budgets.spent_cny. This helper exists for workflow checkpoints, so it must
+    report real numbers instead of a 0/0 placeholder. To avoid double-counting
+    legacy/worker paths, we recompute the workflow project's bootstrap spend
+    from ai_calls and sync the budget row to that value.
+    """
+    db = connect()
+    try:
+        run = db.execute("SELECT project_id FROM workflow_runs WHERE id=%s", (run_id,)).fetchone()
+        if not run:
+            return {"status": "error", "message": "workflow run not found"}
+        project_id = run["project_id"]
+        spent_row = db.execute(
+            "SELECT COALESCE(SUM(cost_cny),0) AS spent FROM ai_calls WHERE project_id=%s AND status='succeeded'",
+            (project_id,),
+        ).fetchone()
+        spent = float(spent_row["spent"] or 0)
+        budget = db.execute(
+            "SELECT * FROM budgets WHERE project_id=%s AND scope='bootstrap'",
+            (project_id,),
+        ).fetchone()
+        if not budget:
+            from app.config import settings
+            db.execute(
+                "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s,%s,'bootstrap',%s,%s)",
+                (new_id("bdg"), project_id, settings.bootstrap_budget_cny, spent),
+            )
+            limit = float(settings.bootstrap_budget_cny)
+        else:
+            limit = float(budget["limit_cny"])
+            db.execute(
+                "UPDATE budgets SET spent_cny=%s, updated_at=now() WHERE id=%s",
+                (spent, budget["id"]),
+            )
+        db.commit()
+        status = "exceeded" if limit and spent > limit else "ok"
+        return {"status": status, "project_id": str(project_id), "scope": "bootstrap",
+                "node_key": node_key, "last_cost_cny": float(cost_cny or 0),
+                "spent": round(spent, 6), "limit": round(limit, 6)}
+    finally:
+        db.close()
 
 def _create_checkpoint(run_id: str, node_key: str, context: dict) -> str:
     """Save a checkpoint snapshot for later resumption."""

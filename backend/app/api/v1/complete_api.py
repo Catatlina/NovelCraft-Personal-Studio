@@ -83,7 +83,10 @@ def test_provider(provider: str, project_id: str, model: str = "",
     require_project_member(project_id, user, write=True)
     if not api_key:
         raise HTTPException(422, "X-Api-Key is required for provider tests")
-    return ok(fn(model, [{"role": "user", "content": "Hello"}], api_key=api_key))
+    result = fn(model, [{"role": "user", "content": "Hello"}], api_key=api_key)
+    if result.get("degraded") or result.get("error"):
+        raise HTTPException(502, {"code": "PROVIDER_TEST_FAILED", "provider": provider, "detail": result.get("error", "provider test failed")})
+    return ok({"status": "succeeded", **result})
 
 
 @router.post("/publish/{platform}")
@@ -96,7 +99,21 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
     }
     fn = adapters.get(platform)
     if not fn: raise HTTPException(404, f"unknown platform: {platform}")
-    result = fn(title, body, **credentials) if credentials else fn(title, body)
+    from app.services.publish_hub import get_platform_credentials
+    stored_credentials = get_platform_credentials(user["id"], platform) or {}
+    merged = {**stored_credentials, **(credentials or {})}
+    if platform == "wechat":
+        result = fn(title, body, app_id=merged.get("app_id", ""), app_secret=merged.get("app_secret", ""))
+    elif platform == "toutiao":
+        result = fn(title, body, token=merged.get("token") or merged.get("access_token", ""))
+    elif platform == "substack":
+        result = fn(title, body, token=merged.get("token") or merged.get("api_key", ""))
+    elif platform == "x":
+        result = fn(title, body, token=merged.get("token") or merged.get("bearer_token") or merged.get("access_token", ""))
+    elif platform == "xiaohongshu":
+        result = fn(title, body, images=merged.get("images", []))
+    else:
+        result = fn(title, body)
     # Reflect the adapter's honest status in the response message
     adapter_status = result.get("status", "unknown")
     adapter_mode = result.get("mode", "")

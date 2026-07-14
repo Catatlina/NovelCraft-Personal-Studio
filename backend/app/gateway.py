@@ -227,6 +227,49 @@ class _FinalHumanizeOutput(_LenientOutput):
     changes: list[str]
 
 
+class _BookAnalysisOutput(_LenientOutput):
+    title: str = Field(min_length=1)
+    total_paragraphs: int = Field(ge=0)
+    opening_hook: str = ""
+    detected_tropes: list[str] = Field(default_factory=list)
+    rhythm: str = Field(min_length=1)
+    avg_paragraph_length: int = Field(ge=0)
+    structure_cards: dict[str, Any] = Field(default_factory=dict)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
+    risks: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class _HotspotContentOutput(_LenientOutput):
+    title: str = Field(min_length=1)
+    body: list[str] = Field(min_length=1)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class _DailyBriefOutput(_LenientOutput):
+    wechat_draft: str = Field(min_length=1)
+    toutiao_draft: str = Field(min_length=1)
+    xhs_draft: str = Field(min_length=1)
+
+
+class _TitleVariantsOutput(_LenientOutput):
+    titles: list[str] = Field(min_length=1, max_length=20)
+
+
+class _VideoScriptOutput(_LenientOutput):
+    title: str = Field(min_length=1)
+    scenes: list[dict[str, Any]] = Field(min_length=1)
+    narration_style: str = ""
+    cover_text: str = ""
+
+
+class _MaterialSuggestionsOutput(_LenientOutput):
+    cover_image_prompt: str = ""
+    suggested_charts: list[str] = Field(default_factory=list)
+    data_sources: list[str] = Field(default_factory=list)
+    recommended_tags: list[str] = Field(default_factory=list)
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -257,6 +300,12 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "final_consistency_check": _FinalConsistencyCheckOutput,
     "final_continuity_audit": _FinalContinuityAuditOutput,
     "final_humanize": _FinalHumanizeOutput,
+    "book_analysis": _BookAnalysisOutput,
+    "gen_daily_brief": _HotspotContentOutput,
+    "hm_daily_brief": _DailyBriefOutput,
+    "hm_title_variants": _TitleVariantsOutput,
+    "gen_video_script": _VideoScriptOutput,
+    "hm_material_suggestions": _MaterialSuggestionsOutput,
 }
 
 

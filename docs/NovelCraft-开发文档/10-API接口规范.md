@@ -27,6 +27,8 @@
 | POST | `/api/v1/ranking/snapshots/{id}/validate-metadata` | Open Library 交叉校验；六态写入 `ranking_items.metadata_status`，证据并入 `metrics.validation` |
 | POST | `/novels/from-inspiration` | 次要灵感入口，复用成书工作流并自动入库 |
 | POST | `/hotspots/scan-and-generate` | 热点分析并生成多平台内容矩阵 |
+| POST | `/api/v1/knowledge/daily-briefing?project_id=` | 每日内容简报；只使用真实采集或已采集热点，AI 仅生成简报/草稿，不得编造“当前热点”并落库 |
+| POST | `/api/v1/books/analyze` | 真实 Gateway 书稿结构分析；写入 `ai_calls`，Provider 失败直接报错，不使用正则/字数启发式冒充 AI |
 | GET | `/api/v1/platform-connections/specs` | 返回可视化配置规格：热点源、发布平台、告警/运维等平台需要填写的字段、必填项和敏感字段 |
 | GET | `/api/v1/platform-connections` | 当前用户平台连接列表；只返回账号名、配置状态、已配置字段、缺失必填字段，不回显密钥/token/cookie |
 | POST | `/api/v1/platform-connections` | 保存真实平台账号/API/人工源配置；敏感字段 Fernet 加密落库，用于热点采集、发布、告警等真实调用 |

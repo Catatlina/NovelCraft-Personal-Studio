@@ -1,4 +1,4 @@
-"""Semantic embeddings with a three-tier backend (Stage-3 ③).
+"""Semantic embeddings with explicit backend selection (Stage-3 ③).
 
 Backend resolution (env EMBEDDING_BACKEND = auto|remote|local|hash, default auto):
 1. remote — OpenAI-compatible /embeddings API when EMBEDDING_API_KEY is set
@@ -6,8 +6,8 @@ Backend resolution (env EMBEDDING_BACKEND = auto|remote|local|hash, default auto
    text-embedding-3-small with dimensions=512);
 2. local — ONNX bge-small-zh-v1.5 via fastembed (~100MB model, ~50MB deps,
    CPU-friendly: fine on a laptop or a 2-core VPS);
-3. hash — the original deterministic blake2b fallback: keeps indexing and
-   tests working fully offline, explicitly NOT semantic.
+3. hash — deterministic blake2b vectors for tests/offline development only,
+   explicitly NOT semantic and never an implicit product downgrade.
 
 All vectors are zero-padded to the storage dimension (1536, the existing
 pgvector column), which preserves cosine ordering exactly — no migration.
@@ -34,7 +34,7 @@ def _pad(vector: list[float]) -> list[float]:
 
 
 def hash_embedding(text: str, dimension: int = STORAGE_DIM) -> list[float]:
-    """Deterministic non-semantic fallback (bigram blake2b hashing)."""
+    """Deterministic non-semantic test backend (bigram blake2b hashing)."""
     vector = [0.0] * dimension
     normalized = re.sub(r"\s+", "", (text or "").lower())
     tokens = [normalized[i:i + 2] for i in range(max(0, len(normalized) - 1))] or ([normalized] if normalized else [])
@@ -58,20 +58,43 @@ def _local_available() -> bool:
         return False
 
 
+def _hash_backend_allowed() -> bool:
+    return (
+        os.getenv("NOVELCRAFT_ALLOW_HASH_EMBEDDING", "").strip().lower() in {"1", "true", "yes"}
+        or os.getenv("NOVELCRAFT_ENV", "").strip().lower() == "test"
+    )
+
+
+def _raise_no_backend(configured: str, reason: str) -> None:
+    raise RuntimeError(
+        f"semantic embedding backend unavailable for EMBEDDING_BACKEND={configured!r}: {reason}. "
+        "Configure EMBEDDING_API_KEY for remote, install/configure fastembed for local, "
+        "or set NOVELCRAFT_ALLOW_HASH_EMBEDDING=true only for explicit offline test/dev indexing."
+    )
+
+
 def resolve_backend() -> str:
     configured = os.getenv("EMBEDDING_BACKEND", "auto").lower()
     if configured == "remote":
-        return "remote" if _remote_available() else "hash"
+        if _remote_available():
+            return "remote"
+        _raise_no_backend(configured, "remote API key is missing")
     if configured == "local":
-        return "local" if _local_available() else "hash"
+        if _local_available():
+            return "local"
+        _raise_no_backend(configured, "local embedding package/model is unavailable")
     if configured == "hash":
-        return "hash"
+        if _hash_backend_allowed():
+            return "hash"
+        _raise_no_backend(configured, "hash vectors are non-semantic")
     # auto: remote > local > hash
     if _remote_available():
         return "remote"
     if _local_available():
         return "local"
-    return "hash"
+    if _hash_backend_allowed():
+        return "hash"
+    _raise_no_backend(configured, "no semantic provider is configured")
 
 
 def _embed_remote(texts: list[str]) -> list[list[float]]:
@@ -117,22 +140,19 @@ def _validate_vectors(vectors: list[list[float]], expected_count: int) -> None:
 def embed_texts(texts: list[str]) -> tuple[list[list[float]], str]:
     """Embed a batch; returns (padded vectors, backend actually used).
 
-    A remote/local failure degrades to hash instead of breaking ingestion —
-    the used backend is reported so callers can persist provenance."""
+    Remote/local failures are terminal. Hash vectors require explicit
+    offline/test opt-in and are reported so callers can persist provenance."""
     if not texts:
         return [], resolve_backend()
     backend = resolve_backend()
-    try:
-        if backend == "remote":
-            vectors = _embed_remote(texts)
-            _validate_vectors(vectors, len(texts))
-            return [_pad(v) for v in vectors], "remote"
-        if backend == "local":
-            vectors = _embed_local(texts)
-            _validate_vectors(vectors, len(texts))
-            return [_pad(v) for v in vectors], "local"
-    except Exception:
-        backend = "hash"
+    if backend == "remote":
+        vectors = _embed_remote(texts)
+        _validate_vectors(vectors, len(texts))
+        return [_pad(v) for v in vectors], "remote"
+    if backend == "local":
+        vectors = _embed_local(texts)
+        _validate_vectors(vectors, len(texts))
+        return [_pad(v) for v in vectors], "local"
     return [hash_embedding(t) for t in texts], "hash"
 
 

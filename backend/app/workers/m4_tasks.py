@@ -25,6 +25,16 @@ def auto_publish_article(self, content_id: str, platform: str, credentials: dict
         return {"status": "error", "message": "content not found"}
 
     credentials = credentials or {}
+    if not credentials:
+        owner_db = connect()
+        owner = owner_db.execute(
+            "SELECT pm.user_id FROM project_members pm WHERE pm.project_id=%s AND pm.role='owner' LIMIT 1",
+            (content["project_id"],),
+        ).fetchone()
+        owner_db.close()
+        if owner:
+            from app.services.publish_hub import get_platform_credentials
+            credentials = get_platform_credentials(str(owner["user_id"]), platform) or {}
     body = content.get("body", {})
     body_text = (
         "\n".join(item.get("text", "") for item in body.get("content", []) if isinstance(item, dict))
@@ -196,7 +206,7 @@ def check_scheduled_publishes(self) -> dict:
         rec = dict(record) if not isinstance(record, dict) else record
         try:
             result = auto_publish_article.delay(
-                rec.get("content_id", ""), rec.get("platform", ""), {}
+                rec.get("content_id", ""), rec.get("platform", ""), None, rec["id"]
             )
             db2 = connect()
             db2.execute(

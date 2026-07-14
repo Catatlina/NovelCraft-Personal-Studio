@@ -151,9 +151,9 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         {subtab==="appsettings" && (
           <div>
             <h3>全局系统配置</h3>
-            <p style={{fontSize:12,color:"var(--text-muted)"}}>下方 API 配置仅保存在当前浏览器会话（BYOK）；定时任务和 Worker 请通过环境变量配置并重启服务。</p>
+            <p style={{fontSize:12,color:"var(--text-muted)"}}>下方 API 配置仅保存在当前浏览器会话（BYOK），会作为 X-Api-Key / X-Api-Base-Url / X-Model 传给当前请求；DeepSeek、Claude、OpenAI、Gemini 的交互式调用都可使用。定时任务和 Worker 请通过环境变量配置并重启服务。</p>
             <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-              <input type={showKey ? "text" : "password"} placeholder="DeepSeek API Key" value={apiKey}
+              <input type={showKey ? "text" : "password"} placeholder="当前路由 Provider API Key（DeepSeek/Claude/OpenAI/Gemini）" value={apiKey}
                 autoComplete="off"
                 onChange={e => { setApiKeyLocal(e.target.value); setSaved(false); }}
                 style={{flex:1}} />
@@ -162,10 +162,10 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               </button>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <input placeholder="API 地址，例 https://api.deepseek.com/v1" value={apiUrl}
+              <input placeholder="API 地址，例 https://api.deepseek.com/v1 或 OpenAI/Claude/Gemini endpoint" value={apiUrl}
                 onChange={e => { setApiUrlLocal(e.target.value); setSaved(false); }}
                 style={{flex:1,fontSize:13}} />
-              <input placeholder="模型名，例 deepseek-chat" value={model}
+              <input placeholder="模型名，例 deepseek-chat / gpt-4o / claude-sonnet-4-20250514" value={model}
                 onChange={e => { setModelLocal(e.target.value); setSaved(false); }}
                 style={{flex:1,fontSize:13}} />
             </div>

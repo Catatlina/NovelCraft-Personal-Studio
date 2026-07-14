@@ -7,19 +7,22 @@ type ModelRoute = { id: string; task_type: string; provider: string; model: stri
 export function Costs({ aiCalls, budgets, routes }: {
   aiCalls: AiCall[]; budgets: Budget[]; routes: ModelRoute[];
 }) {
-  const total = aiCalls.reduce((s, c) => s + Number(c.cost_cny), 0);
+  const safeCalls = Array.isArray(aiCalls) ? aiCalls : [];
+  const safeBudgets = Array.isArray(budgets) ? budgets : [];
+  const safeRoutes = Array.isArray(routes) ? routes : [];
+  const total = safeCalls.reduce((s, c) => s + Number(c.cost_cny), 0);
 
   return (
     <div className="review-grid" style={{gridTemplateColumns:"1fr 300px"}}>
       <div className="panel">
         <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:16}}>
           <strong style={{fontSize:28,color:"var(--brand-500)"}}>¥{total.toFixed(4)}</strong>
-          <span style={{color:"var(--text-muted)"}}>{aiCalls.length} 次调用</span>
+          <span style={{color:"var(--text-muted)"}}>{safeCalls.length} 次调用</span>
         </div>
         <table>
           <thead><tr><th>任务</th><th>模型</th><th>Tokens</th><th>成本</th><th>延迟</th></tr></thead>
           <tbody>
-            {aiCalls.map(c => (
+            {safeCalls.map(c => (
               <tr key={c.id}>
                 <td>{c.task_type}</td>
                 <td>{c.provider}/{c.model}</td>
@@ -33,7 +36,7 @@ export function Costs({ aiCalls, budgets, routes }: {
       </div>
       <div className="panel" style={{display:"flex",flexDirection:"column",gap:14}}>
         <h2>预算</h2>
-        {budgets.map(b => (
+        {safeBudgets.map(b => (
           <div key={b.id}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
               <span>{b.scope}</span>
@@ -43,7 +46,7 @@ export function Costs({ aiCalls, budgets, routes }: {
           </div>
         ))}
         <h2>模型路由</h2>
-        {routes.slice(0,10).map(r => (
+        {safeRoutes.slice(0,10).map(r => (
           <div key={r.id} style={{padding:8,border:"1px solid var(--border-subtle)",borderRadius:"var(--radius-md)"}}>
             <small style={{color:"var(--text-muted)",display:"block"}}>{r.task_type}</small>
             <strong>{r.provider}/{r.model}</strong>
