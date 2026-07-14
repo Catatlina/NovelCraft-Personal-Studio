@@ -34,16 +34,15 @@ def summarize_book(novel_id: str, volume_summaries: list[str]) -> dict:
 
 
 def _call_ai(task_type: str, variables: dict, project_id: str) -> str:
-    """Call AI for summarization. Falls back gracefully."""
-    try:
-        from app.gateway import complete
-        result = complete(
-            run_id=None, node_key=None, project_id=project_id,
-            task_type=task_type, prompt_name=f"narrative.{task_type}", variables=variables,
-        )
-        return result.get("summary", result.get("text", str(result)))
-    except Exception:
-        return f"[摘要生成失败] {variables.get('instructions', '')}"
+    """Call AI for summarization. Failures propagate to the caller (docs/23 §4):
+    storing a fake "[摘要生成失败]" string as a summary would poison every later
+    context window that consumes it."""
+    from app.gateway import complete
+    result = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type=task_type, prompt_name=f"narrative.{task_type}", variables=variables,
+    )
+    return result.get("summary", result.get("text", str(result)))
 
 
 def _get_project_id(content_id: str) -> str:

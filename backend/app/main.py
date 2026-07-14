@@ -481,6 +481,23 @@ async def batch_generate_chapters(
                                 WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE""",
                              (novel_id,)).fetchone()
     start_seq = int((start_row or {}).get("start_seq") or 1)
+    # 卷级门禁：if the batch starts a new planned volume and the previous volume's
+    # gate was run and FAILED, block until the gate passes (or is re-run clean).
+    novel_meta = decode(novel.get("meta"), {}) or {}
+    volume_plan = novel_meta.get("volume_plan") or []
+    if volume_plan:
+        from app.services.narrative_engine import volume_for_chapter
+        current_vol = volume_for_chapter(volume_plan, start_seq)
+        if current_vol and int(current_vol.get("number", 0) or 0) > 1 and start_seq == int(current_vol.get("start_chapter", 0) or 0):
+            prev_num = int(current_vol["number"]) - 1
+            prev_gate = (novel_meta.get("volume_gates") or {}).get(str(prev_num))
+            if prev_gate and not prev_gate.get("passed"):
+                conn.close()
+                raise HTTPException(status_code=409, detail={
+                    "code": "VOLUME_GATE_FAILED",
+                    "message": f"第{prev_num}卷卷级门禁未通过，先解决阻断项再生成第{current_vol['number']}卷",
+                    "blockers": prev_gate.get("blockers", []),
+                })
     conn.execute(
         """INSERT INTO generation_batches
            (id,project_id,novel_id,requested_count,start_seq,quality_status)
@@ -1323,6 +1340,25 @@ def list_foreshadowings(novel_id: str, user: dict = Depends(get_current_user)) -
     ).fetchall()]
     conn.close()
     return ok(rows)
+
+
+@app.post("/api/v1/novels/{novel_id}/volume-gate/{volume_num}")
+def run_volume_gate(novel_id: str, volume_num: int, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """卷级门禁：完成度/伏笔回收/实体矛盾检查，结果持久化到 meta.volume_gates。"""
+    conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
+    conn.close()
+    if novel["type"] != "novel":
+        raise HTTPException(status_code=400, detail="content is not a novel")
+    from app.services.narrative_engine import volume_gate
+    return ok(volume_gate(novel_id, volume_num))
+
+
+@app.get("/api/v1/novels/{novel_id}/volume-gates")
+def list_volume_gates(novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, novel = load_content_for_user(novel_id, user)
+    conn.close()
+    meta = decode(novel.get("meta"), {}) or {}
+    return ok({"volume_plan": meta.get("volume_plan", []), "volume_gates": meta.get("volume_gates", {})})
 
 
 # --- C3: Agent registry ---

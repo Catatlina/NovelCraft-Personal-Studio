@@ -73,6 +73,113 @@ def detect_cross_chapter_conflicts(novel_id: str) -> list[dict]:
     return conflicts
 
 
+def volume_gate(novel_id: str, volume_num: int) -> dict:
+    """卷级门禁：before moving past a volume, verify the volume is complete and
+    internally consistent. Result is persisted to the novel's meta.volume_gates
+    so batch generation can enforce it.
+
+    Blockers (gate fails): missing chapters in the planned range, chapters still
+    in draft/needs_review, unresolved foreshadowing due within the volume,
+    entity location contradictions inside the volume.
+    Warnings (gate passes): chapters without summaries, volume summary AI failure.
+    """
+    from datetime import datetime, timezone
+
+    db = connect()
+    novel = db.execute(
+        "SELECT id, project_id, meta FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+        (novel_id,),
+    ).fetchone()
+    if not novel:
+        db.close()
+        raise ValueError("novel not found")
+    meta = novel["meta"] if isinstance(novel["meta"], dict) else {}
+    plan = meta.get("volume_plan") or []
+    vol = next((v for v in plan if int(v.get("number", 0) or 0) == volume_num), None)
+    if vol is None:
+        db.close()
+        return {"volume": volume_num, "passed": False,
+                "blockers": [f"第{volume_num}卷没有分卷规划（meta.volume_plan），无法进行卷级门禁"],
+                "warnings": [], "checked_at": datetime.now(timezone.utc).isoformat()}
+    start_seq = int(vol.get("start_chapter", 0) or 0)
+    end_seq = int(vol.get("end_chapter", 0) or 0)
+
+    chapters = db.execute(
+        """SELECT (meta->>'seq')::int AS seq, status, title,
+                  COALESCE(meta->>'chapter_summary','') AS summary
+           FROM contents
+           WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+             AND (meta->>'seq')::int BETWEEN %s AND %s
+           ORDER BY (meta->>'seq')::int""",
+        (novel_id, start_seq, end_seq),
+    ).fetchall()
+    db.close()
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    present = {int(c["seq"]) for c in chapters if c.get("seq") is not None}
+    missing = sorted(set(range(start_seq, end_seq + 1)) - present)
+    if missing:
+        blockers.append(f"缺少章节：{missing[:10]}{'…' if len(missing) > 10 else ''}（共{len(missing)}章）")
+
+    unfinished = [int(c["seq"]) for c in chapters if c.get("status") in {"draft", "needs_review"}]
+    if unfinished:
+        blockers.append(f"章节未过审：{unfinished[:10]}{'…' if len(unfinished) > 10 else ''}（共{len(unfinished)}章）")
+
+    overdue = [f for f in check_foreshadow_due(novel_id, end_seq)
+               if int(f.get("target", 0) or 0) >= start_seq]
+    if overdue:
+        blockers.append("到期未回收伏笔：" + "；".join(f"{f['content'][:40]}（应于第{f['target']}章回收）" for f in overdue[:5]))
+
+    conflicts = [c for c in detect_cross_chapter_conflicts(novel_id)
+                 if any(f"第{seq}章" in (c.get("detail") or "") for seq in range(start_seq, end_seq + 1))]
+    if conflicts:
+        blockers.append("实体状态矛盾：" + "；".join(c["detail"][:80] for c in conflicts[:5]))
+
+    no_summary = [int(c["seq"]) for c in chapters if not c.get("summary")]
+    if no_summary:
+        warnings.append(f"缺少章节摘要：{no_summary[:10]}{'…' if len(no_summary) > 10 else ''}（共{len(no_summary)}章）")
+
+    result = {"volume": volume_num, "range": [start_seq, end_seq], "passed": not blockers,
+              "blockers": blockers, "warnings": warnings,
+              "checked_at": datetime.now(timezone.utc).isoformat()}
+
+    if result["passed"]:
+        summaries = [c["summary"] for c in chapters if c.get("summary")]
+        if summaries:
+            try:
+                from app.services.summarizer import summarize_volume
+                result["volume_summary"] = summarize_volume(novel_id, volume_num, summaries)["summary"]
+            except Exception as exc:
+                warnings.append(f"卷摘要生成失败（不阻断门禁）：{exc}")
+                result["warnings"] = warnings
+
+    db = connect()
+    gates = meta.get("volume_gates") or {}
+    gates[str(volume_num)] = result
+    db.execute("UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+               (encode({"volume_gates": gates}), novel_id))
+    if result.get("volume_summary"):
+        vol_summaries = meta.get("volume_summaries") or {}
+        vol_summaries[str(volume_num)] = result["volume_summary"]
+        db.execute("UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                   (encode({"volume_summaries": vol_summaries}), novel_id))
+    db.commit(); db.close()
+    return result
+
+
+def volume_for_chapter(volume_plan: list[dict], chapter_seq: int) -> dict | None:
+    """Locate the planned volume that contains a chapter seq."""
+    for vol in volume_plan or []:
+        try:
+            if int(vol.get("start_chapter", 0) or 0) <= chapter_seq <= int(vol.get("end_chapter", 0) or 0):
+                return vol
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def validate_character_arc(novel_id: str, arc_config: list[dict]) -> list[dict]:
     """TASK-019: Validate character arcs against current progress."""
     db = connect()
