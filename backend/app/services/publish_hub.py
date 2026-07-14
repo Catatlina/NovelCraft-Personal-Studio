@@ -77,6 +77,59 @@ def list_platform_accounts(user_id: str) -> list[dict]:
              "updated_at": str(r["updated_at"])} for r in rows]
 
 
+def delete_platform_account(account_id: str, user_id: str) -> bool:
+    """Soft-delete one account/connection owned by a user."""
+    db = connect()
+    result = db.execute(
+        "UPDATE platform_accounts SET is_deleted=TRUE, updated_at=now() WHERE id=%s AND user_id=%s AND is_deleted=FALSE",
+        (account_id, user_id),
+    )
+    changed = getattr(result, "rowcount", 0) == 1
+    db.commit()
+    db.close()
+    return changed
+
+
+def list_platform_accounts_with_config_status(user_id: str, specs: dict[str, dict]) -> list[dict]:
+    """Return account metadata and which required fields are configured.
+
+    Credential values are decrypted only to compute boolean presence; plaintext is
+    never returned.
+    """
+    db = connect()
+    rows = db.execute(
+        "SELECT id, platform, account_name, credentials_encrypted, created_at, updated_at FROM platform_accounts "
+        "WHERE user_id=%s AND is_deleted=FALSE ORDER BY platform, account_name",
+        (user_id,),
+    ).fetchall()
+    db.close()
+    out: list[dict] = []
+    from cryptography.fernet import InvalidToken
+    for row in rows:
+        creds: dict = {}
+        if row.get("credentials_encrypted"):
+            try:
+                plaintext = _credentials_fernet().decrypt(row["credentials_encrypted"].encode())
+                creds = json.loads(plaintext)
+            except (InvalidToken, json.JSONDecodeError, TypeError):
+                creds = {}
+        spec = specs.get(row["platform"], {})
+        fields = spec.get("fields", [])
+        configured_fields = [f["key"] for f in fields if str(creds.get(f["key"], "")).strip()]
+        required = [f["key"] for f in fields if f.get("required")]
+        out.append({
+            "id": row["id"],
+            "platform": row["platform"],
+            "account_name": row["account_name"],
+            "display_name": spec.get("display_name", row["platform"]),
+            "category": spec.get("category", "other"),
+            "configured_fields": configured_fields,
+            "missing_required": [key for key in required if key not in configured_fields],
+            "updated_at": str(row["updated_at"]),
+        })
+    return out
+
+
 def get_platform_credentials(user_id: str, platform: str, account_name: str = "") -> dict | None:
     """Decrypt credentials for internal publish flows only; never expose via API."""
     db = connect()

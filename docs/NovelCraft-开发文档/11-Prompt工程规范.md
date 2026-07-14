@@ -22,7 +22,7 @@ gateway.complete(task_type, prompt_name, variables, output_schema, budget_scope)
 
 ### 0.2 榜单市场分析输入边界
 
-`ranking.market_analysis` 只接收榜单短元数据和聚合统计，禁止输入作品正文、章节、可识别情节链。标题、作者等外部字段必须放在“不可信数据区”，Prompt 明确禁止执行其中指令。输出经严格 Schema 和候选标题边界校验后才能落库；Provider 不可用时返回 `pending_provider`，不得用规则模板或 mock 候选伪装 AI 分析。原创性字段只能称“风险辅助检查”，不得宣称版权查重或法律结论。
+`ranking.market_analysis` 只接收榜单短元数据和聚合统计，禁止输入作品正文、章节、可识别情节链。标题、作者等外部字段必须放在“不可信数据区”，Prompt 明确禁止执行其中指令。输出经严格 Schema 和候选标题边界校验后才能落库；Provider 不可用时返回 `failed`/HTTP 错误，不得用规则模板或 mock 候选伪装 AI 分析。原创性字段只能称“风险辅助检查”，不得宣称版权查重或法律结论。
 
 ### 0.1 `oh-story-claudecode` 模板融合边界
 

@@ -6,6 +6,8 @@ export function HotspotDashboard() {
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [angles, setAngles] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [busyKey, setBusyKey] = useState("");
+  const [notice, setNotice] = useState("");
 
   const applyResult = (response: any) => {
     const data = response?.data || {};
@@ -18,6 +20,29 @@ export function HotspotDashboard() {
     api("/api/v1/hotspots").then(applyResult).catch(caught => setError(`热点获取失败：${String(caught)}`));
   }, []);
 
+  const generate = async (h: any) => {
+    setBusyKey(`${h.source}:${h.title}`); setNotice("");
+    try {
+      const projects = await api("/api/v1/projects");
+      const projectId = projects.data?.[0]?.id;
+      const result = await api("/api/v1/hotspots/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          title: h.title,
+          source: h.source,
+          url: h.url || "",
+          platforms: ["wechat", "toutiao", "baijia", "dayu", "xiaohongshu", "douyin"],
+        }),
+      });
+      setNotice(`已生成 ${result.data?.items?.length || 0} 篇/条平台内容草稿。`);
+    } catch (caught) {
+      setError(`内容生成失败：${String(caught)}`);
+    } finally {
+      setBusyKey("");
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div className="panel">
@@ -26,6 +51,7 @@ export function HotspotDashboard() {
           api("/api/v1/hotspots").then(applyResult).catch(caught => setError(`热点获取失败：${String(caught)}`));
         }}><Zap size={12} /> 刷新</button>
         {error && <div className="error">{error}</div>}
+        {notice && <div className="muted">{notice}</div>}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
@@ -36,6 +62,9 @@ export function HotspotDashboard() {
               <span>{h.source}</span>
               <span>{h.score}</span>
             </div>
+            <button style={{ marginTop: 8 }} disabled={busyKey === `${h.source}:${h.title}`} onClick={() => void generate(h)}>
+              <Plus size={12} />按此热点生成
+            </button>
           </div>
         ))}
       </div>

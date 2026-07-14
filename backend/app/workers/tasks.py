@@ -406,7 +406,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         claim = conn.execute(
             """UPDATE run_nodes SET status='running', attempt=attempt+1, started_at=now(), error=NULL
                WHERE run_id=%s AND node_key=%s
-                 AND status IN ('pending','failed','pending_provider','pending_budget')
+                 AND status IN ('pending','failed','pending_budget')
                RETURNING id""", (run_id, node_key),
         )
         if hasattr(claim, "rowcount") and claim.rowcount != 1:
@@ -483,12 +483,12 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                     payload={"reason": "invalid_output"})
             return {"status": "invalid_output", "node_key": node_key}
         except ProviderError as exc:
-            # Keep the real provider message — "provider error" alone made
-            # production diagnosis (and the 2026-07-13 QA P0) needlessly blind.
-            _mark_node(run_id, node_key, "pending_provider", f"provider error: {exc}"[:500])
+            # AI provider failures are terminal for this run: no mock, no silent
+            # fallback, and no "pending" state that can be mistaken for success.
+            _mark_node(run_id, node_key, "failed", f"provider error: {exc}"[:500])
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
                                     payload={"reason": "provider_error", "detail": str(exc)[:200]})
-            return {"status": "pending_provider", "node_key": node_key}
+            return {"status": "failed", "node_key": node_key, "reason": str(exc)}
         except Exception as exc:
             _mark_node(run_id, node_key, "failed", str(exc))
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
@@ -1316,17 +1316,28 @@ def batch_generate_chapters_task(
                 _increment_batch_progress_legacy(db, batch_id, accepted)
             db.commit()
             db.close()
-    except (ProviderError, BudgetExceeded) as exc:
+    except BudgetExceeded as exc:
         db = connect()
         db.execute(
-            "UPDATE generation_batches SET status = 'pending_provider', error = %s, updated_at = now() WHERE id = %s",
+            "UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
             (str(exc), batch_id),
         )
         db.commit()
         db.close()
         from app.core.alerts import send_alert
-        send_alert(f"批次 {batch_id} 进入 pending_provider：{exc}", "warning")
-        return {"status": "pending_provider", "batch_id": batch_id, "reason": str(exc)}
+        send_alert(f"批次 {batch_id} 因预算不足失败：{exc}", "warning")
+        return {"status": "failed", "batch_id": batch_id, "reason": str(exc)}
+    except ProviderError as exc:
+        db = connect()
+        db.execute(
+            "UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
+            (str(exc), batch_id),
+        )
+        db.commit()
+        db.close()
+        from app.core.alerts import send_alert
+        send_alert(f"批次 {batch_id} 因 AI provider 失败：{exc}", "warning")
+        return {"status": "failed", "batch_id": batch_id, "reason": str(exc)}
     except Exception as exc:
         db = connect()
         db.execute(

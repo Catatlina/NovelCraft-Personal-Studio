@@ -59,9 +59,9 @@ def test_multi_round_review_surfaces_provider_failure(authed, monkeypatch):
 
     monkeypatch.setattr(gateway, "complete", _down)
     result = multi_round_review("测试正文", rounds=2, project_id=authed["project_id"])
-    assert result["status"] == "pending_provider"
+    assert result["status"] == "failed"
     assert result["final_pass"] is False
-    assert result["rounds"][0]["status"] == "pending_provider"
+    assert result["rounds"][0]["status"] == "failed"
 
 
 def test_cross_model_audit_reports_gateway_results(authed, monkeypatch):
@@ -176,6 +176,47 @@ def test_ai_edit_creates_version_branch(authed, monkeypatch):
     ).fetchone()
     db.close()
     assert version is not None
+
+
+def test_ai_edit_returns_review_and_next_chapter_plan(authed, monkeypatch):
+    from app.db import connect, encode, new_id
+
+    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    content_id = new_id()
+    db = connect()
+    db.execute(
+        "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s,%s,'chapter','整章重写测试',%s,%s,'draft')",
+        (content_id, project_id,
+         encode({"type": "doc", "content": [{"type": "paragraph", "text": "原文段落"}]}),
+         encode({"seq": 3})),
+    )
+    db.commit()
+    db.close()
+
+    calls: list[str] = []
+
+    def fake_complete(**kwargs):
+        calls.append(kwargs["task_type"])
+        if kwargs["task_type"] == "review_7dim":
+            return {"score": 88, "issues": ["节奏可加强"]}
+        if kwargs["task_type"] == "plan_next_chapter":
+            return {"next_title": "第四章 回声", "goals": ["推进主线"], "conflicts": ["制造新阻力"], "warnings": []}
+        return {"text": "重写后的章节正文"}
+
+    import app.main as main_module
+    monkeypatch.setattr(main_module, "complete", fake_complete)
+
+    response = client.post(
+        f"/api/v1/contents/{content_id}/ai/rewrite_chapter",
+        headers=headers,
+        json={"selection": "原文段落", "instruction": "整章重写", "client_mutation_id": f"rewrite-{content_id}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["text"] == "重写后的章节正文"
+    assert data["review_7dim"]["score"] == 88
+    assert data["next_chapter_plan"]["next_title"] == "第四章 回声"
+    assert calls == ["editor_rewrite", "review_7dim", "plan_next_chapter"]
 
 
 # --- workflow executor: honest semantics ---------------------------------------
@@ -319,7 +360,7 @@ def test_fanout_provider_failure_does_not_create_fake_content(authed, monkeypatc
     response = authed["client"].post(
         f"/api/v1/contents/{content_id}/fanout?platforms=wechat", headers=authed["headers"])
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["status"] == "pending_provider"
+    assert response.json()["data"]["items"][0]["status"] == "failed"
     db = connect()
     count = db.execute("SELECT COUNT(*) AS c FROM contents WHERE parent_id=%s", (content_id,)).fetchone()["c"]
     db.close()

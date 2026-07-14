@@ -27,13 +27,10 @@ def extract_and_store_foreshadowing(chapter_id: str, seq: int, chapter_body: str
 
 
 def _extract_via_ai(text: str, project_id: str) -> list[dict]:
-    try:
-        from app.gateway import complete
-        result = complete(
-            run_id=None, node_key=None, project_id=project_id,
-            task_type="extract_foreshadowing", prompt_name="narrative.extract_foreshadowing",
-            variables={"body": text[:5000]},
-        )
-        return result.get("foreshadowings", result.get("foreshadowing", []))
-    except Exception:
-        return []
+    from app.gateway import complete
+    result = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="extract_foreshadowing", prompt_name="narrative.extract_foreshadowing",
+        variables={"body": text[:5000]},
+    )
+    return result.get("foreshadowings", result.get("foreshadowing", []))

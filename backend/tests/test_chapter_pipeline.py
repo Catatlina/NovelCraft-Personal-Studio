@@ -29,10 +29,10 @@ def test_gen_next_chapter_output_is_strictly_validated():
         validate_task_output("gen_next_chapter", {"chapter": {"title": "第二章", "body": []}})
 
 
-def test_gen_next_chapter_mock_output_passes_validation():
-    from app.gateway import _mock_output, validate_task_output
+def test_gen_next_chapter_provider_output_passes_validation():
+    from app.gateway import validate_task_output
 
-    output = _mock_output("gen_next_chapter", {})
+    output = {"chapter": {"title": "第二章 风起", "body": ["第一段推进目标。", "第二段制造冲突。", "第三段留下钩子。"]}}
     validated = validate_task_output("gen_next_chapter", output)
     assert len(validated["chapter"]["body"]) >= 3
 
@@ -144,7 +144,7 @@ def test_batch_resumes_from_completed_count(monkeypatch):
     assert db.batch["completed_count"] == 5
 
 
-def test_provider_failure_marks_batch_pending_provider_with_cause(monkeypatch):
+def test_provider_failure_marks_batch_failed_with_cause(monkeypatch):
     from app.gateway import ProviderError
     from app.workers import tasks
 
@@ -157,9 +157,9 @@ def test_provider_failure_marks_batch_pending_provider_with_cause(monkeypatch):
     monkeypatch.setattr(tasks.gen_next_chapter_task, "run", _raise)
     result = tasks.batch_generate_chapters_task.run("batch-1")
 
-    assert result["status"] == "pending_provider"
+    assert result["status"] == "failed"
     assert "circuit breaker" in result["reason"]
-    assert any("status = 'pending_provider'" in sql and "circuit breaker" in str(params)
+    assert any("status = 'failed'" in sql and "circuit breaker" in str(params)
                for sql, params in db.statements)
     assert db.batch["completed_count"] == 1  # progress is preserved for resume
 
@@ -167,7 +167,7 @@ def test_provider_failure_marks_batch_pending_provider_with_cause(monkeypatch):
 def test_resume_endpoint_redispatches_interrupted_batch(monkeypatch):
     from app import main
 
-    batch = {**_batch(completed=2, requested=5), "status": "pending_provider"}
+    batch = {**_batch(completed=2, requested=5), "status": "failed"}
 
     class _MainDb(_BatchDb):
         pass

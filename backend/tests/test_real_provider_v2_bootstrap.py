@@ -4,7 +4,7 @@ Runs Journey A against the real DeepSeek API: planning → human confirm →
 blueprint → writing → finalization, and requires a real generated chapter.
 Skipped without DEEPSEEK_API_KEY (CI provides it as a repo secret).
 
-This is the "真实 provider 端到端冒烟测试（非 mock）" the 2026-07-13
+This is the "真实 provider 端到端冒烟测试" the 2026-07-13
 acceptance audit required before the flagship flow may be called deliverable.
 """
 import os
@@ -21,10 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture()
 def real_env(monkeypatch):
-    # Leave the test sandbox: real provider, no mock permission.
     monkeypatch.setenv("NOVELCRAFT_ENV", "ci")
-    monkeypatch.delenv("NOVELCRAFT_ALLOW_MOCK", raising=False)
-    monkeypatch.delenv("ALLOW_MOCK", raising=False)
 
 
 @pytest.fixture()

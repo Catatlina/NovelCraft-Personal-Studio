@@ -14,7 +14,7 @@ const PLANNING_NODES = new Set([
   "n3", "n4", "n5", "n6",
 ]);
 const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
-const RETRYABLE_STATUSES = new Set(["pending_provider", "failed", "pending_budget"]);
+const RETRYABLE_STATUSES = new Set(["failed", "pending_budget"]);
 
 function readableLabel(key: string): string {
   const labels: Record<string, string> = {

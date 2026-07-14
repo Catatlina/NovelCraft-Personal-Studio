@@ -68,7 +68,7 @@ def test_queue_backlog_silent_when_redis_down(monkeypatch):
 
 def test_batch_failure_paths_send_alerts():
     source = (ROOT / "backend/app/workers/tasks.py").read_text(encoding="utf-8")
-    assert "pending_provider：" in source and "批次" in source  # alert on provider wait
+    assert "AI provider 失败" in source and "批次" in source  # alert on provider failure
     assert "失败：" in source  # alert on hard failure
 
 

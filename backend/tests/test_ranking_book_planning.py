@@ -133,9 +133,10 @@ def test_provider_failure_keeps_retryable_run_state_without_fabricated_output(mo
 
     result = tasks.execute_bootstrap.run("run-1", "plan_idea")
 
-    assert result == {"status": "pending_provider", "node_key": "plan_idea"}
+    assert result["status"] == "failed"
+    assert result["node_key"] == "plan_idea"
     writes = [(sql, params) for sql, params in db.statements if sql.startswith("UPDATE")]
-    assert any(params and params[0] == "pending_provider" for _sql, params in writes)
+    assert any(params and params[0] == "failed" for _sql, params in writes)
     assert not any("output =" in sql for sql, _params in writes)
 
 

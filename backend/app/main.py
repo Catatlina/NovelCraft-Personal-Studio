@@ -32,11 +32,13 @@ from .api.v1.short_story import router as short_story_router
 from .api.v1.dag_exec import router as dag_exec_router
 from .api.v1.knowledge import router as knowledge_router
 from .api.v1.hotspots import router as hotspots_router
+from .api.v1.imitation import router as imitation_router
+from .api.v1.platform_connections import router as platform_connections_router
 from .api.v1.publish_schedule import router as publish_schedule_router
 from .api.v1.overseas import router as overseas_router
 from .api.v1.batch_endpoints import router as batch_router
 from .api.v1.complete_api import router as complete_router
-from .api.v1.ranking import router as ranking_router
+from .api.v1.ranking import library_router, router as ranking_router
 from .api.v1.fusion import router as fusion_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
@@ -61,8 +63,11 @@ app.include_router(short_story_router)
 app.include_router(dag_exec_router)
 app.include_router(knowledge_router)
 app.include_router(hotspots_router)
+app.include_router(imitation_router)
+app.include_router(platform_connections_router)
 app.include_router(publish_schedule_router)
 app.include_router(overseas_router)
+app.include_router(library_router)
 app.include_router(batch_router)
 app.include_router(complete_router)
 app.include_router(ranking_router)
@@ -530,7 +535,7 @@ def list_novel_generation_batches(novel_id: str, limit: int = 20, offset: int = 
                       "generation_percent": round(generated / requested * 100),
                       "review_percent": round(reviewed / generated * 100) if generated else 0,
                       "acceptance_percent": round(accepted / requested * 100),
-                      "recoverable": batch.get("status") in {"failed", "pending_provider", "dispatch_failed"},
+                      "recoverable": batch.get("status") in {"failed", "dispatch_failed"},
                       "quality_status": quality_status})
     return ok({"items": items, "count": len(items)})
 
@@ -580,9 +585,9 @@ def resume_generation_batch(request: Request, batch_id: str, user: dict = Depend
         conn.close()
         raise HTTPException(status_code=404, detail="batch not found")
     ensure_project_member(conn, batch["project_id"], user, {"owner", "editor"})
-    if batch["status"] not in {"failed", "pending_provider"}:
+    if batch["status"] != "failed":
         conn.close()
-        raise HTTPException(status_code=409, detail=f"batch is {batch['status']}, only failed/pending_provider can resume")
+        raise HTTPException(status_code=409, detail=f"batch is {batch['status']}, only failed can resume")
     conn.execute(
         "UPDATE generation_batches SET status = 'pending', cancel_requested = FALSE, updated_at = now() WHERE id = %s",
         (batch_id,),
@@ -668,7 +673,7 @@ async def fanout_content(
             )
             body = {"type": "doc", "content": [{"type": "paragraph", "text": output.get("text", src_text[:500])}]}
         except (ProviderError, BudgetExceeded) as exc:
-            results.append({"platform": pkey, "status": "pending_provider", "error": str(exc)})
+            results.append({"platform": pkey, "status": "failed", "error": str(exc)})
             continue
 
         conn.execute(
@@ -875,15 +880,30 @@ def ai_edit(
 ) -> ApiResponse:
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
+    task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
     output = complete(
         run_id=None,
         node_key=None,
         project_id=content["project_id"],
-        task_type=f"editor_{op}",
-        prompt_name=f"editor.{op}",
+        task_type=f"editor_{task_op}",
+        prompt_name=f"editor.{task_op}",
         variables={"selection": payload.selection, "instruction": payload.instruction},
         client_mutation_id=payload.client_mutation_id,
     )
+    if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
+        review_context = _chapter_review_context(content, output.get("text") or payload.selection)
+        output["review_7dim"] = complete(
+            run_id=None, node_key=None, project_id=content["project_id"],
+            task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+            variables=review_context,
+            client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
+        )
+        output["next_chapter_plan"] = complete(
+            run_id=None, node_key=None, project_id=content["project_id"],
+            task_type="plan_next_chapter", prompt_name="narrative.plan_next_chapter",
+            variables=review_context,
+            client_mutation_id=f"{payload.client_mutation_id}:next" if payload.client_mutation_id else None,
+        )
     # C5-03: every AI edit leaves a version branch so the tree stays auditable.
     conn = connect()
     conn.execute(
@@ -900,6 +920,24 @@ def ai_edit(
     return ok(output)
 
 
+def _chapter_review_context(content: dict, text: str) -> dict:
+    conn = connect()
+    try:
+        novel_id = content.get("parent_id") or content.get("id")
+        knowledge = conn.execute(
+            """SELECT kind,title,body FROM knowledge_items
+               WHERE content_id=%s AND is_deleted=FALSE ORDER BY kind LIMIT 40""",
+            (novel_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    characters = "\n".join(f"{row.get('title','')}: {row.get('body','')}" for row in knowledge if row.get("kind") == "character")
+    worldview = "\n".join(str(row.get("body", "")) for row in knowledge if row.get("kind") == "worldview")
+    return {"chapter_text": text[:12000], "body": text[:12000],
+            "characters": characters[:4000] or "暂无人物档案",
+            "worldview": worldview[:4000] or "暂无世界观档案"}
+
+
 @app.post("/api/v1/contents/{content_id}/ai/{op}/stream")
 @limiter.limit("20/minute")
 def ai_edit_stream(
@@ -911,22 +949,22 @@ def ai_edit_stream(
 ) -> StreamingResponse:
     """SSE streaming variant of ai_edit for pure-text operations.
 
-    Frames: {"delta": str}* then {"done": true, "text": full}; provider/budget
-    failures emit a single {"error", "code"} frame instead of an HTTP error so
-    the client can fall back to the non-streaming path."""
+    Frames: {"delta": str}* then {"done": true, "text": full}. Provider/budget
+    failures are surfaced as explicit error frames."""
     from .gateway import BudgetExceeded, ProviderError, complete_stream
 
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
     project_id = content["project_id"]
+    task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
 
     def event_source():
         chunks: list[str] = []
         try:
             for delta in complete_stream(
                 project_id=project_id,
-                task_type=f"editor_{op}",
-                prompt_name=f"editor.{op}",
+                task_type=f"editor_{task_op}",
+                prompt_name=f"editor.{task_op}",
                 variables={"selection": payload.selection, "instruction": payload.instruction},
                 client_mutation_id=payload.client_mutation_id,
             ):
@@ -1207,8 +1245,9 @@ def overseas_translate(
     user: dict = Depends(get_current_user),
 ) -> ApiResponse:
     """M4: Translate content for overseas publishing."""
+    from app.gateway import BudgetExceeded, ProviderError
     from .services.overseas import translate_chapter
-    conn, _content = load_content_for_user(content_id, user, {"owner", "editor"})
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     row = conn.execute("SELECT body FROM contents WHERE id = %s", (content_id,)).fetchone()
     conn.close()
     if not row:
@@ -1216,7 +1255,10 @@ def overseas_translate(
     body_text = ""
     if isinstance(row.get("body"), dict):
         body_text = "\n".join(c.get("text","") for c in row["body"].get("content",[]))
-    return ok(translate_chapter(body_text[:8000], target_lang))
+    try:
+        return ok(translate_chapter(body_text[:8000], target_lang, content["project_id"]))
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(status_code=502, detail={"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
 
 
 @app.get("/api/v1/publish/records")

@@ -18,13 +18,20 @@
 | GET | `/api/v1/ranking/snapshots?project_id=` | 项目榜单快照列表 |
 | GET | `/api/v1/ranking/snapshots/{id}` | 榜单快照和条目 |
 | POST | `/api/v1/ranking/snapshots/{id}/retry` | 仅重放失败快照；新快照记录 `retry_of_snapshot_id` |
-| POST | `/api/v1/ranking/snapshots/{id}/analyze` | Gateway 结构化市场分析；严格校验后才写候选；Provider 失败返回 503 + `pending_provider`，不得生成固定候选 |
+| POST | `/api/v1/ranking/snapshots/{id}/analyze` | Gateway 结构化市场分析；严格校验后才写候选；Provider 失败返回 503 + `failed`，不得生成固定候选 |
 | GET | `/api/v1/ranking/topics?project_id=` | 原创选题池 |
 | POST | `/api/v1/ranking/topics/{id}/generate-book` | 建书入库；已有题名时跳过人工选名，从 n3 启动生成 |
+| GET | `/api/v1/library/books?project_id=` | 正式书库列表；按创建时间倒序返回书名、简介、类型、创建时间、最新章节、章节数、字数 |
+| GET | `/api/v1/library/books/{book_id}` | 正式书库详情；返回书名、简介、大纲、最新章节、全部章节、知识条目 |
 | POST | `/api/v1/ranking/import?project_id=` | 用户授权的 CSV/JSON 榜单元数据导入；1–200 条，owner/editor 限定，低置信度快照 `needs_review` |
 | POST | `/api/v1/ranking/snapshots/{id}/validate-metadata` | Open Library 交叉校验；六态写入 `ranking_items.metadata_status`，证据并入 `metrics.validation` |
 | POST | `/novels/from-inspiration` | 次要灵感入口，复用成书工作流并自动入库 |
 | POST | `/hotspots/scan-and-generate` | 热点分析并生成多平台内容矩阵 |
+| GET | `/api/v1/platform-connections/specs` | 返回可视化配置规格：热点源、发布平台、告警/运维等平台需要填写的字段、必填项和敏感字段 |
+| GET | `/api/v1/platform-connections` | 当前用户平台连接列表；只返回账号名、配置状态、已配置字段、缺失必填字段，不回显密钥/token/cookie |
+| POST | `/api/v1/platform-connections` | 保存真实平台账号/API/人工源配置；敏感字段 Fernet 加密落库，用于热点采集、发布、告警等真实调用 |
+| POST | `/api/v1/platform-connections/{platform}/test` | 测试指定平台当前配置是否完整；缺失必填项直接报错，不使用 mock 结果 |
+| DELETE | `/api/v1/platform-connections/{account_id}` | 删除当前用户的平台连接配置 |
 
 ### 连续章节与导出（NC-SC-004，2026-07-11）
 
@@ -33,9 +40,9 @@
 | POST | `/api/v1/novels/{id}/continue` | 生成下一章；章节级 `generation_key` 幂等，重复派发不产生重复章节 |
 | POST | `/api/v1/novels/{id}/chapters/batch` | 建批次生成 1–50 章；返回 `batch_id` |
 | GET | `/api/v1/novels/{id}/generation-batches` | 按时间倒序返回该书持久批次及生成/审核/通过百分比、可恢复状态 |
-| GET | `/api/v1/generation-batches/{id}` | 批次进度；`status` 含 `pending/running/succeeded/failed/pending_provider/cancelled`，失败原因在 `error` |
+| GET | `/api/v1/generation-batches/{id}` | 批次进度；`status` 含 `pending/running/succeeded/failed/cancelled`，失败原因在 `error` |
 | POST | `/api/v1/generation-batches/{id}/cancel` | 请求取消；章节间检查点生效 |
-| POST | `/api/v1/generation-batches/{id}/resume` | 仅 `failed/pending_provider` 可恢复；从 `completed_count` 断点续跑，非中断态返回 409 |
+| POST | `/api/v1/generation-batches/{id}/resume` | 仅 `failed` 可恢复；从 `completed_count` 断点续跑，非中断态返回 409 |
 | GET | `/api/v1/novels/{id}/export/txt`、`.../export/markdown`、`.../export/epub` | 导出整书；EPUB 返回 `application/epub+zip` 文件，无章节为 409、依赖不可用为 503；需项目成员身份 |
 | GET | `/api/v1/novels/{id}/completion` | 完成度统计（章节数/字数/审核数）；需项目成员身份 |
 | GET | `/api/v1/novels/{id}/narrative` | 审阅页时间线/人物弧线真实数据（timeline_events + arcs 表） |
@@ -45,14 +52,14 @@
 | GET | `/api/v1/publish/accounts` | 当前用户平台账号列表（不含凭据字段） |
 | GET | `/api/v1/agents/status` | Agent 控制台真实统计（run_nodes 按 agent 聚合，项目范围） |
 | GET | `/api/v1/hotspots` | 热点采集；`data.sources` 逐源状态，全部失败返回 502 `HOTSPOT_SOURCES_FAILED`，禁止空 200 |
-| POST | `/api/v1/review/multi-round`、`/review/cross-model`、`/prompts/matrix-run` | 均需 `project_id` + 成员校验；真实经 Gateway 调用，Provider 不可用逐项 `pending_provider`，禁止长度公式伪造评分 |
+| POST | `/api/v1/review/multi-round`、`/review/cross-model`、`/prompts/matrix-run` | 均需 `project_id` + 成员校验；真实经 Gateway 调用，Provider 不可用逐项 `failed`，禁止长度公式伪造评分 |
 | POST | `/api/v1/admin/workflows/{name}/execute` | 需 `project_id`+`novel_id`+owner/editor；仅 `bootstrap` 可执行，其余显式 501 `WORKFLOW_EXECUTOR_NOT_IMPLEMENTED` |
 | PUT | `/api/v1/admin/workflows/{name}` | 请求体 `{project_id,nodes}`；保存项目级 DAG 设计稿。`bootstrap` 为只读系统工作流，禁止覆盖；自定义 DAG 未接执行器时仅保存、不宣称可运行 |
 | POST | `/api/v1/contents/{id}/ai/{op}` | AI 编辑成功后写 `versions(label='ai_edit')` 分支（C5-03），`client_mutation_id` 幂等 |
 | POST | `/api/v1/contents/{id}/ai/{op}/stream` | 仅纯文本编辑操作；SSE `delta* → done`，DeepSeek 流式适配，其他 Provider 显式错误并由前端回退普通网关；预算错误为 `PENDING_BUDGET` |
 | POST | `/api/v1/knowledge/reindex-project?project_id=` | owner/editor 在切换 Embedding backend 后重建项目向量；响应包含实际 backend/items/chunks |
 
-所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。Provider 或预算不可用时批次进入 `pending_provider` 并保留已完成进度，禁止伪装成功或清零重跑。曾存在的 `POST /scrape/browseract` 因违反《25》采集合规边界已移除，不得恢复。
+所有创建小说的响应必须先返回持久化 `book_id`，生成失败不得删除书库记录；通过 `workflow_run_id`继续追踪。榜单源失败使用明确错误码，不得返回`200 + []`伪装成功。Provider 失败时批次进入 `failed` 并保留已完成进度，禁止伪装成功或清零重跑。曾存在的 `POST /scrape/browseract` 因违反《25》采集合规边界已移除，不得恢复。
 
 ---
 

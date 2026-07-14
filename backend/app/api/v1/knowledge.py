@@ -116,7 +116,7 @@ def import_knowledge(project_id: str, file: UploadFile = File(...), user: dict =
 
 
 @router.get("/style-check")
-def check_style_similarity(text: str, user: dict = Depends(get_current_user)):
+def check_style_similarity(text: str, project_id: str, user: dict = Depends(get_current_user)):
     """TASK-036: N-gram similarity check against stored styles."""
     if len(text) < 50:
         return {"code": 0, "message": "ok", "data": {"similarity": 0, "warning": None}}
@@ -126,7 +126,15 @@ def check_style_similarity(text: str, user: dict = Depends(get_current_user)):
 
     text_ngrams = ngrams(text)
     db = connect()
-    rows = db.execute("SELECT body FROM knowledge_items WHERE kind = 'reference' LIMIT 20").fetchall()
+    member = db.execute("SELECT 1 FROM project_members WHERE project_id=%s AND user_id=%s",
+                        (project_id, user["id"])).fetchone()
+    if not member:
+        db.close()
+        raise HTTPException(403, "not a project member")
+    rows = db.execute(
+        "SELECT body FROM knowledge_items WHERE project_id=%s AND kind = 'reference' AND is_deleted=FALSE LIMIT 20",
+        (project_id,),
+    ).fetchall()
     db.close()
 
     max_sim = 0

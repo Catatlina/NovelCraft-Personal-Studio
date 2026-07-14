@@ -20,37 +20,29 @@ TRANSLATION_PIPELINE = [
 ]
 
 
-def translate_chapter(chapter_text: str, target_lang: str = "en") -> dict:
+def translate_chapter(chapter_text: str, target_lang: str = "en", project_id: str = "") -> dict:
     """Translate a chapter with the full pipeline."""
-    try:
-        from app.gateway import complete
-        from app.db import connect
-        db = connect()
-        row = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
-        pid = row["id"] if row else ""
-        db.close()
+    from app.gateway import complete
 
-        # Step 1: Segment and translate
-        translated = complete(
-            run_id=None, node_key=None, project_id=pid,
-            task_type="translate_segment", prompt_name="overseas.segment_translate",
-            variables={"text": chapter_text[:8000], "target_lang": target_lang},
-        )
+    # Step 1: Segment and translate
+    translated = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="translate_segment", prompt_name="overseas.translate_segment",
+        variables={"text": chapter_text[:8000], "target_lang": target_lang},
+    )
 
-        # Step 2: Cultural localization
-        localized = complete(
-            run_id=None, node_key=None, project_id=pid,
-            task_type="cultural_localize", prompt_name="overseas.cultural_localize",
-            variables={"text": translated.get("translated", ""), "target_lang": target_lang},
-        )
+    # Step 2: Cultural localization
+    localized = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="cultural_localize", prompt_name="overseas.cultural_localize",
+        variables={"text": translated.get("translated", ""), "target_lang": target_lang},
+    )
 
-        return {
-            "translated": translated.get("translated", ""),
-            "localized": localized.get("localized", ""),
-            "cultural_notes": localized.get("notes", []),
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "translated": translated.get("translated", ""),
+        "localized": localized.get("localized", ""),
+        "cultural_notes": localized.get("notes", []),
+    }
 
 
 def format_for_platform(text: str, platform_key: str) -> str:

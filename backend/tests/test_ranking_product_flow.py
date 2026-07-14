@@ -28,6 +28,7 @@ def test_ranking_routes_are_registered_on_application():
         ("/api/v1/ranking/topics", "GET"),
         ("/api/v1/ranking/topics/{topic_id}/generate-book", "POST"),
         ("/api/v1/ranking/library/books", "GET"),
+        ("/api/v1/library/books", "GET"),
     }
     assert required <= routes
 

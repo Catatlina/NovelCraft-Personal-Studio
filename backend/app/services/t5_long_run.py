@@ -219,10 +219,10 @@ class LongRunRunner:
         while time.monotonic() < deadline:
             batch = self.client.request("GET", f"/generation-batches/{batch_id}")
             status = batch.get("status")
-            if status in {"pending_provider", "failed"}:
+            if status == "failed":
                 attempts = checkpoint.resume_attempts.get(batch_id, 0)
                 if attempts >= self.config.max_resume_attempts:
-                    raise T5RunError(f"batch {batch_id} exhausted provider resumes: {batch.get('error')}")
+                    raise T5RunError(f"batch {batch_id} exhausted failure resumes: {batch.get('error')}")
                 self.client.request("POST", f"/generation-batches/{batch_id}/resume", {})
                 checkpoint.resume_attempts[batch_id] = attempts + 1
                 self._save(checkpoint)

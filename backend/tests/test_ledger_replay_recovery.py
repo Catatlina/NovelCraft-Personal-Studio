@@ -4,7 +4,7 @@ replay of the same client_mutation_id.
 Before this fix, `_record_failed_call` wrote a `status='failed'` row keyed on
 (project_id, client_mutation_id); a subsequent successful retry with the same
 mutation id then collided on the unique index (UniqueViolation), permanently
-breaking pending_provider / batch resume — the project's centerpiece recovery.
+breaking failed-state batch resume — the project's centerpiece recovery.
 """
 from __future__ import annotations
 
@@ -29,13 +29,11 @@ def _seed_project() -> str:
     return pid
 
 
-def _seed_mock_route(task_type: str) -> None:
-    """V2 defaults unrouted tasks to the real deepseek provider; this test
-    drives the ledger via the guarded mock, so it declares its route."""
+def _seed_deepseek_route(task_type: str) -> None:
     db = connect()
     db.execute(
         "INSERT INTO model_routes (id, task_type, provider, model, params, fallback_json) "
-        "VALUES (%s,%s,'mock','mock',%s,%s) ON CONFLICT(task_type) DO NOTHING",
+        "VALUES (%s,%s,'deepseek','deepseek-chat',%s,%s) ON CONFLICT(task_type) DO NOTHING",
         (new_id(), task_type, encode({}), encode([])),
     )
     db.commit()
@@ -58,20 +56,25 @@ def test_failed_call_then_successful_retry_same_mutation_id(monkeypatch):
     pid = _seed_project()
     mutation = f"resume:{uuid.uuid4().hex}"
     task = f"probe_{uuid.uuid4().hex[:6]}"  # arbitrary non-structured task_type
-    _seed_mock_route(task)
+    _seed_deepseek_route(task)
 
-    # Attempt 1: mock gate closed -> ProviderError, a failed row is written.
-    monkeypatch.setenv("NOVELCRAFT_ENV", "development")
-    monkeypatch.setenv("NOVELCRAFT_ALLOW_MOCK", "false")
+    def provider_down(*_args, **_kwargs):
+        raise ProviderError("provider outage")
+
+    monkeypatch.setattr("app.gateway.circuit_breaker", lambda _provider: True)
+    monkeypatch.setattr("app.gateway.record_failure", lambda _provider: None)
+    monkeypatch.setattr("app.gateway.record_success", lambda _provider: None)
+    monkeypatch.setattr("app.gateway._deepseek_complete", provider_down)
+
+    # Attempt 1: provider down -> ProviderError, a failed row is written.
     with pytest.raises(ProviderError):
         complete(run_id=None, node_key=None, project_id=pid, task_type=task,
                  prompt_name="editor.polish", variables={"selection": "x", "instruction": ""},
                  client_mutation_id=mutation)
     assert _mutation_rows(pid, mutation) == [{"status": "failed"}]
 
-    # Attempt 2: provider recovers (mock allowed) with the SAME mutation id.
-    monkeypatch.setenv("NOVELCRAFT_ENV", "test")
-    monkeypatch.setenv("NOVELCRAFT_ALLOW_MOCK", "true")
+    # Attempt 2: provider recovers with the SAME mutation id.
+    monkeypatch.setattr("app.gateway._deepseek_complete", lambda *_args, **_kwargs: ({"text": "ok"}, 10, 5))
     out = complete(run_id=None, node_key=None, project_id=pid, task_type=task,
                    prompt_name="editor.polish", variables={"selection": "x", "instruction": ""},
                    client_mutation_id=mutation)

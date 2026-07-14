@@ -29,16 +29,13 @@ def extract_and_store(chapter_id: str, novel_id: str, chapter_body: str) -> list
 
 def _extract_via_ai(text: str, project_id: str) -> list[dict]:
     """Use AI to extract entity states from chapter text."""
-    try:
-        from app.gateway import complete
-        result = complete(
-            run_id=None, node_key=None, project_id=project_id,
-            task_type="extract_entities", prompt_name="narrative.extract_entities",
-            variables={"body": text[:6000]},
-        )
-        return result.get("entities", [])
-    except Exception:
-        return []
+    from app.gateway import complete
+    result = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="extract_entities", prompt_name="narrative.extract_entities",
+        variables={"body": text[:6000]},
+    )
+    return result.get("entities", [])
 
 
 def get_states(novel_id: str, limit: int = 10) -> list[dict]:

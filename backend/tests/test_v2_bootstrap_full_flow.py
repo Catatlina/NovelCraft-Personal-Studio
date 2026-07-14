@@ -1,15 +1,13 @@
 """T2 full-flow: the audit's "Journey A" (从零建书 → 一键生成) end to end.
 
 Runs the complete V2 four-stage workflow synchronously against the real test
-database with the mock provider: create_run seeds 19 nodes, planning runs to
+database with a patched provider boundary: create_run seeds 19 nodes, planning runs to
 the human gate, title confirmation resumes the run, and blueprint → writing →
 finalization persist a real chapter row, knowledge items and an event ledger.
 
 The 2026-07-13 acceptance audit proved this journey died at the first node
 (no routes / no prompts / fictional model). This test locks the journey shut.
 """
-import os
-
 import pytest
 
 from app.db import connect, encode, init_db, new_id
@@ -27,19 +25,8 @@ V2_TASK_TYPES = [
 
 @pytest.fixture()
 def seeded_novel(monkeypatch):
-    # Several legacy test modules overwrite NOVELCRAFT_ENV at import time and
-    # never restore it; pin the mock-gate env for this flow explicitly.
-    monkeypatch.setenv("NOVELCRAFT_ENV", "test")
-    monkeypatch.setenv("NOVELCRAFT_ALLOW_MOCK", "true")
     init_db()
     db = connect()
-    # Explicit test boundary: route the V2 nodes through the guarded mock
-    # provider so the orchestration/persistence chain runs without a real key.
-    db.execute(
-        "UPDATE model_routes SET provider='mock', model='mock' WHERE task_type = ANY(%s)",
-        (V2_TASK_TYPES,),
-    )
-    db.commit()
     user_id = new_id()
     db.execute(
         "INSERT INTO users (id, email, password_hash, display_name) VALUES (%s,%s,%s,%s)",
@@ -64,14 +51,6 @@ def seeded_novel(monkeypatch):
     db.commit()
     db.close()
     yield project_id, novel_id
-    # Restore the real routes so wiring tests in the same DB stay truthful.
-    db = connect()
-    db.execute(
-        "UPDATE model_routes SET provider='deepseek', model='deepseek-chat' WHERE task_type = ANY(%s)",
-        (V2_TASK_TYPES,),
-    )
-    db.commit()
-    db.close()
 
 
 def _run_state(run_id):
@@ -84,10 +63,36 @@ def _run_state(run_id):
     return run, {n["node_key"]: n["status"] for n in nodes}
 
 
-def test_journey_a_full_v2_flow_mock_provider(seeded_novel):
+def _provider_output(task_type: str) -> dict:
+    outputs = {
+        "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"]},
+        "plan_market_fit": {"market_score": 82, "competitive_landscape": "脑洞悬疑读者接受度高。", "market_gap": "创作者身份代入更强。"},
+        "plan_story_pattern": {"story_model": "悬疑解谜", "act_structure": ["发现异常", "追查真相", "夺回叙事权"], "turning_points": [{"point": "文本成真", "chapter_hint": "第1章"}]},
+        "plan_core_gameplay": {"power_system": "文字改写现实但留下旁证", "progression_path": "读者到执笔者", "pleasure_points": ["信息差反杀", "伏笔回收"]},
+        "plan_world_architecture": {"worldview": {"name": "回声城", "rules": ["文字可改写现实", "改写留下旁证", "旁证可追溯执笔者"]}},
+        "plan_character_system": {"characters": [{"name": "林序", "role": "主角", "arc": "逃避到承担"}, {"name": "沈澜", "role": "盟友", "arc": "守序到质疑"}, {"name": "闻烬", "role": "反派", "arc": "控制到崩塌"}]},
+        "plan_conflict_map": {"conflicts": [{"type": "external", "between": ["林序", "执笔会"], "stakes": "人生叙事权", "escalation": "追踪升级为夺权"}]},
+        "blueprint_volume_plan": {"volumes": [{"number": 1, "title": "回声来信", "arc": "发现异常", "start_chapter": 1, "end_chapter": 30}]},
+        "blueprint_chapter_outline": {"chapter_outlines": [{"volume": 1, "seq": 1, "title": "第一章 来信", "outline": "主角发现文字成真", "beats": ["停电", "短信", "敲门"]}, {"volume": 1, "seq": 2, "title": "第二章 旁证", "outline": "寻找证据", "beats": ["追查", "受阻", "反转"]}, {"volume": 1, "seq": 3, "title": "第三章 修档馆", "outline": "进入新地点", "beats": ["抵达", "冲突", "钩子"]}]},
+        "blueprint_scene_beat": {"scene_beats": [{"scene": 1, "pov": "林序", "location": "出租屋", "goal": "赶稿", "conflict": "文本成真", "outcome": "意外", "emotional_shift": "烦躁到惊惧"}, {"scene": 2, "pov": "林序", "location": "楼道", "goal": "确认敲门", "conflict": "无人回应", "outcome": "失败", "emotional_shift": "惊惧到好奇"}, {"scene": 3, "pov": "林序", "location": "街口", "goal": "求证", "conflict": "旁证出现", "outcome": "成功", "emotional_shift": "好奇到决心"}]},
+        "write_chapter_draft": {"chapter": {"title": "第一章 来信", "body": ["停电来得突然。", "林序盯着屏幕。", "门外响起敲门声。", "短信弹了出来。"]}},
+        "write_self_review": {"self_score": 82, "strengths": ["钩子清晰"], "weaknesses": ["压力可加强"]},
+        "write_polish": {"polished": {"body": ["停电来得突然。", "林序盯着屏幕。", "门外响起敲门声。", "短信弹了出来。"]}, "changes_summary": "收紧节奏"},
+        "write_length_check": {"actual_chars": 1200, "is_acceptable": True},
+        "write_fact_reconcile": {"reconciliation": {"conflicts_found": 0}},
+        "final_consistency_check": {"checks": {"timeline": {"status": "pass"}}, "overall_status": "pass"},
+        "final_continuity_audit": {"continuity": {"status": "continuous"}},
+        "final_humanize": {"humanized_text": "停电来得突然。林序盯着屏幕，门外响起敲门声。短信弹了出来，像有人贴着他的耳朵说话。他没有立刻开门，只把手按在桌沿，听见自己的心跳一下一下撞在安静里。", "changes": ["收紧句子"]},
+    }
+    return outputs[task_type]
+
+
+def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
     from app.workers import tasks
 
     project_id, novel_id = seeded_novel
+    monkeypatch.setattr(tasks, "complete", lambda **kwargs: _provider_output(kwargs["task_type"]))
+    monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
 
     # celery eager-ish: call the underlying function synchronously
     run_id = None
@@ -152,21 +157,20 @@ def test_journey_a_full_v2_flow_mock_provider(seeded_novel):
 
 
 def test_journey_a_resumes_after_provider_failure(seeded_novel, monkeypatch):
-    """Checkpoint contract: a provider failure marks pending_provider, and a
+    """Checkpoint contract: a provider failure marks failed, and a
     redrive resumes from the failed node instead of restarting or crashing
     (the P0 ledger-poisoning regression fixed on 2026-07-13)."""
     from app import gateway
     from app.workers import tasks
 
     project_id, novel_id = seeded_novel
+    monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
 
     fail_on = {"plan_story_pattern"}
-    real_complete = tasks.complete
-
     def flaky_complete(**kwargs):
         if kwargs.get("task_type") in fail_on:
             raise gateway.ProviderError("simulated provider outage")
-        return real_complete(**kwargs)
+        return _provider_output(kwargs["task_type"])
 
     monkeypatch.setattr(tasks, "complete", flaky_complete)
 
@@ -178,7 +182,7 @@ def test_journey_a_resumes_after_provider_failure(seeded_novel, monkeypatch):
     try:
         run_id = tasks.create_run(project_id, novel_id)
         run, node_status = _run_state(run_id)
-        assert node_status["plan_story_pattern"] == "pending_provider"
+        assert node_status["plan_story_pattern"] == "failed"
         assert node_status["plan_idea"] == "succeeded"
 
         # Provider recovers; redrive from the failed node

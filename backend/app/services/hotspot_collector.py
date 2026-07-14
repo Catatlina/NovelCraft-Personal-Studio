@@ -5,8 +5,12 @@ from datetime import datetime, timedelta
 from app.db import connect, encode, new_id
 
 HOTSPOT_SOURCES = {
-    "zhihu": {"name": "知乎热榜", "url": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=10"},
-    "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch"},
+    "baidu": {"name": "百度热搜", "url": "https://top.baidu.com/board?tab=realtime", "kind": "baidu_html"},
+    "zhihu": {"name": "知乎热榜", "url": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20", "kind": "zhihu_json"},
+    "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch", "kind": "weibo_json"},
+    "xiaohongshu": {"name": "小红书热点", "url_env": "HOTSPOT_XIAOHONGSHU_URL", "kind": "generic_json"},
+    "douyin": {"name": "抖音热点", "url_env": "HOTSPOT_DOUYIN_URL", "kind": "generic_json"},
+    "x": {"name": "X Trends", "url_env": "HOTSPOT_X_URL", "kind": "generic_json"},
 }
 
 DUPLICATE_WINDOW_HOURS = 24
@@ -16,20 +20,22 @@ _BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 
-def _hotspot_opener() -> "urllib.request.OpenerDirector":
+def _hotspot_opener(proxy_override: str = "") -> "urllib.request.OpenerDirector":
     """Route hotspot fetches through HOTSPOT_HTTP_PROXY when set (e.g. an xray HTTP
     inbound at http://127.0.0.1:10809). Scoped to hotspots only — the AI gateway and
     everything else keep their direct route. Overseas hosts (e.g. the Singapore VPS)
     often cannot reach zhihu/weibo directly; this lets that traffic go via a proxy."""
-    proxy = os.getenv("HOTSPOT_HTTP_PROXY", "").strip()
+    proxy = proxy_override.strip() or os.getenv("HOTSPOT_HTTP_PROXY", "").strip()
     if proxy:
         return urllib.request.build_opener(
             urllib.request.ProxyHandler({"http": proxy, "https": proxy})
         )
     return urllib.request.build_opener()
 
-def _source_cookie(source_key: str) -> str:
+def _source_cookie(source_key: str, connection: dict | None = None) -> str:
     """Read per-source cookie from env HOTSPOT_<SOURCE>_COOKIE."""
+    if connection:
+        return str(connection.get("cookie") or connection.get("bearer_token") or "").strip()
     return os.getenv(f"HOTSPOT_{source_key.upper()}_COOKIE", "").strip()
 
 
@@ -37,28 +43,102 @@ def _dedup_key(title: str, source: str) -> str:
     return hashlib.sha256(f"{source}:{title}".encode()).hexdigest()[:32]
 
 
-def fetch_hotspots() -> tuple[list[dict], dict[str, str]]:
+def _connection_for_source(source_key: str, user_id: str = "") -> dict:
+    if not user_id:
+        return {}
+    try:
+        from app.services.publish_hub import get_platform_credentials
+        return get_platform_credentials(user_id, f"hotspot_{source_key}") or {}
+    except Exception:
+        return {}
+
+
+def _configured_url(cfg: dict, connection: dict | None = None) -> str:
+    if connection and str(connection.get("url", "")).strip():
+        return str(connection["url"]).strip()
+    if cfg.get("url"):
+        return str(cfg["url"])
+    env_name = str(cfg.get("url_env", ""))
+    return os.getenv(env_name, "").strip() if env_name else ""
+
+
+def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]:
+    kind = cfg.get("kind", "generic_json")
+    if kind == "baidu_html":
+        import html
+        import re
+        text = payload.decode("utf-8", errors="replace")
+        titles = re.findall(r'"word":"(.*?)"', text) or re.findall(r'class="c-single-text-ellipsis">(.*?)<', text)
+        return [{"title": html.unescape(title), "category": "general", "raw_score": 0, "url": cfg.get("url", "")}
+                for title in titles[:20] if title.strip()]
+
+    data = json.loads(payload)
+    if kind == "zhihu_json":
+        raw = data.get("data", [])
+        return [{
+            "title": item.get("target", {}).get("title", ""),
+            "category": item.get("category", "general"),
+            "raw_score": item.get("detail_text", item.get("raw_hot", 0)),
+            "url": item.get("target", {}).get("url", ""),
+        } for item in raw[:20]]
+    if kind == "weibo_json":
+        raw = data.get("data", data).get("realtime", []) if isinstance(data.get("data", data), dict) else []
+        return [{
+            "title": item.get("word", ""),
+            "category": item.get("category", "general"),
+            "raw_score": item.get("num", item.get("raw_hot", 0)),
+            "url": "https://s.weibo.com/weibo?q=" + urllib.parse.quote(item.get("word", "")),
+        } for item in raw[:20]]
+
+    raw = data.get("data", data.get("items", data.get("trends", [])))
+    if isinstance(raw, dict):
+        raw = raw.get("list", raw.get("items", raw.get("trends", [])))
+    items = raw if isinstance(raw, list) else []
+    parsed = []
+    for item in items[:20]:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or item.get("word") or item.get("name") or item.get("query") or ""
+        parsed.append({
+            "title": str(title),
+            "category": item.get("category", "general"),
+            "raw_score": item.get("score", item.get("hot", item.get("raw_hot", 0))),
+            "url": item.get("url", ""),
+        })
+    return parsed
+
+
+def fetch_hotspots(user_id: str = "") -> tuple[list[dict], dict[str, str]]:
     """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4)."""
     results: list[dict] = []
     source_status: dict[str, str] = {}
-    opener = _hotspot_opener()
     timeout = int(os.getenv("HOTSPOT_FETCH_TIMEOUT", "10"))
     for key, cfg in HOTSPOT_SOURCES.items():
         try:
+            connection = _connection_for_source(key, user_id)
+            try:
+                opener = _hotspot_opener(str(connection.get("proxy", "")))
+            except TypeError as exc:
+                if "positional" not in str(exc) and "argument" not in str(exc):
+                    raise
+                opener = _hotspot_opener()
+            url = _configured_url(cfg, connection)
+            if not url:
+                source_status[key] = f"error: {cfg.get('url_env') or 'visual connection'} is not configured"
+                continue
             headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json", "Referer": "https://www." + key + ".com/"}
-            cookie = _source_cookie(key)
+            cookie = _source_cookie(key, connection)
             if cookie:
-                headers["Cookie"] = cookie
-            req = urllib.request.Request(cfg["url"], headers=headers)
+                if key == "x" and connection.get("bearer_token"):
+                    headers["Authorization"] = f"Bearer {cookie}"
+                else:
+                    headers["Cookie"] = cookie
+            req = urllib.request.Request(url, headers=headers)
             with opener.open(req, timeout=timeout) as resp:
-                data = json.loads(resp.read())
-            raw = data.get("data", data.get("realtime", []))
-            if isinstance(raw, dict):
-                raw = raw.get("realtime", raw.get("list", []))
-            items = (raw if isinstance(raw, list) else [])[:15]
+                parsed_items = _parse_hotspot_payload(key, cfg, resp.read())
             count = 0
-            for item in items:
-                title = item.get("target", {}).get("title", item.get("word", ""))
+            for item in parsed_items:
+                title = item.get("title", "")
                 if not title: continue
                 results.append({
                     "source": key, "title": title.strip(),

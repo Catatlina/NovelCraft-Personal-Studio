@@ -80,6 +80,7 @@ export default function App() {
   const [streamPreview, setStreamPreview] = useState("");
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
+  const [editorAiReview, setEditorAiReview] = useState<any>(null);
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
 
@@ -231,39 +232,47 @@ export default function App() {
   }
 
   async function runEditorOp(op: string) {
-    if (!chapter || !selection.trim()) return;
-    const selectedText = selection;
+    if (!chapter) return;
+    const selectedText = op === "rewrite_chapter" ? editorText : selection;
+    if (!selectedText.trim()) return;
     const mutationId = crypto.randomUUID();
     const url = `/api/v1/contents/${chapter.id}/ai/${op}`;
-    const body = { selection: selectedText, instruction: "保持当前风格", client_mutation_id: mutationId };
+    const body = { selection: selectedText, instruction: op === "rewrite_chapter" ? "整章重写，保留核心剧情，优化小说平台阅读体验" : "保持当前风格", client_mutation_id: mutationId };
     if (!navigator.onLine) {
       await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
       setOfflineNotice("AI 操作已排队，联网后自动执行");
       return;
     }
     try {
-      // 流式优先：增量预览，完成后一次性替换选区
-      setStreamPreview("");
-      const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
-        delta => setStreamPreview(previous => previous + delta));
-      setStreamPreview("");
-      setEditorText(current => current.replace(selectedText, text)); setSelection("");
-      if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
-      return;
+      if (!["polish", "rewrite", "rewrite_chapter", "deai"].includes(op)) {
+        // 流式优先：增量预览，完成后一次性替换选区
+        setStreamPreview("");
+        const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
+          delta => setStreamPreview(previous => previous + delta));
+        setStreamPreview("");
+        setEditorText(current => current.replace(selectedText, text)); setSelection("");
+        if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
+        return;
+      }
     } catch (streamError) {
       setStreamPreview("");
       if (streamError instanceof ApiError && streamError.status === 404) {
         // 旧后端无流式端点 → 走非流式
       } else if (streamError instanceof ApiError && !isOfflineApiError(streamError) && streamError.status !== 502) {
-        throw streamError;
+        setError(streamError.message || "AI 操作失败");
+        return;
       }
     }
     try {
-      const output = await api<{ text: string }>(url, { method: "POST", body: JSON.stringify(body) });
-      setEditorText(current => current.replace(selectedText, output.text)); setSelection("");
+      const output = await api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) });
+      setEditorText(current => op === "rewrite_chapter" ? output.text : current.replace(selectedText, output.text)); setSelection("");
+      setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
       if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
     } catch (caught) {
-      if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
+      if (caught instanceof ApiError && !isOfflineApiError(caught)) {
+        setError(caught.message || "AI 操作失败");
+        return;
+      }
       await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
       setOfflineNotice("网络不可用，AI 操作已进入出站队列");
     }
@@ -441,7 +450,7 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
       {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
-      {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }} /></React.Suspense>}
+      {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} /></React.Suspense>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
         <div className="panel"><h2>Prompt 库</h2>

@@ -174,8 +174,8 @@ def _publish_x(title: str, body: str, token: str = "") -> dict:
 # ===== Multi-round review =====
 # These review/audit/matrix helpers previously fabricated scores from string
 # length ("固定字典冒充 AI 分析", forbidden by docs/23 §4). They now go through
-# the gateway; provider unavailability surfaces as pending_provider, never as
-# an invented score.
+# the gateway; provider unavailability is returned as a failed item, never as an
+# invented score or recoverable fake completion.
 
 def _review_via_gateway(content: str, project_id: str, mutation_id: str) -> dict:
     from app.gateway import complete
@@ -202,8 +202,8 @@ def multi_round_review(content: str, rounds: int = 3, project_id: str = "") -> d
             review = _review_via_gateway(content, project_id, f"multi-review:{digest}:round:{round_no}")
         except (ProviderError, BudgetExceeded) as exc:
             results.append({"round": round_no, "threshold": threshold,
-                            "status": "pending_provider", "error": str(exc)})
-            return {"rounds": results, "final_pass": False, "status": "pending_provider"}
+                            "status": "failed", "error": str(exc)})
+            return {"rounds": results, "final_pass": False, "status": "failed"}
         score = int(review.get("score", 0))
         passed = score >= threshold
         results.append({"round": round_no, "threshold": threshold, "score": score,
@@ -233,14 +233,14 @@ def cross_model_audit(content: str, models: list[str] | None = None, project_id:
             audits.append({"model": model, "score": score, "passed": score >= 70,
                            "issues": review.get("issues", []), "status": "succeeded"})
         except (ProviderError, BudgetExceeded) as exc:
-            audits.append({"model": model, "status": "pending_provider", "error": str(exc)})
+            audits.append({"model": model, "status": "failed", "error": str(exc)})
         finally:
             _request_model.set(previous)
     scored = [a for a in audits if a.get("status") == "succeeded"]
     consensus = sum(a["passed"] for a in scored) / len(scored) if scored else 0.0
     return {"audits": audits, "consensus": consensus,
             "overall_pass": bool(scored) and consensus >= 0.5,
-            "status": "succeeded" if scored else "pending_provider"}
+            "status": "succeeded" if scored else "failed"}
 
 
 # ===== Matrix batch run =====
@@ -271,7 +271,7 @@ def matrix_batch_run(prompt_name: str, variables_list: list[dict], models: list[
                                 "status": "succeeded", "output": output})
             except (ProviderError, BudgetExceeded) as exc:
                 results.append({"batch": index + 1, "model": model, "variables": variables,
-                                "status": "pending_provider", "error": str(exc)})
+                                "status": "failed", "error": str(exc)})
             finally:
                 _request_model.set(previous)
     succeeded = sum(1 for r in results if r["status"] == "succeeded")

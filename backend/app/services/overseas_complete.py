@@ -70,27 +70,17 @@ def translate_text(text: str, source_lang: str = "zh", target_lang: str = "en") 
                 "glossary": glossary if terms else "(无)",
             },
         )
-        translated = result.get("text", result.get("translated", text))
+        translated = result.get("text", result.get("translated", ""))
+        if not translated:
+            raise RuntimeError("AI translation response is empty")
         return {
             "source_lang": source_lang, "target_lang": target_lang,
             "original_length": len(text), "translated_length": len(translated),
             "terminology_applied": len(terms), "text": translated,
-            "method": "ai_gateway" if "text" in result else "fallback_term_only",
+            "method": "ai_gateway",
         }
     except Exception:
-        # Fallback: terminology-only (graceful degradation)
-        result = text
-        applied = []
-        for zh, tl in terms.items():
-            if zh in result:
-                result = result.replace(zh, tl)
-                applied.append(f"{zh}→{tl}")
-        return {
-            "source_lang": source_lang, "target_lang": target_lang,
-            "original_length": len(text), "translated_length": len(result),
-            "terminology_applied": len(applied), "terms_used": applied,
-            "text": result, "method": "fallback_terminology_only",
-        }
+        raise
 
 
 def localize_names(chinese_name: str, target_market: str) -> str:

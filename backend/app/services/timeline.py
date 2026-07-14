@@ -49,13 +49,10 @@ def _content_project_id(content_id: str) -> str:
 
 
 def _call_ai(task_type: str, text: str, instructions: str, project_id: str) -> list[dict]:
-    try:
-        from app.gateway import complete
-        result = complete(
-            run_id=None, node_key=None, project_id=project_id,
-            task_type=task_type, prompt_name=f"narrative.{task_type}",
-            variables={"body": text[:5000], "instructions": instructions},
-        )
-        return result.get("events", result.get("arcs", []))
-    except Exception:
-        return []
+    from app.gateway import complete
+    result = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type=task_type, prompt_name=f"narrative.{task_type}",
+        variables={"body": text[:5000], "instructions": instructions},
+    )
+    return result.get("events", result.get("arcs", []))

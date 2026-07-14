@@ -5,7 +5,7 @@ import { RichEditor } from "./RichEditor";
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -15,6 +15,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   offlineAiResults?: Array<{ id: string; text: string }>;
   applyOfflineAiResult?: (id: string, text: string) => void;
   streamPreview?: string;
+  editorAiReview?: { review?: any; next?: any } | null;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
   const docText = (body: any) => body?.content?.map((item: any) => item?.text || "").join("\n\n") || "";
@@ -64,6 +65,20 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </div>
         ) : null}
         <RichEditor value={editorText} onChange={setEditorText} onSelection={setSelection} onAiOp={op => runEditorOp(op)} />
+        {editorAiReview?.review || editorAiReview?.next ? (
+          <div className="editor-review-panel">
+            {editorAiReview.review && <section>
+              <h2>七维评分</h2>
+              <strong>{editorAiReview.review.score ?? "未评分"}</strong>
+              <p>{(editorAiReview.review.issues || []).join("；") || "暂无具体问题"}</p>
+            </section>}
+            {editorAiReview.next && <section>
+              <h2>下一章规划</h2>
+              <strong>{editorAiReview.next.next_title || "下一章"}</strong>
+              <p>{[...(editorAiReview.next.goals || []), ...(editorAiReview.next.conflicts || []), ...(editorAiReview.next.warnings || [])].join("；")}</p>
+            </section>}
+          </div>
+        ) : null}
       </div>
       <div className="panel versions">
         <h2>版本历史</h2>

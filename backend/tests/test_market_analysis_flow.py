@@ -119,11 +119,21 @@ def test_analysis_output_schema_is_strict_and_complete():
 
     validated = _validate_market_analysis_output(_provider_output())
     assert REQUIRED_OUTPUT_KEYS <= validated.keys()
+    assert validated["topic_candidates"][0]["target_audience"] == "偏好成长与经营反馈的读者"
+    assert validated["topic_candidates"][0]["market_evidence"] == ["top2 同类占比"]
+    assert validated["topic_candidates"][0]["originality_notes"]
 
-    incomplete = _provider_output()
-    incomplete.pop("originality_constraints")
-    with pytest.raises((TypeError, ValueError)):
-        _validate_market_analysis_output(incomplete)
+    legacy_real_shape = _provider_output()
+    legacy_real_shape.pop("pacing")
+    legacy_real_shape.pop("originality_constraints")
+    normalized = _validate_market_analysis_output(legacy_real_shape)
+    assert normalized["pacing"] == {}
+    assert normalized["originality_constraints"]
+
+    duplicate = _provider_output()
+    duplicate["topic_candidates"][0]["title"] = "末日经营指南"
+    with pytest.raises(ValueError, match="duplicates"):
+        _validate_market_analysis_output(duplicate, ["末日经营指南"])
 
 
 def test_analysis_uses_gateway_contract_and_persists_schema(monkeypatch):
@@ -204,7 +214,7 @@ def test_provider_failure_is_explicit_and_never_fabricates_success(monkeypatch):
     detail = exc_info.value.detail
     assert isinstance(detail, dict)
     assert detail["code"] == "MARKET_ANALYSIS_PROVIDER_FAILED"
-    assert detail["status"] == "pending_provider"
+    assert detail["status"] == "failed"
     writes = " ".join(sql for sql, _ in db.statements)
     assert "market_analyses" in writes
     assert "topic_candidates" not in writes

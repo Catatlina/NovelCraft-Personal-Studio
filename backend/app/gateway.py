@@ -306,76 +306,42 @@ def _complete_impl(
     provider_name = model_name = ""
     output: dict[str, Any] = {}
 
-    # Route to provider, retrying schema-contract violations. Real models are
-    # non-deterministic, so a malformed structured payload is retried (FR-C3-07,
-    # ≤2 retries) before it is surfaced as a failure. Mock output is always valid,
-    # so it never loops.
+    # Route to a real provider, retrying schema-contract violations. Real models
+    # are non-deterministic, so a malformed structured payload is retried
+    # (FR-C3-07, <=2 retries) before it is surfaced as a failure.
     MAX_SCHEMA_ATTEMPTS = 3
     for schema_attempt in range(MAX_SCHEMA_ATTEMPTS):
         prompt_tokens, completion_tokens = 0, 0
-        if provider == "mock":
-            environment = os.getenv("NOVELCRAFT_ENV", "development").lower()
-            allow_mock = (os.getenv("NOVELCRAFT_ALLOW_MOCK") or os.getenv("ALLOW_MOCK", "false")).lower() == "true"
-            if environment not in {"test", "testing"} or not allow_mock:
-                raise ProviderError("mock provider requires NOVELCRAFT_ENV=test and NOVELCRAFT_ALLOW_MOCK=true")
-            output = _mock_output(task_type, variables)
-            provider_name = "mock"
-            model_name = "mock"
-        elif provider == "deepseek":
+        if provider == "deepseek":
             if not circuit_breaker("deepseek"):
                 raise ProviderError("deepseek circuit breaker open — too many failures")
             try:
                 model_ = _request_model.get() or model or settings.deepseek_model
                 output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
                 record_success("deepseek")
-                # Dynamic provider name based on model prefix
-                provider_name = "openai" if model_.startswith("gpt") else ("anthropic" if model_.startswith("claude") else "deepseek")
+                provider_name = "deepseek"
                 model_name = model_
             except ProviderError:
                 record_failure("deepseek")
-                # Try fallback chain
-                route = _load_route(task_type)
-                fallbacks = route.get("fallback_json", []) if route else []
-                if isinstance(fallbacks, str):
-                    fallbacks = json.loads(fallbacks)
-                for fb in fallbacks:
-                    try:
-                        output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
-                        break
-                    except Exception:
-                        continue
-                else:
-                    raise ProviderError(f"deepseek failed and all fallbacks exhausted for {task_type}")
+                raise
         elif provider in ("claude", "openai", "gemini"):
             try:
-                output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(
-                    {"provider": provider, "model": model or ""}, task_type, prompt_text, variables, params
+                output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
+                    provider, model or "", prompt_text, params
                 )
-            except Exception:
-                route = _load_route(task_type)
-                fallbacks = route.get("fallback_json", []) if route else []
-                for fb in fallbacks:
-                    try:
-                        output, prompt_tokens, completion_tokens, provider_name, model_name = _try_fallback(fb, task_type, prompt_text, variables, params)
-                        break
-                    except Exception:
-                        continue
-                else:
-                    raise ProviderError(f"provider {provider} failed and all fallbacks exhausted for {task_type}")
+            except Exception as exc:
+                raise ProviderError(f"provider {provider} failed for {task_type}: {exc}") from exc
         else:
-            raise ProviderError(f"unsupported provider: {provider}")
+            raise ProviderError(f"unsupported real provider: {provider}")
 
         try:
             output = validate_task_output(task_type, output)
             break
         except OutputValidationError:
-            # Deterministic providers (mock) can't self-correct; a real model may
-            # succeed on a fresh sample. Exhausted retries re-raise for the caller.
-            if provider_name == "mock" or schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
+            # A real model may succeed on a fresh sample. Exhausted retries
+            # re-raise for the caller.
+            if schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
                 raise
-
-    if provider_name == "mock":
-        output["_meta"] = {"provider": "mock", "synthetic": True}
 
     latency_ms = int((time.perf_counter() - start) * 1000)
     cost_cny = _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens)
@@ -384,7 +350,7 @@ def _complete_impl(
     try:
         # ON CONFLICT lets a successful retry overwrite the failed-attempt ledger
         # row that shares this mutation id, instead of colliding on the unique
-        # index and permanently breaking pending_provider/resume recovery.
+        # index and permanently breaking failed-state retry recovery.
         conn.execute(
             """
             INSERT INTO ai_calls (
@@ -494,24 +460,15 @@ def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id:
             conn.close()
 
 
-def _try_fallback(fb: dict, task_type: str, prompt_text: str, variables: dict, params: dict) -> tuple:
-    """Try a fallback provider. Returns (output, prompt_tokens, completion_tokens, provider_name, model_name)."""
-    fb_provider = fb.get("provider", "deepseek")
-    fb_model = fb.get("model", "deepseek-chat")
-    if fb_provider == "deepseek":
-        output, pt, ct = _deepseek_complete(task_type, prompt_text, fb_model, params)
-    elif fb_provider in ("claude", "openai", "gemini"):
-        from .ai.providers import PROVIDERS
-        fn = PROVIDERS.get(fb_provider)
-        if fn:
-            output, pt, ct = fn(prompt_text, fb_model, params)
-        else:
-            raise ProviderError(f"unknown provider: {fb_provider}")
-    else:
-        output = _mock_output(task_type, variables)
-        pt = max(80, len(prompt_text) // 3)
-        ct = max(120, len(encode(output)) // 3)
-    return output, pt, ct, fb_provider, fb_model
+def _call_real_provider(provider: str, model: str, prompt_text: str, params: dict) -> tuple:
+    """Call one configured real provider. No mock or fallback generation."""
+    from .ai.providers import PROVIDERS
+
+    fn = PROVIDERS.get(provider)
+    if not fn:
+        raise ProviderError(f"unknown provider: {provider}")
+    output, pt, ct = fn(prompt_text, model, params)
+    return output, pt, ct, provider, model
 
 
 def _load_route(task_type: str) -> dict | None:
@@ -589,7 +546,6 @@ def _calculate_cost(provider: str, model: str, prompt_tokens: int, completion_to
         "anthropic": {"input": 21.0, "output": 105.0},
         "claude": {"input": 21.0, "output": 105.0},
         "gemini": {"input": 0.75, "output": 3.0},
-        "mock": {"input": 0.0, "output": 0.0},
     }
     try:
         overrides = json.loads(os.getenv("AI_PRICE_CNY_PER_MILLION", "{}"))
@@ -736,19 +692,7 @@ def _complete_stream_impl(
 
     chunks: list[str] = []
     usage: dict[str, int] = {}
-    if provider == "mock":
-        environment = os.getenv("NOVELCRAFT_ENV", "development").lower()
-        allow_mock = (os.getenv("NOVELCRAFT_ALLOW_MOCK") or os.getenv("ALLOW_MOCK", "false")).lower() == "true"
-        if environment not in {"test", "testing"} or not allow_mock:
-            raise ProviderError("mock provider requires NOVELCRAFT_ENV=test and NOVELCRAFT_ALLOW_MOCK=true")
-        mock_text = str(_mock_output(task_type, variables).get("text", ""))
-        midpoint = max(1, len(mock_text) // 2)
-        for piece in (mock_text[:midpoint], mock_text[midpoint:]):
-            if piece:
-                chunks.append(piece)
-                yield piece
-        provider_name = model_name = "mock"
-    elif provider == "deepseek":
+    if provider == "deepseek":
         if not circuit_breaker("deepseek"):
             raise ProviderError("deepseek circuit breaker open — too many failures")
         model_name = _request_model.get() or model or settings.deepseek_model
@@ -764,7 +708,7 @@ def _complete_stream_impl(
     else:
         # Other providers use different auth/protocol implementations in the
         # non-streaming gateway. Until matching stream adapters exist, fail
-        # explicitly so the client can safely fall back to complete().
+        # explicitly.
         raise ProviderError(f"streaming is not supported for provider: {provider}")
 
     full_text = "".join(chunks)
@@ -818,214 +762,3 @@ def complete_stream(
             client_mutation_id=client_mutation_id, started=started, error=exc,
         )
         raise
-
-
-def _mock_output(task_type: str, variables: dict[str, Any]) -> dict[str, Any]:
-    idea = variables.get("idea", "一个人在迷雾中寻找真相")
-    genre = variables.get("genre", "幻想")
-    style = variables.get("style", "克制、悬疑")
-    title = variables.get("selected_title") or variables.get("title") or "雾灯纪元"
-
-    if task_type == "gen_titles":
-        return {
-            "title_candidates": [
-                f"《{_keyword(idea)}之门》",
-                "《雾灯纪元》",
-                "《第七封回信》",
-            ]
-        }
-    if task_type == "gen_synopsis":
-        return {
-            "synopsis": f"{title}讲述一位普通创作者被卷入{genre}谜局后，必须用记忆、文字和选择重写命运的故事。",
-            "selling_points": ["强钩子开局", "主角成长清晰", "世界观可持续扩展", "适合长篇连载"],
-        }
-    if task_type == "gen_worldview":
-        return {
-            "worldview": {
-                "name": "回声城邦",
-                "rules": [
-                    "重要记忆会凝结成可交易的墨晶",
-                    "每一次改写历史都会留下不可擦除的旁证",
-                    "夜航者负责修补城市中的叙事裂缝",
-                ],
-            }
-        }
-    if task_type == "gen_characters":
-        return {
-            "characters": [
-                {"name": "林序", "role": "主角", "arc": "从逃避表达走向主动书写"},
-                {"name": "沈微澜", "role": "盟友", "arc": "在秩序与真相之间重新选择"},
-                {"name": "闻烬", "role": "对手", "arc": "相信牺牲少数即可拯救多数"},
-            ]
-        }
-    if task_type == "gen_outline":
-        return {
-            "outline": [
-                "第一卷：主角发现自己的小说正在现实中逐字发生。",
-                "第二卷：团队进入回声城邦，寻找第一枚墨晶。",
-                "第三卷：真相揭开，主角必须决定是否保留被改写的人生。",
-            ]
-        }
-    if task_type == "gen_chapter1":
-        paragraphs = [
-            f"{title}的第一章开始于一场不合时宜的停电。林序盯着屏幕上最后一行字，发现它并不是自己刚刚写下的。",
-            "窗外的雨声像无数细小的指节敲在玻璃上。楼下便利店的灯牌忽明忽暗，而他文档里的城市名，正好也叫回声城邦。",
-            "手机弹出一条陌生短信：不要删掉下一段。林序笑了一下，以为是谁的恶作剧。直到门外响起三下敲门声，节奏和他草稿里的描写完全一致。",
-            "他打开门，门外没有人，只有一枚黑色墨晶躺在脚垫中央。墨晶内部像困着一盏灯，照亮了他从未告诉过任何人的一句话：如果故事能救人，我愿意先被故事审判。",
-        ]
-        return {"chapter": {"title": "第一章 墨晶来信", "body": paragraphs}}
-    if task_type == "gen_next_chapter":
-        paragraphs = [
-            "夜色沉下来的时候，林序把墨晶放进外套内袋，沿着环河路往修档馆走。",
-            "沈微澜在馆门口等他，手里捏着一页被雨水泡皱的档案，纸角的编号正在缓慢褪色。",
-            "两人对视一眼，都没有说话。城市在他们身后轻轻震了一下，像一本被人翻动的书。",
-        ]
-        return {"chapter": {"title": "下一章 修档馆的震动", "body": paragraphs}}
-    if task_type == "review_7dim":
-        return {
-            "score": 84,
-            "dimensions": {
-                "prose": 88, "plot": 82, "character_ooc": 80,
-                "world_conflict": 86, "logic_consistency": 84,
-                "pace": 80, "foreshadowing": 78,
-            },
-            "issues": [
-                "第一章悬念成立，可在结尾补更明确的行动目标。",
-                "主角职业和日常压力可以再落地一些。",
-            ],
-        }
-    if task_type == "review_ooc":
-        return {"ooc_count": 0, "violations": []}
-    if task_type == "review_consistency":
-        return {"contradictions": []}
-    if task_type == "review_rhythm":
-        return {"pacing_score": 82, "sections": []}
-    if task_type.startswith("editor_"):
-        selection = variables.get("selection", "")
-        instruction = variables.get("instruction", "")
-        if task_type == "editor_continue":
-            text = selection + "\n\n他把墨晶握在掌心，忽然听见城市深处传来潮水般的翻页声。"
-        elif task_type == "editor_rewrite":
-            text = f"改写版：{selection.strip()}（更强调冲突与画面，{instruction or '保持原意'}。）"
-        elif task_type == "editor_expand":
-            text = f"{selection.strip()}\n\n（扩写）周围的一切都在诉说着不为人知的秘密。空气里弥漫着墨晶的微光，每一次呼吸都像在吸入远古的记忆。他感到自己的心跳与城市的脉搏渐渐同步。"
-        elif task_type == "editor_condense":
-            sentences = selection.strip().split("。")
-            text = "。".join(sentences[:max(1, len(sentences)//2)]) + "。"
-        elif task_type == "editor_deai":
-            text = selection.strip().replace("值得注意的是", "").replace("综上所述", "").replace("首先", "").replace("其次", "").replace("最后", "")
-        else:
-            text = f"润色版：{selection.strip()}（语言更顺，节奏更稳。）"
-        return {"text": text}
-    # ── V2 four-stage bootstrap mocks (schema-conformant so the mock T2
-    # pipeline exercises the same validation the real provider faces) ──
-    if task_type == "plan_idea":
-        return {
-            "idea_expanded": f"基于灵感「{idea}」展开：一位普通创作者发现自己写下的{genre}故事正在现实中逐字发生，"
-                             "他必须在故事完结前找出幕后执笔者，否则自己的人生将被彻底改写。",
-            "core_hook": "你写的每一个字都在杀人，而你停不下笔。",
-            "target_audience": "18-35 岁悬疑/脑洞向读者",
-            "title_candidates": ["《墨晶来信》", "《回声城邦》", "《第七封回信》", "《执笔者》", "《雾灯纪元》"],
-        }
-    if task_type == "plan_market_fit":
-        return {"market_score": 78.0,
-                "competitive_landscape": "同类元叙事悬疑作品头部集中在无限流框架，普遍弱化现实锚点。",
-                "market_gap": "现实系元叙事+创作者身份代入，现有作品未覆盖。"}
-    if task_type == "plan_story_pattern":
-        return {"story_model": "悬疑解谜+成长",
-                "act_structure": ["第一幕：发现故事成真", "第二幕：追查执笔者", "第三幕：自我审判与改写"],
-                "turning_points": [{"point": "墨晶第一次出现", "chapter_hint": "第1章"},
-                                    {"point": "盟友身份反转", "chapter_hint": "第15章"}],
-                "emotional_arc": "好奇→惊惧→掌控→释然"}
-    if task_type == "plan_core_gameplay":
-        return {"power_system": "墨晶记忆体系：重要记忆凝结为墨晶，可读取、交易、改写",
-                "progression_path": "读者→执笔者→修档人→叙事仲裁者，四级",
-                "pleasure_points": ["信息差反杀", "伏笔跨章回收", "以文字改写现实的代价抉择"],
-                "power_ceiling": "每次改写都留下不可擦除的旁证，滥用即暴露"}
-    if task_type == "plan_world_architecture":
-        return {"worldview": {"name": "回声城邦",
-                               "rules": ["重要记忆凝结成可交易的墨晶", "改写历史留下不可擦除的旁证",
-                                          "夜航者修补叙事裂缝", "城邦每夜按已出版文本自我校对"],
-                               "forces": ["修档馆：维护正史", "执笔会：垄断改写权"],
-                               "geography": "环河七区，修档馆居中",
-                               "history": "百年前的大改写抹去了城邦第一任执笔者"}}
-    if task_type == "plan_character_system":
-        return {"characters": [
-            {"name": "林序", "role": "主角", "arc": "从逃避表达走向主动书写", "motivation": "夺回人生的著作权",
-             "flaw": "习惯性自我怀疑", "relationships": [{"with": "沈微澜", "type": "互信盟友"}]},
-            {"name": "沈微澜", "role": "盟友", "arc": "在秩序与真相间重新选择", "motivation": "修正家族档案",
-             "flaw": "过度守序", "relationships": [{"with": "闻烬", "type": "旧识决裂"}]},
-            {"name": "闻烬", "role": "反派", "arc": "相信牺牲少数即可拯救多数", "motivation": "阻止第二次大改写",
-             "flaw": "目的正义化手段", "relationships": [{"with": "林序", "type": "镜像对照"}]},
-        ]}
-    if task_type == "plan_conflict_map":
-        return {"conflicts": [
-            {"type": "external", "between": ["林序", "执笔会"], "stakes": "人生著作权",
-             "escalation": "从躲避追踪到正面夺权"},
-            {"type": "internal", "between": ["林序", "林序"], "stakes": "表达的勇气",
-             "escalation": "每次改写都在考验他是否敢署名"},
-        ]}
-    if task_type == "blueprint_volume_plan":
-        return {"volumes": [{"number": 1, "title": "墨晶来信", "arc": "发现与卷入",
-                              "start_chapter": 1, "end_chapter": 50,
-                              "climax": "修档馆之夜", "hook": "第一枚墨晶里是主角自己的记忆"}],
-                "chapter_tree": [{"volume": 1, "start_chapter": 1, "end_chapter": 50}]}
-    if task_type == "blueprint_chapter_outline":
-        return {"chapter_outlines": [
-            {"volume": 1, "seq": i, "title": f"第{i}章", "outline": f"第{i}章：目标受阻后的转折与代价。",
-             "beats": ["建立目标", "遭遇阻碍", "付出代价", "转折钩子"],
-             "foreshadow_plant": ["墨晶微光" if i == 1 else ""], "foreshadow_reap": []}
-            for i in range(1, 11)
-        ]}
-    if task_type == "blueprint_scene_beat":
-        return {"scene_beats": [
-            {"scene": 1, "pov": "林序", "location": "出租屋", "goal": "赶稿", "conflict": "文档自行改写",
-             "outcome": "意外", "emotional_shift": "烦躁→惊惧"},
-            {"scene": 2, "pov": "林序", "location": "楼道", "goal": "查敲门声", "conflict": "无人却有墨晶",
-             "outcome": "失败", "emotional_shift": "惊惧→好奇"},
-            {"scene": 3, "pov": "林序", "location": "便利店", "goal": "求证现实", "conflict": "店员说出他草稿台词",
-             "outcome": "成功", "emotional_shift": "好奇→下定决心"},
-        ]}
-    if task_type == "write_chapter_draft":
-        return {"chapter": {"title": "第一章 墨晶来信", "body": [
-            f"{title}的第一章开始于一场不合时宜的停电。林序盯着屏幕上最后一行字，发现它并不是自己刚刚写下的。",
-            "窗外的雨声像无数细小的指节敲在玻璃上。楼下便利店的灯牌忽明忽暗，而他文档里的城市名，正好也叫回声城邦。",
-            "手机弹出一条陌生短信：不要删掉下一段。林序以为是谁的恶作剧，直到门外响起三下敲门声，节奏和他草稿里的描写完全一致。",
-            "他打开门，门外没有人，只有一枚黑色墨晶躺在脚垫中央。",
-            "墨晶内部像困着一盏灯，照亮了他从未告诉过任何人的一句话：如果故事能救人，我愿意先被故事审判。",
-            "林序握紧墨晶，转身回屋。屏幕上，光标正停在一行新出现的字后面——「现在，轮到你写了。」",
-        ]}}
-    if task_type == "write_self_review":
-        return {"overall": "开篇钩子成立，节奏可控", "strengths": ["悬念递进清晰", "现实锚点扎实"],
-                "weaknesses": ["主角职业压力可再落地"], "suggestions": ["结尾补一个明确的行动目标"],
-                "self_score": 84.0}
-    if task_type == "write_polish":
-        return {"polished": {"title": "第一章 墨晶来信", "body": [
-            "停电来得不合时宜。林序盯着屏幕上最后一行字——那不是他写的。",
-            "雨点敲着玻璃，楼下便利店的灯牌忽明忽暗。他文档里的城市，也叫回声城邦。",
-            "陌生短信弹出来：不要删掉下一段。门外接着响起三下敲门声，和他草稿里写的一模一样。",
-            "门外没有人。只有一枚黑色墨晶，躺在脚垫中央。",
-            "墨晶里像困着一盏灯，照亮他从未说出口的那句话：如果故事能救人，我愿意先被故事审判。",
-            "他握紧墨晶回屋。光标停在一行新字后面——「现在，轮到你写了。」",
-        ]}, "changes_summary": "打散雷同句式，收紧开篇三段，强化结尾钩子。"}
-    if task_type == "write_length_check":
-        return {"actual_chars": 3200, "is_acceptable": True, "advice": "无需调整"}
-    if task_type == "write_fact_reconcile":
-        return {"reconciliation": {"conflicts_found": 0, "issues": [], "passed": True}}
-    if task_type == "final_consistency_check":
-        return {"checks": {dim: {"status": "pass", "issues": []} for dim in
-                            ("characters", "locations", "timeline", "objects", "settings", "foreshadowing")},
-                "overall_status": "pass", "warning_count": 0}
-    if task_type == "final_continuity_audit":
-        return {"continuity": {"status": "continuous", "gaps": [], "narrative_flow": "场景因果链完整，情绪曲线连续"}}
-    if task_type == "final_humanize":
-        return {"humanized_text": "停电来得不合时宜。林序盯着屏幕上最后一行字——那不是他写的。"
-                                   "雨点敲着玻璃，楼下便利店的灯牌忽明忽暗。他文档里的城市，也叫回声城邦。"
-                                   "门外没有人，只有一枚黑色墨晶躺在脚垫中央。他握紧墨晶回屋，光标停在一行新字后面——「现在，轮到你写了。」",
-                "changes": ["删去两处总结式收尾", "长短句交替"], "ai_patterns_removed": ["章末总结体"]}
-    return {"text": f"{style}：围绕“{idea}”生成的内容。"}
-
-
-def _keyword(text: str) -> str:
-    cleaned = "".join(ch for ch in text if ch.isalnum())
-    return (cleaned[:4] or "星河")

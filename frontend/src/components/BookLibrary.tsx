@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { Search, Filter, ArrowUpDown } from "lucide-react";
+import { Search, BookOpen, ArrowLeft } from "lucide-react";
 
-type Book = { id: string; title: string; status: string; meta: Record<string, any>; updated_at: string };
+type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
+type BookDetail = { book: Book; synopsis: string; genre: string; outline: unknown; latest_chapter?: any; chapters: any[]; total_words: number };
 type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string; blocker_code?: string; cancel_requested?: boolean; updated_at?: string };
 type Completion = { total_chapters: number; reviewed_chapters: number; total_words: number; average_review_score: number; generation_percent?: number | null; review_percent?: number; continuity_flagged?: number; continuity_unchecked?: number; needs_rewrite_chapters?: number; quality_warnings?: string[]; ready_for_release?: boolean; exportable: boolean };
 type ImportPreview = { seq: string; title: string; raw: string };
@@ -18,10 +19,11 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [completions, setCompletions] = useState<Record<string, Completion>>({});
   const [importBookId, setImportBookId] = useState("");
   const [directoryText, setDirectoryText] = useState("");
+  const [detail, setDetail] = useState<BookDetail | null>(null);
   // NC-LIB-002: search, filter, sort, pagination
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [sortBy, setSortBy] = useState<"title" | "updated" | "chapters">("updated");
+  const [sortBy, setSortBy] = useState<"created" | "title" | "chapters">("created");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 10;
   const pollers = useRef<Record<string, number>>({});
@@ -43,9 +45,21 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     }
   };
 
+  const openDetail = async (book: Book) => {
+    setBusy(book.id); setNotice("");
+    try {
+      const result = await api<Wrapped<BookDetail>>(`/api/v1/library/books/${book.id}`);
+      setDetail(result.data);
+    } catch (caught) {
+      setNotice(`详情加载失败：${String(caught)}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
   useEffect(() => {
     setBooks([]); setError("");
-    api<Wrapped<Book[]>>(`/api/v1/ranking/library/books?project_id=${projectId}`).then(result => {
+    api<Wrapped<Book[]>>(`/api/v1/library/books?project_id=${projectId}`).then(result => {
       setBooks(result.data); setError(""); result.data.forEach(book => void loadBookState(book));
     }).catch(caught => setError(String(caught)));
     return () => { Object.values(pollers.current).forEach(id => window.clearInterval(id)); pollers.current = {}; };
@@ -57,7 +71,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       try {
         const result = await api<Wrapped<Batch>>(`/api/v1/generation-batches/${batchId}`);
         setBatches(prev => ({ ...prev, [bookId]: result.data }));
-        if (["succeeded", "failed", "cancelled", "pending_provider"].includes(result.data.status)) {
+        if (["succeeded", "failed", "cancelled"].includes(result.data.status)) {
           window.clearInterval(pollers.current[batchId]); delete pollers.current[batchId];
           const book = books.find(item => item.id === bookId);
           if (book) void loadBookState(book);
@@ -148,11 +162,49 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     return true;
   }).sort((a, b) => {
     if (sortBy === "title") return a.title.localeCompare(b.title);
-    if (sortBy === "chapters") return (completions[b.id]?.total_chapters || 0) - (completions[a.id]?.total_chapters || 0);
-    return new Date(b.updated_at || "").getTime() - new Date(a.updated_at || "").getTime();
+    if (sortBy === "chapters") return (b.chapter_count || completions[b.id]?.total_chapters || 0) - (a.chapter_count || completions[a.id]?.total_chapters || 0);
+    return new Date(b.created_at || "").getTime() - new Date(a.created_at || "").getTime();
   });
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+
+  if (detail) {
+    const book = detail.book;
+    const outline = typeof detail.outline === "string" ? detail.outline : JSON.stringify(detail.outline || book.meta?.outline || "", null, 2);
+    return <section className="panel book-detail">
+      <button onClick={() => setDetail(null)}><ArrowLeft size={14} />返回书库</button>
+      <div className="book-detail-head">
+        <div>
+          <h2>{book.title}</h2>
+          <p className="muted">{detail.genre} · 创建于 {new Date(book.created_at).toLocaleString()} · {detail.total_words || 0} 字</p>
+        </div>
+        <button className="primary" onClick={() => void onOpen(book.id)}><BookOpen size={14} />进入编辑</button>
+      </div>
+      <div className="book-detail-grid">
+        <section>
+          <h3>简介</h3>
+          <p>{detail.synopsis || "暂无简介"}</p>
+        </section>
+        <section>
+          <h3>最新章节</h3>
+          <p>{detail.latest_chapter?.title || "暂无章节"}</p>
+        </section>
+      </div>
+      <section>
+        <h3>大纲</h3>
+        <pre className="outline-block">{outline || "暂无大纲"}</pre>
+      </section>
+      <section>
+        <h3>全部章节</h3>
+        <div className="chapter-list">
+          {detail.chapters.map(ch => <button key={ch.id} onClick={() => void onOpen(book.id)}>
+            第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}<small>{ch.status}</small>
+          </button>)}
+          {!detail.chapters.length && <p className="muted">暂无章节。</p>}
+        </div>
+      </section>
+    </section>;
+  }
 
   return <section className="panel"><h2>统一书库</h2>{error && <div className="error">{error}</div>}
     {notice && <div className="muted">{notice}</div>}
@@ -169,38 +221,41 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <option value="completed">completed</option>
       </select>
       <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
-        <option value="updated">最近更新</option>
+        <option value="created">最新创建</option>
         <option value="title">按书名</option>
         <option value="chapters">按章节数</option>
       </select>
     </div>
     <label className="muted">批量章节数 <input type="number" min={1} max={50} value={batchCount}
       onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} style={{ width: "4em" }} /></label>
-    <div className="grid-cards">{paged.map(book => {
+    <div className="book-table">{paged.map((book, index) => {
       const batch = batches[book.id];
       const completion = completions[book.id];
-      return <article className="feature-card" key={book.id}>
-        <strong>{book.title}</strong><small>{book.status} · {book.meta?.source_type || "inspiration"}</small>
-        <p>{book.meta?.idea || "暂无简介"}</p>
+      const rank = page * PAGE_SIZE + index + 1;
+      return <article className="book-row" key={book.id}>
+        <strong>{rank}. {book.title}</strong>
+        <p>{book.synopsis || book.meta?.idea || "暂无简介"}</p>
+        <small>{book.genre || book.meta?.genre || "未分类"} · 创建 {new Date(book.created_at).toLocaleString()} · 最新章节 {book.latest_chapter_title || "暂无"} · {book.total_words ?? completion?.total_words ?? 0} 字</small>
         {completion ? <div style={{ display: "grid", gap: 4 }}>
-          <small>章节 {completion.total_chapters} · 已审核 {completion.reviewed_chapters} · {completion.total_words} 字</small>
+          <small>章节 {book.chapter_count ?? completion.total_chapters} · 已审核 {completion.reviewed_chapters}</small>
           <small>生成进度 {completion.generation_percent ?? "目标未设置"}{completion.generation_percent !== null && completion.generation_percent !== undefined ? "%" : ""} · 审核覆盖 {completion.review_percent ?? 0}% · 平均审核分 {completion.average_review_score || "暂无"}</small>
           {(completion.quality_warnings || []).length > 0 && <div className="danger-text"><strong>质量警告：</strong>{completion.quality_warnings?.join("；")}</div>}
           {!completion.ready_for_release && completion.total_chapters > 0 && <small>当前仅表示章节已生成，不代表质量验收或整书完成。</small>}
         </div> : <small className="muted">正在加载章节完成度与质量状态…</small>}
-        {batch && <div className={batch.status === "failed" || batch.status === "pending_provider" ? "danger-text" : "muted"}>
+        {batch && <div className={batch.status === "failed" ? "danger-text" : "muted"}>
           批次 {batch.status}：{batch.completed_count}/{batch.requested_count}
           {batch.cancel_requested ? " · 已请求取消" : ""}{batch.blocker_code ? ` · ${batch.blocker_code}` : ""}
           {batch.error ? ` — ${batch.error}` : ""}
           {batch.status === "succeeded" && <div><small>生成批次已结束，请继续核对审核覆盖和连续性风险。</small></div>}
         </div>}
         <div className="row-actions">
-          <button onClick={() => void onOpen(book.id)}>打开小说</button>
+          <button onClick={() => void openDetail(book)}>查看详情</button>
+          <button onClick={() => void onOpen(book.id)}>进入编辑</button>
           <button disabled={busy === book.id} onClick={() => void continueOne(book)}>续写一章</button>
           <button disabled={busy === book.id} onClick={() => void startBatch(book)}>批量生成</button>
           {batch && ["pending", "running"].includes(batch.status) &&
             <button disabled={busy === book.id} onClick={() => void cancelBatch(book, batch)}>取消批次</button>}
-          {batch && ["failed", "pending_provider"].includes(batch.status) &&
+          {batch && batch.status === "failed" &&
             <button disabled={busy === book.id} onClick={() => void resumeBatch(book, batch)}>恢复批次</button>}
           <button disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入章节目录</button>
           <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>

@@ -71,12 +71,11 @@ def test_invalid_or_empty_bootstrap_output_is_not_persisted_or_succeeded(
     assert not any(params and params[0] == "succeeded" for sql, params in db.statements if sql.startswith("UPDATE"))
 
 
-def test_development_mock_route_requires_explicit_test_opt_in(monkeypatch):
+def test_mock_route_is_rejected(monkeypatch):
     from app import gateway
     from app.gateway import ProviderError
 
     monkeypatch.setenv("NOVELCRAFT_ENV", "development")
-    monkeypatch.delenv("ALLOW_MOCK", raising=False)
     class Db:
         def execute(self, _sql, _params=()):
             return _Cursor()
@@ -100,8 +99,9 @@ def test_development_mock_route_requires_explicit_test_opt_in(monkeypatch):
         )
 
 
-def test_test_environment_with_allow_mock_marks_output_as_mock(monkeypatch):
+def test_test_environment_still_rejects_mock_provider(monkeypatch):
     from app import gateway
+    from app.gateway import ProviderError
 
     class Db:
         def __init__(self):
@@ -119,22 +119,16 @@ def test_test_environment_with_allow_mock_marks_output_as_mock(monkeypatch):
 
     db = Db()
     monkeypatch.setenv("NOVELCRAFT_ENV", "test")
-    monkeypatch.setenv("ALLOW_MOCK", "true")
     monkeypatch.setattr(gateway, "connect", lambda: db)
     monkeypatch.setattr(gateway, "_load_prompt_and_route", lambda *_args: ("prompt", "mock", "mock", {}))
     monkeypatch.setattr(gateway, "_assert_budget", lambda *_args: None)
 
-    output = gateway.complete(
-        run_id="run-1", node_key="n3", project_id="project-1",
-        task_type="gen_synopsis", prompt_name="bootstrap.gen_synopsis", variables={},
-        client_mutation_id="bootstrap:run-1:n3",
-    )
-
-    assert output["_meta"]["provider"] == "mock"
-    assert output["_meta"]["synthetic"] is True
-    ai_call = next(params for sql, params in db.statements if sql.startswith("INSERT INTO ai_calls"))
-    assert ai_call[3] == "mock"
-    assert ai_call[14] == "bootstrap:run-1:n3"
+    with pytest.raises(ProviderError, match="unsupported real provider: mock"):
+        gateway.complete(
+            run_id="run-1", node_key="n3", project_id="project-1",
+            task_type="gen_synopsis", prompt_name="bootstrap.gen_synopsis", variables={},
+            client_mutation_id="bootstrap:run-1:n3",
+        )
 
 
 def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):

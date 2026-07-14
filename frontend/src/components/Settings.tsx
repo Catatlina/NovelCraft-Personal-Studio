@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X } from "lucide-react";
+import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap } from "lucide-react";
 import { api } from "../lib/api";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
@@ -7,6 +7,9 @@ type ModelRoute = { id: string; task_type: string; provider: string; model: stri
 type Budget = { id: string; project_id: string; scope: string; limit_cny: number; spent_cny: number };
 type Prompt = { id: string; name: string; version: string; model: string; template: string };
 type AppSetting = { key: string; value: string; description: string; updated_at: string };
+type ConnectionField = { key: string; label: string; type: string; required?: boolean };
+type ConnectionSpec = { category: string; display_name: string; help?: string; fields: ConnectionField[] };
+type ConnectionItem = { id: string; platform: string; account_name: string; display_name: string; category: string; configured_fields: string[]; missing_required: string[]; updated_at: string };
 
 export function Settings({ projectId = "" }: { projectId?: string }) {
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -14,7 +17,13 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [settings, setAppSettings] = useState<AppSetting[]>([]);
-  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"data"|"account">("appsettings");
+  const [connectionSpecs, setConnectionSpecs] = useState<Record<string, ConnectionSpec>>({});
+  const [connections, setConnections] = useState<ConnectionItem[]>([]);
+  const [connectionCategory, setConnectionCategory] = useState("hotspot");
+  const [connectionPlatform, setConnectionPlatform] = useState("");
+  const [connectionAccount, setConnectionAccount] = useState("default");
+  const [connectionCreds, setConnectionCreds] = useState<Record<string,string>>({});
+  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"connections"|"data"|"account">("appsettings");
   const [pwOld, setPwOld] = useState("");
   const [pwNew, setPwNew] = useState("");
   const [pwMsg, setPwMsg] = useState("");
@@ -42,8 +51,47 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
     api("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
     api("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
     api("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
+    loadConnections();
     api("/api/v1/stats/overview").then(d=>setStats(d.data||null)).catch(()=>setStats(null));
   }, []);
+
+  async function loadConnections() {
+    const specs = await api("/api/v1/platform-connections/specs");
+    const specData = specs.data || {};
+    setConnectionSpecs(specData);
+    if (!connectionPlatform) {
+      const first = Object.entries(specData).find(([, spec]: any) => spec.category === connectionCategory)?.[0] || Object.keys(specData)[0] || "";
+      setConnectionPlatform(first);
+    }
+    const rows = await api("/api/v1/platform-connections");
+    setConnections(rows.data || []);
+  }
+
+  const platformsForCategory = Object.entries(connectionSpecs)
+    .filter(([, spec]) => spec.category === connectionCategory);
+  const activeSpec = connectionSpecs[connectionPlatform];
+
+  async function saveConnection() {
+    if (!connectionPlatform) return;
+    await api("/api/v1/platform-connections", {
+      method: "POST",
+      body: JSON.stringify({ platform: connectionPlatform, account_name: connectionAccount || "default", credentials: connectionCreds }),
+    });
+    setMsg("平台连接已保存（敏感字段已加密，不会回显）");
+    setConnectionCreds({});
+    await loadConnections();
+  }
+
+  async function deleteConnection(id: string) {
+    await api(`/api/v1/platform-connections/${id}`, { method: "DELETE" });
+    setMsg("平台连接已删除");
+    await loadConnections();
+  }
+
+  async function testConnection(platform: string) {
+    const result = await api(`/api/v1/platform-connections/${platform}/test`, { method: "POST" });
+    setMsg(`检测结果：${result.data?.status || "unknown"}`);
+  }
 
   async function saveRoute() {
     if (!editRoute) return;
@@ -91,6 +139,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         <button className={subtab==="providers"?"active":""} onClick={()=>setSubtab("providers")} style={{justifyContent:"flex-start"}}><Key size={16}/> Providers</button>
         <button className={subtab==="routes"?"active":""} onClick={()=>setSubtab("routes")} style={{justifyContent:"flex-start"}}><Cpu size={16}/> 模型路由</button>
         <button className={subtab==="budgets"?"active":""} onClick={()=>setSubtab("budgets")} style={{justifyContent:"flex-start"}}><DollarSign size={16}/> 预算</button>
+        <button className={subtab==="connections"?"active":""} onClick={()=>setSubtab("connections")} style={{justifyContent:"flex-start"}}><PlugZap size={16}/> 平台连接</button>
         <button className={subtab==="prompts"?"active":""} onClick={()=>setSubtab("prompts")} style={{justifyContent:"flex-start"}}><Code2 size={16}/> Prompts</button>
         <button className={subtab==="data"?"active":""} onClick={()=>setSubtab("data")} style={{justifyContent:"flex-start"}}><Save size={16}/> 数据</button>
         <button className={subtab==="account"?"active":""} onClick={()=>setSubtab("account")} style={{justifyContent:"flex-start"}}><Key size={16}/> 账号</button>
@@ -170,7 +219,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               <div className="panel" style={{marginTop:12}}>
                 <h3>编辑: {editRoute.task_type}</h3>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <label>Provider <select value={editRoute.provider} onChange={e=>setEditRoute({...editRoute,provider:e.target.value})}>{["deepseek","claude","openai","gemini","mock"].map(p=><option key={p}>{p}</option>)}</select></label>
+                  <label>Provider <select value={editRoute.provider} onChange={e=>setEditRoute({...editRoute,provider:e.target.value})}>{["deepseek","claude","openai","gemini"].map(p=><option key={p}>{p}</option>)}</select></label>
                   <label>模型 <input value={editRoute.model} onChange={e=>setEditRoute({...editRoute,model:e.target.value})} /></label>
                   <div style={{display:"flex",gap:8}}><button className="primary" onClick={saveRoute}><Save size={14}/>保存</button><button onClick={()=>setEditRoute(null)}>取消</button></div>
                 </div>
@@ -192,6 +241,61 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {subtab==="connections" && (
+          <div style={{display:"grid",gap:16}}>
+            <div>
+              <h3>平台连接配置</h3>
+              <p className="muted">所有需要真实平台账号、API、Cookie、热点源 URL 或人工填写的地方都在这里配置。敏感字段加密入库，列表只显示“已配置/缺失”，不回显明文。</p>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                {["hotspot","publish","ops"].map(cat => <button key={cat} className={connectionCategory===cat?"active":""} onClick={() => {
+                  setConnectionCategory(cat);
+                  const first = Object.entries(connectionSpecs).find(([, spec]) => spec.category === cat)?.[0] || "";
+                  setConnectionPlatform(first); setConnectionCreds({});
+                }}>{cat === "hotspot" ? "热点源" : cat === "publish" ? "发布平台" : "运维告警"}</button>)}
+              </div>
+              <div className="panel" style={{display:"grid",gap:10}}>
+                <label>平台
+                  <select value={connectionPlatform} onChange={e => { setConnectionPlatform(e.target.value); setConnectionCreds({}); }} style={{width:"100%"}}>
+                    {platformsForCategory.map(([key, spec]) => <option key={key} value={key}>{spec.display_name}</option>)}
+                  </select>
+                </label>
+                {activeSpec?.help && <small className="muted">{activeSpec.help}</small>}
+                <label>账号/连接名
+                  <input value={connectionAccount} onChange={e=>setConnectionAccount(e.target.value)} placeholder="default" />
+                </label>
+                {activeSpec?.fields?.map(field => (
+                  <label key={field.key}>{field.label}{field.required ? " *" : ""}
+                    <input
+                      type={field.type === "secret" ? "password" : field.type === "url" ? "url" : "text"}
+                      value={connectionCreds[field.key] || ""}
+                      onChange={e=>setConnectionCreds({...connectionCreds, [field.key]: e.target.value})}
+                      autoComplete="off"
+                      placeholder={field.type === "secret" ? "保存后不回显" : ""}
+                    />
+                  </label>
+                ))}
+                <button className="primary" onClick={saveConnection} disabled={!connectionPlatform}><Save size={14}/>保存连接</button>
+              </div>
+            </div>
+            <div>
+              <h3>已配置连接</h3>
+              <table><thead><tr><th>平台</th><th>连接名</th><th>状态</th><th>字段</th><th>操作</th></tr></thead>
+                <tbody>{connections.map(item => <tr key={item.id}>
+                  <td>{item.display_name}</td>
+                  <td>{item.account_name}</td>
+                  <td>{item.missing_required?.length ? `缺少 ${item.missing_required.join(", ")}` : "已配置"}</td>
+                  <td style={{fontSize:12,color:"var(--text-muted)"}}>{item.configured_fields.join(", ") || "—"}</td>
+                  <td style={{display:"flex",gap:6}}>
+                    <button onClick={()=>testConnection(item.platform)}>检测</button>
+                    <button onClick={()=>deleteConnection(item.id)}><X size={12}/>删除</button>
+                  </td>
+                </tr>)}</tbody>
+              </table>
+              {!connections.length && <p className="muted">暂无平台连接。选择上方平台并保存后，热点采集、发布、告警等功能会优先使用这里的配置。</p>}
+            </div>
           </div>
         )}
 

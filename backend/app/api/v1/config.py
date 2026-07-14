@@ -16,9 +16,6 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
     if allowed and user["email"].lower() in allowed:
         return user
-    # Only bypass admin check in test environments with mock mode explicitly enabled
-    if os.getenv("NOVELCRAFT_ENV", "") == "test" and os.getenv("NOVELCRAFT_ALLOW_MOCK", "").lower() == "true":
-        return user
     if not allowed:
         raise HTTPException(status_code=403, detail="NOVELCRAFT_ADMIN_EMAILS must be set in production")
     raise HTTPException(status_code=403, detail="admin access required")
@@ -52,17 +49,17 @@ def ensure_project_member(project_id: str, user: dict, roles: set[str] | None = 
 
 
 class ProviderSettings(BaseModel):
-    provider: str = Field(pattern="^(deepseek|claude|openai|gemini|mock)$")
+    provider: str = Field(pattern="^(deepseek|claude|openai|gemini)$")
     api_key: str = ""
     base_url: str = ""
     default_model: str = ""
 
 
 class ModelRouteUpdate(BaseModel):
-    provider: str
+    provider: str = Field(pattern="^(deepseek|claude|openai|gemini)$")
     model: str
     params: dict = {}
-    fallbacks: list[dict] = []
+    fallbacks: list[dict] = Field(default_factory=list, max_length=0)
 
 
 class WorkflowSaveRequest(BaseModel):

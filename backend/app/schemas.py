@@ -54,12 +54,12 @@ class BudgetUpdate(BaseModel):
 
 
 class ModelRouteUpdate(BaseModel):
-    provider: str = Field(pattern="^(mock|deepseek)$")
+    provider: str = Field(pattern="^(deepseek|claude|openai|gemini)$")
     model: str = Field(min_length=1, max_length=120)
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-AiOperation = Literal["polish", "rewrite", "continue", "expand", "condense", "deai"]
+AiOperation = Literal["polish", "rewrite", "rewrite_chapter", "continue", "expand", "condense", "deai"]
 
 
 class ContentMetaRegistry(BaseModel):

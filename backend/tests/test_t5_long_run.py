@@ -90,7 +90,7 @@ def test_restart_recovers_checkpointed_provider_batch_before_creating_new_one(tm
                 if self.resumed:
                     self.chapters = [_chapter(1, "第一章正文"), _chapter(2, "第二章正文")]
                     return {"id": "b-existing", "status": "succeeded"}
-                return {"id": "b-existing", "status": "pending_provider", "error": "temporary"}
+                return {"id": "b-existing", "status": "failed", "error": "temporary"}
             if path == "/generation-batches/b-existing/resume":
                 self.resumed += 1
                 return {"status": "pending"}

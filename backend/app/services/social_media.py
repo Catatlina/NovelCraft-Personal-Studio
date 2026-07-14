@@ -5,6 +5,7 @@ PLATFORMS = {
     "wechat": {"name": "微信公众号", "type": "wechat_article", "style": "深度长文，排版精美，引导关注"},
     "toutiao": {"name": "今日头条", "type": "toutiao_article", "style": "SEO标题，关键词优化，推荐算法适配"},
     "xiaohongshu": {"name": "小红书", "type": "xhs_note", "style": "短笔记，emoji风格，标签系统，封面建议"},
+    "douyin": {"name": "抖音", "type": "douyin_video", "style": "短视频脚本，强开头，口播化，适合 30-60 秒"},
     "zhihu": {"name": "知乎", "type": "zhihu_answer", "style": "深度分析，专业引用，问答格式"},
     "baijia": {"name": "百家号", "type": "baijia_article", "style": "百度SEO，关键词密度优化"},
     "dayu": {"name": "大鱼号", "type": "dayu_article", "style": "UC推荐适配"},

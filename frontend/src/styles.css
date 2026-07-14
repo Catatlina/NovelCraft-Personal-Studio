@@ -119,6 +119,19 @@ meter { width: 100%; }
 .feature-card small, .muted { color: var(--text-muted); }
 .feature-card p { color: var(--text-secondary); font-size: 13px; }
 .danger-text { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.book-table { display: flex; flex-direction: column; gap: var(--space-2); }
+.book-row { display: grid; grid-template-columns: 180px minmax(220px, 1fr) 1.2fr; gap: var(--space-3); align-items: start; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.book-row > p { color: var(--text-secondary); font-size: 13px; max-height: 42px; overflow: hidden; }
+.book-row small { color: var(--text-muted); }
+.book-row .row-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.book-detail { display: flex; flex-direction: column; gap: var(--space-4); }
+.book-detail-head { display: flex; justify-content: space-between; gap: var(--space-4); align-items: center; }
+.book-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.outline-block { white-space: pre-wrap; overflow: auto; max-height: 360px; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); }
+.chapter-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.chapter-list button { justify-content: space-between; }
+.editor-review-panel { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3); }
+.editor-review-panel section { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); background: var(--bg-base); }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); }
@@ -145,5 +158,6 @@ th { color: var(--text-muted); font-size: 13px; }
   .workspace { padding: var(--space-3); }
   .panel { padding: var(--space-3); }
   .grid-2 { grid-template-columns: 1fr; }
+  .book-row, .book-detail-grid, .editor-review-panel { grid-template-columns: 1fr; }
   table { font-size: 12px; }
 }

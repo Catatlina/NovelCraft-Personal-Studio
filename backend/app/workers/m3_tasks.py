@@ -19,15 +19,13 @@ def run_imitation_workflow(self, reference_id: str, novel_id: str) -> dict:
     from app.gateway import complete
     output = complete(
         run_id=None, node_key=None, project_id=novel.get("project_id", ""),
-        task_type="style_imitation", prompt_name="bootstrap.gen_chapter1",
+        task_type="style_imitation", prompt_name="style.imitation",
         variables={
-            "title": novel.get("title", "Untitled"),
-            "genre": "literary",
-            "style": f"imitate: {ref.get('title', 'reference')}",
-            "body": ref.get("body", "")[:2000],
+            "source_text": str(ref.get("body", ""))[:16000],
+            "instruction": f"为《{novel.get('title', 'Untitled')}》生成原创仿写样稿；只学习节奏和语气，不复用原文设定。",
         },
     )
-    return {"status": "generated", "title": output.get("chapter", {}).get("title", "")}
+    return {"status": "generated", "title": output.get("title", ""), "has_text": bool(output.get("text"))}
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=10)

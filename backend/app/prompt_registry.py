@@ -228,6 +228,20 @@ $context
 输出 JSON: {"chapter":{"title":"第N章 标题","body":["段落一","段落二",...]}}
 body 至少 6 段。"""),
 
+    ("narrative.plan_next_chapter", "3.0.0", "deepseek",
+     """你是长篇小说责编。请基于当前章节和七维审查视角，规划下一章。
+
+当前章节：
+$chapter_text
+
+人物档案：
+$characters
+
+世界观：
+$worldview
+
+输出 JSON: {"next_title":"下一章标题","goals":["目标"],"conflicts":["冲突"],"beats":["节拍1","节拍2","节拍3"],"warnings":["写作注意事项"]}"""),
+
     ("narrative.summarize_chapter", "3.0.0", "deepseek",
      """总结章节关键信息（用于写前上下文装配）。
 
@@ -243,6 +257,23 @@ $instructions
     ("social.gen_daily_brief", "3.0.0", "deepseek",
      "根据话题生成每日内容简报。话题：$topic 角度：$angle。输出JSON: {\"wechat_draft\":\"\",\"toutiao_draft\":\"\",\"xhs_draft\":\"\"}"),
 
+    ("social.gen_hotspot_content", "3.0.0", "deepseek",
+     """你是自媒体内容主编。请根据热点生成适合指定平台的原创内容，不得编造事实，不得声称已验证未给出的信息。
+
+热点：$hotspot_title
+来源：$hotspot_source
+链接：$hotspot_url
+平台：$platform
+平台风格：$style
+
+要求：
+1. 公众号/头条号/百家号/大鱼号输出结构化文章，包含标题、导语、正文段落、结尾互动。
+2. 小红书输出笔记体，包含封面文案、正文、标签。
+3. 抖音输出短视频脚本，包含 3 秒钩子、分镜、口播、结尾引导。
+4. 不确定的信息明确写“据公开热榜显示/需进一步核实”，不要伪造数据。
+
+输出 JSON: {"title":"标题","body":["段落或脚本分镜"],"meta":{"tags":["标签"],"summary":"摘要","cta":"互动引导"}}"""),
+
     ("ranking.market_analysis", "3.0.0", "deepseek",
      """你是网文市场分析师。分析以下榜单数据并生成独立原创选题。
 
@@ -255,7 +286,19 @@ $title_samples
   "market_signals":[{"signal":"信号","evidence":"证据"}],
   "audience":{"primary":"主要受众","needs":["需求"]},
   "title_patterns":[{"pattern":"模式","examples":["例子"]}],
-  "topic_candidates":[{"title":"选题","premise":"梗概","genre":"类型","market_score":80,"differentiators":[],"risk":""}]
+  "pacing":{"opening":"开篇节奏建议","retention_hooks":["留存钩子"]},
+  "originality_constraints":["原创约束"],
+  "topic_candidates":[{
+    "title":"选题",
+    "premise":"梗概",
+    "genre":"类型",
+    "market_score":80,
+    "target_audience":"目标读者",
+    "differentiators":["差异点"],
+    "market_evidence":["市场证据"],
+    "risk":"风险",
+    "originality_notes":"原创性说明"
+  }]
 }"""),
 
     # ── Overseas ──
@@ -274,6 +317,17 @@ $title_samples
      "请扩写以下文本，增加细节、场景和心理描写，保持人物与设定一致。\n$selection\n输出 JSON: {\"text\":\"扩写后的文本\"}"),
     ("editor.condense", "3.0.0", "deepseek",
      "请缩写以下文本，保留核心情节与关键信息，删除冗余。\n$selection\n输出 JSON: {\"text\":\"缩写后的文本\"}"),
+
+    ("style.imitation", "3.0.0", "deepseek",
+     """你是文风学习与原创仿写助手。请只学习原文的叙述节奏、句长、视角、情绪推进、段落密度，不复制原文人物、设定、专名、桥段和连续表达。
+
+原文：
+$source_text
+
+任务：
+$instruction
+
+输出 JSON: {"title":"样稿标题","style_profile":{"pov":"视角","sentence_rhythm":"句长节奏","dialogue_ratio":"对话比例","tone":"语气","taboos":["不可复用项"]},"text":"原创仿写样稿，至少800字"}"""),
 
     # ── Narrative: 长篇一致性引擎（summarizer/timeline 服务在用） ──
     ("narrative.summarize_volume", "3.0.0", "deepseek",
@@ -610,7 +664,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "editor_deai":          '{"text":"去AI味后文本"}',
     "summarize_chapter":    '{"summary":"","entities":[],"timeline":[],"foreshadowings":[]}',
     "gen_next_chapter":     '{"chapter":{"title":"第N章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}} (body 至少 6 段)',
-    "ranking_market_analysis": '{"market_signals":[],"audience":{"primary":"","needs":[]},"title_patterns":[],"topic_candidates":[]}',
+    "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":""}]}',
     "editor_expand":        '{"text":"扩写后文本"}',
     "editor_condense":      '{"text":"缩写后文本"}',
     "summarize_volume":     '{"summary":"卷摘要"}',

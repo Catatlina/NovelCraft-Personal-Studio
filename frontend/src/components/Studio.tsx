@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import { BookOpen, Database, TrendingUp, Play, Loader2 } from "lucide-react";
+import { BookOpen, Database, TrendingUp, Play, Loader2, CopyCheck } from "lucide-react";
 import { api } from "../lib/api";
 
 export function Studio() {
-  const [tab, setTab] = useState<"short"|"knowledge"|"hotspot">("short");
+  const [tab, setTab] = useState<"short"|"knowledge"|"hotspot"|"imitation">("short");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -20,16 +20,24 @@ export function Studio() {
   // Hotspot
   const [hotspots, setHotspots] = useState<any[]>([]);
   const [briefing, setBriefing] = useState<any>(null);
+  const [sourceText, setSourceText] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [imitateInstruction, setImitateInstruction] = useState("提炼文风并仿写为原创网文开篇");
 
   async function createShortStory() {
-    setBusy(true);
-    const pid = (await api("/api/v1/projects")).data[0].id;
-    const r = await api(`/api/v1/projects/${pid}/short-stories`, {
-      method:"POST", body: JSON.stringify({ idea, template, genre: "都市", style: "现代" }),
-    });
-    setResult(r);
-    setBusy(false);
-    setMsg("短篇已创建！查看审阅页");
+    setBusy(true); setMsg("");
+    try {
+      const pid = (await api("/api/v1/projects")).data[0].id;
+      const r = await api(`/api/v1/projects/${pid}/short-stories`, {
+        method:"POST", body: JSON.stringify({ idea, template, genre: "都市", style: "现代" }),
+      });
+      setResult(r);
+      setMsg("短篇已创建！查看审阅页");
+    } catch (caught) {
+      setMsg(`短篇生成失败：${String(caught)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function searchKnowledge() {
@@ -50,6 +58,24 @@ export function Studio() {
     setBriefing(data);
   }
 
+  async function runImitation() {
+    setBusy(true); setMsg("");
+    try {
+      const r = await api("/api/v1/projects");
+      const pid = r.data[0].id;
+      const res = await api("/api/v1/imitation", {
+        method: "POST",
+        body: JSON.stringify({ project_id: pid, source_text: sourceText, source_url: sourceUrl, instruction: imitateInstruction }),
+      });
+      setResult(res);
+      setMsg("仿写样稿已生成。");
+    } catch (caught) {
+      setMsg(`仿写失败：${String(caught)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div style={{display:"grid",gridTemplateColumns:"180px 1fr",gap:16,minHeight:400}}>
       <div className="panel" style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -57,6 +83,7 @@ export function Studio() {
 
         <button className={tab==="knowledge"?"active":""} onClick={()=>setTab("knowledge")} style={{justifyContent:"flex-start"}}><Database size={16}/> 知识库</button>
         <button className={tab==="hotspot"?"active":""} onClick={()=>setTab("hotspot")} style={{justifyContent:"flex-start"}}><TrendingUp size={16}/> 热点</button>
+        <button className={tab==="imitation"?"active":""} onClick={()=>setTab("imitation")} style={{justifyContent:"flex-start"}}><CopyCheck size={16}/> 仿写</button>
       </div>
 
       <div className="panel">
@@ -132,6 +159,19 @@ export function Studio() {
                 <strong>{g.topic}</strong><pre style={{fontSize:11,color:"var(--text-muted)",whiteSpace:"pre-wrap"}}>{JSON.stringify(g.draft,null,2)?.slice(0,300)}</pre>
               </div>)}
             </div>}
+          </div>
+        )}
+
+        {tab === "imitation" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <h2>仿写模块</h2>
+            <input value={sourceUrl} onChange={e=>setSourceUrl(e.target.value)} placeholder="原文 HTTPS 链接（可选）" />
+            <textarea value={sourceText} onChange={e=>setSourceText(e.target.value)} placeholder="或粘贴原文，至少 200 字" rows={8} />
+            <input value={imitateInstruction} onChange={e=>setImitateInstruction(e.target.value)} placeholder="仿写要求" />
+            <button className="primary" onClick={runImitation} disabled={busy || (!sourceText.trim() && !sourceUrl.trim())}>
+              {busy?<Loader2 className="spin" size={16}/>:<CopyCheck size={16}/>}生成原创仿写
+            </button>
+            {result?.data && <pre className="outline-block">{JSON.stringify(result.data, null, 2)}</pre>}
           </div>
         )}
       </div>

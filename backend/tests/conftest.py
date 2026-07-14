@@ -1,10 +1,9 @@
-"""Test configuration — explicit mock boundary and reset connection pool."""
+"""Test configuration and reset connection pool."""
 import os
 
 import pytest
 
 os.environ["NOVELCRAFT_ENV"] = "test"
-os.environ["NOVELCRAFT_ALLOW_MOCK"] = "true"
 os.environ["NOVELCRAFT_JWT_SECRET"] = "novelcraft-test-secret-at-least-32-characters"
 
 from app.db import close_pool

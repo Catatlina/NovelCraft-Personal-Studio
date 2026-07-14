@@ -19,6 +19,7 @@ from app.services.ranking_capture import validate_with_open_library
 from app.gateway import BudgetExceeded, ProviderError, complete
 
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
+library_router = APIRouter(prefix="/api/v1/library", tags=["library"])
 
 SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网"}
 MIN_AUTOMATED_CONFIDENCE = 0.85
@@ -105,8 +106,8 @@ class MarketAnalysisOutput(BaseModel):
     market_signals: list[dict]
     audience: dict
     title_patterns: list[dict]
-    pacing: dict
-    originality_constraints: list[str] = Field(min_length=1)
+    pacing: dict = Field(default_factory=dict)
+    originality_constraints: list[str] = Field(default_factory=list)
     topic_candidates: list[MarketTopicOutput] = Field(min_length=1, max_length=5)
 
 
@@ -128,11 +129,29 @@ def _normalized_title(value: str) -> str:
 
 
 def _validate_market_analysis_output(output: dict, source_titles: list[str] | None = None) -> dict:
-    validated = MarketAnalysisOutput.model_validate(output).model_dump()
+    payload = dict(output or {})
+    payload.setdefault("pacing", {})
+    payload.setdefault(
+        "originality_constraints",
+        ["不得复用榜单原作标题、人物、世界设定或可识别情节链"],
+    )
+    validated = MarketAnalysisOutput.model_validate(payload).model_dump()
     source = {_normalized_title(title) for title in (source_titles or [])}
+    audience_primary = str((validated.get("audience") or {}).get("primary") or "目标读者")
+    signal_evidence = [
+        str(signal.get("evidence") or signal.get("signal") or "").strip()
+        for signal in validated.get("market_signals", [])
+        if isinstance(signal, dict) and str(signal.get("evidence") or signal.get("signal") or "").strip()
+    ]
     for candidate in validated["topic_candidates"]:
         if _normalized_title(candidate["title"]) in source:
             raise ValueError("candidate title duplicates a source ranking title")
+        if not candidate.get("target_audience"):
+            candidate["target_audience"] = audience_primary
+        if not candidate.get("market_evidence"):
+            candidate["market_evidence"] = signal_evidence[:3] or candidate.get("differentiators", [])[:3]
+        if not candidate.get("originality_notes"):
+            candidate["originality_notes"] = "需与输入榜单标题、人物、设定和可识别情节链保持差异。"
     return validated
 
 
@@ -433,10 +452,15 @@ def analyze_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
                               task_type="ranking_market_analysis", prompt_name="ranking.market_analysis",
                               variables=variables,
                               client_mutation_id=f"ranking-analysis:{snapshot_id}:{analysis_attempt}")
-        except (ProviderError, BudgetExceeded) as exc:
-            db.execute("UPDATE market_analyses SET status='pending_provider', error=%s WHERE id=%s", (str(exc), analysis_id))
+        except BudgetExceeded as exc:
+            db.execute("UPDATE market_analyses SET status='failed', error=%s WHERE id=%s", (str(exc), analysis_id))
             db.commit(); db.close()
-            raise HTTPException(503, {"code": "MARKET_ANALYSIS_PROVIDER_FAILED", "status": "pending_provider",
+            raise HTTPException(402, {"code": "MARKET_ANALYSIS_BUDGET_EXCEEDED", "status": "failed",
+                                      "analysis_id": analysis_id, "reason": str(exc)}) from exc
+        except ProviderError as exc:
+            db.execute("UPDATE market_analyses SET status='failed', error=%s WHERE id=%s", (str(exc), analysis_id))
+            db.commit(); db.close()
+            raise HTTPException(503, {"code": "MARKET_ANALYSIS_PROVIDER_FAILED", "status": "failed",
                                       "analysis_id": analysis_id, "reason": str(exc)}) from exc
         try:
             validated = _validate_market_analysis_output(output, [item["title"] for item in items])
@@ -477,13 +501,76 @@ def list_topics(project_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.get("/library/books")
+@library_router.get("/books")
 def list_books(project_id: str, limit: int = 100, offset: int = 0,
                user: dict = Depends(get_current_user)):
     db = connect(); require_member(db, project_id, user)
-    data = rows(db, """SELECT id,project_id,type,title,meta,status,updated_at FROM contents
-                         WHERE project_id=%s AND type='novel' AND is_deleted=FALSE
-                         ORDER BY updated_at DESC LIMIT %s OFFSET %s""", (project_id, min(limit, 200), max(offset, 0)))
+    data = rows(db, """
+        SELECT n.id,n.project_id,n.type,n.title,n.meta,n.status,n.created_at,n.updated_at,
+               COALESCE(NULLIF(n.meta->>'synopsis',''), NULLIF(n.meta->>'idea',''), '') AS synopsis,
+               COALESCE(NULLIF(n.meta->>'genre',''), NULLIF(n.meta->>'source_type',''), '未分类') AS genre,
+               latest.id AS latest_chapter_id,
+               latest.title AS latest_chapter_title,
+               latest.seq AS latest_chapter_seq,
+               COALESCE(stats.chapter_count, 0) AS chapter_count,
+               COALESCE(stats.total_words, 0) AS total_words
+        FROM contents n
+        LEFT JOIN LATERAL (
+            SELECT c.id,c.title,COALESCE((c.meta->>'seq')::int,0) AS seq
+            FROM contents c
+            WHERE c.parent_id=n.id AND c.type='chapter' AND c.is_deleted=FALSE
+            ORDER BY COALESCE((c.meta->>'seq')::int,0) DESC, c.created_at DESC
+            LIMIT 1
+        ) latest ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS chapter_count,
+                   COALESCE(SUM(
+                       CASE
+                         WHEN jsonb_typeof(c.body->'content')='array'
+                         THEN length(regexp_replace(c.body::text, '[\\"{}:\\[\\],typecontentparagraphtext]', '', 'g'))
+                         ELSE length(c.body::text)
+                       END
+                   ),0) AS total_words
+            FROM contents c
+            WHERE c.parent_id=n.id AND c.type='chapter' AND c.is_deleted=FALSE
+        ) stats ON TRUE
+        WHERE n.project_id=%s AND n.type='novel' AND n.is_deleted=FALSE
+        ORDER BY n.created_at DESC, n.id DESC
+        LIMIT %s OFFSET %s
+    """, (project_id, min(limit, 200), max(offset, 0)))
     db.close(); return ok(data)
+
+
+@router.get("/library/books/{book_id}")
+@library_router.get("/books/{book_id}")
+def get_book_detail(book_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    book = db.execute("""SELECT id,project_id,type,title,body,meta,status,created_at,updated_at
+                         FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE""", (book_id,)).fetchone()
+    if not book:
+        db.close(); raise HTTPException(404, "book not found")
+    require_member(db, book["project_id"], user)
+    chapters = rows(db, """SELECT id,title,body,meta,status,created_at,updated_at,
+                                  COALESCE((meta->>'seq')::int,0) AS seq
+                           FROM contents
+                           WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+                           ORDER BY COALESCE((meta->>'seq')::int,0), created_at""", (book_id,))
+    knowledge = rows(db, """SELECT kind,title,body,meta,created_at FROM knowledge_items
+                            WHERE content_id=%s AND is_deleted=FALSE
+                            ORDER BY kind, created_at""", (book_id,))
+    db.close()
+    meta = book.get("meta") or {}
+    latest = chapters[-1] if chapters else None
+    return ok({
+        "book": dict(book),
+        "synopsis": meta.get("synopsis") or meta.get("idea") or "",
+        "genre": meta.get("genre") or meta.get("source_type") or "未分类",
+        "outline": meta.get("outline") or meta.get("chapter_plan") or "",
+        "latest_chapter": latest,
+        "chapters": chapters,
+        "knowledge": knowledge,
+        "total_words": sum(len(str(ch.get("body") or "")) for ch in chapters),
+    })
 
 
 @router.post("/topics/{topic_id}/generate-book")
