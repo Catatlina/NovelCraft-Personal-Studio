@@ -161,6 +161,33 @@ def collect_publish_data(self, content_id: str, platform: str) -> dict:
             "posts": int(row["total"] or 0)}
 
 
+@celery_app.task(bind=True, max_retries=1)
+def collect_publish_metrics_sweep(self) -> dict:
+    """NC-PUB-002: periodic metrics backflow — refresh aggregates for every
+    platform/content pair that has an active publish record in the last 30 days.
+    Aggregation reads real collected platform data (published_posts); it never
+    fabricates platform numbers."""
+    from app.db import connect
+
+    db = connect()
+    pairs = db.execute(
+        """SELECT DISTINCT platform, content_id FROM publish_records
+           WHERE status IN ('published','submitted','draft_created')
+             AND created_at > now() - interval '30 days'
+             AND content_id IS NOT NULL""",
+    ).fetchall()
+    db.close()
+    refreshed, failures = 0, []
+    for pair in pairs:
+        row = dict(pair) if not isinstance(pair, dict) else pair
+        try:
+            collect_publish_data.run(str(row["content_id"]), row["platform"])
+            refreshed += 1
+        except Exception as exc:
+            failures.append({"platform": row["platform"], "error": str(exc)[:120]})
+    return {"status": "ok", "pairs": len(pairs), "refreshed": refreshed, "failures": failures}
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def publish_retry_handler(self, record_id: str) -> dict:
     """TASK-043: Retry failed publish attempts with exponential backoff."""
