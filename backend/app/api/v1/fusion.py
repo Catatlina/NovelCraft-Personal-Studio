@@ -9,6 +9,44 @@ from app.api.v1.complete_api import ok, user_project_ids
 router = APIRouter(prefix="/fusion", tags=["fusion"])
 
 
+# ===== NC-FUS-004: migration drill / reconciliation / duplicate governance =====
+
+@router.post("/migration/checkpoint")
+def create_migration_checkpoint(name: str = "", user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import create_fusion_migration_checkpoint
+    return ok(create_fusion_migration_checkpoint(name=name))
+
+
+@router.get("/migration/checkpoints")
+def get_migration_checkpoints(limit: int = 20, user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import list_migration_checkpoints
+    return ok(list_migration_checkpoints(limit=min(max(limit, 1), 100)))
+
+
+@router.get("/migration/compare")
+def compare_checkpoints(before_id: str, after_id: str, user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import compare_migration_checkpoints
+    return ok(compare_migration_checkpoints(before_id, after_id))
+
+
+@router.get("/migration/duplicates")
+def get_duplicate_data(user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import detect_duplicate_data
+    return ok(detect_duplicate_data())
+
+
+@router.post("/migration/duplicates/{probe}/cleanup")
+def cleanup_duplicates(probe: str, user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import cleanup_duplicate_data
+    return ok(cleanup_duplicate_data(probe))
+
+
+@router.post("/migration/drill")
+def migration_drill(user: dict = Depends(get_current_user)):
+    from app.services.fusion_governance import run_migration_drill
+    return ok(run_migration_drill())
+
+
 @router.get("/status")
 def fusion_status(user: dict = Depends(get_current_user)):
     """Aggregated fusion status: governance + deep workflow + deep book integration."""
