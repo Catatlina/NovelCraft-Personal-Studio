@@ -209,15 +209,38 @@ def main() -> int:
             launch_options["channel"] = args.browser_channel
         context = playwright.chromium.launch_persistent_context(str(profile), **launch_options)
         page = context.pages[0] if context.pages else context.new_page()
-        page.goto(URLS[args.source], wait_until="domcontentloaded", timeout=60_000)
-        if not args.no_pause:
+        navigation_error = None
+        try:
+            page.goto(URLS[args.source], wait_until="domcontentloaded", timeout=60_000)
+        except Exception as exc:
+            navigation_error = f"navigation failed: {exc}"
+        if not args.no_pause and not navigation_error:
             print("请在浏览器中完成必要的登录或安全验证，然后回到终端按 Enter。", file=sys.stderr)
             input()
-        page.screenshot(path=str(screenshot), full_page=True)
-        html_snapshot.write_text(page.content(), encoding="utf-8")
-        body = page.locator("body").inner_text(timeout=10_000)
-        items = extract_public_cards(page, args.source)
-        artifact = build_artifact(args.source, page.url, body, items, screenshot, profile, args.ocr, html_snapshot)
+        try:
+            page.screenshot(path=str(screenshot), full_page=True)
+        except Exception:
+            pass
+        try:
+            html_snapshot.write_text(page.content(), encoding="utf-8")
+        except Exception:
+            html_snapshot.write_text("", encoding="utf-8")
+        if navigation_error:
+            artifact = {
+                "schema_version": 1,
+                "source": args.source,
+                "status": "failed",
+                "collector": "visible_browser",
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "source_url": page.url,
+                "items": [],
+                "error": navigation_error,
+                "evidence": {"screenshot": str(screenshot), "browser_profile": str(profile), "html_snapshot": str(html_snapshot)},
+            }
+        else:
+            body = page.locator("body").inner_text(timeout=10_000)
+            items = extract_public_cards(page, args.source)
+            artifact = build_artifact(args.source, page.url, body, items, screenshot, profile, args.ocr, html_snapshot)
         output.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
         context.close()
     print(output)

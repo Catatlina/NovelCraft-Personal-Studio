@@ -115,3 +115,26 @@ def test_tencent_captcha_html_requires_user_action_but_generic_script_word_does_
         tmp_path / "fanqie.png", tmp_path / "profile", html_snapshot=fanqie_html,
     )
     assert fanqie["status"] == "schema_changed"
+
+
+def test_failed_capture_artifact_remains_explicit_failure(tmp_path):
+    from app.services.ranking_capture import load_capture_artifact
+
+    path = tmp_path / "timeout.json"
+    path.write_text(
+        """{
+          "source": "zongheng",
+          "status": "failed",
+          "collector": "visible_browser",
+          "error": "navigation failed: timeout",
+          "evidence": {"html_snapshot": "zongheng.html"},
+          "items": []
+        }""",
+        encoding="utf-8",
+    )
+
+    item = load_capture_artifact(path, "zongheng").as_adapter_items()[0]
+
+    assert item["degraded"] is True
+    assert item["capture_status"] == "failed"
+    assert "timeout" in item["error"]
