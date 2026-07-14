@@ -10,6 +10,7 @@ type MarketAnalysis = { analysis_id: string; summary: string; status: string; an
 type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
 type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string; originality_notes?: string; novel_id?: string };
 type ImportItem = Record<string, unknown>;
+type CaptureArtifact = { source: string; status?: string; collector?: string; items?: ImportItem[]; source_label?: string };
 
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return JSON.stringify(error.payload);
@@ -55,6 +56,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [openSnapshotId, setOpenSnapshotId] = useState("");
   const [snapshotDetails, setSnapshotDetails] = useState<Record<string, SnapshotDetail>>({});
   const [importItems, setImportItems] = useState<ImportItem[]>([]);
+  const [captureArtifact, setCaptureArtifact] = useState<CaptureArtifact | null>(null);
   const [importSource, setImportSource] = useState("manual_import");
   const [importFileName, setImportFileName] = useState("");
 
@@ -83,13 +85,23 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   }
 
   async function selectImportFile(file?: File) {
-    setMessage(""); setImportItems([]); setImportFileName(file?.name || "");
+    setMessage(""); setImportItems([]); setCaptureArtifact(null); setImportFileName(file?.name || "");
     if (!file) return;
     try {
       const text = await file.text();
       if (file.name.toLowerCase().endsWith(".csv")) setImportItems(parseCsv(text));
       else {
         const parsed: unknown = JSON.parse(text);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          && typeof (parsed as CaptureArtifact).source === "string"
+          && ["fanqie", "qidian", "zongheng", "manual"].includes((parsed as CaptureArtifact).source)
+          && ("status" in (parsed as Record<string, unknown>) || "collector" in (parsed as Record<string, unknown>))) {
+          const artifact = parsed as CaptureArtifact;
+          setCaptureArtifact(artifact);
+          setImportItems(Array.isArray(artifact.items) ? artifact.items : []);
+          setImportSource(artifact.source_label || artifact.source);
+          return;
+        }
         const data = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown })?.items;
         if (!Array.isArray(data)) throw new Error("JSON 必须是条目数组或包含 items 数组");
         setImportItems(data.filter(item => item && typeof item === "object") as ImportItem[]);
@@ -102,14 +114,20 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   }
 
   async function importRanking() {
-    if (!importItems.length) { setMessage("请先选择包含有效条目的 CSV 或 JSON 文件"); return; }
+    if (!captureArtifact && !importItems.length) { setMessage("请先选择包含有效条目的 CSV、JSON 或采集工件"); return; }
     if (!importSource.trim()) { setMessage("请填写来源标识"); return; }
     setBusy("import"); setMessage("");
     try {
-      const result = await api<Wrapped<{ snapshot_id: string; item_count: number }>>(`/api/v1/ranking/import?project_id=${projectId}`, {
-        method: "POST", body: JSON.stringify({ source_label: importSource.trim(), items: importItems }),
-      });
-      setMessage(`导入成功：${result.data.item_count} 条`); setImportItems([]); setImportFileName("");
+      const result = captureArtifact
+        ? await api<Wrapped<{ snapshot_id: string; item_count: number; capture_status?: string; status?: string }>>(`/api/v1/ranking/capture-import?project_id=${projectId}`, {
+            method: "POST", body: JSON.stringify({ ...captureArtifact, source_label: importSource.trim() }),
+          })
+        : await api<Wrapped<{ snapshot_id: string; item_count: number; capture_status?: string; status?: string }>>(`/api/v1/ranking/import?project_id=${projectId}`, {
+            method: "POST", body: JSON.stringify({ source_label: importSource.trim(), items: importItems }),
+          });
+      const reviewHint = result.data.capture_status === "needs_review" ? "，低置信度条目需人工确认后才能分析" : "";
+      setMessage(`导入成功：${result.data.item_count} 条${reviewHint}`);
+      setImportItems([]); setCaptureArtifact(null); setImportFileName("");
       setOpenSnapshotId(result.data.snapshot_id || ""); await load();
     } catch (error) { setMessage(`导入失败：${errorText(error)}`); }
     finally { setBusy(""); }
@@ -147,6 +165,21 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       setSnapshotDetails(current => ({ ...current, [snapshot.id]: detail.data }));
       setOpenSnapshotId(snapshot.id); await load();
     } catch (error) { setMessage(`元数据校验失败：${errorText(error)}`); }
+    finally { setBusy(""); }
+  }
+
+  async function confirmCapture(snapshot: Snapshot) {
+    setBusy(`confirm:${snapshot.id}`); setMessage("");
+    try {
+      const result = await api<Wrapped<{ capture_status: string; status: string }>>(`/api/v1/ranking/snapshots/${snapshot.id}/confirm-capture`, {
+        method: "POST", body: "{}",
+      });
+      setMessage(`采集证据已确认：${result.data.capture_status}`);
+      await load();
+      const detail = await api<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
+      setSnapshotDetails(current => ({ ...current, [snapshot.id]: detail.data }));
+      setOpenSnapshotId(snapshot.id);
+    } catch (error) { setMessage(`确认失败：${errorText(error)}`); }
     finally { setBusy(""); }
   }
 
@@ -195,13 +228,13 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     </div>
       <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
         <strong>导入已有榜单文件</strong>
-        <small>支持 UTF-8 CSV（必须包含 title 表头）或 JSON 数组；导入内容会保留为人工采集证据。</small>
+        <small>支持 UTF-8 CSV、普通 JSON 数组，或浏览器/OCR 采集工件。番茄 OCR / 起点会话工件会自动保留截图、置信度和来源证据。</small>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
           <input aria-label="榜单来源标识" value={importSource} onChange={event => setImportSource(event.target.value)} placeholder="来源标识，例如 qidian_manual" />
           <input aria-label="选择榜单文件" type="file" accept=".csv,.json,text/csv,application/json" onChange={event => void selectImportFile(event.target.files?.[0])} />
           <button className="primary" disabled={!!busy || !importItems.length} onClick={() => void importRanking()}>{busy === "import" ? "导入中…" : "导入榜单"}</button>
         </div>
-        {importFileName && <small>{importFileName}：已解析 {importItems.length} 条，提交前不会上传。</small>}
+        {importFileName && <small>{importFileName}：{captureArtifact ? `识别为 ${captureArtifact.source} 采集工件，状态 ${captureArtifact.status || "succeeded"}` : "已解析"} {importItems.length} 条，提交前不会上传。</small>}
       </div>
     </section>
     <section className="panel"><h2>榜单快照</h2><table><thead><tr><th>来源</th><th>状态</th><th>数量</th><th>时间</th><th>操作</th></tr></thead>
@@ -210,6 +243,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             <button disabled={!!busy} onClick={() => void toggleSnapshot(snapshot)}>{openSnapshotId === snapshot.id ? "收起" : snapshot.status === "succeeded" ? "查看榜单" : "查看错误"}</button>
             {snapshot.status === "succeeded" && <button disabled={!!busy} onClick={() => void validateMetadata(snapshot)}>{busy === `validate:${snapshot.id}` ? "校验中…" : "交叉校验元数据"}</button>}
+            {snapshot.status === "succeeded" && (snapshot.capture_status === "needs_review" || snapshot.capture_status === "partial") && <button className="primary" disabled={!!busy} onClick={() => void confirmCapture(snapshot)}>{busy === `confirm:${snapshot.id}` ? "确认中…" : "确认采集证据"}</button>}
             {snapshot.status === "succeeded" && snapshot.capture_status !== "needs_review" && snapshot.capture_status !== "partial" && <button disabled={!!busy} onClick={() => analyze(snapshot)}>生成分析与选题</button>}
             {snapshot.status === "failed" && <button className="primary" disabled={!!busy} onClick={() => retrySnapshot(snapshot)}>{busy === `retry:${snapshot.id}` ? "重试中…" : "重新采集"}</button>}
           </div>

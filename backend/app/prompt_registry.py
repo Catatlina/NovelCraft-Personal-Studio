@@ -286,6 +286,18 @@ $instructions
 
 输出 JSON: {"cover_image_prompt":"封面图生成提示词","suggested_charts":["可制作图表"],"data_sources":["建议核验的数据源"],"recommended_tags":["标签"]}"""),
 
+    ("publish.performance_feedback", "1.0.0", "deepseek",
+     """你是内容增长分析师。以下是该账号真实发布回流数据（阅读/点赞/收益/平台 ROI），请据此提出可执行的选题建议与写作改进建议。
+规则：
+1. 只依据给出的数据推理，不得编造数据中不存在的表现或平台
+2. 每条选题建议的 based_on 必须引用数据中 top_posts 的 post_id，说明依据哪些内容的表现
+3. 写作建议要具体到可操作（结构、标题、节奏、平台适配），不写空话
+
+回流数据（JSON）：
+$performance_data
+
+输出 JSON: {"topic_suggestions":[{"suggestion":"选题建议","rationale":"数据依据说明","based_on":["post_id"]}],"writing_advice":["可执行写作改进建议"]}"""),
+
     ("social.gen_hotspot_content", "3.0.0", "deepseek",
      """你是自媒体内容主编。请根据热点生成适合指定平台的原创内容，不得编造事实，不得声称已验证未给出的信息。
 
@@ -356,6 +368,20 @@ $title_samples
 
     ("overseas.cultural_localize", "3.0.0", "deepseek",
      "文化本地化 $target_lang 文本：\n$text\n输出 JSON: {\"localized\":\"\",\"notes\":[\"修改说明\"]}"),
+
+    ("overseas.localize_names", "3.0.0", "deepseek",
+     """你是小说出海本地化编辑。请把中文角色名本地化为目标语言姓名，保持全书唯一且便于目标市场读者记忆。
+
+待映射姓名：$names
+目标语言：$target_lang
+已有映射：$existing_map
+
+要求：
+1. 不要原样保留中文。
+2. 不要给多个角色分配同一个目标名。
+3. 只输出 JSON。
+
+输出 JSON: {"name_map":{"中文名":"Localized Name"}}"""),
 
     # ── Editor: 扩写/缩写（v1 保留，仍被 /contents/{id}/ai 调用） ──
     ("editor.expand", "3.0.0", "deepseek",
@@ -715,6 +741,10 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "hm_title_variants":    '{"titles":["标题1","标题2","标题3"]}',
     "gen_video_script":     '{"title":"视频标题","scenes":[{"time":"0-3s","action":"画面动作","text":"口播/字幕"}],"narration_style":"口播风格","cover_text":"封面文案"}',
     "hm_material_suggestions": '{"cover_image_prompt":"封面图提示词","suggested_charts":["图表"],"data_sources":["核验数据源"],"recommended_tags":["标签"]}',
+    "performance_feedback": '{"topic_suggestions":[{"suggestion":"选题建议","rationale":"数据依据","based_on":["post_id"]}],"writing_advice":["写作改进建议"]}',
+    "translate_segment":    '{"translated":"translated text"}',
+    "cultural_localize":    '{"localized":"localized text","notes":["change note"]}',
+    "localize_names":       '{"name_map":{"张翰":"John Zhang"}}',
     "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":""}]}',
     "editor_expand":        '{"text":"扩写后文本"}',
     "editor_condense":      '{"text":"缩写后文本"}',

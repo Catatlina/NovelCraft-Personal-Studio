@@ -7,7 +7,14 @@ from pydantic import BaseModel, Field
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
 from app.gateway import BudgetExceeded, ProviderError, complete
-from app.services.hotspot_collector import fetch_hotspots, store_hotspots, analyze_hotspots, get_hotspot_trend_report
+from app.services.hotspot_collector import (
+    analyze_hotspots,
+    backfill_hotspot_history,
+    fetch_hotspots,
+    get_hotspot_history_report,
+    get_hotspot_trend_report,
+    store_hotspots,
+)
 from app.services.social_media import PLATFORMS, VIDEO_PLATFORMS
 
 router = APIRouter(prefix="/api/v1", tags=["hotspots"])
@@ -45,6 +52,35 @@ def get_hotspots(user: dict = Depends(get_current_user)):
 @router.get("/hotspots/trend-report")
 def hotspot_trend_report(user: dict = Depends(get_current_user)):
     return {"code": 0, "message": "ok", "data": get_hotspot_trend_report()}
+
+
+@router.post("/hotspots/history/backfill")
+def hotspot_history_backfill(days: int = 7, user: dict = Depends(get_current_user)):
+    """Backfill stored hotspot snapshots from configured real archive URLs.
+
+    Sources without a historical endpoint are reported as unsupported; this
+    endpoint never synthesizes past trends from today's list.
+    """
+    try:
+        result = backfill_hotspot_history(days=days, user_id=user["id"])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if result["status"] == "unsupported":
+        raise HTTPException(status_code=502, detail={
+            "code": "HOTSPOT_HISTORY_UNSUPPORTED",
+            "message": "No configured historical hotspot source returned data.",
+            "data": result,
+        })
+    return {"code": 0, "message": "ok", "data": result}
+
+
+@router.get("/hotspots/history")
+def hotspot_history_report(days: int = 7, user: dict = Depends(get_current_user)):
+    try:
+        report = get_hotspot_history_report(days=days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"code": 0, "message": "ok", "data": report}
 
 
 def _require_editor(db, project_id: str, user: dict) -> None:

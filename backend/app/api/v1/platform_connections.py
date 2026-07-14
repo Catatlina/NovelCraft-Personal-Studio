@@ -19,31 +19,37 @@ CONNECTION_SPECS: dict[str, dict] = {
     # Hotspot sources
     "hotspot_baidu": {"category": "hotspot", "display_name": "百度热搜", "help": "公开源，通常无需配置；可填写 cookie/proxy 覆盖默认请求。", "fields": [
         {"key": "url", "label": "自定义 URL", "type": "url", "required": False},
+        {"key": "history_url", "label": "历史归档 URL（支持 {date}）", "type": "url", "required": False},
         {"key": "cookie", "label": "Cookie", "type": "secret", "required": False},
         {"key": "proxy", "label": "HTTP 代理", "type": "url", "required": False},
     ]},
     "hotspot_zhihu": {"category": "hotspot", "display_name": "知乎热榜", "help": "公开 API 可能限流；必要时填写 cookie/proxy。", "fields": [
         {"key": "url", "label": "自定义 URL", "type": "url", "required": False},
+        {"key": "history_url", "label": "历史归档 URL（支持 {date}）", "type": "url", "required": False},
         {"key": "cookie", "label": "Cookie", "type": "secret", "required": False},
         {"key": "proxy", "label": "HTTP 代理", "type": "url", "required": False},
     ]},
     "hotspot_weibo": {"category": "hotspot", "display_name": "微博热搜", "help": "公开接口可能需要 cookie。", "fields": [
         {"key": "url", "label": "自定义 URL", "type": "url", "required": False},
+        {"key": "history_url", "label": "历史归档 URL（支持 {date}）", "type": "url", "required": False},
         {"key": "cookie", "label": "Cookie", "type": "secret", "required": False},
         {"key": "proxy", "label": "HTTP 代理", "type": "url", "required": False},
     ]},
     "hotspot_xiaohongshu": {"category": "hotspot", "display_name": "小红书热点源", "help": "请填合法授权的数据源 URL；不配置不伪造数据。", "fields": [
         {"key": "url", "label": "热点 JSON URL", "type": "url", "required": True},
+        {"key": "history_url", "label": "历史归档 URL（支持 {date}）", "type": "url", "required": False},
         {"key": "cookie", "label": "Cookie/授权头", "type": "secret", "required": False},
         {"key": "proxy", "label": "HTTP 代理", "type": "url", "required": False},
     ]},
     "hotspot_douyin": {"category": "hotspot", "display_name": "抖音热点源", "help": "请填合法授权的数据源 URL；不配置不伪造数据。", "fields": [
         {"key": "url", "label": "热点 JSON URL", "type": "url", "required": True},
+        {"key": "history_url", "label": "历史归档 URL（支持 {date}）", "type": "url", "required": False},
         {"key": "cookie", "label": "Cookie/授权头", "type": "secret", "required": False},
         {"key": "proxy", "label": "HTTP 代理", "type": "url", "required": False},
     ]},
     "hotspot_x": {"category": "hotspot", "display_name": "X / Twitter Trends", "help": "请填官方 API 或授权聚合源 URL。", "fields": [
         {"key": "url", "label": "Trends JSON URL", "type": "url", "required": True},
+        {"key": "history_url", "label": "历史归档 URL（支持 {date}）", "type": "url", "required": False},
         {"key": "bearer_token", "label": "Bearer Token", "type": "secret", "required": False},
         {"key": "proxy", "label": "HTTP 代理", "type": "url", "required": False},
     ]},

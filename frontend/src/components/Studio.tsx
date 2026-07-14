@@ -171,6 +171,12 @@ export function Studio() {
             <button className="primary" onClick={runImitation} disabled={busy || (!sourceText.trim() && !sourceUrl.trim())}>
               {busy?<Loader2 className="spin" size={16}/>:<CopyCheck size={16}/>}生成原创仿写
             </button>
+            {result?.data?.copyright_warning && (
+              <div className={result.data.copyright_risk === "manual_review" ? "danger-text" : "muted"}>
+                <strong>版权/相似度提示：</strong>{result.data.copyright_warning}
+                {result.data.similarity && <span> 相似度 {Math.round((result.data.similarity.similarity || 0) * 100)}%，处理建议：{result.data.similarity.action}</span>}
+              </div>
+            )}
             {result?.data && <pre className="outline-block">{JSON.stringify(result.data, null, 2)}</pre>}
           </div>
         )}

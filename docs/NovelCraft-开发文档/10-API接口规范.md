@@ -24,6 +24,8 @@
 | GET | `/api/v1/library/books?project_id=` | 正式书库列表；按创建时间倒序返回书名、简介、类型、创建时间、最新章节、章节数、字数 |
 | GET | `/api/v1/library/books/{book_id}` | 正式书库详情；返回书名、简介、大纲、最新章节、全部章节、知识条目 |
 | POST | `/api/v1/ranking/import?project_id=` | 用户授权的 CSV/JSON 榜单元数据导入；1–200 条，owner/editor 限定，低置信度快照 `needs_review` |
+| POST | `/api/v1/ranking/capture-import?project_id=` | 用户可见浏览器/OCR 采集工件导入；支持 `fanqie/qidian/zongheng/manual`，保留 screenshot/artifact/置信度证据；非成功状态写失败快照 |
+| POST | `/api/v1/ranking/snapshots/{id}/confirm-capture` | owner/editor 人工确认低置信 OCR/部分采集快照；确认后 `capture_status=succeeded`，才允许市场分析 |
 | POST | `/api/v1/ranking/snapshots/{id}/validate-metadata` | Open Library 交叉校验；六态写入 `ranking_items.metadata_status`，证据并入 `metrics.validation` |
 | POST | `/novels/from-inspiration` | 次要灵感入口，复用成书工作流并自动入库 |
 | POST | `/hotspots/scan-and-generate` | 热点分析并生成多平台内容矩阵 |

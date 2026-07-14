@@ -15,7 +15,7 @@ from pydantic import ConfigDict
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
 from app.services.ranking_adapter import RANKING_FETCHERS, normalize_ranking_items
-from app.services.ranking_capture import validate_with_open_library
+from app.services.ranking_capture import ALLOWED_CAPTURE_SOURCES, CaptureResult, validate_with_open_library
 from app.gateway import BudgetExceeded, ProviderError, complete
 
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
@@ -77,6 +77,32 @@ class RankingImportRequest(BaseModel):
 
     def validated_items(self) -> list[dict[str, Any]]:
         return [item.model_dump() for item in self.items]
+
+
+class RankingCaptureImportRequest(BaseModel):
+    """Visible-browser/OCR capture artifact import.
+
+    This accepts the same JSON contract emitted by ``backend/scripts/capture_ranking.py``
+    or a legal OCR worker. It deliberately does not fetch protected pages or solve
+    challenges server-side.
+    """
+    model_config = ConfigDict(extra="allow")
+    source: str = Field(pattern=r"^(fanqie|qidian|zongheng|manual)$")
+    status: str = Field(default="succeeded", pattern=r"^(succeeded|user_action_required|ocr_required|schema_changed|failed)$")
+    collector: str = Field(default="visible_browser", max_length=120)
+    captured_at: str | None = None
+    source_label: str | None = Field(default=None, max_length=100)
+    source_url: str | None = Field(default=None, max_length=1000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = Field(default=None, max_length=1000)
+    items: list[RankingImportItem] = Field(default_factory=list, max_length=200)
+
+    @field_validator("source")
+    @classmethod
+    def source_allowed(cls, value: str) -> str:
+        if value not in ALLOWED_CAPTURE_SOURCES:
+            raise ValueError("unsupported capture source")
+        return value
 
 
 class SnapshotMetadataValidationRequest(BaseModel):
@@ -265,6 +291,87 @@ def import_ranking(payload: RankingImportRequest, project_id: str, user: dict = 
         if hasattr(db, "commit"):
             db.commit()
         return ok({**result, "raw_count": len(raw_items), "dropped_count": len(raw_items) - len(normalized)})
+    finally:
+        db.close()
+
+
+@router.post("/capture-import")
+def import_capture_artifact(payload: RankingCaptureImportRequest, project_id: str, user: dict = Depends(get_current_user)):
+    """Import a visible-browser/OCR ranking capture artifact into product tables.
+
+    - ``succeeded`` artifacts are normalized and persisted with collector,
+      screenshot/artifact evidence and per-item confidence.
+    - ``user_action_required`` / ``ocr_required`` / ``schema_changed`` artifacts
+      become failed evidence snapshots instead of empty successes.
+    - Low-confidence OCR rows produce ``capture_status=needs_review`` and are
+      blocked from market analysis until an editor confirms the capture.
+    """
+    db = connect()
+    try:
+        require_member(db, project_id, user, write=True)
+        display_name = payload.source_label or SOURCE_NAMES.get(payload.source, payload.source)
+        evidence = dict(payload.evidence or {})
+        if payload.source_url:
+            evidence["source_url"] = payload.source_url
+        if payload.captured_at:
+            evidence["captured_at"] = payload.captured_at
+        capture = CaptureResult(
+            source=payload.source,
+            status=payload.status,
+            items=[item.model_dump() for item in payload.items],
+            evidence={**evidence, "collector": payload.collector},
+            error=payload.error,
+        )
+        adapter_items = capture.as_adapter_items()
+        error_item = next((item for item in adapter_items if item.get("error")), None)
+        normalized = normalize_ranking_items(payload.source, adapter_items)
+        assessment = _ranking_snapshot_status(normalized, MIN_AUTOMATED_CONFIDENCE)
+        capture_status = payload.status if payload.status != "succeeded" else assessment["status"]
+        error = (error_item or {}).get("error") if error_item else None
+        if error_item and error_item.get("capture_status"):
+            error = f"[{error_item['capture_status']}] {error}"
+        result = _persist_ranking_snapshot(
+            db,
+            project_id=project_id,
+            source_key=payload.source,
+            display_name=display_name,
+            normalized_items=normalized,
+            capture_status=capture_status,
+            error=error,
+        )
+        db.commit()
+        return ok({**result, "raw_count": len(adapter_items), "dropped_count": len(adapter_items) - len(normalized)})
+    finally:
+        db.close()
+
+
+@router.post("/snapshots/{snapshot_id}/confirm-capture")
+def confirm_capture(snapshot_id: str, user: dict = Depends(get_current_user)):
+    """Mark a low-confidence capture as manually reviewed by an owner/editor."""
+    db = connect()
+    try:
+        snapshot = db.execute("SELECT * FROM ranking_snapshots WHERE id=%s", (snapshot_id,)).fetchone()
+        if not snapshot:
+            raise HTTPException(404, "snapshot not found")
+        require_member(db, snapshot["project_id"], user, write=True)
+        if snapshot["status"] != "succeeded":
+            raise HTTPException(409, "only persisted successful snapshots can be confirmed")
+        if snapshot.get("capture_status") not in {"needs_review", "partial"}:
+            return ok({"snapshot_id": snapshot_id, "capture_status": snapshot.get("capture_status") or "succeeded",
+                       "status": "already_confirmed"})
+        evidence_patch = {
+            "manual_review": {
+                "reviewed_by": user["id"],
+                "reviewed_at": "now",
+                "reason": "editor confirmed visible-browser/OCR ranking metadata",
+            }
+        }
+        db.execute("""UPDATE ranking_snapshots
+                      SET capture_status='succeeded',
+                          evidence=COALESCE(evidence,'{}'::jsonb) || %s
+                      WHERE id=%s""", (encode(evidence_patch), snapshot_id))
+        db.commit()
+        return ok({"snapshot_id": snapshot_id, "capture_status": "succeeded", "status": "confirmed"})
     finally:
         db.close()
 

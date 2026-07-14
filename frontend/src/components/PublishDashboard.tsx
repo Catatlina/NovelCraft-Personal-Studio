@@ -15,10 +15,31 @@ export function PublishDashboard() {
   const [inviteRole, setInviteRole] = useState("editor");
   const [logs, setLogs] = useState<any[]>([]);
   const [sensitiveResult, setSensitiveResult] = useState<{ passed: boolean; blocked_words: string[] } | null>(null);
+  // NC-PUB-003: 效果看板 + AI 反哺建议
+  const [dashboard, setDashboard] = useState<any>(null);
+  const [feedback, setFeedback] = useState<any>(null);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
 
   useEffect(() => {
     api("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
   }, [result]);
+
+  useEffect(() => {
+    if (tab === "roi") api("/api/v1/analytics/dashboard").then(d=>setDashboard(d.data||null)).catch(()=>setDashboard(null));
+  }, [tab]);
+
+  async function loadFeedback() {
+    setFeedbackBusy(true); setFeedbackError("");
+    try {
+      const projects = await api("/api/v1/projects");
+      const r = await api("/api/v1/analytics/feedback", { method: "POST",
+        body: JSON.stringify({ project_id: projects.data?.[0]?.id }) });
+      setFeedback(r.data || null);
+    } catch (caught) {
+      setFeedbackError(`AI 反哺建议失败：${String(caught)}`);
+    } finally { setFeedbackBusy(false); }
+  }
 
   async function doPublish() {
     if (!contentId) return;
@@ -125,7 +146,53 @@ export function PublishDashboard() {
 
         {tab === "roi" && (
           <div>
-            <h3>发布记录</h3>
+            {dashboard && (
+              <div data-testid="performance-dashboard">
+                <h3>效果看板</h3>
+                <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:8}}>
+                  <span>阅读 <strong>{dashboard.totals?.total_reads ?? 0}</strong></span>
+                  <span>点赞 <strong>{dashboard.totals?.total_likes ?? 0}</strong></span>
+                  <span>分享 <strong>{dashboard.totals?.total_shares ?? 0}</strong></span>
+                  <span>收益 <strong>¥{dashboard.totals?.total_revenue ?? 0}</strong></span>
+                  <span>覆盖内容 <strong>{dashboard.totals?.total_posts ?? 0}</strong></span>
+                </div>
+                {(dashboard.roi_by_platform || []).length > 0 && (
+                  <table><thead><tr><th>平台</th><th>条数</th><th>阅读</th><th>收益</th><th>RPM</th></tr></thead>
+                  <tbody>
+                    {dashboard.roi_by_platform.map((p:any)=><tr key={p.platform}>
+                      <td>{p.platform}</td><td>{p.posts}</td><td>{p.reads}</td><td>¥{p.revenue}</td><td>{p.rpm}</td>
+                    </tr>)}
+                  </tbody></table>
+                )}
+                <h3 style={{marginTop:12}}>选题反哺</h3>
+                {(dashboard.topic_suggestions || []).map((s:any,i:number)=>(
+                  <div key={i} style={{fontSize:13,padding:"4px 0"}}>
+                    {s.suggestion}
+                    {s.source_title && <small className="muted">（依据：{s.source_title}，{s.reads} 阅读）</small>}
+                  </div>
+                ))}
+                <button disabled={feedbackBusy} onClick={()=>void loadFeedback()} style={{marginTop:8}}>
+                  AI 深度反哺建议
+                </button>
+                {feedbackError && <div className="error">{feedbackError}</div>}
+                {feedback?.status === "no_data" && <div className="muted">{feedback.message}</div>}
+                {feedback?.status === "ok" && (
+                  <div style={{marginTop:8,fontSize:13}} data-testid="ai-feedback">
+                    {(feedback.topic_suggestions || []).map((s:any,i:number)=>(
+                      <div key={i} style={{padding:"4px 0"}}>
+                        <strong>{s.suggestion}</strong>
+                        <div className="muted">{s.rationale}{s.based_on?.length ? `（依据内容：${s.based_on.length} 篇）` : ""}</div>
+                      </div>
+                    ))}
+                    {(feedback.writing_advice || []).length > 0 && <div style={{marginTop:6}}>
+                      <strong>写作建议</strong>
+                      {feedback.writing_advice.map((a:string,i:number)=><div key={i}>· {a}</div>)}
+                    </div>}
+                  </div>
+                )}
+              </div>
+            )}
+            <h3 style={{marginTop:16}}>发布记录</h3>
             <table><thead><tr><th>平台</th><th>模式</th><th>状态</th><th>时间</th></tr></thead>
             <tbody>
               {records.slice(0,20).map((r:any)=><tr key={r.id}>

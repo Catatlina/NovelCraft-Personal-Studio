@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap } from "lucide-react";
-import { api } from "../lib/api";
+import { api, getApiKey, getApiUrl, getModel, setApiKey, setApiUrl, setModel } from "../lib/api";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string,unknown>; fallback_json: any[] };
@@ -40,9 +40,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
   // Load saved API config on mount
   useEffect(() => {
-    import("../lib/api").then(({ getApiKey, getApiUrl, getModel }) => {
-      setApiKeyLocal(getApiKey()); setApiUrlLocal(getApiUrl()); setModelLocal(getModel());
-    });
+    setApiKeyLocal(getApiKey()); setApiUrlLocal(getApiUrl()); setModelLocal(getModel());
   }, []);
 
   useEffect(() => {
@@ -115,7 +113,6 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   }
 
   async function saveApiConfig() {
-    const { setApiKey, setApiUrl, setModel } = await import("../lib/api");
     setApiKey(apiKey); setApiUrl(apiUrl); setModel(model);
     setSaved(true);
     setMsg("API 配置已保存");

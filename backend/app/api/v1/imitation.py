@@ -15,6 +15,11 @@ from app.services.style_learn import check_similarity, learn_style
 
 router = APIRouter(prefix="/api/v1/imitation", tags=["imitation"])
 
+COPYRIGHT_WARNING = (
+    "仿写仅可用于用户有权使用的文本风格学习；系统会按相似度红线阻断高相似输出，"
+    "但该提示不构成法律意见，发布前仍需人工确认版权与平台规则风险。"
+)
+
 
 class ImitationRequest(BaseModel):
     project_id: str
@@ -68,7 +73,9 @@ def imitate(payload: ImitationRequest, user: dict = Depends(get_current_user)):
         raise HTTPException(502, {"code": "AI_OUTPUT_INVALID", "detail": "imitation output text is empty"})
     similarity = check_similarity(source, text)
     if similarity.get("verdict") == "blocked":
-        raise HTTPException(422, {"code": "IMITATION_SIMILARITY_BLOCKED", **similarity})
+        raise HTTPException(422, {"code": "IMITATION_SIMILARITY_BLOCKED", **similarity,
+                                  "copyright_warning": COPYRIGHT_WARNING})
+    copyright_risk = "manual_review" if similarity.get("verdict") == "warning" else "low"
     style_profile = output.get("style_profile") or learn_style([source])
     content_id = new_id()
     db = connect()
@@ -78,11 +85,14 @@ def imitate(payload: ImitationRequest, user: dict = Depends(get_current_user)):
                    (content_id, payload.project_id, output.get("title", "仿写样稿")[:200],
                     encode({"type": "doc", "content": [{"type": "paragraph", "text": text}]}),
                     encode({"source_url": payload.source_url, "instruction": payload.instruction,
-                            "style_profile": style_profile, "similarity": similarity}),
+                            "style_profile": style_profile, "similarity": similarity,
+                            "copyright_risk": copyright_risk, "copyright_warning": COPYRIGHT_WARNING}),
                     user["id"]))
         db.commit()
     finally:
         db.close()
     return {"code": 0, "message": "ok", "data": {"content_id": content_id, **output,
                                                   "style_profile": style_profile,
-                                                  "similarity": similarity}}
+                                                  "similarity": similarity,
+                                                  "copyright_risk": copyright_risk,
+                                                  "copyright_warning": COPYRIGHT_WARNING}}

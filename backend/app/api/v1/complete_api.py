@@ -327,6 +327,33 @@ def get_topic_suggestions_from_performance(user: dict = Depends(get_current_user
     return ok(generate_topic_suggestions_from_data(project_ids=user_project_ids(user)))
 
 
+@router.get("/analytics/dashboard")
+def get_performance_dashboard(user: dict = Depends(get_current_user)):
+    """NC-PUB-003: 效果看板 — 指标口径 + 汇总 + 平台 ROI + Top 内容 + 可追溯选题建议。"""
+    from app.services.publish_hub import build_performance_dashboard
+    return ok(build_performance_dashboard(project_ids=user_project_ids(user)))
+
+
+class PerformanceFeedbackRequest(BaseModel):
+    project_id: str
+
+
+@router.post("/analytics/feedback")
+def get_performance_feedback(payload: PerformanceFeedbackRequest, user: dict = Depends(get_current_user)):
+    """NC-PUB-003: 真实 AI 反哺建议，绑定源数据 post_id 可追溯；Provider 失败显式 502。"""
+    from app.gateway import BudgetExceeded, ProviderError
+    from app.services.publish_hub import performance_feedback
+    db = connect()
+    try:
+        require_member(db, payload.project_id, user, write=True)
+    finally:
+        db.close()
+    try:
+        return ok(performance_feedback(payload.project_id, project_ids=user_project_ids(user)))
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
+
+
 # --- NC-SEA-001~003: Overseas markets, translation, publishing ---
 
 @router.get("/markets")
@@ -342,15 +369,26 @@ def check_market_compliance_endpoint(market: str, content: str, user: dict = Dep
 
 
 @router.post("/translate")
-def translate_text_endpoint(text: str, source_lang: str = "zh", target_lang: str = "en", user: dict = Depends(get_current_user)):
+def translate_text_endpoint(text: str, project_id: str, source_lang: str = "zh", target_lang: str = "en",
+                            novel_id: str = "", user: dict = Depends(get_current_user)):
     from app.services.overseas_complete import translate_text
-    return ok(translate_text(text, source_lang, target_lang))
+    from app.gateway import BudgetExceeded, ProviderError
+    require_project_member(project_id, user, write=True)
+    if novel_id:
+        require_novel_member(novel_id, user)
+    try:
+        return ok(translate_text(text, source_lang, target_lang, project_id=project_id, novel_id=novel_id))
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
 
 
 @router.post("/translate/localize")
-def localize_names_endpoint(chinese_name: str, target_market: str, user: dict = Depends(get_current_user)):
+def localize_names_endpoint(chinese_name: str, target_market: str, novel_id: str = "",
+                            user: dict = Depends(get_current_user)):
     from app.services.overseas_complete import localize_names
-    return ok(localize_names(chinese_name, target_market))
+    if novel_id:
+        require_novel_member(novel_id, user)
+    return ok(localize_names(chinese_name, target_market, novel_id=novel_id))
 
 
 @router.post("/revenue/convert")
@@ -362,4 +400,5 @@ def convert_revenue_endpoint(amount: float, from_currency: str, to_currency: str
 @router.post("/overseas/publish")
 def publish_overseas_endpoint(content_id: str, market: str, platform: str, user: dict = Depends(get_current_user)):
     from app.services.overseas_complete import publish_overseas
-    return ok(publish_overseas(content_id, market, platform))
+    project_id = require_content_member(content_id, user, write=True)
+    return ok(publish_overseas(content_id, market, platform, project_id=project_id))

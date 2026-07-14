@@ -1,16 +1,16 @@
 """NC-HM-001: Hotspot ingestion — fetch, dedup, trend, freshness scoring."""
 from __future__ import annotations
 import json, os, urllib.request, hashlib, urllib.parse
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from app.db import connect, encode, new_id
 
 HOTSPOT_SOURCES = {
-    "baidu": {"name": "百度热搜", "url": "https://top.baidu.com/board?tab=realtime", "kind": "baidu_html"},
-    "zhihu": {"name": "知乎热榜", "url": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20", "kind": "zhihu_json"},
-    "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch", "kind": "weibo_json"},
-    "xiaohongshu": {"name": "小红书热点", "url_env": "HOTSPOT_XIAOHONGSHU_URL", "kind": "generic_json"},
-    "douyin": {"name": "抖音热点", "url_env": "HOTSPOT_DOUYIN_URL", "kind": "generic_json"},
-    "x": {"name": "X Trends", "url_env": "HOTSPOT_X_URL", "kind": "generic_json"},
+    "baidu": {"name": "百度热搜", "url": "https://top.baidu.com/board?tab=realtime", "history_url_env": "HOTSPOT_BAIDU_HISTORY_URL", "kind": "baidu_html"},
+    "zhihu": {"name": "知乎热榜", "url": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20", "history_url_env": "HOTSPOT_ZHIHU_HISTORY_URL", "kind": "zhihu_json"},
+    "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch", "history_url_env": "HOTSPOT_WEIBO_HISTORY_URL", "kind": "weibo_json"},
+    "xiaohongshu": {"name": "小红书热点", "url_env": "HOTSPOT_XIAOHONGSHU_URL", "history_url_env": "HOTSPOT_XIAOHONGSHU_HISTORY_URL", "kind": "generic_json"},
+    "douyin": {"name": "抖音热点", "url_env": "HOTSPOT_DOUYIN_URL", "history_url_env": "HOTSPOT_DOUYIN_HISTORY_URL", "kind": "generic_json"},
+    "x": {"name": "X Trends", "url_env": "HOTSPOT_X_URL", "history_url_env": "HOTSPOT_X_HISTORY_URL", "kind": "generic_json"},
 }
 
 DUPLICATE_WINDOW_HOURS = 24
@@ -62,6 +62,27 @@ def _configured_url(cfg: dict, connection: dict | None = None) -> str:
     return os.getenv(env_name, "").strip() if env_name else ""
 
 
+def _configured_history_url(cfg: dict, collection_date: str, connection: dict | None = None) -> str:
+    """Return a real configured historical hotspot URL for one date.
+
+    Many public trend endpoints expose only the current list. We therefore only
+    backfill dates from an explicitly configured official/authorized archive URL;
+    if absent, callers must surface ``unsupported_history`` instead of inventing
+    historical data.
+    """
+    raw = ""
+    if connection and str(connection.get("history_url", "")).strip():
+        raw = str(connection["history_url"]).strip()
+    elif cfg.get("history_url"):
+        raw = str(cfg["history_url"])
+    else:
+        env_name = str(cfg.get("history_url_env", ""))
+        raw = os.getenv(env_name, "").strip() if env_name else ""
+    if not raw:
+        return ""
+    return raw.replace("{date}", collection_date).replace("{yyyy-mm-dd}", collection_date)
+
+
 def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]:
     kind = cfg.get("kind", "generic_json")
     if kind == "baidu_html":
@@ -108,44 +129,50 @@ def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]
     return parsed
 
 
+def _fetch_source_items(source_key: str, cfg: dict, url: str, connection: dict | None = None) -> list[dict]:
+    timeout = int(os.getenv("HOTSPOT_FETCH_TIMEOUT", "10"))
+    try:
+        opener = _hotspot_opener(str((connection or {}).get("proxy", "")))
+    except TypeError as exc:
+        if "positional" not in str(exc) and "argument" not in str(exc):
+            raise
+        opener = _hotspot_opener()
+    headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json", "Referer": "https://www." + source_key + ".com/"}
+    cookie = _source_cookie(source_key, connection)
+    if cookie:
+        if source_key == "x" and (connection or {}).get("bearer_token"):
+            headers["Authorization"] = f"Bearer {cookie}"
+        else:
+            headers["Cookie"] = cookie
+    req = urllib.request.Request(url, headers=headers)
+    with opener.open(req, timeout=timeout) as resp:
+        return _parse_hotspot_payload(source_key, cfg, resp.read())
+
+
 def fetch_hotspots(user_id: str = "") -> tuple[list[dict], dict[str, str]]:
     """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4)."""
     results: list[dict] = []
     source_status: dict[str, str] = {}
-    timeout = int(os.getenv("HOTSPOT_FETCH_TIMEOUT", "10"))
     for key, cfg in HOTSPOT_SOURCES.items():
         try:
             connection = _connection_for_source(key, user_id)
-            try:
-                opener = _hotspot_opener(str(connection.get("proxy", "")))
-            except TypeError as exc:
-                if "positional" not in str(exc) and "argument" not in str(exc):
-                    raise
-                opener = _hotspot_opener()
             url = _configured_url(cfg, connection)
             if not url:
                 source_status[key] = f"error: {cfg.get('url_env') or 'visual connection'} is not configured"
                 continue
-            headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json", "Referer": "https://www." + key + ".com/"}
-            cookie = _source_cookie(key, connection)
-            if cookie:
-                if key == "x" and connection.get("bearer_token"):
-                    headers["Authorization"] = f"Bearer {cookie}"
-                else:
-                    headers["Cookie"] = cookie
-            req = urllib.request.Request(url, headers=headers)
-            with opener.open(req, timeout=timeout) as resp:
-                parsed_items = _parse_hotspot_payload(key, cfg, resp.read())
+            parsed_items = _fetch_source_items(key, cfg, url, connection)
             count = 0
             for item in parsed_items:
                 title = item.get("title", "")
                 if not title: continue
+                fetched_at = datetime.utcnow().isoformat()
                 results.append({
                     "source": key, "title": title.strip(),
                     "category": item.get("category", "general"),
-                    "raw_score": item.get("detail_text", item.get("raw_hot", 0)),
-                    "url": item.get("target", {}).get("url", ""),
-                    "fetched_at": datetime.utcnow().isoformat(),
+                    "raw_score": item.get("raw_score", item.get("detail_text", item.get("raw_hot", 0))),
+                    "url": item.get("url", item.get("target", {}).get("url", "")),
+                    "fetched_at": fetched_at,
+                    "collection_date": fetched_at[:10],
                     "dedup_key": _dedup_key(title, key),
                 })
                 count += 1
@@ -153,6 +180,79 @@ def fetch_hotspots(user_id: str = "") -> tuple[list[dict], dict[str, str]]:
         except Exception as exc:
             source_status[key] = f"error: {exc}"
     return results, source_status
+
+
+def backfill_hotspot_history(days: int = 7, user_id: str = "") -> dict:
+    """Collect historical hotspot snapshots from configured archive URLs.
+
+    This is intentionally evidence-first: dates without a configured historical
+    endpoint are reported as ``unsupported_history`` and no synthetic rows are
+    created. If a source exposes a current endpoint only, today's current
+    snapshot can still be collected by ``fetch_hotspots``; it is not treated as
+    proof that past dates were available.
+    """
+    if days < 1 or days > 30:
+        raise ValueError("days must be between 1 and 30")
+    today = date.today()
+    run_id = new_id()
+    by_date: dict[str, dict[str, str]] = {}
+    inserted_total = 0
+    fetched_total = 0
+    dates_with_rows: set[str] = set()
+    for offset in range(days - 1, -1, -1):
+        collection_day = today - timedelta(days=offset)
+        collection_date = collection_day.isoformat()
+        by_date[collection_date] = {}
+        fetched_at = datetime.combine(collection_day, time(hour=12)).isoformat()
+        for key, cfg in HOTSPOT_SOURCES.items():
+            try:
+                connection = _connection_for_source(key, user_id)
+                url = _configured_history_url(cfg, collection_date, connection)
+                if not url:
+                    by_date[collection_date][key] = "unsupported_history: configure history_url with {date}"
+                    continue
+                parsed_items = _fetch_source_items(key, cfg, url, connection)
+                items: list[dict] = []
+                for item in parsed_items:
+                    title = str(item.get("title", "")).strip()
+                    if not title:
+                        continue
+                    items.append({
+                        "source": key,
+                        "title": title,
+                        "category": item.get("category", "general"),
+                        "raw_score": item.get("raw_score", item.get("detail_text", item.get("raw_hot", 0))),
+                        "url": item.get("url", item.get("target", {}).get("url", "")),
+                        "fetched_at": fetched_at,
+                        "collection_date": collection_date,
+                        "collection_run_id": run_id,
+                        "dedup_key": _dedup_key(title, key),
+                    })
+                fetched_total += len(items)
+                inserted = store_hotspots(items, fetched_at=fetched_at, collection_date=collection_date, collection_run_id=run_id)
+                inserted_total += inserted
+                if items:
+                    dates_with_rows.add(collection_date)
+                by_date[collection_date][key] = f"ok: fetched={len(items)}, inserted={inserted}" if items else "empty"
+            except Exception as exc:
+                by_date[collection_date][key] = f"error: {exc}"
+    unsupported_sources = sorted({
+        key
+        for statuses in by_date.values()
+        for key, status in statuses.items()
+        if status.startswith("unsupported_history")
+    })
+    return {
+        "run_id": run_id,
+        "days_requested": days,
+        "date_range": [(today - timedelta(days=days - 1)).isoformat(), today.isoformat()],
+        "dates_with_rows": sorted(dates_with_rows),
+        "fetched": fetched_total,
+        "inserted": inserted_total,
+        "sources": by_date,
+        "unsupported_sources": unsupported_sources,
+        "status": "ok" if len(dates_with_rows) == days else ("partial" if dates_with_rows else "unsupported"),
+    }
 
 
 def _safe_score(raw: str) -> float:
@@ -197,15 +297,22 @@ def compute_trend(item_title: str, source: str, current_score: float) -> str:
     return "stable"
 
 
-def store_hotspots(items: list[dict]) -> int:
+def store_hotspots(items: list[dict], fetched_at: str | None = None, collection_date: str | None = None, collection_run_id: str = "") -> int:
     db = connect()
     count = 0
-    now_str = datetime.utcnow().isoformat()
+    now_str = fetched_at or datetime.utcnow().isoformat()
+    default_collection_date = collection_date or now_str[:10]
     for item in items:
-        # Dedup: check if same title+source within window
+        item_collection_date = str(item.get("collection_date") or default_collection_date)
+        item_dedup_key = item.get("dedup_key", "")
+        # Dedup current snapshots by the 24h window, and historical snapshots by
+        # source/title/date so the same topic can legitimately appear on multiple days.
         existing = db.execute(
-            "SELECT id FROM knowledge_items WHERE kind='hotspot' AND meta->>'dedup_key'=%s AND created_at > now() - interval '24 hours'",
-            (item.get("dedup_key", ""),),
+            """SELECT id FROM knowledge_items
+               WHERE kind='hotspot' AND meta->>'dedup_key'=%s
+               AND COALESCE(meta->>'collection_date', left(meta->>'fetched_at', 10))=%s
+               AND (%s <> %s OR created_at > now() - interval '24 hours')""",
+            (item_dedup_key, item_collection_date, item_collection_date, datetime.utcnow().date().isoformat()),
         ).fetchone()
         if existing:
             # Update trend + freshness
@@ -216,18 +323,21 @@ def store_hotspots(items: list[dict]) -> int:
             continue
 
         trend = compute_trend(item.get("title", ""), item.get("source", ""), _safe_score(item.get("raw_score", 0)))
-        freshness = compute_freshness_score(now_str)
+        item_fetched_at = str(item.get("fetched_at") or now_str)
+        freshness = compute_freshness_score(item_fetched_at)
 
         db.execute(
             "INSERT INTO knowledge_items (id, kind, title, body, meta) VALUES (%s,%s,%s,%s,%s)",
             (new_id(), "hotspot", item.get("title", "")[:200],
-             json.dumps(item, ensure_ascii=False),
+             json.dumps({**item, "collection_date": item_collection_date, "fetched_at": item_fetched_at}, ensure_ascii=False),
              encode({
                  "source": item.get("source", ""), "score": item.get("raw_score", 0),
-                 "dedup_key": item.get("dedup_key", ""),
+                 "dedup_key": item_dedup_key,
                  "trend": trend, "freshness": round(freshness, 3),
                  "title": item.get("title", ""), "url": item.get("url", ""),
-                 "fetched_at": now_str,
+                 "fetched_at": item_fetched_at,
+                 "collection_date": item_collection_date,
+                 "collection_run_id": item.get("collection_run_id") or collection_run_id,
              })),
         )
         count += 1
@@ -273,4 +383,33 @@ def get_hotspot_trend_report() -> dict:
         "total_hotspots_24h": total["total"] if total else 0,
         "avg_freshness": round(float(fresh["avg_fresh"] or 0), 3) if fresh else 0,
         "trends": {t["trend"]: t["cnt"] for t in trends},
+    }
+
+
+def get_hotspot_history_report(days: int = 7) -> dict:
+    """Return stored historical evidence for the last N calendar days."""
+    if days < 1 or days > 30:
+        raise ValueError("days must be between 1 and 30")
+    db = connect()
+    rows = db.execute(
+        """SELECT COALESCE(meta->>'collection_date', left(meta->>'fetched_at', 10)) AS collection_date,
+                  meta->>'source' AS source,
+                  COUNT(*) AS cnt
+           FROM knowledge_items
+           WHERE kind='hotspot'
+             AND COALESCE(meta->>'collection_date', left(meta->>'fetched_at', 10)) >= to_char((CURRENT_DATE - (%s::int - 1)), 'YYYY-MM-DD')
+           GROUP BY collection_date, source
+           ORDER BY collection_date DESC, source ASC""",
+        (days,),
+    ).fetchall()
+    db.close()
+    by_date: dict[str, dict[str, int]] = {}
+    for row in rows:
+        collection_date = row["collection_date"] or "unknown"
+        by_date.setdefault(collection_date, {})[row["source"] or "unknown"] = int(row["cnt"])
+    return {
+        "days_requested": days,
+        "dates": by_date,
+        "dates_with_rows": sorted(by_date.keys()),
+        "total_rows": sum(sum(sources.values()) for sources in by_date.values()),
     }

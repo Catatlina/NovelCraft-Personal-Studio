@@ -270,6 +270,30 @@ class _MaterialSuggestionsOutput(_LenientOutput):
     recommended_tags: list[str] = Field(default_factory=list)
 
 
+class _TopicSuggestionItem(_LenientOutput):
+    suggestion: str = Field(min_length=2)
+    rationale: str = ""
+    based_on: list[str] = Field(default_factory=list)
+
+
+class _PerformanceFeedbackOutput(_LenientOutput):
+    topic_suggestions: list[_TopicSuggestionItem] = Field(min_length=1)
+    writing_advice: list[str] = Field(default_factory=list)
+
+
+class _TranslateSegmentOutput(_LenientOutput):
+    translated: str = Field(min_length=1)
+
+
+class _CulturalLocalizeOutput(_LenientOutput):
+    localized: str = Field(min_length=1)
+    notes: list[str] = Field(default_factory=list)
+
+
+class _LocalizeNamesOutput(_LenientOutput):
+    name_map: dict[str, str] = Field(default_factory=dict)
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -306,6 +330,10 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "hm_title_variants": _TitleVariantsOutput,
     "gen_video_script": _VideoScriptOutput,
     "hm_material_suggestions": _MaterialSuggestionsOutput,
+    "performance_feedback": _PerformanceFeedbackOutput,
+    "translate_segment": _TranslateSegmentOutput,
+    "cultural_localize": _CulturalLocalizeOutput,
+    "localize_names": _LocalizeNamesOutput,
 }
 
 
