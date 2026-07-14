@@ -73,3 +73,55 @@ def test_library_lists_newest_first_and_detail_contains_book_shape():
     assert data["outline"] == "三幕式大纲"
     assert data["latest_chapter"]["title"] == "第二章"
     assert [chapter["title"] for chapter in data["chapters"]] == ["第一章", "第二章"]
+
+
+def test_library_server_side_search_filter_sort():
+    """NC-LIB-002: q/status/sort are applied server-side with whitelisted ORDER BY."""
+    from app.db import connect, encode, new_id
+
+    client, headers, project_id = _auth_project()
+    a_id, b_id, c_id = new_id(), new_id(), new_id()
+
+    db = connect()
+    db.execute(
+        """INSERT INTO contents (id,project_id,type,title,body,meta,status,created_at,updated_at)
+           VALUES (%s,%s,'novel','深渊猎手',%s,%s,'draft',now() - interval '3 day',now() - interval '3 day')""",
+        (a_id, project_id, encode({"type": "doc", "content": []}), encode({"synopsis": "玄幻冒险"})),
+    )
+    db.execute(
+        """INSERT INTO contents (id,project_id,type,title,body,meta,status,created_at,updated_at)
+           VALUES (%s,%s,'novel','都市医仙',%s,%s,'completed',now() - interval '2 day',now())""",
+        (b_id, project_id, encode({"type": "doc", "content": []}), encode({"idea": "都市异能爽文"})),
+    )
+    db.execute(
+        """INSERT INTO contents (id,project_id,type,title,body,meta,status,created_at,updated_at)
+           VALUES (%s,%s,'novel','安静的角落',%s,%s,'draft',now() - interval '1 day',now() - interval '2 day')""",
+        (c_id, project_id, encode({"type": "doc", "content": []}), encode({"synopsis": "文艺短篇"})),
+    )
+    db.commit(); db.close()
+
+    # q searches title and synopsis/idea
+    by_title = client.get("/api/v1/library/books", headers=headers,
+                          params={"project_id": project_id, "q": "深渊"}).json()["data"]
+    assert [b["title"] for b in by_title] == ["深渊猎手"]
+    by_synopsis = client.get("/api/v1/library/books", headers=headers,
+                             params={"project_id": project_id, "q": "爽文"}).json()["data"]
+    assert [b["title"] for b in by_synopsis] == ["都市医仙"]
+
+    # status filter
+    completed = client.get("/api/v1/library/books", headers=headers,
+                           params={"project_id": project_id, "status": "completed"}).json()["data"]
+    assert [b["title"] for b in completed] == ["都市医仙"]
+
+    # sort=updated puts the most recently edited first; sort=title is lexicographic
+    updated = client.get("/api/v1/library/books", headers=headers,
+                         params={"project_id": project_id, "sort": "updated"}).json()["data"]
+    assert updated[0]["title"] == "都市医仙"
+    titles = client.get("/api/v1/library/books", headers=headers,
+                        params={"project_id": project_id, "sort": "title"}).json()["data"]
+    assert [b["title"] for b in titles] == sorted(b["title"] for b in titles)
+
+    # unknown sort key falls back to created DESC instead of erroring/injecting
+    fallback = client.get("/api/v1/library/books", headers=headers,
+                          params={"project_id": project_id, "sort": "id; DROP TABLE contents"}).json()["data"]
+    assert [b["title"] for b in fallback][:3] == ["安静的角落", "都市医仙", "深渊猎手"]

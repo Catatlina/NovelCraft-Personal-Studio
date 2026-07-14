@@ -23,7 +23,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   // NC-LIB-002: search, filter, sort, pagination
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [sortBy, setSortBy] = useState<"created" | "title" | "chapters">("created");
+  const [sortBy, setSortBy] = useState<"created" | "updated" | "title" | "chapters">("created");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 10;
   const pollers = useRef<Record<string, number>>({});
@@ -162,6 +162,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     return true;
   }).sort((a, b) => {
     if (sortBy === "title") return a.title.localeCompare(b.title);
+    if (sortBy === "updated") return new Date(b.updated_at || b.created_at || "").getTime() - new Date(a.updated_at || a.created_at || "").getTime();
     if (sortBy === "chapters") return (b.chapter_count || completions[b.id]?.total_chapters || 0) - (a.chapter_count || completions[a.id]?.total_chapters || 0);
     return new Date(b.created_at || "").getTime() - new Date(a.created_at || "").getTime();
   });
@@ -222,6 +223,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       </select>
       <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
         <option value="created">最新创建</option>
+        <option value="updated">最近编辑</option>
         <option value="title">按书名</option>
         <option value="chapters">按章节数</option>
       </select>

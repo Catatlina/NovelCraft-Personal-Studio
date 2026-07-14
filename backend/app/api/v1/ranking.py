@@ -500,11 +500,30 @@ def list_topics(project_id: str, user: dict = Depends(get_current_user)):
     db.close(); return ok(data)
 
 
+# NC-LIB-002: whitelisted server-side sorts — client passes a key, never SQL.
+LIBRARY_SORTS = {
+    "created": "n.created_at DESC, n.id DESC",
+    "updated": "n.updated_at DESC, n.id DESC",
+    "title": "n.title ASC, n.id DESC",
+}
+
+
 @router.get("/library/books")
 @library_router.get("/books")
 def list_books(project_id: str, limit: int = 100, offset: int = 0,
+               q: str = "", status: str = "", sort: str = "created",
                user: dict = Depends(get_current_user)):
     db = connect(); require_member(db, project_id, user)
+    order_by = LIBRARY_SORTS.get(sort, LIBRARY_SORTS["created"])
+    extra_where = ""
+    params: list = [project_id]
+    if q.strip():
+        like = f"%{q.strip()}%"
+        extra_where += " AND (n.title ILIKE %s OR COALESCE(n.meta->>'synopsis','') ILIKE %s OR COALESCE(n.meta->>'idea','') ILIKE %s)"
+        params += [like, like, like]
+    if status.strip():
+        extra_where += " AND n.status = %s"
+        params.append(status.strip())
     data = rows(db, """
         SELECT n.id,n.project_id,n.type,n.title,n.meta,n.status,n.created_at,n.updated_at,
                COALESCE(NULLIF(n.meta->>'synopsis',''), NULLIF(n.meta->>'idea',''), '') AS synopsis,
@@ -534,10 +553,10 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
             FROM contents c
             WHERE c.parent_id=n.id AND c.type='chapter' AND c.is_deleted=FALSE
         ) stats ON TRUE
-        WHERE n.project_id=%s AND n.type='novel' AND n.is_deleted=FALSE
-        ORDER BY n.created_at DESC, n.id DESC
+        WHERE n.project_id=%s AND n.type='novel' AND n.is_deleted=FALSE""" + extra_where + """
+        ORDER BY """ + order_by + """
         LIMIT %s OFFSET %s
-    """, (project_id, min(limit, 200), max(offset, 0)))
+    """, (*params, min(limit, 200), max(offset, 0)))
     db.close(); return ok(data)
 
 

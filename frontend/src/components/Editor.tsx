@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Save, RotateCcw } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 
@@ -28,6 +28,22 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     setConflictDismissed(false);
   }, [conflict?.id]);
 
+  // NC-LIB-003: debounced autosave — 3s after the last edit, only when the draft
+  // actually differs from the persisted chapter. Conflict resolution pauses it.
+  const saveRef = useRef(saveChapter);
+  saveRef.current = saveChapter;
+  const [autoSavedAt, setAutoSavedAt] = useState("");
+  const dirty = !!chapter && editorText !== serverText;
+  useEffect(() => {
+    if (!chapter || !dirty) return;
+    if (conflict && !conflictDismissed) return;
+    const timer = setTimeout(() => {
+      saveRef.current();
+      setAutoSavedAt(new Date().toLocaleTimeString());
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [editorText, chapter?.id, dirty, conflict?.id, conflictDismissed]);
+
   return (
     <div className="editor-grid">
       <div className="panel">
@@ -37,6 +53,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </select>
           <input value={chapter?.title ?? ""} readOnly style={{ flex: 1, background: "transparent", border: "none", fontSize: 18, fontWeight: 600 }} />
           <button onClick={saveChapter} disabled={!chapter}><Save size={16} />保存</button>
+          <small className="muted" data-testid="autosave-status">{dirty ? "未保存改动…" : autoSavedAt ? `已自动保存 ${autoSavedAt}` : ""}</small>
         </div>
         {streamPreview ? (
           <div className="panel" style={{ maxHeight: 160, overflowY: "auto", fontSize: 13, whiteSpace: "pre-wrap" }}>
