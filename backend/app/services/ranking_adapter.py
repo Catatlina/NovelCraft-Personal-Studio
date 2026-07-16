@@ -220,11 +220,13 @@ _QIDIAN_LABELS = {
 def fetch_qidian_ranking(rank_type: str = "hotsales") -> list[dict]:
     """Fetch 起点中文网 ranking.
     rank_type: 'hotsales'/'monthly'/'newbook'/'finished'/'recommend'/'collect'/'fans'
+    Requires China IP proxy (set RANKING_PROXY_URL).
     """
+    label = _QIDIAN_LABELS.get(rank_type, rank_type)
     url = _QIDIAN_MOBILE_URLS.get(rank_type, _QIDIAN_MOBILE_URLS["hotsales"])
     headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 Chrome/125.0.0.0 Mobile Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9",
     }
     try:
         req = urllib.request.Request(url, headers=headers)
@@ -234,77 +236,51 @@ def fetch_qidian_ranking(rank_type: str = "hotsales") -> list[dict]:
         return [{"source": "qidian", "degraded": True,
                  "error": f"Qidian unreachable: {e}"}]
 
-    # Try __INITIAL_STATE__ first
-    idx = html.find("__INITIAL_STATE__")
-    if idx >= 0:
-        start = idx + len("__INITIAL_STATE__")
-        end = html.find("</script>", start)
-        try:
-            json_str = html[start:end].strip().rstrip(";").strip()
-            json_str = re.sub(r"\bundefined\b", "null", json_str)
-            state = json.loads(json_str)
-            for key in ["rank", "data"]:
-                bl = state.get(key, {})
-                if isinstance(bl, dict):
-                    bl = bl.get("bookList", bl.get("list", bl.get("records", [])))
-                if isinstance(bl, list) and bl:
-                    results = []
-                    for item in bl:
-                        if not isinstance(item, dict):
-                            continue
-                        bid = str(item.get("bookId", item.get("bId", item.get("id", ""))))
-                        title = item.get("bookName", item.get("bName", item.get("name", "")))
-                        if not title or not bid:
-                            continue
-                        results.append({
-                            "rank": len(results) + 1,
-                            "title": title,
-                            "author": item.get("authorName", item.get("aName", item.get("author", ""))),
-                            "intro": str(item.get("bookDesc", item.get("desc", "")) or "")[:200],
-                            "word_count": item.get("wordCount", item.get("wordNumber", 0)),
-                            "category": item.get("categoryName", item.get("catName", "")),
-                            "source": "qidian",
-                            "source_book_id": bid,
-                            "url": f"https://m.qidian.com/book/{bid}/",
-                        })
-                    if results:
-                        return results
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # Fallback: HTML regex extraction
-    books = []
-    # Match: <a href="//m.qidian.com/book/{id}/" ...>title</a>
-    pattern = re.compile(
-        r'<a[^>]*href="//m\.qidian\.com/book/(\d+)/"[^>]*>([^<]+)</a>.*?'
-        r'<span[^>]*class="[^"]*author[^"]*"[^>]*>([^<]+)</span>',
-        re.DOTALL,
+    # Extract JSON from <script> tag: {"pageContext":{..."records":[...]}}
+    scripts = re.findall(
+        r'<script[^>]*>\s*(\{.*?"records"\s*:\s*\[.*?\})\s*</script>',
+        html, re.DOTALL,
     )
-    seen = set()
-    for m in pattern.finditer(html):
-        bid, title, author = m.group(1), m.group(2).strip(), m.group(3).strip()
-        if bid in seen or not title:
-            continue
-        seen.add(bid)
-        books.append({
-            "rank": len(books) + 1,
-            "title": title,
-            "author": author,
-            "category": _QIDIAN_LABELS.get(rank_type, rank_type),
-            "source": "qidian",
-            "source_book_id": bid,
-            "url": f"https://m.qidian.com/book/{bid}/",
-        })
-        if len(books) >= 30:
-            break
+    if scripts:
+        try:
+            data = __import__("json").JSONDecoder().raw_decode(scripts[0])[0]
+            records = (
+                data.get("pageContext", {})
+                .get("pageProps", {})
+                .get("pageData", {})
+                .get("records", [])
+            )
+        except Exception:
+            records = []
 
-    if not books:
-        return [{"source": "qidian", "degraded": True,
-                 "error": "Qidian HTML parser produced no items"}]
-    return books
+        if records:
+            results = []
+            for r in records:
+                if not isinstance(r, dict):
+                    continue
+                bid = str(r.get("bid", r.get("bookId", "")))
+                if not bid:
+                    continue
+                results.append({
+                    "rank": int(r.get("rankNum", len(results) + 1)),
+                    "title": str(r.get("bName", r.get("bookName", ""))),
+                    "author": str(r.get("bAuth", r.get("authorName", ""))),
+                    "intro": str(r.get("desc", ""))[:300],
+                    "word_count": str(r.get("cnt", "")),
+                    "category": f"{r.get('cat', '')}|{r.get('subCat', '')}",
+                    "rank_count": str(r.get("rankCnt", "")),
+                    "source": "qidian",
+                    "source_book_id": bid,
+                    "url": f"https://m.qidian.com/book/{bid}/",
+                })
+            return results
+
+    return [{"source": "qidian", "degraded": True,
+             "error": "Qidian page script JSON not found"}]
 
 
-# ============================================================
+
+
 # Source 3: 纵横中文网 — HTML regex
 # ============================================================
 
