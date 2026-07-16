@@ -182,8 +182,9 @@ def list_prompts(user: dict = Depends(require_admin_reads)):
 
 
 @router.get("/settings")
-def list_settings(user: dict = Depends(require_admin)):
-    """Read all settings (keys masked)."""
+def list_settings(user: dict = Depends(require_admin_reads)):
+    """Read all settings (keys masked). QA-003: reads use the read guard so a
+    single-user instance without NOVELCRAFT_ADMIN_EMAILS is not locked out."""
     db = connect()
     rows = db.execute("SELECT key, value, description, updated_at FROM settings ORDER BY key").fetchall()
     db.close()
