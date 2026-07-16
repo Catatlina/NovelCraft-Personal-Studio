@@ -16,6 +16,7 @@ Features:
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
 from functools import wraps
@@ -654,16 +655,74 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         client_mutation_id = f"bootstrap:{run_id}:{node_key}:v2"
 
         try:
-            output = complete(
-                run_id=run_id,
-                node_key=node_key,
-                project_id=project_id,
-                task_type=task_type or "",
-                prompt_name=f"bootstrap.{task_type}" if task_type else "",
-                variables=run_context,
-                client_mutation_id=client_mutation_id,
-            )
-            output = validate_task_output(task_type or "", output)
+            if task_type == "plan_idea":
+                # A planning model is not allowed to grade its own fidelity.
+                # Run an independent, recorded AI audit against the raw user
+                # request and feed any concrete defects into a fresh sample.
+                # The node cannot advance to title selection until the audit has
+                # zero contradictions and omissions.
+                fidelity_feedback: list[str] = []
+                output = {}
+                for fidelity_attempt in range(1, 4):
+                    plan_variables = {
+                        **run_context,
+                        "fidelity_feedback": "；".join(fidelity_feedback),
+                    }
+                    output = complete(
+                        run_id=run_id,
+                        node_key=node_key,
+                        project_id=project_id,
+                        task_type=task_type,
+                        prompt_name="bootstrap.plan_idea",
+                        variables=plan_variables,
+                        client_mutation_id=(
+                            f"bootstrap:{run_id}:{node_key}:fidelity-v1:plan:{fidelity_attempt}"
+                        ),
+                    )
+                    output = validate_task_output(task_type, output)
+                    audit = complete(
+                        run_id=run_id,
+                        node_key=node_key,
+                        project_id=project_id,
+                        task_type="audit_plan_fidelity",
+                        prompt_name="bootstrap.audit_plan_fidelity",
+                        variables={
+                            "idea": run_context.get("idea", ""),
+                            "plan_output": json.dumps(output, ensure_ascii=False),
+                        },
+                        client_mutation_id=(
+                            f"bootstrap:{run_id}:{node_key}:fidelity-v1:audit:{fidelity_attempt}"
+                        ),
+                    )
+                    audit = validate_task_output("audit_plan_fidelity", audit)
+                    contradictions = [str(item).strip() for item in audit.get("contradictions", []) if str(item).strip()]
+                    omissions = [str(item).strip() for item in audit.get("omissions", []) if str(item).strip()]
+                    passed = (
+                        audit.get("passed") is True
+                        and float(audit.get("score") or 0) == 100
+                        and not contradictions
+                        and not omissions
+                    )
+                    if passed:
+                        output["plan_fidelity_audit"] = audit
+                        break
+                    fidelity_feedback = contradictions + omissions
+                else:
+                    raise OutputValidationError(
+                        "plan fidelity audit rejected output after 3 real revisions: "
+                        + "；".join(fidelity_feedback[:8])
+                    )
+            else:
+                output = complete(
+                    run_id=run_id,
+                    node_key=node_key,
+                    project_id=project_id,
+                    task_type=task_type or "",
+                    prompt_name=f"bootstrap.{task_type}" if task_type else "",
+                    variables=run_context,
+                    client_mutation_id=client_mutation_id,
+                )
+                output = validate_task_output(task_type or "", output)
         except BudgetExceeded:
             _mark_node(run_id, node_key, "pending_budget", "budget exceeded")
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,

@@ -142,6 +142,14 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
 
     def complete(**kwargs):
         calls.append(kwargs)
+        if kwargs["task_type"] == "audit_plan_fidelity":
+            return {
+                "passed": True,
+                "score": 100,
+                "matched_requirements": ["主角职业", "核心能力", "追查目标"],
+                "contradictions": [],
+                "omissions": [],
+            }
         return {"idea_expanded": "一位创作者发现自己写下的故事正在现实中逐字发生，必须找出幕后执笔者。",
                 "core_hook": "你写的每一个字都在杀人",
                 "target_audience": "18-35 岁悬疑读者",
@@ -177,7 +185,8 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
     result = tasks.execute_bootstrap.run("run-1", "plan_idea")
 
     assert result["status"] == "error"
-    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:v2"
+    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v1:plan:1"
+    assert calls[1]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v1:audit:1"
 
 
 def test_gateway_replay_by_mutation_id_returns_existing_output_without_new_writes(monkeypatch):

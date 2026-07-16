@@ -84,6 +84,7 @@ def _provider_output(task_type: str) -> dict:
     ]
     outputs = {
         "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"], "source_facts": ["主角是作者", "文字影响现实", "必须夺回叙事权"], "design_additions": [], "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"], "creative_bible": creative_bible},
+        "audit_plan_fidelity": {"passed": True, "score": 100, "matched_requirements": ["主角职业", "核心能力", "故事目标"], "contradictions": [], "omissions": []},
         "plan_market_fit": {"market_score": 82, "competitive_landscape": "脑洞悬疑读者接受度高。", "market_gap": "创作者身份代入更强。"},
         "plan_story_pattern": {"story_model": "悬疑解谜", "act_structure": ["发现异常", "追查真相", "夺回叙事权"], "turning_points": [{"point": "文本成真", "chapter_hint": "第1章"}]},
         "plan_core_gameplay": {"power_system": "文字改写现实但留下旁证", "progression_path": "读者到执笔者", "pleasure_points": ["信息差反杀", "伏笔回收"]},

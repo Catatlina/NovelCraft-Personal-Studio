@@ -56,6 +56,7 @@ AI_WRAPPER_CALLS = {
 ALLOWLIST: dict[str, str] = {
     "backend/app/main.py:batch_generate_chapters": "API dispatcher; queues batch_generate_chapters_task, no generated output",
     "backend/app/main.py:_chapter_review_context": "DB context assembler for review UI, no generated output",
+    "backend/app/main.py:manual_review_chapter": "human approve/reject state transition; rejection only dispatches the real-AI regeneration worker",
     "backend/app/workers/tasks.py:batch_generate_chapters_task": "Celery orchestration; generation occurs in _generate_next_chapter_unlocked via gateway",
     "backend/app/services/hotspot_collector.py:_safe_score": "numeric normalization of collected source scores",
     "backend/app/services/hotspot_collector.py:compute_freshness_score": "deterministic recency score from timestamps",

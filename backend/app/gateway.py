@@ -142,6 +142,14 @@ class _PlanIdeaOutput(_LenientOutput):
     forbidden_changes: list[str] = Field(min_length=3, max_length=20)
 
 
+class _PlanFidelityAuditOutput(_LenientOutput):
+    passed: bool
+    score: float = Field(ge=0, le=100)
+    matched_requirements: list[str] = Field(min_length=3)
+    contradictions: list[str] = Field(default_factory=list)
+    omissions: list[str] = Field(default_factory=list)
+
+
 class _RegenerateTitlesOutput(_LenientOutput):
     title_candidates: list[str] = Field(min_length=3, max_length=10)
 
@@ -349,6 +357,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "review_rhythm": _RhythmOutput,
     # V2 four-stage bootstrap (18 agent nodes)
     "plan_idea": _PlanIdeaOutput,
+    "audit_plan_fidelity": _PlanFidelityAuditOutput,
     "regenerate_titles": _RegenerateTitlesOutput,
     "plan_market_fit": _PlanMarketFitOutput,
     "plan_story_pattern": _PlanStoryPatternOutput,

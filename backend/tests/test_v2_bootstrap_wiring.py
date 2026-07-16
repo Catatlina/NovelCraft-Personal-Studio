@@ -85,6 +85,19 @@ def test_plan_idea_supplies_title_candidates_for_human_gate():
     assert "title_candidates" in model.model_fields
 
 
+def test_plan_fidelity_audit_requires_explicit_clean_verdict():
+    model = gateway.BOOTSTRAP_OUTPUT_MODELS["audit_plan_fidelity"]
+    assert {"passed", "score", "matched_requirements", "contradictions", "omissions"} <= set(model.model_fields)
+    accepted = gateway.validate_task_output("audit_plan_fidelity", {
+        "passed": True,
+        "score": 100,
+        "matched_requirements": ["年龄", "职业", "目标篇幅"],
+        "contradictions": [],
+        "omissions": [],
+    })
+    assert accepted["passed"] is True
+
+
 def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
     """T2: against the real test database, every node resolves a real model and
     a non-generic prompt. This is the audit's decisive failing check."""

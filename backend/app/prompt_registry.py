@@ -448,6 +448,7 @@ $instruction
 灵感：$idea
 题材：$genre
 风格：$style
+上一轮忠实度审计反馈（首轮为空；若非空，必须逐条修正）：$fidelity_feedback
 
 要求：
 0. 原始需求是最高优先级事实源。先逐条提取 source_facts，必须忠实保留用户明确写出的年代、年龄、职业、设备、能力、人物关系、前三章事件和篇幅目标；不得用你更熟悉的套路替换。任何创作补强只能进入 design_additions，并且不能与 source_facts 冲突
@@ -470,6 +471,25 @@ $instruction
 已有标题参考（可空）：$suggested_title
 
 输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"creative_bible":"完整创作圣经"}"""),
+
+    ("bootstrap.audit_plan_fidelity", "1.0.0", "deepseek",
+     """你是独立的需求验收员，不参与创作。逐项比较“用户原始需求”和“规划结果”，只判断规划是否忠实，不评价文笔和市场性。
+
+用户原始需求：
+$idea
+
+规划结果：
+$plan_output
+
+强制审计规则：
+1. 用户明确给出的年份、年龄、职业、身份、人物关系、设备品牌/型号、能力来源、目标总字数、内容主次/占比、前三章事件顺序，必须原样保留，不得近似替换
+2. “至少/以上/不低于”是硬下限；规划不得缩小。用户说“以生活为主”，生活内容必须是最大内容板块；用户给出明确占比时必须按该占比
+3. 规划新增的人名、家人、伙伴、年龄、阶段和商业路线，若用户未指定，可以作为建议，但不得伪装成用户事实，也不得与原始需求冲突
+4. source_facts 必须覆盖所有显式硬约束；forbidden_changes 必须保护最容易漂移的职业、年龄、设备、开局事件、篇幅与内容主次
+5. 任何一项矛盾或遗漏，passed 必须为 false，score 不得高于 89；只有零矛盾、零遗漏才可 passed=true 且 score=100
+6. contradictions 和 omissions 使用可直接交给策划 AI 修正的中文句子，必须引用原需求值和错误/缺失值
+
+输出 JSON: {"passed":false,"score":80,"matched_requirements":["已保留的要求1","已保留的要求2","已保留的要求3"],"contradictions":["原需求为X，规划却为Y"],"omissions":["规划遗漏Z"]}"""),
 
     ("bootstrap.regenerate_titles", "1.0.0", "deepseek",
      """你是网文书名策划。用户对现有候选不满意，请基于已经确认的创作拆解重新生成一组完全不同的书名。
@@ -850,6 +870,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
     "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单"}',
+    "audit_plan_fidelity":    '{"passed":false,"score":80,"matched_requirements":["匹配1","匹配2","匹配3"],"contradictions":["矛盾"],"omissions":["遗漏"]}',
     "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',
     "plan_story_pattern":     '{"story_model":"模式名称","act_structure":["第一幕：…","第二幕：…","第三幕：…"],"turning_points":[{"point":"转折","chapter_hint":"位置"}],"emotional_arc":"情绪轨迹"}',
