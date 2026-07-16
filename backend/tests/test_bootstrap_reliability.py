@@ -157,6 +157,7 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
                 "source_facts": ["主角是作者", "文字影响现实", "主角必须追查真相"],
                 "design_additions": [],
                 "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"],
+                "downstream_deliverables": ["生成分卷总纲、章节细纲和第一章正文"],
                 "creative_bible": (
                     "核心设定：主角写下的故事逐字发生，必须找到幕后执笔者并夺回现实叙事权。"
                     "开局节奏：第一章通过停电和短信确认异常，第二章寻找旁证，第三章发现现实被修订的痕迹。"

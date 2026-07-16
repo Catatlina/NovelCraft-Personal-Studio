@@ -140,6 +140,7 @@ class _PlanIdeaOutput(_LenientOutput):
     source_facts: list[str] = Field(min_length=3, max_length=30)
     design_additions: list[str] = Field(default_factory=list, max_length=20)
     forbidden_changes: list[str] = Field(min_length=3, max_length=20)
+    downstream_deliverables: list[str] = Field(min_length=1, max_length=20)
 
 
 class _PlanFidelityAuditOutput(_LenientOutput):

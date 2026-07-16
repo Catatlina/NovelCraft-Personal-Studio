@@ -467,10 +467,11 @@ $instruction
    - 持续校验清单：时间线、资金/能力来源、现实逻辑、蝴蝶效应/设定边界
 6. forbidden_changes：列出至少 3 条后续绝不能发生的事实漂移，例如不得改变主角职业、不得把核心设备替换成别的设备、不得把不同年代事件写在同一天
 7. 不得擅自增加“另一个重生者、系统任务、前妻/后宫、神秘组织”等会改变作品类型的重大设定；如确有价值，只能列入 design_additions，不能视为已经采用
+8. downstream_deliverables：逐条记录用户要求后续模块实际产出的内容及数量，例如“生成 8 卷分卷总纲”“生成前 30 章细纲”“第一章正文不低于 3000 字”。这里只登记交付物，不在本节点提前生成章节细纲或正文
 
 已有标题参考（可空）：$suggested_title
 
-输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"creative_bible":"完整创作圣经"}"""),
+输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经"}"""),
 
     ("bootstrap.audit_plan_fidelity", "1.0.0", "deepseek",
      """你是独立的需求验收员，不参与创作。逐项比较“用户原始需求”和“规划结果”，只判断规划是否忠实，不评价文笔和市场性。
@@ -486,8 +487,10 @@ $plan_output
 2. “至少/以上/不低于”是硬下限；规划不得缩小。用户说“以生活为主”，生活内容必须是最大内容板块；用户给出明确占比时必须按该占比
 3. 规划新增的人名、家人、伙伴、年龄、阶段和商业路线，若用户未指定，可以作为建议，但不得伪装成用户事实，也不得与原始需求冲突
 4. source_facts 必须覆盖所有显式硬约束；forbidden_changes 必须保护最容易漂移的职业、年龄、设备、开局事件、篇幅与内容主次
-5. 任何一项矛盾或遗漏，passed 必须为 false，score 不得高于 89；只有零矛盾、零遗漏才可 passed=true 且 score=100
-6. contradictions 和 omissions 使用可直接交给策划 AI 修正的中文句子，必须引用原需求值和错误/缺失值
+5. 当前只审计“规划节点”。用户要求的分卷细纲、前 N 章细纲、章节正文、评分等下游产物，只需在 downstream_deliverables 中准确登记数量和标准；不得因为当前尚未实际生成这些下游内容而判遗漏
+6. creative_bible 只需建立可执行框架，不要求在当前节点展开每一卷/每一章的全部细节；具体细节由 downstream_deliverables 对应的蓝图和写作节点完成
+7. 任何当前规划范围内的矛盾或遗漏，passed 必须为 false，score 不得高于 89；只有零矛盾、零遗漏才可 passed=true 且 score=100
+8. contradictions 和 omissions 使用可直接交给策划 AI 修正的中文句子，必须引用原需求值和错误/缺失值
 
 输出 JSON: {"passed":false,"score":80,"matched_requirements":["已保留的要求1","已保留的要求2","已保留的要求3"],"contradictions":["原需求为X，规划却为Y"],"omissions":["规划遗漏Z"]}"""),
 
@@ -869,7 +872,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_volume":     '{"summary":"卷摘要"}',
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
-    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单"}',
+    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单"}',
     "audit_plan_fidelity":    '{"passed":false,"score":80,"matched_requirements":["匹配1","匹配2","匹配3"],"contradictions":["矛盾"],"omissions":["遗漏"]}',
     "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',

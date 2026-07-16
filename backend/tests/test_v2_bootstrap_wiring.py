@@ -142,6 +142,7 @@ def test_validate_rejects_malformed_new_node_output():
         "source_facts": ["主角是作者", "文字影响现实", "必须夺回叙事权"],
         "design_additions": [],
         "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"],
+        "downstream_deliverables": ["生成分卷总纲、章节细纲和第一章正文"],
         "creative_bible": creative_bible,
         "extra_field_from_model": "tolerated",
     })
