@@ -30,6 +30,10 @@ class HumanConfirm(BaseModel):
     selected_title: str = Field(min_length=1, max_length=120)
 
 
+class TitleRegenerateRequest(BaseModel):
+    feedback: str = Field(default="", max_length=500)
+
+
 class ContentUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     body: dict[str, Any] | None = None

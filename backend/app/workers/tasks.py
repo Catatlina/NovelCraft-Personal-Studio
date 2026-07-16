@@ -512,9 +512,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         # ── Human node ──────────────────────────────────────────────────
         if kind == "human":
             run_context = run["context"] if isinstance(run["context"], dict) else {}
-            if run_context.get("auto_confirm_title") and node_key == "human_confirm_title":
+            if (run_context.get("auto_confirm_title") or run_context.get("title_locked")) and node_key == "human_confirm_title":
                 title_candidates = run_context.get("title_candidates") or []
-                selected_title = str(title_candidates[0]).strip() if title_candidates else ""
+                selected_title = (
+                    str(run_context.get("selected_title") or "").strip()
+                    if run_context.get("title_locked")
+                    else (str(title_candidates[0]).strip() if title_candidates else "")
+                )
                 if not selected_title:
                     conn.execute(
                         """UPDATE run_nodes
@@ -554,7 +558,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                            finished_at = now(),
                            output = %s
                        WHERE run_id = %s AND node_key = %s""",
-                    (encode({"selected_title": selected_title, "source": "auto_confirm"}), run_id, node_key),
+                    (encode({"selected_title": selected_title, "source": "locked_title" if run_context.get("title_locked") else "auto_confirm"}), run_id, node_key),
                 )
                 conn.execute(
                     """UPDATE workflow_runs
@@ -814,10 +818,10 @@ def create_run(project_id: str, novel_id: str,
                api_key: str = "", api_url: str = "", model: str = "",
                selected_title: str = "", idempotency_key: str | None = None,
                auto_confirm_title: bool = False) -> str:
-    """Create a workflow run and its nodes in the database with the 4-stage architecture.
+    """Create a workflow run through the complete planning-to-audit pipeline.
 
-    If selected_title is provided, skips planning stage + human confirm
-    and starts directly at blueprint.
+    A preselected title locks only the title gate. It never bypasses source
+    decomposition, creative-bible planning, or quality controls.
     """
     db = connect()
     if idempotency_key:
@@ -840,9 +844,9 @@ def create_run(project_id: str, novel_id: str,
         raise ValueError("novel not found")
 
     meta = novel["meta"] if isinstance(novel["meta"], dict) else {}
-    context = {"novel_id": novel_id, "idea": meta.get("idea", ""), **meta}
+    context = {"novel_id": novel_id, "idea": meta.get("idea", ""), "suggested_title": "", **meta}
     if selected_title:
-        context["selected_title"] = selected_title
+        context["suggested_title"] = selected_title
     if auto_confirm_title:
         context["auto_confirm_title"] = True
 
@@ -862,23 +866,6 @@ def create_run(project_id: str, novel_id: str,
         )
 
     start_key = "plan_idea"
-    if selected_title:
-        # Skip planning + human confirm: mark all planning nodes + human as succeeded
-        planning_nodes = [n[0] for n in BOOTSTRAP_NODES if NODE_STAGE.get(n[0]) == "planning"]
-        for pn_key in planning_nodes:
-            db.execute(
-                """UPDATE run_nodes SET status='succeeded', output=%s, finished_at=now()
-                   WHERE run_id=%s AND node_key=%s""",
-                (encode({"source": "ranking_topic"}), run_id, pn_key),
-            )
-        db.execute(
-            """UPDATE run_nodes SET status='succeeded', output=%s, finished_at=now()
-               WHERE run_id=%s AND node_key=%s""",
-            (encode({"selected_title": selected_title, "source": "ranking_topic"}), run_id, "human_confirm_title"),
-        )
-        db.execute("UPDATE workflow_runs SET current_node_key='blueprint_volume_plan', context=%s WHERE id=%s",
-                   (encode(context), run_id))
-        start_key = "blueprint_volume_plan"
 
     db.commit()
     db.close()
@@ -987,6 +974,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 m["source_facts"] = output.get("source_facts", [])
                 m["design_additions"] = output.get("design_additions", [])
                 m["forbidden_changes"] = output.get("forbidden_changes", [])
+                m["planning_module"] = "creative_bible_v2"
                 db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
             knowledge_id = new_id()
             generation_key = f"run:{run_id}:node:{node_key}:creative-bible:v1"

@@ -129,7 +129,7 @@ class _RunDb:
         self.closed = True
 
 
-def test_create_run_with_selected_title_skips_title_and_human_nodes(monkeypatch):
+def test_create_run_with_selected_title_still_runs_full_planning(monkeypatch):
     from app.workers import tasks
 
     db = _RunDb()
@@ -148,19 +148,15 @@ def test_create_run_with_selected_title_skips_title_and_human_nodes(monkeypatch)
 
     assert run_id
     assert db.committed and db.closed
-    assert dispatched == [(run_id, "blueprint_volume_plan", "api-key", "https://provider.example/v1", "model-id")]
+    assert dispatched == [(run_id, "plan_idea", "api-key", "https://provider.example/v1", "model-id")]
 
-    # V2 marks each planning node + the human gate succeeded individually
+    # A ranking title is only a suggestion. It must not fabricate planning
+    # success, bypass creative-bible decomposition, or confirm itself.
+    # creative-bible decomposition module.
     skip_updates = [params for sql, params in db.statements
                     if "UPDATE run_nodes SET status='succeeded'" in sql and params and params[-2] == run_id]
-    skipped_keys = {params[-1] for params in skip_updates}
-    assert "human_confirm_title" in skipped_keys
-    assert {"plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
-            "plan_world_architecture", "plan_character_system", "plan_conflict_map"} <= skipped_keys
-    human_update = next(p for p in skip_updates if p[-1] == "human_confirm_title")
-    assert json.loads(human_update[0])["selected_title"] == "榜单原创书名"
-
-    run_updates = [params for sql, params in db.statements if "current_node_key='blueprint_volume_plan'" in sql]
-    assert len(run_updates) == 1
-    assert json.loads(run_updates[0][0])["selected_title"] == "榜单原创书名"
-    assert run_updates[0][1] == run_id
+    assert skip_updates == []
+    run_insert = next(params for sql, params in db.statements if sql.startswith("INSERT INTO workflow_runs"))
+    context = json.loads(run_insert[6])
+    assert context["suggested_title"] == "榜单原创书名"
+    assert "selected_title" not in context

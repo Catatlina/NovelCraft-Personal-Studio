@@ -135,11 +135,15 @@ class _PlanIdeaOutput(_LenientOutput):
     idea_expanded: str = Field(min_length=20)
     core_hook: str = Field(min_length=5)
     target_audience: str = Field(min_length=2)
-    title_candidates: list[str] = Field(min_length=3, max_length=8)
+    title_candidates: list[str] = Field(min_length=3, max_length=10)
     creative_bible: str = Field(min_length=300)
     source_facts: list[str] = Field(min_length=3, max_length=30)
     design_additions: list[str] = Field(default_factory=list, max_length=20)
     forbidden_changes: list[str] = Field(min_length=3, max_length=20)
+
+
+class _RegenerateTitlesOutput(_LenientOutput):
+    title_candidates: list[str] = Field(min_length=3, max_length=10)
 
 
 class _PlanMarketFitOutput(_LenientOutput):
@@ -345,6 +349,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "review_rhythm": _RhythmOutput,
     # V2 four-stage bootstrap (18 agent nodes)
     "plan_idea": _PlanIdeaOutput,
+    "regenerate_titles": _RegenerateTitlesOutput,
     "plan_market_fit": _PlanMarketFitOutput,
     "plan_story_pattern": _PlanStoryPatternOutput,
     "plan_core_gameplay": _PlanCoreGameplayOutput,

@@ -12,7 +12,7 @@ class Settings:
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     # Verified against the official /models endpoint on 2026-07-16.
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
-    request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "45"))
+    request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "180"))
     bootstrap_budget_cny: float = float(os.getenv("NOVELCRAFT_BOOTSTRAP_BUDGET_CNY", "2.0"))
     jwt_secret: str = os.getenv("NOVELCRAFT_JWT_SECRET", "")
     access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_EXP_MINUTES", "30"))

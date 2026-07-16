@@ -252,6 +252,17 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
           <p>{detail.latest_chapter?.title || "暂无章节"}</p>
         </section>
       </div>
+      {(book.meta?.creative_bible || book.meta?.source_facts?.length) && <section>
+        <h3>创作拆解</h3>
+        {Array.isArray(book.meta?.source_facts) && book.meta.source_facts.length > 0 && <>
+          <h4>不可变事实</h4>
+          <ul>{book.meta.source_facts.map((fact: string, index: number) => <li key={index}>{fact}</li>)}</ul>
+        </>}
+        {book.meta?.creative_bible && <>
+          <h4>创作圣经</h4>
+          <pre className="outline-block">{book.meta.creative_bible}</pre>
+        </>}
+      </section>}
       <section>
         <h3>大纲</h3>
         <pre className="outline-block">{outline || "暂无大纲"}</pre>

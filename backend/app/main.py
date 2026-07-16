@@ -25,6 +25,7 @@ from .schemas import (
     HumanConfirm,
     NovelCreate,
     ShortStoryCreate,
+    TitleRegenerateRequest,
     VersionRestore,
 )
 from .workers.tasks import confirm_human, create_run
@@ -451,16 +452,11 @@ async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(
             payload = {}
     except Exception:
         payload = {}
-    raw_auto_confirm_title = payload.get("auto_confirm_title", True)
-    if isinstance(raw_auto_confirm_title, str):
-        auto_confirm_title = raw_auto_confirm_title.strip().lower() not in {"0", "false", "no", "off"}
-    else:
-        auto_confirm_title = bool(raw_auto_confirm_title)
     run_id = create_run(novel["project_id"], novel_id,
                         api_key=request.headers.get("X-Api-Key", ""),
                         api_url=request.headers.get("X-Api-Base-Url", ""),
                         model=request.headers.get("X-Model", ""),
-                        auto_confirm_title=auto_confirm_title)
+                        auto_confirm_title=False)
     return ok({"run_id": run_id})
 
 
@@ -926,6 +922,45 @@ async def confirm_title(request: Request, run_id: str, payload: HumanConfirm, us
                   api_url=request.headers.get("X-Api-Base-Url", ""),
                   model=request.headers.get("X-Model", ""))
     return ok({"run_id": run_id, "selected_title": payload.selected_title})
+
+
+@app.post("/api/v1/runs/{run_id}/titles/regenerate")
+@limiter.limit("10/minute")
+def regenerate_run_titles(
+    request: Request,
+    run_id: str,
+    payload: TitleRegenerateRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    conn, run = load_run_for_user(run_id, user, {"owner", "editor"})
+    human = conn.execute(
+        "SELECT status FROM run_nodes WHERE run_id=%s AND node_key='human_confirm_title'",
+        (run_id,),
+    ).fetchone()
+    context = run["context"] if isinstance(run.get("context"), dict) else {}
+    conn.close()
+    if not human or human["status"] != "waiting_human":
+        raise HTTPException(409, "书名只能在人工选名阶段重新生成")
+
+    result = complete(
+        run_id=run_id,
+        node_key="human_confirm_title",
+        project_id=run["project_id"],
+        task_type="regenerate_titles",
+        prompt_name="bootstrap.regenerate_titles",
+        variables={**context, "feedback": payload.feedback},
+        client_mutation_id=f"title-regenerate:{run_id}:{new_id('ttl')}",
+    )
+    titles = result["title_candidates"]
+    context["title_candidates"] = titles
+    context["title_regeneration_count"] = int(context.get("title_regeneration_count") or 0) + 1
+    conn = connect()
+    conn.execute(
+        "UPDATE workflow_runs SET context=%s,updated_at=now() WHERE id=%s",
+        (encode(context), run_id),
+    )
+    conn.commit(); conn.close()
+    return ok({"run_id": run_id, "title_candidates": titles})
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/{node_key}/retry")

@@ -148,3 +148,15 @@ def test_writing_selects_only_the_requested_chapter_outline():
     assert selected == context["chapter_outlines"][0]
     assert "测试设备" not in str(selected)
     assert "向父母坦白" not in str(selected)
+
+
+def test_title_regeneration_requires_three_to_ten_real_candidates():
+    import pytest
+
+    with pytest.raises(gateway.OutputValidationError):
+        gateway.validate_task_output("regenerate_titles", {"title_candidates": ["《甲》", "《乙》"]})
+    accepted = gateway.validate_task_output(
+        "regenerate_titles",
+        {"title_candidates": ["《甲》", "《乙》", "《丙》", "《丁》", "《戊》"]},
+    )
+    assert len(accepted["title_candidates"]) == 5

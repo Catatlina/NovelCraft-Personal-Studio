@@ -454,19 +454,40 @@ $instruction
 1. idea_expanded：把灵感展开为 150-300 字的完整创意——谁、在什么世界、遇到什么变故、要达成什么、代价是什么；不得改变 source_facts
 2. core_hook：一句话核心卖点，读者为什么非看不可（爽感/悬念/情感/新奇中至少占一）
 3. target_audience：目标读者画像（年龄段+阅读偏好，不要写"所有人"）
-4. title_candidates：5 个书名候选，4-8 字、有市场辨识度、避免烂俗模板词（废柴/逆袭/无双）
+4. title_candidates：生成 3-10 个书名候选（默认 5 个），4-12 字、有市场辨识度、避免烂俗模板词（废柴/逆袭/无双）；如果有 suggested_title，只把它作为一个候选参考，不得直接替用户确认
 5. creative_bible：800-1800 字，必须把用户需求补强为长篇可执行设定，结构必须包含：
    - 核心设定：主角身份、金手指/能力、时代背景、最大卖点
    - 开局节奏：前三章分别完成什么，尤其黄金三章的冲突、坦白、钩子
    - 能力边界：金手指能做什么、不能做什么、代价和风险
    - 长篇路线：至少 6 个阶段，每阶段的目标、产业/力量升级、主要矛盾
+   - 篇幅与内容配比：按用户目标总字数反推卷数、每卷字数、主线/生活/感情/商业/科技等内容占比，合计必须为 100%，避免中后期失控
    - 人物关系：主角与家人/伙伴/对手的真实张力，禁止工具人
    - 叙事风格与禁忌：哪些内容要突出，哪些套路/漏洞要避免
    - 持续校验清单：时间线、资金/能力来源、现实逻辑、蝴蝶效应/设定边界
 6. forbidden_changes：列出至少 3 条后续绝不能发生的事实漂移，例如不得改变主角职业、不得把核心设备替换成别的设备、不得把不同年代事件写在同一天
 7. 不得擅自增加“另一个重生者、系统任务、前妻/后宫、神秘组织”等会改变作品类型的重大设定；如确有价值，只能列入 design_additions，不能视为已经采用
 
+已有标题参考（可空）：$suggested_title
+
 输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"creative_bible":"完整创作圣经"}"""),
+
+    ("bootstrap.regenerate_titles", "1.0.0", "deepseek",
+     """你是网文书名策划。用户对现有候选不满意，请基于已经确认的创作拆解重新生成一组完全不同的书名。
+
+原始需求：$idea
+核心卖点：$core_hook
+不可变事实：$source_facts
+创作圣经：$creative_bible
+现有候选（不得重复）：$title_candidates
+用户反馈（可空）：$feedback
+
+要求：
+1. 返回 3-10 个书名，默认 5 个；不得与现有候选重复
+2. 书名 4-12 字，准确传达题材、核心金手指或情感气质
+3. 禁止用与内容无关的夸张标题，禁止机械套用“开局/无敌/震惊/系统逼我”等模板
+4. 只提供候选，不替用户决定
+
+输出 JSON: {"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}"""),
 
     ("bootstrap.plan_market_fit", "1.0.0", "deepseek",
      """你是网文市场分析师。请评估以下创意的市场匹配度。
@@ -829,6 +850,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
     "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单"}',
+    "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',
     "plan_story_pattern":     '{"story_model":"模式名称","act_structure":["第一幕：…","第二幕：…","第三幕：…"],"turning_points":[{"point":"转折","chapter_hint":"位置"}],"emotional_arc":"情绪轨迹"}',
     "plan_core_gameplay":     '{"power_system":"力量体系","progression_path":"成长路径","pleasure_points":["爽点1","爽点2","爽点3"],"power_ceiling":"上限与代价"}',

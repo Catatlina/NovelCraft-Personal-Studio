@@ -36,12 +36,14 @@ function formatTime(value?: string | null): string {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
-export function Progress({ run, onConfirm }: { run: Run | null; onConfirm: (title: string) => void }) {
+export function Progress({ run, onConfirm, onRegenerateTitles }: { run: Run | null; onConfirm: (title: string) => Promise<void>; onRegenerateTitles: (feedback: string) => Promise<void> }) {
   const nodes = run?.nodes ?? [];
   const human = nodes.find(n => HUMAN_NODE_KEYS.has(n.node_key));
   const titles = (run?.context?.title_candidates as string[]) ?? [];
   const selectedTitle = typeof run?.context?.selected_title === "string" ? run.context.selected_title : "";
-  const rankingTitleAccepted = human?.status === "succeeded" && (human.output?.source === "ranking_topic" || (!!selectedTitle && titles.length === 0));
+  const [customTitle, setCustomTitle] = useState("");
+  const [titleFeedback, setTitleFeedback] = useState("");
+  const [titleBusy, setTitleBusy] = useState(false);
   const [retrying, setRetrying] = useState("");
   const [retryMessage, setRetryMessage] = useState("");
   const [selectedNodeKey, setSelectedNodeKey] = useState("");
@@ -57,6 +59,18 @@ export function Progress({ run, onConfirm }: { run: Run | null; onConfirm: (titl
       const detail = error instanceof ApiError ? JSON.stringify(error.payload) : String(error);
       setRetryMessage(`${node.title} 重试失败：${detail}`);
     } finally { setRetrying(""); }
+  }
+
+  async function regenerateTitles() {
+    setTitleBusy(true); setRetryMessage("");
+    try {
+      await onRegenerateTitles(titleFeedback.trim());
+      setTitleFeedback("");
+      setRetryMessage("已生成一组新的书名候选，请选择或直接填写书名。");
+    } catch (error) {
+      const detail = error instanceof ApiError ? JSON.stringify(error.payload) : String(error);
+      setRetryMessage(`重新生成书名失败：${detail}`);
+    } finally { setTitleBusy(false); }
   }
 
   return (
@@ -106,13 +120,24 @@ export function Progress({ run, onConfirm }: { run: Run | null; onConfirm: (titl
         </div>
         <div className="panel human-gate">
           <h2>书名确认</h2>
-          {rankingTitleAccepted ? <p>已采用榜单候选书名：<strong>{selectedTitle || String(human?.output?.selected_title || "已确认")}</strong></p> : human?.status === "waiting_human" ? (
-            <div className="title-choices">
-              {titles.map(t => <button key={t} onClick={() => onConfirm(t)}>{t}</button>)}
+          {human?.status === "waiting_human" ? (
+            <div style={{display:"grid",gap:12}}>
+              <p className="muted">请从 {titles.length} 个候选中选择；没有合适的可重新生成，或直接填写自己的书名。</p>
+              <div className="title-choices">
+                {titles.map(t => <button key={t} disabled={titleBusy} onClick={() => void onConfirm(t)}>{t}</button>)}
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input style={{flex:1,minWidth:220}} maxLength={120} placeholder="自己填写书名" value={customTitle} onChange={event => setCustomTitle(event.target.value)} />
+                <button className="primary" disabled={titleBusy || !customTitle.trim()} onClick={() => void onConfirm(customTitle.trim())}>使用自定义书名</button>
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input style={{flex:1,minWidth:220}} maxLength={500} placeholder="可选：告诉 AI 新书名应强调什么" value={titleFeedback} onChange={event => setTitleFeedback(event.target.value)} />
+                <button disabled={titleBusy} onClick={() => void regenerateTitles()}>{titleBusy ? "生成中…" : "重新生成书名"}</button>
+              </div>
             </div>
           ) : (
             <p style={{color:"var(--text-muted)"}}>
-              {human?.status === "succeeded" ? "书名已确认，继续执行..." : "等待书名候选生成..."}
+              {human?.status === "succeeded" ? <>已确认书名：<strong>{selectedTitle || String(human?.output?.selected_title || "已确认")}</strong></> : "等待书名候选生成..."}
             </p>
           )}
         </div>
