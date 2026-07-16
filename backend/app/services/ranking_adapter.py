@@ -12,29 +12,29 @@ import re, json, urllib.request, urllib.error
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-# SOCKS5 proxy — route through local Ubuntu to bypass China IP blocks
-_PROXY_HOST = __import__("os").getenv("RANKING_PROXY_HOST", "127.0.0.1")
-_PROXY_PORT = int(__import__("os").getenv("RANKING_PROXY_PORT", "1080"))
-_proxy_opener = None
+# HTTP proxy — route through China IP to bypass geo-blocks
+_PROXY_URL = __import__("os").getenv("RANKING_PROXY_URL", "")
+_proxy_handler = None
 
 
 def _get_opener():
-    """Return urllib opener, optionally routed through SOCKS5 proxy."""
-    global _proxy_opener
-    if _proxy_opener is not None:
-        return _proxy_opener
-    try:
-        from sockshandler import SocksiPyHandler
-        import socks
-        _proxy_opener = urllib.request.build_opener(
-            SocksiPyHandler(socks.SOCKS5, _PROXY_HOST, _PROXY_PORT))
-    except Exception:
-        _proxy_opener = False  # Sentinel: proxy unavailable
-    return _proxy_opener
+    """Return urllib opener with HTTP proxy if configured."""
+    global _proxy_handler
+    if _proxy_handler is not None:
+        return _proxy_handler
+    if _PROXY_URL:
+        try:
+            _proxy_handler = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": _PROXY_URL, "https": _PROXY_URL}))
+            return _proxy_handler
+        except Exception:
+            pass
+    _proxy_handler = False
+    return _proxy_handler
 
 
 def _urlopen(req, timeout=15, use_proxy=False):
-    """Open URL, optionally through SOCKS5 proxy."""
+    """Open URL, optionally through HTTP proxy."""
     if use_proxy:
         opener = _get_opener()
         if opener and opener is not False:
