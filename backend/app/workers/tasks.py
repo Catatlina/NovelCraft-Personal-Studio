@@ -652,7 +652,12 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             run_context = _enrich_finalization_context(run_context, novel_id)
 
         # ── Execute AI call ─────────────────────────────────────────────
-        client_mutation_id = f"bootstrap:{run_id}:{node_key}:v2"
+        # Idempotent within one claimed node attempt, but a deliberate retry
+        # must obtain a fresh provider result instead of replaying the output
+        # that caused the previous attempt to fail (or that depended on stale
+        # upstream planning context).
+        node_attempt = int(node.get("attempt") or 0) + 1
+        client_mutation_id = f"bootstrap:{run_id}:{node_key}:attempt-v1:{node_attempt}"
 
         try:
             if task_type == "plan_idea":
