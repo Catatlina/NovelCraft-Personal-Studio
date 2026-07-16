@@ -44,12 +44,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   }, []);
 
   useEffect(() => {
-    api("/api/v1/admin/providers").then(d=>setProviders(d.data||[]));
-    api("/api/v1/admin/model-routes").then(d=>setRoutes(d.data||[]));
-    api("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
-    api("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
-    api("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
-    loadConnections();
+    // 管理接口失败（如非管理员 403）时如实提示，不能变成未捕获异常
+    const reportAdminError = (caught: unknown) => setMsg(`管理配置加载失败：${String(caught)}`);
+    api("/api/v1/admin/providers").then(d=>setProviders(d.data||[])).catch(reportAdminError);
+    api("/api/v1/admin/model-routes").then(d=>setRoutes(d.data||[])).catch(reportAdminError);
+    api("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[])).catch(reportAdminError);
+    api("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[])).catch(reportAdminError);
+    api("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[])).catch(reportAdminError);
+    loadConnections().catch(reportAdminError);
     api("/api/v1/stats/overview").then(d=>setStats(d.data||null)).catch(()=>setStats(null));
   }, []);
 

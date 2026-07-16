@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { BookOpen, Check, CircleDollarSign, Code2, FileText, GitBranch, Library, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow, TrendingUp, Search, Send, Lightbulb, Users, Terminal } from "lucide-react";
 
 type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
@@ -8,6 +8,9 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
   runStatus?: string; children: React.ReactNode;
 }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const workspaceRef = useRef<HTMLElement>(null);
+  // 切换页面时回到顶部，避免沿用上一页的滚动位置导致内容看似空白
+  useEffect(() => { workspaceRef.current?.scrollTo(0, 0); }, [tab]);
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next); document.documentElement.setAttribute("data-theme", next);
@@ -44,7 +47,7 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
           </button>
         </div>
       </aside>
-      <section className="workspace">
+      <section className="workspace" ref={workspaceRef}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
           <h1 style={{fontSize:24,margin:0}}>{title}</h1>
           {runStatus&&<span className={`pill ${runStatus}`}>{runStatus}</span>}

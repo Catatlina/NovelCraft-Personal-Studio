@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 
 export function HotspotDashboard() {
   const [hotspots, setHotspots] = useState<any[]>([]);
-  const [angles, setAngles] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState("");
@@ -19,12 +19,22 @@ export function HotspotDashboard() {
   const applyResult = (response: any) => {
     const data = response?.data || {};
     setHotspots(data.hotspots || []);
-    setAngles((data.creative_angles || []).map((item: any) => typeof item === "string" ? item : item.angle));
     setError("");
   };
 
+  const loadHotspots = async () => {
+    setLoading(true);
+    try {
+      applyResult(await api("/api/v1/hotspots"));
+    } catch (caught) {
+      setError(`热点获取失败：${String(caught)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    api("/api/v1/hotspots").then(applyResult).catch(caught => setError(`热点获取失败：${String(caught)}`));
+    void loadHotspots();
   }, []);
 
   const generate = async (h: any) => {
@@ -82,9 +92,7 @@ export function HotspotDashboard() {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div className="panel">
         <h3><TrendingUp size={14} /> 热点看板</h3>
-        <button onClick={() => {
-          api("/api/v1/hotspots").then(applyResult).catch(caught => setError(`热点获取失败：${String(caught)}`));
-        }}><Zap size={12} /> 刷新</button>
+        <button disabled={loading} onClick={() => void loadHotspots()}><Zap size={12} /> {loading ? "正在采集…" : "刷新"}</button>
         {error && <div className="error">{error}</div>}
         {notice && <div className="muted">{notice}</div>}
       </div>
@@ -147,16 +155,6 @@ export function HotspotDashboard() {
         </div>
       )}
 
-      {angles.length > 0 && (
-        <div className="panel">
-          <h3><Target size={14} /> 创作选题</h3>
-          {angles.slice(0, 10).map((a, i) => (
-            <div key={i} style={{ fontSize: 13, padding: "4px 0", borderBottom: "1px solid var(--border-subtle)" }}>
-              <Plus size={10} /> {a}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

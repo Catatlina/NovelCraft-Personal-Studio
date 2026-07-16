@@ -63,6 +63,7 @@ export default function App() {
   const [chapter, setChapter] = useState<Content | null>(null);
   const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
+  const restoringRun = useRef(false);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
@@ -99,10 +100,46 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token || !project || run || restoringRun.current) return;
+    restoringRun.current = true;
+    const savedRunId = localStorage.getItem(`nc_current_run:${project.id}`) || "";
+    const path = savedRunId
+      ? `/api/v1/runs/${savedRunId}`
+      : `/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`;
+    api<Run>(path)
+      .then(restored => {
+        setRun(restored);
+        localStorage.setItem(`nc_current_run:${project.id}`, restored.id);
+        return api<Content>(`/api/v1/contents/${restored.novel_id}`);
+      })
+      .then(content => { setNovel(content); void cacheSet("currentNovel", content); })
+      .catch(async firstError => {
+        if (!savedRunId) {
+          if (!(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
+          return;
+        }
+        localStorage.removeItem(`nc_current_run:${project.id}`);
+        try {
+          const restored = await api<Run>(`/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`);
+          setRun(restored);
+          localStorage.setItem(`nc_current_run:${project.id}`, restored.id);
+          const content = await api<Content>(`/api/v1/contents/${restored.novel_id}`);
+          setNovel(content); void cacheSet("currentNovel", content);
+        } catch {
+          // A project without workflow runs is a valid initial state.
+          if (!(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
+        }
+      })
+      .finally(() => { restoringRun.current = false; });
+  }, [token, project?.id, run?.id]);
+
+  useEffect(() => {
     if (!run) return;
+    // 终态（成功/失败）后停止轮询，避免无限每 2 秒请求 runs/contents
+    if (run.status === "succeeded" || run.status === "failed") return;
     const poll = setInterval(() => { if (run) refreshRun(run.id); }, 2000);
     return () => clearInterval(poll);
-  }, [run?.id]);
+  }, [run?.id, run?.status]);
 
   useEffect(() => {
     if (tab !== "review" || !novel) { setNarrative({ timeline: [], arcs: [] }); return; }
@@ -167,6 +204,7 @@ export default function App() {
   async function refreshRun(runId: string) {
     const r = await api<Run>(`/api/v1/runs/${runId}`);
     setRun(r);
+    localStorage.setItem(`nc_current_run:${r.project_id}`, r.id);
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
     void cacheSet("currentNovel", n);

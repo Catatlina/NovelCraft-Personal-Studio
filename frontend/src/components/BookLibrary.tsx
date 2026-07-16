@@ -45,6 +45,7 @@ function formatBookOutline(outline: unknown): string {
 
 export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: (bookId: string) => Promise<void> }) {
   const [books, setBooks] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -54,6 +55,8 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [importBookId, setImportBookId] = useState("");
   const [directoryText, setDirectoryText] = useState("");
   const [detail, setDetail] = useState<BookDetail | null>(null);
+  const [rejectingChapterId, setRejectingChapterId] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
   // NC-LIB-002: search, filter, sort, pagination
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -92,10 +95,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   };
 
   useEffect(() => {
-    setBooks([]); setError("");
+    setBooks([]); setError(""); setLoading(true);
     api<Wrapped<Book[]>>(`/api/v1/library/books?project_id=${projectId}`).then(result => {
       setBooks(result.data); setError(""); result.data.forEach(book => void loadBookState(book));
-    }).catch(caught => setError(String(caught)));
+    }).catch(caught => setError(String(caught))).finally(() => setLoading(false));
     return () => { Object.values(pollers.current).forEach(id => window.clearInterval(id)); pollers.current = {}; };
   }, [projectId]);
 
@@ -121,7 +124,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     setBusy(book.id); setNotice("");
     try {
       await api(`/api/v1/novels/${book.id}/continue`, { method: "POST" });
-      setNotice(`《${book.title}》已派发续写任务`);
+      setNotice(`${book.title} 已派发续写任务`);
     } catch (caught) { setNotice(`续写失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
@@ -189,11 +192,8 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     } catch (caught) { setNotice(`导出失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
-  const manualReviewChapter = async (chapter: any, decision: "approve" | "reject") => {
+  const manualReviewChapter = async (chapter: any, decision: "approve" | "reject", reason = "") => {
     if (!detail) return;
-    const reason = decision === "reject"
-      ? window.prompt("请输入拒绝原因，系统会按这个原因重写本章：", "质量不达标，请重写本章") || ""
-      : "";
     if (decision === "reject" && !reason.trim()) return;
     setBusy(chapter.id); setNotice("");
     try {
@@ -204,6 +204,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       setNotice(decision === "approve"
         ? `《${chapter.title}》已通过人工审核并入库。`
         : `《${chapter.title}》已拒绝，正在重新生成。任务 ${result.data.task_id || ""}`);
+      if (decision === "reject") {
+        setRejectingChapterId("");
+        setRejectReason("");
+      }
       await openDetail(detail.book);
       await loadBookState(detail.book);
     } catch (caught) {
@@ -235,6 +239,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     });
     return <section className="panel book-detail">
       <button onClick={() => setDetail(null)}><ArrowLeft size={14} />返回书库</button>
+      {notice && <div className="muted" role="status">{notice}</div>}
       <div className="book-detail-head">
         <div>
           <h2>{book.title}</h2>
@@ -270,16 +275,34 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       <section>
         <h3>全部章节</h3>
         <div className="chapter-list">
-          {detail.chapters.map(ch => <div className="chapter-review-row" key={ch.id}>
-            <button onClick={() => void onOpen(book.id)}>
-              第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}
-              <small>{ch.status}{ch.meta?.review_score ? ` · AI分 ${Math.round(ch.meta.review_score)}` : ""}</small>
-            </button>
-            <div className="chapter-review-actions">
-              {ch.status !== "reviewed" && <button disabled={busy === ch.id} className="primary" onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
-              {ch.status !== "reviewed" && <button disabled={busy === ch.id} onClick={() => void manualReviewChapter(ch, "reject")}>拒绝重写</button>}
-              {ch.status === "reviewed" && <span className="pill succeeded">已入库</span>}
+          {detail.chapters.map(ch => <div key={ch.id}>
+            <div className="chapter-review-row">
+              <button onClick={() => void onOpen(book.id)}>
+                第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}
+                <small>{ch.status}{ch.meta?.review_score ? ` · AI分 ${Math.round(ch.meta.review_score)}` : ""}</small>
+              </button>
+              <div className="chapter-review-actions">
+                {ch.status !== "reviewed" && <button disabled={busy === ch.id} className="primary" onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
+                {ch.status !== "reviewed" && <button disabled={busy === ch.id} onClick={() => {
+                  setRejectingChapterId(ch.id);
+                  setRejectReason("质量不达标，请增强场景冲突、生活质感、人物连续性和章末钩子，重写后正文不得低于3000字。");
+                }}>拒绝重写</button>}
+                {ch.status === "reviewed" && <span className="pill succeeded">已入库</span>}
+              </div>
             </div>
+            {rejectingChapterId === ch.id && <div className="review-reject-form">
+              <label htmlFor={`reject-reason-${ch.id}`}>拒绝原因（将原样交给 AI 重写）</label>
+              <textarea id={`reject-reason-${ch.id}`} rows={4} maxLength={2000} value={rejectReason}
+                onChange={event => setRejectReason(event.target.value)} />
+              <small>{rejectReason.trim().length}/2000 字</small>
+              <div className="row-actions">
+                <button onClick={() => { setRejectingChapterId(""); setRejectReason(""); }}>取消</button>
+                <button className="primary" disabled={busy === ch.id || !rejectReason.trim()}
+                  onClick={() => void manualReviewChapter(ch, "reject", rejectReason)}>
+                  {busy === ch.id ? "提交中…" : "确认拒绝并重写"}
+                </button>
+              </div>
+            </div>}
           </div>)}
           {!detail.chapters.length && <p className="muted">暂无章节。</p>}
         </div>
@@ -362,6 +385,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       <span style={{ fontSize: 13 }}>{page + 1} / {totalPages} (共 {filtered.length} 本)</span>
       <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
     </div>}
-    {!books.length && !error && <p className="muted">书库为空。可以从扫榜中心或灵感入口创建小说。</p>}
+    {loading && <p className="muted">正在加载书库…</p>}
+    {!loading && !books.length && !error && <p className="muted">书库为空。可以从扫榜中心或灵感入口创建小说。</p>}
   </section>;
 }

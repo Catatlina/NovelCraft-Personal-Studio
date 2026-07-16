@@ -47,6 +47,13 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
   const review7dim = (meta as any).review_7dim;
   const consistencyChecks = review?.final_consistency_check?.checks || {};
   const hasLegacyDimensions = !!(review7dim?.dimensions || review?.dimensions);
+  const hasScoreEvidence = hasLegacyDimensions
+    || Object.keys(consistencyChecks).length > 0
+    || review7dim?.score != null
+    || review?.score != null
+    || review?.self_score != null
+    || ["review_literary", "review_logic", "review_rhythm", "review_rhythm_score", "review_character", "review_dialogue", "review_description", "review_innovation"]
+      .some(key => (meta as any)[key] != null);
   const dims = hasLegacyDimensions
     ? Object.entries((review7dim?.dimensions || review?.dimensions) as Record<string, number>).map(([name, score]) => ({ name: DIMENSION_LABELS[name] || name, score: Number(score) || 0 }))
     : Object.keys(consistencyChecks).length
@@ -67,8 +74,10 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="panel">
-        <h3>七维审查 {chapter ? `— 总分 ${Math.round(totalScore)}` : ""}</h3>
-        <ReviewRadar data={dims} />
+        <h3>七维审查 {chapter ? (hasScoreEvidence ? `— 总分 ${Math.round(totalScore)}` : "— 尚未评分") : ""}</h3>
+        {hasScoreEvidence ? <ReviewRadar data={dims} /> : (
+          <p className="muted">本章没有可验证的七维评分记录。请在编辑器执行改写、润色或整章重写，或等待生成工作流完成自动审查。</p>
+        )}
         {issues.length > 0 && (
           <div className="chips">
             {issues.map((issue, index) => <span key={index}>{issue}</span>)}

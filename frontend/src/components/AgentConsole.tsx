@@ -27,10 +27,10 @@ export function AgentConsole() {
               <td>
                 <span style={{
                   display: "inline-flex", alignItems: "center", gap: 4,
-                  color: a.status === "running" ? "var(--success)" : "var(--text-muted)"
+                  color: a.status === "running" ? "var(--success)" : a.status === "stale" ? "var(--warning)" : "var(--text-muted)"
                 }}>
                   <Activity size={10} />
-                  {a.status === "running" ? "运行中" : "空闲"}
+                  {a.status === "running" ? "运行中" : a.status === "stale" ? "异常未收敛" : "空闲"}
                 </span>
               </td>
               <td>{a.task_count}</td>

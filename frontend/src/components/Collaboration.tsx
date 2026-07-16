@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { UserPlus, Shield, Trash2, Activity } from "lucide-react";
 import { api } from "../lib/api";
 
-type Member = { id: string; email: string; role: string; joined_at: string };
+type Member = { id?: string; email: string; role: string; created_at?: string };
 type Log = { id: string; action: string; detail: string; created_at: string };
 
 export function CollaborationPanel({ projectId }: { projectId: string }) {
@@ -42,10 +42,10 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         <table style={{ width: "100%", fontSize: 13, marginTop: 8 }}>
           <tbody>
             {members.map(m => (
-              <tr key={m.id}>
+              <tr key={m.id || m.email}>
                 <td style={{ fontWeight: 600 }}>{roleIcon(m.role)} {m.email}</td>
                 <td style={{ color: "var(--text-muted)" }}>{m.role}</td>
-                <td style={{ fontSize: 11 }}>{new Date(m.joined_at).toLocaleDateString()}</td>
+                <td style={{ fontSize: 11 }}>{m.created_at ? new Date(m.created_at).toLocaleDateString() : "--"}</td>
               </tr>
             ))}
           </tbody>

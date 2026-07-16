@@ -86,7 +86,18 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
     headers["Authorization"] = `Bearer ${sessionStorage.getItem("nc_token") || ""}`;
     r = await fetch(fullUrl, { ...init, headers, credentials: "include" });
   }
-  const payload = await r.json();
+  const contentType = r.headers.get("content-type") || "";
+  let payload: any;
+  if (contentType.includes("application/json")) {
+    payload = await r.json();
+  } else {
+    const body = await r.text();
+    payload = {
+      detail: `服务返回了非 JSON 响应（HTTP ${r.status}）`,
+      content_type: contentType || "unknown",
+      response_preview: body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160),
+    };
+  }
   if (!r.ok) throw new ApiError(r.status, payload);
   return payload;
 }
