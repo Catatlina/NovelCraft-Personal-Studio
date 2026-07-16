@@ -15,7 +15,7 @@
 - **创意拆解模块化**：所有新书统一执行“原始需求 → 创作圣经 → 市场/故事/玩法/世界/人物/冲突规划”，不再把排行榜建议标题当成已确认标题。规划结果包含 `source_facts`、`design_additions`、`forbidden_changes`、长篇阶段、篇幅和内容配比。
 - **规划忠实度硬门禁**：`plan_idea` 每次真实 DeepSeek 输出后，新增独立 `audit_plan_fidelity` 调用逐项对照原始需求；年龄、年份、职业、设备、目标字数、内容主次和前三章事件存在矛盾/遗漏时，自动反馈并重新调用真实 AI，最多三轮；三轮仍不合格则节点 `failed`，不得进入选名或继续写作。用户要求后续生成的分卷总纲、前 N 章细纲、章节正文等记录在结构化 `downstream_deliverables`，由后续模块执行，不在策划节点伪装已产出。每轮策划与审计均写 `ai_calls`，没有 mock/fallback。
 - **人工选名**：面向用户的开书入口固定在 `human_confirm_title` 停下，展示 3–10 个候选；支持重新生成候选、填写反馈、自定义书名。用户确认前不进入蓝图和章节生成。
-- **当前证据**：相关回归 38 passed；全量后端 `557 passed, 9 skipped`。生产真实 Provider 与浏览器验收需在部署后补证据，部署前状态为“已接线”。
+- **当前证据**：相关回归 38 passed；全量后端 `557 passed, 9 skipped`；后续幂等恢复专项 24 passed。生产 run `9a5a00b7-f806-43db-9f8a-452a86211966` 使用 DeepSeek `deepseek-v4-pro` 完成三轮“策划→独立审计”纠偏，最终 `score=100 / contradictions=[] / omissions=[]`；随后市场、故事模式、核心玩法、世界观、人物、冲突图谱均以 attempt 级新幂等键重新真实调用，工作流停在 `waiting_human/human_confirm_title`，未自动选名。内置浏览器与当前 Chrome 均无 NovelCraft 登录态，只能到登录页，因此登录后 T4 视觉验收仍未完成，当前状态保持“已接线 / 生产 T3 已验证”。
 
 ### 2026-07-14 待验收推进轮证据（部分完成/骨架 → 待验收）
 
