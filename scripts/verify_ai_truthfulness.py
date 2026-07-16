@@ -66,6 +66,7 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/services/publish_hub.py:generate_topic_suggestions_from_data": "database aggregation over performance rows",
     "backend/app/services/t5_long_run.py:adjacent_repeat_scores": "deterministic n-gram quality metric",
     "backend/app/services/m3_bulk.py:analyze_book_structure": "file parser/statistical structure metrics, not AI analysis",
+    "backend/app/services/overseas_complete.py:generate_consistency_report": "deterministic term/name coverage counting over stored content, no generated prose",
     "backend/app/api/v1/complete_api.py:multi_round_review_endpoint": "endpoint delegates to AI wrapper multi_round_review",
     "backend/app/api/v1/complete_api.py:cross_model_review": "endpoint delegates to AI wrapper cross_model_audit",
     "backend/app/api/v1/complete_api.py:analyze_book": "endpoint delegates to AI wrapper book_analysis_workbench",
