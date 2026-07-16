@@ -107,6 +107,18 @@ def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
 def test_validate_rejects_malformed_new_node_output():
     """BUG-05: new nodes must not free-pass garbage output."""
     import pytest
+    creative_bible = (
+        "核心设定：主角在异界废城中获得能改写契约的能力，但每一次改写都必须付出记忆代价。"
+        "开局节奏：第一章展示契约失控和家族危机，第二章让主角验证能力边界，第三章完成第一次公开反击并埋下代价。"
+        "能力边界：契约只能修改已存在的约定，不能凭空制造资源；越重要的契约越需要等价记忆。"
+        "长篇路线：觉醒、立足、夺回家族、进入王城、卷入神权战争、发现契约源头。"
+        "人物关系：主角与家人有保护和隐瞒的张力，与盟友互相利用，与反派在规则理解上正面对抗。"
+        "叙事禁忌：禁止无代价开挂，禁止反派降智，禁止把设定写成说明书。"
+        "持续校验：检查能力代价、人物已知信息、契约规则和章节钩子是否一致。"
+        "黄金三章必须完成能力验证、家庭信任危机和第一场公开冲突，后续每一卷都要让能力代价升级，"
+        "让主角在亲情、利益和规则之间做选择，不能只靠信息差碾压。商业/权力扩张必须有资源来源、"
+        "执行团队、外部阻力和阶段性失败，确保长篇推进时每个胜利都能被读者相信。"
+    )
 
     with pytest.raises(gateway.OutputValidationError):
         gateway.validate_task_output("plan_idea", {"whatever": True})
@@ -117,6 +129,8 @@ def test_validate_rejects_malformed_new_node_output():
         "core_hook": "核心卖点足够长",
         "target_audience": "男频玄幻读者",
         "title_candidates": ["《甲》", "《乙》", "《丙》"],
+        "creative_bible": creative_bible,
         "extra_field_from_model": "tolerated",
     })
     assert ok["core_hook"] == "核心卖点足够长"
+    assert "creative_bible" in ok

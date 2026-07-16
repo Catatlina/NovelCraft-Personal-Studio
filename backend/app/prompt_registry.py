@@ -443,7 +443,7 @@ $instruction
 
     # ═══ V2 四阶段 Bootstrap：规划阶段（7 节点，oh-story Phase 1-2 + harnessNovel 分层规划） ═══
     ("bootstrap.plan_idea", "1.0.0", "deepseek",
-     """你是资深网文策划（StoryArchitect）。请把一句话灵感展开为完整创意，并给出书名候选。
+     """你是资深网文策划（StoryArchitect）和长篇项目制片人。请先像专业创作顾问一样，把用户的原始需求整理成可供后续 AI 写作链路执行的"创作圣经"，再给出书名候选。
 
 灵感：$idea
 题材：$genre
@@ -454,13 +454,22 @@ $instruction
 2. core_hook：一句话核心卖点，读者为什么非看不可（爽感/悬念/情感/新奇中至少占一）
 3. target_audience：目标读者画像（年龄段+阅读偏好，不要写"所有人"）
 4. title_candidates：5 个书名候选，4-8 字、有市场辨识度、避免烂俗模板词（废柴/逆袭/无双）
+5. creative_bible：800-1800 字，必须把用户需求补强为长篇可执行设定，结构必须包含：
+   - 核心设定：主角身份、金手指/能力、时代背景、最大卖点
+   - 开局节奏：前三章分别完成什么，尤其黄金三章的冲突、坦白、钩子
+   - 能力边界：金手指能做什么、不能做什么、代价和风险
+   - 长篇路线：至少 6 个阶段，每阶段的目标、产业/力量升级、主要矛盾
+   - 人物关系：主角与家人/伙伴/对手的真实张力，禁止工具人
+   - 叙事风格与禁忌：哪些内容要突出，哪些套路/漏洞要避免
+   - 持续校验清单：时间线、资金/能力来源、现实逻辑、蝴蝶效应/设定边界
 
-输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"]}"""),
+输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"creative_bible":"完整创作圣经"}"""),
 
     ("bootstrap.plan_market_fit", "1.0.0", "deepseek",
      """你是网文市场分析师。请评估以下创意的市场匹配度。
 
 创意：$idea_expanded
+创作圣经：$creative_bible
 核心卖点：$core_hook
 目标受众：$target_audience
 题材：$genre
@@ -476,6 +485,7 @@ $instruction
      """你是故事结构专家。请为以下创意确定叙事模式与幕结构。
 
 创意：$idea_expanded
+创作圣经：$creative_bible
 核心卖点：$core_hook
 故事市场缺口：$market_gap
 
@@ -491,6 +501,7 @@ $instruction
      """你是爽点系统设计师。请为以下小说设计核心玩法（读者持续追读的引擎）。
 
 创意：$idea_expanded
+创作圣经：$creative_bible
 故事模式：$story_model
 题材：$genre
 
@@ -506,6 +517,7 @@ $instruction
      """你是世界观架构师。请为以下小说构建可支撑百万字连载的世界观。
 
 创意：$idea_expanded
+创作圣经：$creative_bible
 力量体系：$power_system
 故事模式：$story_model
 
@@ -522,6 +534,7 @@ $instruction
      """你是角色设计师。请为以下小说设计人物系统（4-8 位核心人物）。
 
 创意：$idea_expanded
+创作圣经：$creative_bible
 世界观：$worldview
 故事模式：$story_model
 
@@ -538,6 +551,7 @@ $instruction
 
 人物：$characters
 世界观：$worldview
+创作圣经：$creative_bible
 转折点：$turning_points
 
 要求：
@@ -555,11 +569,13 @@ $instruction
 人物：$_characters_text
 冲突图谱：$conflicts
 故事模式：$story_model
+创作圣经：$creative_bible
 
 要求：
-1. 3-10 卷，每卷含：number、title（卷名）、arc（本卷完成什么弧线）、start_chapter、end_chapter、climax（卷高潮）、hook（卷末钩子）
+1. 按百万字长篇规划 6-12 卷，每卷含：number、title（卷名）、arc（本卷完成什么弧线）、start_chapter、end_chapter、climax（卷高潮）、hook（卷末钩子）
 2. 每卷解决一条支线冲突、推进主线冲突一级
 3. chapter_tree：与 volumes 对应的章节区间树
+4. 必须承接创作圣经的长期阶段路线，不得只规划前三十章
 
 输出 JSON: {"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}"""),
 
@@ -570,10 +586,11 @@ $instruction
 世界观：$_worldview_text
 人物：$_characters_text
 爽点系统：$pleasure_points
+创作圣经：$creative_bible
 
 要求（AI_NovelGenerator 章法）：
 1. 每章含：volume、seq（章节序号）、title（章名）、outline（80-150 字梗概：目标→阻碍→行动→代价→转折）、beats（3-5 个节拍）、foreshadow_plant（本章埋的伏笔，可空）、foreshadow_reap（本章回收的伏笔，可空）
-2. 第 1 章按"黄金三章"标准：开篇冲突+人物魅力+世界观一角
+2. 第 1-3 章必须按创作圣经里的黄金三章目标推进；如果用户要求前三章坦白/立规矩/完成关键事件，不得拖延
 3. 每 2-3 章安排一个小爽点、第 9-10 章安排第一个中型高潮
 
 输出 JSON: {"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1","节拍2","节拍3"],"foreshadow_plant":[],"foreshadow_reap":[]}]}"""),
@@ -596,6 +613,7 @@ $instruction
      """你是资深网文作家。请写《$selected_title》第 $_chapter_seq 章正文。
 
 原始创作需求/用户灵感：$idea
+创作圣经：$creative_bible
 风格：$style
 人物档案：$_characters_text
 世界观：$_worldview_text
@@ -767,7 +785,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_volume":     '{"summary":"卷摘要"}',
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
-    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"]}',
+    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单"}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',
     "plan_story_pattern":     '{"story_model":"模式名称","act_structure":["第一幕：…","第二幕：…","第三幕：…"],"turning_points":[{"point":"转折","chapter_hint":"位置"}],"emotional_arc":"情绪轨迹"}',
     "plan_core_gameplay":     '{"power_system":"力量体系","progression_path":"成长路径","pleasure_points":["爽点1","爽点2","爽点3"],"power_ceiling":"上限与代价"}',

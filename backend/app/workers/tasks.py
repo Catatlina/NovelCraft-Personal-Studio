@@ -955,6 +955,36 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
 
     if task_type == "plan_idea":
         context["idea_expanded"] = output.get("idea_expanded", output.get("idea", ""))
+        creative_bible = str(output.get("creative_bible") or "").strip()
+        if creative_bible:
+            meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (_novel_id,)).fetchone()
+            if meta_row:
+                m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
+                m["creative_bible"] = creative_bible
+                m["core_hook"] = output.get("core_hook", "")
+                m["target_audience"] = output.get("target_audience", "")
+                db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
+            knowledge_id = new_id()
+            generation_key = f"run:{run_id}:node:{node_key}:creative-bible:v1"
+            stored = db.execute(
+                """INSERT INTO knowledge_items
+                   (id, project_id, content_id, kind, title, body, meta, generation_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (content_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+                   DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
+                   RETURNING id""",
+                (
+                    knowledge_id,
+                    _project_id,
+                    _novel_id,
+                    "creative_bible",
+                    "创作圣经",
+                    creative_bible,
+                    encode({"source_node": node_key, "core_hook": output.get("core_hook", "")}),
+                    generation_key,
+                ),
+            ).fetchone()
+            knowledge_ids_to_reindex.append(stored["id"] if stored else knowledge_id)
     elif task_type == "plan_market_fit":
         context["market_fit"] = output
     elif task_type == "plan_story_pattern":

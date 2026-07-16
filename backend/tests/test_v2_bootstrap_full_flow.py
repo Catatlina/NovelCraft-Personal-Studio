@@ -64,6 +64,15 @@ def _run_state(run_id):
 
 
 def _provider_output(task_type: str) -> dict:
+    creative_bible = (
+        "核心设定：林序是一名被现实反噬的悬疑作者，他发现自己写下的章节会以扭曲方式发生，必须找出掌控文本与现实边界的执笔会。"
+        "开局节奏：第一章用停电、短信和敲门制造异常；第二章追查旁证，确认不是幻觉；第三章进入修档馆，第一次触碰规则。"
+        "能力边界：文字只能影响已有因果，不能凭空创造人物和财富；每次改写都会留下旁证，并让执笔会更快定位主角。"
+        "长篇路线：第一阶段确认异常并保命，第二阶段建立证据链，第三阶段寻找同类，第四阶段反制执笔会，第五阶段揭开现实修档机制，第六阶段夺回叙事权。"
+        "人物关系：林序逃避责任但擅长观察，沈澜守序理性却被真相动摇，闻烬相信控制叙事才能拯救世界。"
+        "叙事禁忌：禁止说明书式解释规则，禁止反派降智，禁止靠巧合推进；每个规则必须通过场景、对话和代价展示。"
+        "持续校验：检查旁证是否闭环、人物是否知道不该知道的信息、改写代价是否递增、悬疑线索是否能回收。"
+    )
     long_body = [
         (
             f"第{index}段，停电来得突然。林序盯着屏幕，门外响起敲门声，短信弹了出来，像有人贴着他的耳朵说话。"
@@ -74,7 +83,7 @@ def _provider_output(task_type: str) -> dict:
         for index in range(1, 17)
     ]
     outputs = {
-        "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"]},
+        "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"], "creative_bible": creative_bible},
         "plan_market_fit": {"market_score": 82, "competitive_landscape": "脑洞悬疑读者接受度高。", "market_gap": "创作者身份代入更强。"},
         "plan_story_pattern": {"story_model": "悬疑解谜", "act_structure": ["发现异常", "追查真相", "夺回叙事权"], "turning_points": [{"point": "文本成真", "chapter_hint": "第1章"}]},
         "plan_core_gameplay": {"power_system": "文字改写现实但留下旁证", "progression_path": "读者到执笔者", "pleasure_points": ["信息差反杀", "伏笔回收"]},

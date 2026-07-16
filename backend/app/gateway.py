@@ -136,6 +136,7 @@ class _PlanIdeaOutput(_LenientOutput):
     core_hook: str = Field(min_length=5)
     target_audience: str = Field(min_length=2)
     title_candidates: list[str] = Field(min_length=3, max_length=8)
+    creative_bible: str = Field(min_length=300)
 
 
 class _PlanMarketFitOutput(_LenientOutput):
