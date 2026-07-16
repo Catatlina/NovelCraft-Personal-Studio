@@ -12,6 +12,35 @@ import re, json, urllib.request, urllib.error
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
+# SOCKS5 proxy — route through local Ubuntu to bypass China IP blocks
+_PROXY_HOST = __import__("os").getenv("RANKING_PROXY_HOST", "127.0.0.1")
+_PROXY_PORT = int(__import__("os").getenv("RANKING_PROXY_PORT", "1080"))
+_proxy_opener = None
+
+
+def _get_opener():
+    """Return urllib opener, optionally routed through SOCKS5 proxy."""
+    global _proxy_opener
+    if _proxy_opener is not None:
+        return _proxy_opener
+    try:
+        from sockshandler import SocksiPyHandler
+        import socks
+        _proxy_opener = urllib.request.build_opener(
+            SocksiPyHandler(socks.SOCKS5, _PROXY_HOST, _PROXY_PORT))
+    except Exception:
+        _proxy_opener = False  # Sentinel: proxy unavailable
+    return _proxy_opener
+
+
+def _urlopen(req, timeout=15, use_proxy=False):
+    """Open URL, optionally through SOCKS5 proxy."""
+    if use_proxy:
+        opener = _get_opener()
+        if opener and opener is not False:
+            return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX)
+
 
 # ============================================================
 # Source 1: 番茄小说 — Public API via rank_version from page
@@ -51,7 +80,7 @@ def _fanqie_meta() -> dict:
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception:
         return {"rank_version": "", "categories": {}}
@@ -99,7 +128,7 @@ def _fanqie_api_call(category_id: str, gender: str = "1", rank_mold: str = "2",
     }
     try:
         req = urllib.request.Request(api_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
         if data.get("code") != 0:
             return []
@@ -190,8 +219,7 @@ _QIDIAN_LABELS = {
 
 def fetch_qidian_ranking(rank_type: str = "hotsales") -> list[dict]:
     """Fetch 起点中文网 ranking.
-
-    rank_type: 'hotsales' / 'monthly' / 'newbook' / 'finished' / 'recommend' / 'collect' / 'fans'
+    rank_type: 'hotsales'/'monthly'/'newbook'/'finished'/'recommend'/'collect'/'fans'
     """
     url = _QIDIAN_MOBILE_URLS.get(rank_type, _QIDIAN_MOBILE_URLS["hotsales"])
     headers = {
@@ -200,7 +228,7 @@ def fetch_qidian_ranking(rank_type: str = "hotsales") -> list[dict]:
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=15, use_proxy=True) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
         return [{"source": "qidian", "degraded": True,
@@ -286,7 +314,7 @@ def fetch_zongheng_ranking() -> list[dict]:
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
         results = []
         matches = re.findall(
