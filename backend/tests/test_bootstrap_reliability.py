@@ -186,8 +186,8 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
     result = tasks.execute_bootstrap.run("run-1", "plan_idea")
 
     assert result["status"] == "error"
-    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v1:plan:1"
-    assert calls[1]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v1:audit:1"
+    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v2:cycle:1:plan:1"
+    assert calls[1]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v2:cycle:1:audit:1"
 
 
 def test_gateway_replay_by_mutation_id_returns_existing_output_without_new_writes(monkeypatch):

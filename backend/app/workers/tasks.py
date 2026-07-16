@@ -663,6 +663,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                 # zero contradictions and omissions.
                 fidelity_feedback: list[str] = []
                 output = {}
+                fidelity_cycle = int(node.get("attempt") or 0) + 1
                 for fidelity_attempt in range(1, 4):
                     plan_variables = {
                         **run_context,
@@ -676,7 +677,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         prompt_name="bootstrap.plan_idea",
                         variables=plan_variables,
                         client_mutation_id=(
-                            f"bootstrap:{run_id}:{node_key}:fidelity-v1:plan:{fidelity_attempt}"
+                            f"bootstrap:{run_id}:{node_key}:fidelity-v2:cycle:{fidelity_cycle}:plan:{fidelity_attempt}"
                         ),
                     )
                     output = validate_task_output(task_type, output)
@@ -691,7 +692,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                             "plan_output": json.dumps(output, ensure_ascii=False),
                         },
                         client_mutation_id=(
-                            f"bootstrap:{run_id}:{node_key}:fidelity-v1:audit:{fidelity_attempt}"
+                            f"bootstrap:{run_id}:{node_key}:fidelity-v2:cycle:{fidelity_cycle}:audit:{fidelity_attempt}"
                         ),
                     )
                     audit = validate_task_output("audit_plan_fidelity", audit)
