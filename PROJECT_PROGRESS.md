@@ -10,7 +10,14 @@
 
 ## 当前主线 (main)
 
-### 2026-07-16 创意拆解与人工选名整改（部署前工作树）
+### 2026-07-16 全量回归 + 生产浏览器巡检与修复轮
+
+- **全量回归**：本地 `pytest` → **565 passed, 9 skipped**（CI 等价环境；此前一次失败为本地 `DEEPSEEK_MODEL` 注入所致误报，CI 环境复跑通过）；`npm run build`（tsc+vite）通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py` 通过；alembic 单头 `nc_versions_reason_text` 全量迁移通过。
+- **生产浏览器巡检（真实登录态，Chrome 驱动）**：19 个页面全部渲染并核对控制台/网络请求；扫榜中心真实起点/番茄快照与失败详情展示正常；书库、审阅七维雷达、编辑器 TipTap、成本追踪 13 次真实 DeepSeek 调用、智能体任务计数等均为真实数据。
+- **修复 1（生产配置）**：服务器 `.env` 缺 `NOVELCRAFT_ADMIN_EMAILS` → `/admin/settings` 403 且前端产生未捕获异常；已补配并按 `docker-compose.prod.yml`（env_file 全量注入）正确重建 api/worker，登录态实测 200。
+- **修复 2（后端 @9c4abc1 main / @535dea6 分支）**：`GET /admin/settings` 由写级 `require_admin` 改为 `require_admin_reads`（QA-003 口径，与 providers/model-routes/prompts 一致）。
+- **修复 3（前端 @d72f2cf 分支）**：run 终态（succeeded/failed）停止 2 秒轮询；切换 Tab 滚回顶部；Settings 管理接口失败如实提示而非未捕获异常；同轮把此前已构建部署到生产（bundle `index-D_diNxCO`）的前端 WIP 入库补齐溯源。
+- **修复 4（基础设施）**：热点采集全源超时根因定位——`jp.xyjin.xyz:8888`（frps 隧道→国内 tinyproxy）被互联网扫描者当开放代理滥用打满，且 frps 存在僵尸 `nc-proxy` 注册占用端口；已 ufw 白名单收紧 8888 仅允许 43.156.17.78、重启 frps 清除僵尸注册。实测 `/api/v1/hotspots` 恢复 200、60 条真实百度热点，看板正常渲染。遗留：国内 frpc 配置存在重复绑定 8888 的 `nc-proxy` 段，建议清理；知乎/微博 ajax 需有效 Cookie。
 
 - **创意拆解模块化**：所有新书统一执行“原始需求 → 创作圣经 → 市场/故事/玩法/世界/人物/冲突规划”，不再把排行榜建议标题当成已确认标题。规划结果包含 `source_facts`、`design_additions`、`forbidden_changes`、长篇阶段、篇幅和内容配比。
 - **规划忠实度硬门禁**：`plan_idea` 每次真实 DeepSeek 输出后，新增独立 `audit_plan_fidelity` 调用逐项对照原始需求；年龄、年份、职业、设备、目标字数、内容主次和前三章事件存在矛盾/遗漏时，自动反馈并重新调用真实 AI，最多三轮；三轮仍不合格则节点 `failed`，不得进入选名或继续写作。用户要求后续生成的分卷总纲、前 N 章细纲、章节正文等记录在结构化 `downstream_deliverables`，由后续模块执行，不在策划节点伪装已产出。每轮策划与审计均写 `ai_calls`，没有 mock/fallback。
