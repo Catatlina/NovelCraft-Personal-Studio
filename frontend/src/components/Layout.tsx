@@ -9,8 +9,9 @@ export function Layout({ tab, setTab, title, runStatus, children }: {
 }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const workspaceRef = useRef<HTMLElement>(null);
-  // 切换页面时回到顶部，避免沿用上一页的滚动位置导致内容看似空白
-  useEffect(() => { workspaceRef.current?.scrollTo(0, 0); }, [tab]);
+  // 切换页面时回到顶部，避免沿用上一页的滚动位置导致内容看似空白。
+  // 实际滚动容器是 document（.workspace 未产生内部滚动），两者都归零以兼容布局变化。
+  useEffect(() => { workspaceRef.current?.scrollTo(0, 0); window.scrollTo(0, 0); }, [tab]);
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next); document.documentElement.setAttribute("data-theme", next);
