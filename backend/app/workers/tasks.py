@@ -94,6 +94,7 @@ NODE_STAGE["human_confirm_title"] = "human"
 
 # Default budget per chapter (all 5 writing nodes combined)
 DEFAULT_CHAPTER_BUDGET_CNY = 0.50
+MIN_CHAPTER_CHARS = 3000
 
 # Per-node budget allocation (planning ≈ blueprint < writing < finalization)
 NODE_BUDGET_MULTIPLIERS: dict[str, float] = {
@@ -173,6 +174,13 @@ def _assert_story_revision_quality(
         raise OutputValidationError(
             f"{task_type} dropped too many paragraphs: {len(after_paragraphs)}/{before_paragraph_count}"
         )
+
+
+def _assert_min_chapter_length(task_type: str, text: str) -> None:
+    from app.services.text_metrics import count_content_chars
+    chars = count_content_chars(text)
+    if chars < MIN_CHAPTER_CHARS:
+        raise OutputValidationError(f"{task_type} chapter too short: {chars}/{MIN_CHAPTER_CHARS} chars")
 # ── Isolated request context decorator ──────────────────────────────────────
 
 def _isolated_request_context(fn):
@@ -1034,6 +1042,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                         after_paragraphs=paragraphs,
                         min_ratio=0.80,
                     )
+                    _assert_min_chapter_length(task_type, "\n".join(paragraphs))
                 except OutputValidationError:
                     db.close()
                     raise
@@ -1079,6 +1088,11 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
     if _looks_like_non_narrative_text(chapter_text):
         db.close()
         raise OutputValidationError("write_chapter_draft returned non-narrative instructional text")
+    try:
+        _assert_min_chapter_length("write_chapter_draft", chapter_text)
+    except OutputValidationError:
+        db.close()
+        raise
     chapter_seq = int(context.get("_chapter_seq", 1))
     chapter_meta = {"seq": chapter_seq, "word_count": count_content_chars(chapter_text)}
     cid = new_id()
@@ -1090,7 +1104,7 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
            DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
            RETURNING id""",
         (cid, project_id, novel_id, "chapter", chapter.get("title", f"第一章"),
-         encode(body), encode(chapter_meta), "reviewed", generation_key),
+         encode(body), encode(chapter_meta), "pending_review", generation_key),
     ).fetchone()
     cid = stored["id"] if stored else cid
     context["chapter_id"] = cid
@@ -1124,6 +1138,7 @@ def _persist_chapter_polish(db, node_key: str, output: dict, context: dict, run_
                 before_text=before_text or context.get("chapter_text", ""),
                 after_paragraphs=polished_paragraphs,
             )
+            _assert_min_chapter_length("write_polish", "\n".join(polished_paragraphs))
         except OutputValidationError:
             db.close()
             raise
@@ -1283,6 +1298,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
     db = connect()
     from app.services.text_metrics import count_content_chars
     text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter["body"])
+    _assert_min_chapter_length("gen_next_chapter", text)
     chapter_meta = {"seq": next_seq, "word_count": count_content_chars(text)}
     if batch_id and batch_ordinal:
         chapter_meta.update({"batch_id": batch_id, "batch_ordinal": batch_ordinal,
@@ -1354,6 +1370,11 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
     current_body = list(paragraphs)
     for attempt in range(max_rewrites + 1):
         current_text = "\n".join(current_body)
+        length_issue = ""
+        try:
+            _assert_min_chapter_length("chapter_review", current_text)
+        except OutputValidationError as exc:
+            length_issue = str(exc)
         review = complete(
             run_id=None, node_key=None, project_id=project_id,
             task_type="review_7dim", prompt_name="bootstrap.review_7dim",
@@ -1363,6 +1384,9 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         )
         score = float(review["score"])
         issues = list(review.get("issues", []))
+        if length_issue:
+            score = min(score, threshold - 1)
+            issues.append(length_issue)
         review_key = f"{generation_key}:review-record:{attempt}:v1"
         db = connect()
         db.execute(
@@ -1372,14 +1396,14 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                DO UPDATE SET score=EXCLUDED.score,dimensions=EXCLUDED.dimensions,issues=EXCLUDED.issues""",
             (new_id(), chapter_id, score, encode(review["dimensions"]), encode(issues), review_key),
         )
-        status = "reviewed" if score >= threshold else "pending_review"
+        status = "pending_review"
         db.execute("""UPDATE contents SET status=%s,meta=meta || %s,updated_at=now() WHERE id=%s""",
                    (status, encode({"review_score": score, "review_issues": issues,
                                     "review_attempts": attempt + 1,
-                                    "quality_status": "accepted" if score >= threshold else "draft_pending_review"}), chapter_id))
+                                    "quality_status": "ai_review_passed" if score >= threshold else "draft_pending_review"}), chapter_id))
         db.commit(); db.close()
         if score >= threshold:
-            return {"accepted": True, "review_status": "reviewed", "final_score": score,
+            return {"accepted": False, "review_status": "pending_review", "final_score": score,
                     "rewrite_attempts": attempt, "title": current_title, "body": current_body}
         if attempt == max_rewrites:
             db = connect()
@@ -1398,6 +1422,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         )["chapter"]
         current_title = rewritten["title"]
         current_body = list(rewritten["body"])
+        _assert_min_chapter_length("chapter_rewrite", "\n".join(current_body))
         rewritten_doc = {"type": "doc", "content": [{"type": "paragraph", "text": text}
                                                          for text in current_body]}
         from app.services.text_metrics import count_content_chars
@@ -1423,6 +1448,95 @@ def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
              + [{"type": "foreshadow_due", "content": f.get("content", ""), "foreshadow_id": f.get("id")}
                 for f in overdue])
     return {"status": "flagged" if risks else "clean", "risks": risks, "checked_at": checked_at}
+
+
+@celery_app.task(bind=True, max_retries=1)
+@_isolated_request_context
+def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
+                            api_key: str = "", api_url: str = "", model: str = "") -> dict:
+    """Regenerate one rejected chapter in place.
+
+    This is the manual-review path: rejecting a chapter must not create the next
+    chapter by accident. It rewrites the same content row and leaves it
+    ``pending_review`` for another human decision.
+    """
+    from app.services.novel_export import extract_body_text
+    from app.services.text_metrics import count_content_chars
+
+    db = connect()
+    chapter = db.execute("SELECT * FROM contents WHERE id=%s AND type='chapter' AND is_deleted=FALSE", (chapter_id,)).fetchone()
+    if not chapter:
+        db.close()
+        return {"status": "error", "message": "chapter not found"}
+    novel = db.execute("SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE", (chapter["parent_id"],)).fetchone()
+    if not novel:
+        db.close()
+        return {"status": "error", "message": "novel not found"}
+    chapter_meta = chapter["meta"] if isinstance(chapter.get("meta"), dict) else {}
+    seq = int(chapter_meta.get("seq") or 1)
+    current_text = extract_body_text(chapter.get("body", ""))
+    project_id = chapter["project_id"]
+    novel_id = chapter["parent_id"]
+    db.close()
+
+    output = complete(
+        run_id=None,
+        node_key=None,
+        project_id=project_id,
+        task_type="gen_next_chapter",
+        prompt_name="narrative.gen_next_chapter",
+        variables={
+            "rewrite": True,
+            "manual_review_rejected": True,
+            "chapter_seq": seq,
+            "current_title": chapter["title"],
+            "current_body": current_text,
+            "review_feedback": [reason or "人工审核拒绝：请重写本章，保留章节序号，强化冲突、叙事和可读性。"],
+            "context": f"小说：《{novel['title']}》\n章节序号：第{seq}章\n拒绝原因：{reason}",
+        },
+        client_mutation_id=f"manual-review:{chapter_id}:regenerate:{int(time.time())}:v1",
+    )
+    rewritten = output["chapter"]
+    paragraphs = [str(p).strip() for p in rewritten.get("body", []) if str(p).strip()]
+    text = "\n".join(paragraphs)
+    if _looks_like_non_narrative_text(text):
+        db = connect()
+        db.execute(
+            "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+            (encode({"manual_review": {"status": "regenerate_failed", "reason": "non_narrative_output"}}), chapter_id),
+        )
+        db.commit(); db.close()
+        raise OutputValidationError("manual regeneration returned non-narrative text")
+    _assert_min_chapter_length("manual_regeneration", text)
+
+    db = connect()
+    previous_snapshot = {"title": chapter["title"], "body": chapter["body"], "meta": chapter_meta}
+    db.execute(
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason) VALUES (%s,'content',%s,'before_manual_regenerate',%s,%s)",
+        (new_id("ver"), chapter_id, encode(previous_snapshot), reason[:500]),
+    )
+    meta_patch = {
+        "word_count": count_content_chars(text),
+        "manual_review": {
+            "status": "regenerated",
+            "reason": reason,
+            "regenerated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "quality_status": "draft_pending_review",
+    }
+    db.execute(
+        """UPDATE contents
+           SET title=%s, body=%s, status='pending_review', meta=meta || %s, updated_at=now()
+           WHERE id=%s""",
+        (
+            rewritten.get("title") or chapter["title"],
+            encode(_chapter_doc_from_paragraphs(paragraphs)),
+            encode(meta_patch),
+            chapter_id,
+        ),
+    )
+    db.commit(); db.close()
+    return {"status": "pending_review", "chapter_id": chapter_id, "title": rewritten.get("title") or chapter["title"], "seq": seq}
 def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str = "",
                     model: str = "") -> dict:
     """Run or resume one stable batch slot."""
@@ -1474,7 +1588,7 @@ def _recount_batch_progress(db, batch_id: str) -> dict | None:
             by_ordinal[ordinal] = meta.get("quality_status") or row.get("status")
     generated = len(by_ordinal)
     accepted = sum(status in {"accepted", "reviewed"} for status in by_ordinal.values())
-    needs_review = sum(status in {"needs_review", "needs_rewrite"} for status in by_ordinal.values())
+    needs_review = sum(status in {"needs_review", "needs_rewrite", "pending_review", "draft_pending_review", "ai_review_passed"} for status in by_ordinal.values())
     reviewed = accepted + needs_review
     terminal = reviewed
     db.execute("""UPDATE generation_batches SET generated_count=%s,reviewed_count=%s,

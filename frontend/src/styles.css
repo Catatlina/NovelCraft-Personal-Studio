@@ -141,6 +141,9 @@ meter { width: 100%; }
 .outline-block { white-space: pre-wrap; overflow: auto; max-height: 360px; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); }
 .chapter-list { display: flex; flex-direction: column; gap: var(--space-2); }
 .chapter-list button { justify-content: space-between; }
+.chapter-review-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
+.chapter-review-row > button { min-width: 0; }
+.chapter-review-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
 .editor-review-panel { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3); }
 .editor-review-panel section { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); background: var(--bg-base); }
 
@@ -171,7 +174,8 @@ th { color: var(--text-muted); font-size: 13px; }
   .workspace { padding: var(--space-3); width: 100%; overflow-x: hidden; }
   .panel { padding: var(--space-3); }
   .grid-2 { grid-template-columns: 1fr; }
-  .book-row, .book-detail-grid, .editor-review-panel, .progress-grid { grid-template-columns: 1fr; }
+  .book-row, .book-detail-grid, .editor-review-panel, .progress-grid, .chapter-review-row { grid-template-columns: 1fr; }
+  .chapter-review-actions { justify-content: flex-start; }
   .progress-side { position: static; }
   .timeline .node { grid-template-columns: 1fr; }
   .timeline .node em { text-align: left; }

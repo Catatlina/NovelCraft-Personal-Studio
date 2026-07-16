@@ -64,6 +64,15 @@ def _run_state(run_id):
 
 
 def _provider_output(task_type: str) -> dict:
+    long_body = [
+        (
+            f"第{index}段，停电来得突然。林序盯着屏幕，门外响起敲门声，短信弹了出来，像有人贴着他的耳朵说话。"
+            "他没有立刻开门，只把手按在桌沿，听见自己的心跳一下一下撞在安静里。屏幕上那行字还亮着：三分钟后，有人会来取走你的名字。"
+            "楼道里的声控灯忽明忽暗，旧门板被风推得轻轻作响。他想起小说里那个已经死去三章的女主角，想起她最后留下的句子：如果现实开始回信，千万别相信第一个敲门的人。"
+            "林序把没水的钢笔握进掌心，笔尖却慢慢渗出墨色，像有什么东西正在借他的手重新写下结局。"
+        )
+        for index in range(1, 17)
+    ]
     outputs = {
         "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"]},
         "plan_market_fit": {"market_score": 82, "competitive_landscape": "脑洞悬疑读者接受度高。", "market_gap": "创作者身份代入更强。"},
@@ -75,19 +84,14 @@ def _provider_output(task_type: str) -> dict:
         "blueprint_volume_plan": {"volumes": [{"number": 1, "title": "回声来信", "arc": "发现异常", "start_chapter": 1, "end_chapter": 30}]},
         "blueprint_chapter_outline": {"chapter_outlines": [{"volume": 1, "seq": 1, "title": "第一章 来信", "outline": "主角发现文字成真", "beats": ["停电", "短信", "敲门"]}, {"volume": 1, "seq": 2, "title": "第二章 旁证", "outline": "寻找证据", "beats": ["追查", "受阻", "反转"]}, {"volume": 1, "seq": 3, "title": "第三章 修档馆", "outline": "进入新地点", "beats": ["抵达", "冲突", "钩子"]}]},
         "blueprint_scene_beat": {"scene_beats": [{"scene": 1, "pov": "林序", "location": "出租屋", "goal": "赶稿", "conflict": "文本成真", "outcome": "意外", "emotional_shift": "烦躁到惊惧"}, {"scene": 2, "pov": "林序", "location": "楼道", "goal": "确认敲门", "conflict": "无人回应", "outcome": "失败", "emotional_shift": "惊惧到好奇"}, {"scene": 3, "pov": "林序", "location": "街口", "goal": "求证", "conflict": "旁证出现", "outcome": "成功", "emotional_shift": "好奇到决心"}]},
-        "write_chapter_draft": {"chapter": {"title": "第一章 来信", "body": ["停电来得突然。", "林序盯着屏幕。", "门外响起敲门声。", "短信弹了出来。"]}},
+        "write_chapter_draft": {"chapter": {"title": "第一章 来信", "body": long_body}},
         "write_self_review": {"self_score": 82, "strengths": ["钩子清晰"], "weaknesses": ["压力可加强"]},
-        "write_polish": {"polished": {"body": ["停电来得突然。", "林序盯着屏幕。", "门外响起敲门声。", "短信弹了出来。"]}, "changes_summary": "收紧节奏"},
-        "write_length_check": {"actual_chars": 1200, "is_acceptable": True},
+        "write_polish": {"polished": {"body": long_body}, "changes_summary": "收紧节奏"},
+        "write_length_check": {"actual_chars": 3600, "is_acceptable": True},
         "write_fact_reconcile": {"reconciliation": {"conflicts_found": 0}},
         "final_consistency_check": {"checks": {"timeline": {"status": "pass"}}, "overall_status": "pass"},
         "final_continuity_audit": {"continuity": {"status": "continuous"}},
-        "final_humanize": {"humanized_text": "\n".join([
-            "停电来得突然。林序盯着屏幕，门外响起敲门声。短信弹了出来，像有人贴着他的耳朵说话。",
-            "他没有立刻开门，只把手按在桌沿，听见自己的心跳一下一下撞在安静里。屏幕上那行字还亮着：三分钟后，有人会来取走你的名字。",
-            "楼道里的声控灯忽明忽暗。林序屏住呼吸，从抽屉里摸出那支没水的钢笔，笔尖却在掌心慢慢渗出墨色。",
-            "门外的人又敲了两下。这一次，短信同步跳出来：别开门。发信人是他小说里已经死去三章的女主角。"
-        ]), "changes": ["收紧句子"]},
+        "final_humanize": {"humanized_text": "\n".join(long_body), "changes": ["收紧句子"]},
     }
     return outputs[task_type]
 

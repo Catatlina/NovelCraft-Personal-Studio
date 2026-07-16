@@ -155,6 +155,30 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     } catch (caught) { setNotice(`导出失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
+  const manualReviewChapter = async (chapter: any, decision: "approve" | "reject") => {
+    if (!detail) return;
+    const reason = decision === "reject"
+      ? window.prompt("请输入拒绝原因，系统会按这个原因重写本章：", "质量不达标，请重写本章") || ""
+      : "";
+    if (decision === "reject" && !reason.trim()) return;
+    setBusy(chapter.id); setNotice("");
+    try {
+      const result = await api<Wrapped<{ status: string; task_id?: string }>>(`/api/v1/chapters/${chapter.id}/manual-review`, {
+        method: "POST",
+        body: JSON.stringify({ decision, reason }),
+      });
+      setNotice(decision === "approve"
+        ? `《${chapter.title}》已通过人工审核并入库。`
+        : `《${chapter.title}》已拒绝，正在重新生成。任务 ${result.data.task_id || ""}`);
+      await openDetail(detail.book);
+      await loadBookState(detail.book);
+    } catch (caught) {
+      setNotice(`${decision === "approve" ? "通过" : "拒绝"}失败：${String(caught)}`);
+    } finally {
+      setBusy("");
+    }
+  };
+
   // NC-LIB-002: Apply filters client-side
   const filtered = books.filter(b => {
     if (search && !b.title.includes(search) && !(b.meta?.idea || "").includes(search)) return false;
@@ -198,9 +222,17 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       <section>
         <h3>全部章节</h3>
         <div className="chapter-list">
-          {detail.chapters.map(ch => <button key={ch.id} onClick={() => void onOpen(book.id)}>
-            第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}<small>{ch.status}</small>
-          </button>)}
+          {detail.chapters.map(ch => <div className="chapter-review-row" key={ch.id}>
+            <button onClick={() => void onOpen(book.id)}>
+              第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}
+              <small>{ch.status}{ch.meta?.review_score ? ` · AI分 ${Math.round(ch.meta.review_score)}` : ""}</small>
+            </button>
+            <div className="chapter-review-actions">
+              {ch.status !== "reviewed" && <button disabled={busy === ch.id} className="primary" onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
+              {ch.status !== "reviewed" && <button disabled={busy === ch.id} onClick={() => void manualReviewChapter(ch, "reject")}>拒绝重写</button>}
+              {ch.status === "reviewed" && <span className="pill succeeded">已入库</span>}
+            </div>
+          </div>)}
           {!detail.chapters.length && <p className="muted">暂无章节。</p>}
         </div>
       </section>

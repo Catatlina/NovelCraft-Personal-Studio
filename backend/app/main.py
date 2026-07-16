@@ -4,6 +4,7 @@ import secrets
 from typing import Any
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import psycopg2.pool
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
@@ -172,6 +173,11 @@ class AgentExecuteRequest(BaseModel):
     project_id: str
     variables: dict[str, Any] = Field(default_factory=dict)
     client_mutation_id: str | None = Field(default=None, max_length=100)
+
+
+class ChapterReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(approve|reject)$")
+    reason: str = Field(default="", max_length=1000)
 
 
 def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
@@ -472,6 +478,86 @@ async def continue_novel(request: Request, novel_id: str, user: dict = Depends(g
                                          api_url=request.headers.get("X-Api-Base-Url", ""),
                                          model=request.headers.get("X-Model", ""))
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
+
+
+@app.post("/api/v1/chapters/{chapter_id}/manual-review")
+@limiter.limit("20/minute")
+async def manual_review_chapter(
+    request: Request,
+    chapter_id: str,
+    payload: ChapterReviewRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Human quality gate for generated chapters.
+
+    approve: marks the chapter as reviewed/accepted and therefore usable in the library.
+    reject: marks it needs_rewrite and dispatches an in-place regeneration task.
+    """
+    conn, chapter = load_content_for_user(chapter_id, user, {"owner", "editor"})
+    if chapter["type"] != "chapter":
+        conn.close()
+        raise HTTPException(status_code=400, detail="content is not a chapter")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if payload.decision == "approve":
+        conn.execute(
+            """UPDATE contents
+               SET status='reviewed',
+                   meta=meta || %s,
+                   updated_at=now()
+               WHERE id=%s""",
+            (encode({
+                "quality_status": "accepted",
+                "manual_review": {
+                    "status": "approved",
+                    "reviewed_by": user["id"],
+                    "reviewed_at": now_iso,
+                    "reason": payload.reason,
+                },
+            }), chapter_id),
+        )
+        conn.execute(
+            """INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at)
+               VALUES (%s,'content',%s,'manual_review.approved',%s,now())""",
+            (new_id(), chapter_id, encode({"reason": payload.reason, "user_id": user["id"]})),
+        )
+        conn.commit()
+        updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id=%s", (chapter_id,)).fetchone()))
+        conn.close()
+        return ok({"chapter": updated, "status": "reviewed"})
+
+    conn.execute(
+        """UPDATE contents
+           SET status='needs_rewrite',
+               meta=meta || %s,
+               updated_at=now()
+           WHERE id=%s""",
+        (encode({
+            "quality_status": "needs_review",
+            "manual_review": {
+                "status": "rejected",
+                "reviewed_by": user["id"],
+                "reviewed_at": now_iso,
+                "reason": payload.reason,
+            },
+        }), chapter_id),
+    )
+    conn.execute(
+        """INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at)
+           VALUES (%s,'content',%s,'manual_review.rejected',%s,now())""",
+        (new_id(), chapter_id, encode({"reason": payload.reason, "user_id": user["id"]})),
+    )
+    conn.commit()
+    conn.close()
+
+    from .workers.tasks import regenerate_chapter_task
+    task = regenerate_chapter_task.delay(
+        chapter_id,
+        payload.reason,
+        api_key=request.headers.get("X-Api-Key", ""),
+        api_url=request.headers.get("X-Api-Base-Url", ""),
+        model=request.headers.get("X-Model", ""),
+    )
+    return ok({"chapter_id": chapter_id, "status": "regenerating", "task_id": task.id})
 
 
 @app.post("/api/v1/novels/{novel_id}/expand-outline")
