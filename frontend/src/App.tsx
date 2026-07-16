@@ -170,8 +170,6 @@ export default function App() {
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
     void cacheSet("currentNovel", n);
-    // 只在用户正在看的进度页且 run 完成时才跳审阅（避免跨书跳转）
-    if (r.status === "succeeded" && tab === "progress") setTab("review");
   }
 
   async function startBootstrap() {
@@ -390,9 +388,13 @@ export default function App() {
     setChapter(r); setEditorText(docToText(r.body)); loadVersions(r.id);
   }
 
-  // V2 runs surface review output via write_self_review; legacy runs used n8 (review_7dim).
-  const review = (run?.nodes.find(n => n.node_key === "write_self_review")?.output
-    ?? run?.nodes.find(n => n.node_key === "n8")?.output) as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
+  // V2 runs split quality data across self-review and consistency nodes; legacy runs used n8.
+  const review = ({
+    ...(run?.nodes.find(n => n.node_key === "n8")?.output ?? {}),
+    ...(run?.nodes.find(n => n.node_key === "write_self_review")?.output ?? {}),
+    final_consistency_check: run?.nodes.find(n => n.node_key === "final_consistency_check")?.output,
+    final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
+  }) as any;
 
   const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点仪表盘", knowledge: "知识库浏览器", fanout: "多平台分发", versions: "版本树", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
   const [prompts, setPrompts] = useState<any[]>([]);
@@ -449,7 +451,7 @@ export default function App() {
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
-      {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
+      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} /></React.Suspense>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "prompts" && (
