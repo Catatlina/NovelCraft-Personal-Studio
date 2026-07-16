@@ -1,74 +1,314 @@
-"""TASK-001/M1: Real ranking source adapters — HTTP scraping, no API key needed."""
+"""TASK-001/M1: Real ranking source adapters — HTTP scraping for 番茄/起点/纵横.
+
+Based on proven open-source approaches:
+  - 番茄: Qbook approach — fetch __INITIAL_STATE__ for rank_version, then call public API
+  - 起点: Qbook approach — mobile page HTML parsing + __INITIAL_STATE__
+  - 纵横: regex HTML parsing (existing)
+"""
 
 import hashlib
 import unicodedata
-import re, json, urllib.request
+import re, json, urllib.request, urllib.error
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
-
-from app.services.ranking_capture import configured_capture
+from urllib.parse import urljoin
 
 
 # ============================================================
-# Source 1: 番茄小说 (fanqienovel.com) — HTML 解析
+# Source 1: 番茄小说 — Public API via rank_version from page
 # ============================================================
 
-def fetch_fanqie_ranking(category: str = "novel_rank") -> list[dict]:
-    """Load a rendered browser/OCR capture of public Fanqie rank metadata."""
-    capture = configured_capture("fanqie")
-    if capture:
-        return capture.as_adapter_items()
-    return [{"source": "fanqie", "degraded": True,
-             "error": "Fanqie requires a rendered browser/OCR capture; set RANKING_CAPTURE_FANQIE_PATH"}]
+_FANQIE_META_CACHE: dict | None = None
+_FANQIE_META_TS: float = 0
+_FANQIE_META_TTL = 3600  # 1 hour
+
+# SSL context for Chinese sites (cert issues from non-China IPs)
+_SSL_CTX = __import__("ssl").create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = __import__("ssl").CERT_NONE
+
+
+def _decrypt_pua(text: str) -> str:
+    """Decrypt 番茄小说 PUA font-encoded titles."""
+    try:
+        from app.services.pua_map import decrypt_pua
+        return decrypt_pua(text)
+    except Exception:
+        return text
+
+
+def _fanqie_meta() -> dict:
+    """Fetch fanqie rank page to extract rank_version and categories."""
+    global _FANQIE_META_CACHE, _FANQIE_META_TS
+    import time as _time
+    now = _time.time()
+    if _FANQIE_META_CACHE and (now - _FANQIE_META_TS) < _FANQIE_META_TTL:
+        return _FANQIE_META_CACHE
+
+    url = "https://fanqienovel.com/rank"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return {"rank_version": "", "categories": {}}
+
+    idx = html.find("__INITIAL_STATE__=")
+    if idx < 0:
+        return {"rank_version": "", "categories": {}}
+
+    start = idx + len("__INITIAL_STATE__=")
+    end = html.find("</script>", start)
+    json_str = html[start:end].strip().rstrip(";").strip()
+    json_str = re.sub(r"\bundefined\b", "null", json_str)
+
+    try:
+        state, _ = __import__("json").JSONDecoder().raw_decode(json_str)
+    except json.JSONDecodeError:
+        return {"rank_version": "", "categories": {}}
+
+    rank = state.get("rank", {})
+    meta = {
+        "rank_version": rank.get("rankVersion", ""),
+        "categories": rank.get("rankCategoryTypeList", {}),
+    }
+    _FANQIE_META_CACHE = meta
+    _FANQIE_META_TS = now
+    return meta
+
+
+def _fanqie_api_call(category_id: str, gender: str = "1", rank_mold: str = "2",
+                     offset: int = 0, limit: int = 30) -> list[dict]:
+    """Call fanqie ranking API (uses rank_version from page, no a_bogus needed)."""
+    import urllib.parse
+    meta = _fanqie_meta()
+    params = urllib.parse.urlencode({
+        "app_id": "2503", "rank_list_type": "3",
+        "offset": offset, "limit": limit,
+        "category_id": category_id, "rank_version": meta["rank_version"],
+        "gender": gender, "rankMold": rank_mold,
+    })
+    api_url = f"https://fanqienovel.com/api/rank/category/list?{params}"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://fanqienovel.com/rank",
+        "User-Agent": "Mozilla/5.0",
+    }
+    try:
+        req = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+            data = json.loads(resp.read())
+        if data.get("code") != 0:
+            return []
+        return data.get("data", {}).get("book_list", [])
+    except Exception:
+        return []
+
+
+def fetch_fanqie_ranking(category: str = "read", gender: str = "") -> list[dict]:
+    """Fetch 番茄小说 ranking.
+
+    category: 'read' (在读榜) or 'new' (新书榜)
+    gender: 'male' / 'female' / '' (默认男频+女频各取前5分类)
+    """
+    mold_map = {"read": "2", "new": "1"}
+    gender_map = {"male": "1", "female": "0"}
+    rank_mold = mold_map.get(category, "2")
+
+    meta = _fanqie_meta()
+    categories = meta.get("categories", {})
+    if not categories:
+        return [{"source": "fanqie", "degraded": True,
+                 "error": "Fanqie rank page unreachable — check network"}]
+
+    targets = []
+    if gender in ("male", "female"):
+        g = gender_map[gender]
+        for cat in categories.get(gender, []):
+            targets.append((cat["id"], cat["name"], g))
+    else:
+        for gk, limit in [("male", 5), ("female", 5)]:
+            g = gender_map[gk]
+            for cat in categories.get(gk, [])[:limit]:
+                targets.append((cat["id"], cat["name"], g))
+
+    if not targets:
+        targets = [("261", "都市日常", "1")]
+
+    results = []
+    seen = set()
+    for cat_id, cat_name, g in targets:
+        for offset in range(0, 30, 10):
+            items = _fanqie_api_call(cat_id, g, rank_mold, offset, 10)
+            for item in items:
+                book_id = str(item.get("book_id", item.get("bookId", "")))
+                if not book_id or book_id in seen:
+                    continue
+                seen.add(book_id)
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": _decrypt_pua(str(item.get("bookName", item.get("book_name", "")))),
+                    "author": _decrypt_pua(str(item.get("author", item.get("author_name", "")))),
+                    "category": cat_name,
+                    "source": "fanqie",
+                    "source_book_id": book_id,
+                    "url": f"https://fanqienovel.com/page/{book_id}",
+                    "read_count": item.get("readCount", item.get("read_count", 0)),
+                    "word_count": item.get("wordCount", item.get("word_count", 0)),
+                })
+            if len(items) < 10:
+                break
+
+    if not results:
+        return [{"source": "fanqie", "degraded": True,
+                 "error": "Fanqie API returned no results"}]
+    return results
 
 
 # ============================================================
-# Source 2: 起点 (Qidian) — JSONP 接口
+# Source 2: 起点中文网 — Mobile page + __INITIAL_STATE__
 # ============================================================
 
-def fetch_qidian_ranking() -> list[dict]:
-    """Load public Qidian rank metadata captured in a user-controlled browser."""
-    capture = configured_capture("qidian")
-    if capture:
-        return capture.as_adapter_items()
-    return [{"source": "qidian", "degraded": True,
-             "error": "Qidian requires a user-controlled browser capture; complete any challenge manually, "
-                      "then set RANKING_CAPTURE_QIDIAN_PATH"}]
+_QIDIAN_MOBILE_URLS = {
+    "hotsales":  "https://m.qidian.com/rank/hotsales/",
+    "newbook":   "https://m.qidian.com/rank/newbook/",
+    "finished":  "https://m.qidian.com/rank/finished/",
+    "recommend": "https://m.qidian.com/rank/",
+    "monthly":   "https://m.qidian.com/rank/yuepiao/",
+    "collect":   "https://m.qidian.com/rank/collect/",
+    "fans":      "https://m.qidian.com/rank/fans/",
+}
+
+_QIDIAN_LABELS = {
+    "hotsales": "畅销榜", "newbook": "新书榜", "finished": "完本榜",
+    "recommend": "推荐榜", "monthly": "月票榜", "collect": "收藏榜", "fans": "粉丝榜",
+}
+
+
+def fetch_qidian_ranking(rank_type: str = "hotsales") -> list[dict]:
+    """Fetch 起点中文网 ranking.
+
+    rank_type: 'hotsales' / 'monthly' / 'newbook' / 'finished' / 'recommend' / 'collect' / 'fans'
+    """
+    url = _QIDIAN_MOBILE_URLS.get(rank_type, _QIDIAN_MOBILE_URLS["hotsales"])
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 Chrome/125.0.0.0 Mobile Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return [{"source": "qidian", "degraded": True,
+                 "error": f"Qidian unreachable: {e}"}]
+
+    # Try __INITIAL_STATE__ first
+    idx = html.find("__INITIAL_STATE__")
+    if idx >= 0:
+        start = idx + len("__INITIAL_STATE__")
+        end = html.find("</script>", start)
+        try:
+            json_str = html[start:end].strip().rstrip(";").strip()
+            json_str = re.sub(r"\bundefined\b", "null", json_str)
+            state = json.loads(json_str)
+            for key in ["rank", "data"]:
+                bl = state.get(key, {})
+                if isinstance(bl, dict):
+                    bl = bl.get("bookList", bl.get("list", bl.get("records", [])))
+                if isinstance(bl, list) and bl:
+                    results = []
+                    for item in bl:
+                        if not isinstance(item, dict):
+                            continue
+                        bid = str(item.get("bookId", item.get("bId", item.get("id", ""))))
+                        title = item.get("bookName", item.get("bName", item.get("name", "")))
+                        if not title or not bid:
+                            continue
+                        results.append({
+                            "rank": len(results) + 1,
+                            "title": title,
+                            "author": item.get("authorName", item.get("aName", item.get("author", ""))),
+                            "intro": str(item.get("bookDesc", item.get("desc", "")) or "")[:200],
+                            "word_count": item.get("wordCount", item.get("wordNumber", 0)),
+                            "category": item.get("categoryName", item.get("catName", "")),
+                            "source": "qidian",
+                            "source_book_id": bid,
+                            "url": f"https://m.qidian.com/book/{bid}/",
+                        })
+                    if results:
+                        return results
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Fallback: HTML regex extraction
+    books = []
+    # Match: <a href="//m.qidian.com/book/{id}/" ...>title</a>
+    pattern = re.compile(
+        r'<a[^>]*href="//m\.qidian\.com/book/(\d+)/"[^>]*>([^<]+)</a>.*?'
+        r'<span[^>]*class="[^"]*author[^"]*"[^>]*>([^<]+)</span>',
+        re.DOTALL,
+    )
+    seen = set()
+    for m in pattern.finditer(html):
+        bid, title, author = m.group(1), m.group(2).strip(), m.group(3).strip()
+        if bid in seen or not title:
+            continue
+        seen.add(bid)
+        books.append({
+            "rank": len(books) + 1,
+            "title": title,
+            "author": author,
+            "category": _QIDIAN_LABELS.get(rank_type, rank_type),
+            "source": "qidian",
+            "source_book_id": bid,
+            "url": f"https://m.qidian.com/book/{bid}/",
+        })
+        if len(books) >= 30:
+            break
+
+    if not books:
+        return [{"source": "qidian", "degraded": True,
+                 "error": "Qidian HTML parser produced no items"}]
+    return books
 
 
 # ============================================================
-# Source 3: 纵横中文网 (Zongheng) — HTML 解析
+# Source 3: 纵横中文网 — HTML regex
 # ============================================================
 
 def fetch_zongheng_ranking() -> list[dict]:
-    """Fetch 纵横中文网排行榜."""
+    """Fetch 纵横中文网排行榜 via HTML parsing."""
     url = "https://www.zongheng.com/rank"
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-        # The current page is server-rendered. Use the first visible rank block,
-        # not the old /rank/details page which now returns an incompatible shell.
         results = []
         matches = re.findall(
             r'<div data-id="(?P<id>\d+)" class="zh-modules-rank-book[^>]*>.*?'
             r'<p class="book-rank--title-text[^>]*>\s*<a title="(?P<title>[^"]+)" '
             r'href="(?P<url>[^"]+)"',
-            html,
-            re.DOTALL,
+            html, re.DOTALL,
         )
         seen = set()
         for book_id, title, href in matches:
             if book_id in seen:
                 continue
             seen.add(book_id)
-            results.append({"rank": len(results) + 1, "title": title.strip(), "author": "", "source": "zongheng",
-                            "source_book_id": book_id, "url": urljoin(url, href)})
+            results.append({
+                "rank": len(results) + 1, "title": title.strip(), "author": "",
+                "source": "zongheng", "source_book_id": book_id,
+                "url": urljoin(url, href),
+            })
             if len(results) >= 20:
                 break
         if not results:
-            raise ValueError("Zongheng ranking parser produced no items (schema drift)")
+            raise ValueError("Zongheng parser produced no items (schema drift)")
         return results
     except Exception as e:
         return [{"source": "zongheng", "error": str(e), "degraded": True}]
@@ -78,15 +318,6 @@ def fetch_zongheng_ranking() -> list[dict]:
 # Unified ranking collector
 # ============================================================
 
-def collect_all_rankings() -> dict:
-    """Collect from all available sources. Returns {source: [book list]}."""
-    return {
-        "fanqie": fetch_fanqie_ranking(),
-        "qidian": fetch_qidian_ranking(),
-        "zongheng": fetch_zongheng_ranking(),
-    }
-
-
 RANKING_FETCHERS = {
     "fanqie": fetch_fanqie_ranking,
     "qidian": fetch_qidian_ranking,
@@ -94,14 +325,24 @@ RANKING_FETCHERS = {
 }
 
 
-def normalize_ranking_items(source: str, items: list[dict], fetched_at: datetime | None = None) -> list[dict]:
-    """Normalize and deduplicate one source response without hiding failures."""
+def collect_all_rankings() -> dict:
+    """Collect from all available sources."""
+    return {
+        "fanqie": fetch_fanqie_ranking(),
+        "qidian": fetch_qidian_ranking("monthly"),
+        "zongheng": fetch_zongheng_ranking(),
+    }
+
+
+def normalize_ranking_items(source: str, items: list[dict],
+                            fetched_at: datetime | None = None) -> list[dict]:
+    """Normalize and deduplicate one source response."""
     normalized: list[dict] = []
     seen: set[str] = set()
     fetched_at = fetched_at or datetime.now(timezone.utc)
     best_by_key: dict[str, dict] = {}
     for raw in items:
-        if raw.get("error"):
+        if raw.get("error") or raw.get("degraded"):
             continue
         title = unicodedata.normalize("NFKC", re.sub(r"\s+", " ", str(raw.get("title", ""))).strip())
         if not title:
@@ -111,16 +352,25 @@ def normalize_ranking_items(source: str, items: list[dict], fetched_at: datetime
         external_raw = raw.get("external_id", raw.get("source_book_id", raw.get("book_id", raw.get("bookId"))))
         external_id = str(external_raw).strip() if external_raw not in (None, "") else None
         if not external_id and source_url:
-            path_ids = re.findall(r"\d{4,}", urlparse(source_url).path)
+            path_ids = re.findall(r"\d{4,}", source_url)
             external_id = path_ids[-1] if path_ids else None
         identity = external_id or f"{title.casefold()}|{author.casefold()}"
         dedupe_key = hashlib.sha256(f"{source}:{identity}".encode("utf-8")).hexdigest()
-        metrics = {"readers": str(raw.get("readers", "")), "status": str(raw.get("status", "")),
-                   "last_update": str(raw.get("last_update", ""))}
+        metrics = {
+            "readers": str(raw.get("readers", raw.get("read_count", ""))),
+            "status": str(raw.get("status", "")),
+            "last_update": str(raw.get("last_update", "")),
+        }
+        if raw.get("word_count") or raw.get("wordCount"):
+            metrics["word_count"] = raw.get("word_count", raw.get("wordCount", 0))
+        if raw.get("intro"):
+            metrics["intro"] = str(raw.get("intro", ""))[:200]
         if any(key in raw for key in ("collector", "confidence", "evidence")):
-            metrics.update({"collector": str(raw.get("collector", "http")),
-                            "confidence": float(raw.get("confidence", 1.0)),
-                            "evidence": raw.get("evidence", {})})
+            metrics.update({
+                "collector": str(raw.get("collector", "http")),
+                "confidence": float(raw.get("confidence", 1.0)),
+                "evidence": raw.get("evidence", {}),
+            })
         item = {
             "source_key": source,
             "external_id": external_id,
@@ -136,4 +386,4 @@ def normalize_ranking_items(source: str, items: list[dict], fetched_at: datetime
         previous = best_by_key.get(dedupe_key)
         if previous is None or item["rank_no"] < previous["rank_no"]:
             best_by_key[dedupe_key] = item
-    return sorted(best_by_key.values(), key=lambda item: item["rank_no"])
+    return sorted(best_by_key.values(), key=lambda x: x["rank_no"])
