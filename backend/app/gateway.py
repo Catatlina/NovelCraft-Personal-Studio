@@ -27,6 +27,18 @@ _request_model: ContextVar[str | None] = ContextVar("request_model", default=Non
 MODEL = "deepseek-chat"
 PROVIDER = "deepseek"
 
+LONG_FORM_TASKS = {
+    "gen_chapter1",
+    "gen_next_chapter",
+    "write_chapter_draft",
+    "write_polish",
+    "final_humanize",
+    "editor_continue",
+    "editor_rewrite",
+    "editor_expand",
+    "style_imitation",
+}
+
 
 class BudgetExceeded(RuntimeError):
     """Raised when a project budget would be exceeded by an AI call."""
@@ -641,15 +653,26 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     api_key = _request_api_key.get() or settings.deepseek_api_key
     if not api_key:
         raise ProviderError("DEEPSEEK_API_KEY is not configured")
+    max_tokens = params.get("max_tokens")
+    if max_tokens is None and task_type in LONG_FORM_TASKS:
+        # Long-form fiction nodes must be able to return 3000+ Chinese
+        # characters inside a JSON payload. Relying on provider defaults makes
+        # the prompt say "write long" while the API may still truncate output.
+        max_tokens = 8192
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "你是 NovelCraft 的结构化创作 Agent。只输出 JSON。"},
+            {"role": "system", "content": "你是 NovelCraft 的职业网文创作 Agent。只输出合法 JSON；正文必须是可直接连载发布的小说叙事，不写说明文、计划书或创作建议。"},
             {"role": "user", "content": prompt},
         ],
         "response_format": {"type": "json_object"},
         "temperature": params.get("temperature", 0.7),
     }
+    if max_tokens is not None:
+        try:
+            body["max_tokens"] = max(1024, min(int(max_tokens), 8192))
+        except (TypeError, ValueError):
+            body["max_tokens"] = 8192
     from .core.url_security import validate_ai_base_url
     base_url = validate_ai_base_url(_request_api_base_url.get() or settings.deepseek_base_url)
     request = urllib.request.Request(
