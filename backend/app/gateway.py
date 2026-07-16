@@ -441,6 +441,14 @@ def _complete_impl(
                 record_success("deepseek")
                 provider_name = "deepseek"
                 model_name = model_
+            except OutputValidationError:
+                # Non-JSON and other structured-response violations are model
+                # sample failures, not transport outages. Retry with a fresh
+                # real completion under the same contract.
+                if schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
+                    record_failure("deepseek")
+                    raise
+                continue
             except ProviderError:
                 record_failure("deepseek")
                 raise
@@ -727,7 +735,7 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ProviderError(f"deepseek returned non-json for {task_type}") from exc
+        raise OutputValidationError(f"deepseek returned non-json for {task_type}") from exc
     return parsed, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 
