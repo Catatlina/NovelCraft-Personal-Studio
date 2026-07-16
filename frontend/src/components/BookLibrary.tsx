@@ -9,6 +9,40 @@ type Completion = { total_chapters: number; reviewed_chapters: number; total_wor
 type ImportPreview = { seq: string; title: string; raw: string };
 type Wrapped<T> = { data: T };
 
+function formatBookOutline(outline: unknown): string {
+  if (typeof outline === "string") return outline.trim();
+  if (!outline || typeof outline !== "object") return "";
+
+  const blueprint = outline as { volume_plan?: any[]; chapter_outlines?: any[] };
+  const sections: string[] = [];
+  if (Array.isArray(blueprint.volume_plan) && blueprint.volume_plan.length) {
+    const volumes = blueprint.volume_plan.map((volume, index) => {
+      const number = volume.number ?? index + 1;
+      const chapterRange = volume.start_chapter && volume.end_chapter
+        ? `（第${volume.start_chapter}-${volume.end_chapter}章）`
+        : "";
+      return [
+        `第${number}卷 ${volume.title || "未命名"}${chapterRange}`,
+        volume.arc ? `主线：${volume.arc}` : "",
+        volume.climax ? `高潮：${volume.climax}` : "",
+        volume.hook ? `卷末钩子：${volume.hook}` : "",
+      ].filter(Boolean).join("\n");
+    });
+    sections.push(`【分卷规划】\n${volumes.join("\n\n")}`);
+  }
+  if (Array.isArray(blueprint.chapter_outlines) && blueprint.chapter_outlines.length) {
+    const chapters = blueprint.chapter_outlines.map((chapter, index) => {
+      const seq = chapter.seq ?? index + 1;
+      const beats = Array.isArray(chapter.beats) && chapter.beats.length
+        ? `\n节拍：${chapter.beats.join(" → ")}`
+        : "";
+      return `第${seq}章 ${chapter.title || "未命名"}\n${chapter.outline || ""}${beats}`.trim();
+    });
+    sections.push(`【逐章细纲】\n${chapters.join("\n\n")}`);
+  }
+  return sections.join("\n\n") || JSON.stringify(outline, null, 2);
+}
+
 export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: (bookId: string) => Promise<void> }) {
   const [books, setBooks] = useState<Book[]>([]);
   const [error, setError] = useState("");
@@ -195,7 +229,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
 
   if (detail) {
     const book = detail.book;
-    const outline = typeof detail.outline === "string" ? detail.outline : JSON.stringify(detail.outline || book.meta?.outline || "", null, 2);
+    const outline = formatBookOutline(detail.outline || book.meta?.outline || {
+      volume_plan: book.meta?.volume_plan,
+      chapter_outlines: book.meta?.chapter_outlines,
+    });
     return <section className="panel book-detail">
       <button onClick={() => setDetail(null)}><ArrowLeft size={14} />返回书库</button>
       <div className="book-detail-head">

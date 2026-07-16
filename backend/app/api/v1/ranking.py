@@ -44,6 +44,22 @@ def rows(db, sql: str, params: tuple = ()) -> list[dict]:
     return [dict(row) for row in db.execute(sql, params).fetchall()]
 
 
+def _resolve_book_outline(meta: dict[str, Any]) -> Any:
+    """Return either a legacy outline or the V2 blueprint persisted by bootstrap."""
+    legacy_outline = meta.get("outline") or meta.get("chapter_plan")
+    if legacy_outline:
+        return legacy_outline
+
+    volume_plan = meta.get("volume_plan") or []
+    chapter_outlines = meta.get("chapter_outlines") or []
+    if volume_plan or chapter_outlines:
+        return {
+            "volume_plan": volume_plan,
+            "chapter_outlines": chapter_outlines,
+        }
+    return ""
+
+
 class CreateBookRequest(BaseModel):
     auto_start: bool = True
     target_words: int = Field(default=800_000, ge=10_000, le=5_000_000)
@@ -691,7 +707,7 @@ def get_book_detail(book_id: str, user: dict = Depends(get_current_user)):
         "book": dict(book),
         "synopsis": meta.get("synopsis") or meta.get("idea") or "",
         "genre": meta.get("genre") or meta.get("source_type") or "未分类",
-        "outline": meta.get("outline") or meta.get("chapter_plan") or "",
+        "outline": _resolve_book_outline(meta),
         "latest_chapter": latest,
         "chapters": chapters,
         "knowledge": knowledge,

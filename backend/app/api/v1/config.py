@@ -80,7 +80,7 @@ def list_providers(user: dict = Depends(require_admin_reads)):
     """List all configured AI providers with masked keys."""
     providers = [
         {"name": "deepseek", "key_configured": bool(os.getenv("DEEPSEEK_API_KEY","")),
-         "base_url": "https://api.deepseek.com", "default_model": "deepseek-chat"},
+         "base_url": "https://api.deepseek.com", "default_model": "deepseek-v4-pro"},
         {"name": "claude", "key_configured": bool(os.getenv("CLAUDE_API_KEY","")),
          "base_url": "https://api.anthropic.com", "default_model": "claude-sonnet-4-20250514"},
         {"name": "openai", "key_configured": bool(os.getenv("OPENAI_API_KEY","")),

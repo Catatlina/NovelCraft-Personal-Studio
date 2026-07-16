@@ -10,8 +10,8 @@ class Settings:
     ai_provider: str = os.getenv("NOVELCRAFT_AI_PROVIDER", "deepseek")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    # Must be a real DeepSeek API model id (deepseek-chat / deepseek-reasoner).
-    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    # Verified against the official /models endpoint on 2026-07-16.
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "45"))
     bootstrap_budget_cny: float = float(os.getenv("NOVELCRAFT_BOOTSTRAP_BUDGET_CNY", "2.0"))
     jwt_secret: str = os.getenv("NOVELCRAFT_JWT_SECRET", "")

@@ -24,7 +24,7 @@ _request_model: ContextVar[str | None] = ContextVar("request_model", default=Non
 
 # Default model when no route exists. Must be a model that actually exists on
 # the DeepSeek API — a fictional name here fails every unrouted task at call time.
-MODEL = "deepseek-chat"
+MODEL = "deepseek-v4-pro"
 PROVIDER = "deepseek"
 
 LONG_FORM_TASKS = {
@@ -137,6 +137,9 @@ class _PlanIdeaOutput(_LenientOutput):
     target_audience: str = Field(min_length=2)
     title_candidates: list[str] = Field(min_length=3, max_length=8)
     creative_bible: str = Field(min_length=300)
+    source_facts: list[str] = Field(min_length=3, max_length=30)
+    design_additions: list[str] = Field(default_factory=list, max_length=20)
+    forbidden_changes: list[str] = Field(min_length=3, max_length=20)
 
 
 class _PlanMarketFitOutput(_LenientOutput):
@@ -226,13 +229,35 @@ class _WriteFactReconcileOutput(_LenientOutput):
     reconciliation: dict[str, Any]
 
 
+class _ConsistencyDimension(_LenientOutput):
+    status: str = Field(pattern=r"^(pass|warning|fail)$")
+    issues: list[Any] = Field(default_factory=list)
+
+
+class _FinalConsistencyDimensions(_LenientOutput):
+    source_fidelity: _ConsistencyDimension
+    characters: _ConsistencyDimension
+    locations: _ConsistencyDimension
+    timeline: _ConsistencyDimension
+    objects: _ConsistencyDimension
+    settings: _ConsistencyDimension
+    foreshadowing: _ConsistencyDimension
+
+
 class _FinalConsistencyCheckOutput(_LenientOutput):
-    checks: dict[str, Any]
-    overall_status: str = Field(min_length=2)
+    checks: _FinalConsistencyDimensions
+    overall_status: str = Field(pattern=r"^(pass|warning|fail)$")
+    warning_count: int = Field(ge=0)
+
+
+class _ContinuityAuditBody(_LenientOutput):
+    status: str = Field(pattern=r"^(continuous|warning|broken)$")
+    gaps: list[Any] = Field(default_factory=list)
+    narrative_flow: str = Field(min_length=2)
 
 
 class _FinalContinuityAuditOutput(_LenientOutput):
-    continuity: dict[str, Any]
+    continuity: _ContinuityAuditBody
 
 
 class _FinalHumanizeOutput(_LenientOutput):

@@ -73,11 +73,8 @@ def test_prompts_are_methodology_grade_not_stubs():
 
 
 def test_no_fictional_default_models():
-    assert gateway.MODEL == "deepseek-chat"
-    assert app_config.Settings().deepseek_model in {"deepseek-chat", "deepseek-reasoner"} or \
-        not re.match(r"deepseek-v4", app_config.Settings().deepseek_model)
-    for py in (Path(gateway.__file__), Path(app_config.__file__)):
-        assert "deepseek-v4" not in py.read_text(), f"fictional model referenced in {py.name}"
+    assert gateway.MODEL == "deepseek-v4-pro"
+    assert app_config.Settings().deepseek_model == "deepseek-v4-pro"
 
 
 def test_plan_idea_supplies_title_candidates_for_human_gate():
@@ -99,7 +96,7 @@ def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
             f"bootstrap.{t}", t, {"idea": "测试", "genre": "科幻", "style": "硬核"}
         )
         assert provider == "deepseek", (t, provider)
-        assert model == "deepseek-chat", (t, model)
+        assert model == "deepseek-v4-pro", (t, model)
         assert not prompt.startswith("请执行任务"), f"{t} fell back to generic prompt"
         assert len(prompt) > 200, (t, len(prompt))
 
@@ -129,8 +126,25 @@ def test_validate_rejects_malformed_new_node_output():
         "core_hook": "核心卖点足够长",
         "target_audience": "男频玄幻读者",
         "title_candidates": ["《甲》", "《乙》", "《丙》"],
+        "source_facts": ["主角是作者", "文字影响现实", "必须夺回叙事权"],
+        "design_additions": [],
+        "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"],
         "creative_bible": creative_bible,
         "extra_field_from_model": "tolerated",
     })
     assert ok["core_hook"] == "核心卖点足够长"
     assert "creative_bible" in ok
+
+
+def test_writing_selects_only_the_requested_chapter_outline():
+    from app.workers.tasks import _chapter_outline_for_seq
+
+    context = {"chapter_outlines": [
+        {"seq": 1, "title": "第一章", "outline": "只写重生"},
+        {"seq": 2, "title": "第二章", "outline": "测试设备"},
+        {"seq": 3, "title": "第三章", "outline": "向父母坦白"},
+    ]}
+    selected = _chapter_outline_for_seq(context, 1)
+    assert selected == context["chapter_outlines"][0]
+    assert "测试设备" not in str(selected)
+    assert "向父母坦白" not in str(selected)

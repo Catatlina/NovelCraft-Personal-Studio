@@ -22,7 +22,16 @@ export function getApiKey(): string { return sessionStorage.getItem(K_API_KEY) |
 export function setApiKey(key: string) { sessionStorage.setItem(K_API_KEY, key); }
 export function getApiUrl(): string { return sessionStorage.getItem(K_API_URL) || ""; }
 export function setApiUrl(url: string) { sessionStorage.setItem(K_API_URL, url); }
-export function getModel(): string { return sessionStorage.getItem(K_MODEL) || ""; }
+export function getModel(): string {
+  const stored = sessionStorage.getItem(K_MODEL) || "";
+  // One-time migration: this low-cost model produced demonstrable long-form
+  // fact drift. An empty override lets the server's visible v4-pro route apply.
+  if (stored === "deepseek-v4-flash") {
+    sessionStorage.removeItem(K_MODEL);
+    return "";
+  }
+  return stored;
+}
 export function setModel(m: string) { sessionStorage.setItem(K_MODEL, m); }
 
 function getCookie(name: string): string {

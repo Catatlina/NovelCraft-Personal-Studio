@@ -92,7 +92,7 @@ def test_ranking_planning_nodes_use_gateway_and_have_structured_contracts():
     from app.workers import tasks
 
     expected = {
-        "plan_idea": ("plan_idea", {"idea_expanded", "core_hook", "target_audience", "title_candidates", "creative_bible"}),
+        "plan_idea": ("plan_idea", {"idea_expanded", "core_hook", "target_audience", "title_candidates", "creative_bible", "source_facts", "forbidden_changes"}),
         "plan_world_architecture": ("plan_world_architecture", {"worldview"}),
         "plan_character_system": ("plan_character_system", {"characters"}),
         "blueprint_chapter_outline": ("blueprint_chapter_outline", {"chapter_outlines"}),

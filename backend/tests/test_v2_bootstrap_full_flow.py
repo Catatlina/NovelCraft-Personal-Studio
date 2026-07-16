@@ -19,7 +19,7 @@ V2_TASK_TYPES = [
     "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
     "write_chapter_draft", "write_self_review", "write_polish",
     "write_length_check", "write_fact_reconcile",
-    "final_consistency_check", "final_continuity_audit", "final_humanize",
+    "final_humanize", "final_consistency_check", "final_continuity_audit",
 ]
 
 
@@ -83,7 +83,7 @@ def _provider_output(task_type: str) -> dict:
         for index in range(1, 17)
     ]
     outputs = {
-        "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"], "creative_bible": creative_bible},
+        "plan_idea": {"idea_expanded": "一个作者发现自己写下的故事正在现实中发生，他必须夺回人生的叙事权。", "core_hook": "写下的字会改变现实。", "target_audience": "悬疑脑洞读者", "title_candidates": ["《回声来信》", "《执笔者》", "《删章之后》"], "source_facts": ["主角是作者", "文字影响现实", "必须夺回叙事权"], "design_additions": [], "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"], "creative_bible": creative_bible},
         "plan_market_fit": {"market_score": 82, "competitive_landscape": "脑洞悬疑读者接受度高。", "market_gap": "创作者身份代入更强。"},
         "plan_story_pattern": {"story_model": "悬疑解谜", "act_structure": ["发现异常", "追查真相", "夺回叙事权"], "turning_points": [{"point": "文本成真", "chapter_hint": "第1章"}]},
         "plan_core_gameplay": {"power_system": "文字改写现实但留下旁证", "progression_path": "读者到执笔者", "pleasure_points": ["信息差反杀", "伏笔回收"]},
@@ -98,8 +98,8 @@ def _provider_output(task_type: str) -> dict:
         "write_polish": {"polished": {"body": long_body}, "changes_summary": "收紧节奏"},
         "write_length_check": {"actual_chars": 3600, "is_acceptable": True},
         "write_fact_reconcile": {"reconciliation": {"conflicts_found": 0}},
-        "final_consistency_check": {"checks": {"timeline": {"status": "pass"}}, "overall_status": "pass"},
-        "final_continuity_audit": {"continuity": {"status": "continuous"}},
+        "final_consistency_check": {"checks": {"source_fidelity": {"status": "pass", "issues": []}, "characters": {"status": "pass", "issues": []}, "locations": {"status": "pass", "issues": []}, "timeline": {"status": "pass", "issues": []}, "objects": {"status": "pass", "issues": []}, "settings": {"status": "pass", "issues": []}, "foreshadowing": {"status": "pass", "issues": []}}, "overall_status": "pass", "warning_count": 0},
+        "final_continuity_audit": {"continuity": {"status": "continuous", "gaps": [], "narrative_flow": "场景和情绪衔接自然"}},
         "final_humanize": {"humanized_text": "\n".join(long_body), "changes": ["收紧句子"]},
     }
     return outputs[task_type]

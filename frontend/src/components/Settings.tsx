@@ -162,10 +162,11 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               <input placeholder="API 地址，例 https://api.deepseek.com/v1 或 OpenAI/Claude/Gemini endpoint" value={apiUrl}
                 onChange={e => { setApiUrlLocal(e.target.value); setSaved(false); }}
                 style={{flex:1,fontSize:13}} />
-              <input placeholder="模型名，例 deepseek-chat / gpt-4o / claude-sonnet-4-20250514" value={model}
+              <input placeholder="模型名，留空使用路由；DeepSeek 长篇推荐 deepseek-v4-pro" value={model}
                 onChange={e => { setModelLocal(e.target.value); setSaved(false); }}
                 style={{flex:1,fontSize:13}} />
             </div>
+            {model.includes("flash") && <div className="danger-text" style={{marginBottom:12}}>Flash 是速度优先模型，容易出现长篇设定漂移；小说规划和正文建议使用 deepseek-v4-pro。</div>}
             <div style={{marginBottom:12}}>
               <button className="primary" onClick={saveApiConfig} disabled={saved} style={{justifyContent:"center"}}>
                 {saved ? "✅ 已保存" : "💾 保存 API 配置"}

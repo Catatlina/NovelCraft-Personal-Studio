@@ -64,9 +64,9 @@ BOOTSTRAP_STAGES = {
     "finalization": {
         "label": "最终化阶段",
         "nodes": [
-            ("final_consistency_check", "agent", "Reviewer",  "六维一致性检查",    "final_consistency_check"),
-            ("final_continuity_audit",  "agent", "Reviewer",  "连续性审计",        "final_continuity_audit"),
             ("final_humanize",          "agent", "Writer",    "去AI味人文化",      "final_humanize"),
+            ("final_consistency_check", "agent", "Reviewer",  "七维一致性检查",    "final_consistency_check"),
+            ("final_continuity_audit",  "agent", "Reviewer",  "连续性审计",        "final_continuity_audit"),
         ],
     },
 }
@@ -181,6 +181,24 @@ def _assert_min_chapter_length(task_type: str, text: str) -> None:
     chars = count_content_chars(text)
     if chars < MIN_CHAPTER_CHARS:
         raise OutputValidationError(f"{task_type} chapter too short: {chars}/{MIN_CHAPTER_CHARS} chars")
+
+
+def _chapter_outline_for_seq(context: dict, chapter_seq: int) -> dict:
+    """Select exactly one outline so prose never consumes later chapters."""
+    outlines = context.get("chapter_outlines") or []
+    if not isinstance(outlines, list):
+        return {}
+    for outline in outlines:
+        if not isinstance(outline, dict):
+            continue
+        try:
+            if int(outline.get("seq") or 0) == chapter_seq:
+                return outline
+        except (TypeError, ValueError):
+            continue
+    if 0 < chapter_seq <= len(outlines) and isinstance(outlines[chapter_seq - 1], dict):
+        return outlines[chapter_seq - 1]
+    return {}
 # ── Isolated request context decorator ──────────────────────────────────────
 
 def _isolated_request_context(fn):
@@ -607,6 +625,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             context_window = _write_before_search(novel_id, chapter_seq, window_size=100)
             run_context["_context_window"] = context_window
             run_context["_chapter_seq"] = chapter_seq
+            run_context["_chapter_outline"] = _chapter_outline_for_seq(run_context, chapter_seq)
             # Chapter idempotency: check if chapter already exists
             idem_key = _chapter_idempotency_key(novel_id, chapter_seq)
             conn = connect()
@@ -738,6 +757,8 @@ def _enrich_blueprint_context(context: dict, novel_id: str) -> dict:
 def _enrich_finalization_context(context: dict, novel_id: str) -> dict:
     """Enrich context for finalization with full chapter body + entity states."""
     enriched = dict(context)
+    chapter_seq = int(context.get("_chapter_seq") or 1)
+    enriched["_chapter_outline"] = _chapter_outline_for_seq(context, chapter_seq)
     # Get chapter body text
     chapter_id = context.get("chapter_id", "")
     if chapter_id:
@@ -963,6 +984,9 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 m["creative_bible"] = creative_bible
                 m["core_hook"] = output.get("core_hook", "")
                 m["target_audience"] = output.get("target_audience", "")
+                m["source_facts"] = output.get("source_facts", [])
+                m["design_additions"] = output.get("design_additions", [])
+                m["forbidden_changes"] = output.get("forbidden_changes", [])
                 db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
             knowledge_id = new_id()
             generation_key = f"run:{run_id}:node:{node_key}:creative-bible:v1"
@@ -1059,6 +1083,38 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
         _persist_fact_reconcile(db, node_key, output, context, _novel_id, run_id)
     elif task_type in ("final_consistency_check", "final_continuity_audit", "final_humanize"):
         context[task_type] = output
+        if task_type == "final_consistency_check":
+            checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
+            failed_checks = {
+                name: check for name, check in checks.items()
+                if not isinstance(check, dict)
+                or check.get("status") != "pass"
+                or bool(check.get("issues"))
+            }
+            if output.get("overall_status") != "pass" or failed_checks:
+                cid = context.get("chapter_id", "")
+                if cid:
+                    db.execute(
+                        "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+                        (encode({"quality_gate": {"status": "failed", "checks": checks}}), cid),
+                    )
+                db.commit()
+                db.close()
+                raise OutputValidationError(
+                    "final consistency gate rejected chapter: " + ", ".join(failed_checks.keys())
+                )
+        if task_type == "final_continuity_audit":
+            continuity = output.get("continuity") if isinstance(output.get("continuity"), dict) else {}
+            if continuity.get("status") != "continuous" or bool(continuity.get("gaps")):
+                cid = context.get("chapter_id", "")
+                if cid:
+                    db.execute(
+                        "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+                        (encode({"continuity_gate": {"status": "failed", "audit": continuity}}), cid),
+                    )
+                db.commit()
+                db.close()
+                raise OutputValidationError("final continuity gate rejected chapter")
         if task_type == "final_humanize":
             cid = context.get("chapter_id", "")
             if cid and output.get("humanized_text"):
@@ -1618,7 +1674,9 @@ def _recount_batch_progress(db, batch_id: str) -> dict | None:
             by_ordinal[ordinal] = meta.get("quality_status") or row.get("status")
     generated = len(by_ordinal)
     accepted = sum(status in {"accepted", "reviewed"} for status in by_ordinal.values())
-    needs_review = sum(status in {"needs_review", "needs_rewrite", "pending_review", "draft_pending_review", "ai_review_passed"} for status in by_ordinal.values())
+    # A generated draft has not completed AI/manual review yet and must not
+    # inflate reviewed/completed counters.
+    needs_review = sum(status in {"needs_review", "needs_rewrite", "pending_review", "ai_review_passed"} for status in by_ordinal.values())
     reviewed = accepted + needs_review
     terminal = reviewed
     db.execute("""UPDATE generation_batches SET generated_count=%s,reviewed_count=%s,
