@@ -185,7 +185,7 @@ def fetch_fanqie_ranking(category: str = "read", gender: str = "") -> list[dict]
                     "source": "fanqie",
                     "source_book_id": book_id,
                     "url": f"https://fanqienovel.com/page/{book_id}",
-                    "read_count": item.get("readCount", item.get("read_count", 0)),
+                    "read_count": item.get("read_count", item.get("readCount", 0)),
                     "word_count": item.get("wordCount", item.get("word_count", 0)),
                 })
             if len(items) < 10:
