@@ -24,6 +24,7 @@ from typing import Any
 from app.db import connect, encode, new_id, row_to_dict
 from app.gateway import (BudgetExceeded, OutputValidationError, ProviderError, complete,
                          validate_task_output, _request_api_key, _request_api_base_url, _request_model)
+from app.services.novel_export import extract_body_text
 
 from .celery_app import celery_app
 
@@ -116,6 +117,62 @@ NODE_BUDGET_MULTIPLIERS: dict[str, float] = {
 
 def _chapter_idempotency_key(novel_id: str, chapter_seq: int) -> str:
     return f"novel:{novel_id}:chapter:{chapter_seq}:bootstrap:v2"
+
+
+_NON_NARRATIVE_MARKERS = (
+    "本章将深入探讨",
+    "在润色过程中",
+    "首先需要明确章节",
+    "目标读者",
+    "逻辑结构",
+    "提升阅读流畅性",
+    "删除冗余表述",
+    "替换模糊词汇",
+    "去AI味是",
+    "具体改动可以",
+    "输出JSON",
+    "处理后的完整正文",
+    "本文将",
+)
+
+
+def _chapter_paragraphs_from_text(text: str) -> list[str]:
+    return [line.strip() for line in str(text or "").replace("\r\n", "\n").split("\n") if line.strip()]
+
+
+def _chapter_doc_from_paragraphs(paragraphs: list[str]) -> dict[str, Any]:
+    return {"type": "doc", "content": [{"type": "paragraph", "text": p} for p in paragraphs]}
+
+
+def _looks_like_non_narrative_text(text: str) -> bool:
+    compact = str(text or "")
+    hits = sum(1 for marker in _NON_NARRATIVE_MARKERS if marker in compact)
+    return hits >= 2
+
+
+def _assert_story_revision_quality(
+    *,
+    task_type: str,
+    before_text: str,
+    after_paragraphs: list[str],
+    min_ratio: float = 0.65,
+) -> None:
+    after_text = "\n".join(after_paragraphs).strip()
+    before_chars = len(str(before_text or "").strip())
+    after_chars = len(after_text)
+    before_paragraph_count = len(_chapter_paragraphs_from_text(before_text))
+    if not after_text:
+        raise OutputValidationError(f"{task_type} returned empty chapter text")
+    if _looks_like_non_narrative_text(after_text):
+        raise OutputValidationError(f"{task_type} returned non-narrative instructional text")
+    if before_chars >= 200 and after_chars < int(before_chars * min_ratio):
+        raise OutputValidationError(
+            f"{task_type} shortened chapter too much: {after_chars}/{before_chars} chars"
+        )
+    if before_paragraph_count >= 6 and len(after_paragraphs) < before_paragraph_count - 2:
+        raise OutputValidationError(
+            f"{task_type} dropped too many paragraphs: {len(after_paragraphs)}/{before_paragraph_count}"
+        )
 # ── Isolated request context decorator ──────────────────────────────────────
 
 def _isolated_request_context(fn):
@@ -603,7 +660,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         budget_info = _estimate_node_cost(run_id, node_key, output)
         _track_budget(run_id, node_key, budget_info.get("cost_cny", 0))
 
-        _persist_output(run_id, node_key, task_type or "", output, novel_id, project_id)
+        try:
+            _persist_output(run_id, node_key, task_type or "", output, novel_id, project_id)
+        except OutputValidationError as exc:
+            _mark_node(run_id, node_key, "failed", str(exc))
+            _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
+                                    payload={"reason": "invalid_persisted_output", "detail": str(exc)[:200]})
+            return {"status": "invalid_output", "node_key": node_key}
 
         _record_bootstrap_event(run_id, "node.completed", node_key=node_key,
                                 payload={"budget": budget_info})
@@ -675,7 +738,7 @@ def _enrich_finalization_context(context: dict, novel_id: str) -> dict:
         db.close()
         if ch:
             body = ch.get("body", "")
-            enriched["_chapter_body"] = str(body)[:8000]
+            enriched["_chapter_body"] = extract_body_text(body)[:12000]
 
     # Get entity snapshot
     reconc_res = _write_after_reconcile(novel_id, chapter_id or "",
@@ -959,11 +1022,30 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
     elif task_type in ("final_consistency_check", "final_continuity_audit", "final_humanize"):
         context[task_type] = output
         if task_type == "final_humanize":
-            # Apply humanized text to chapter if available
             cid = context.get("chapter_id", "")
             if cid and output.get("humanized_text"):
-                db.execute("UPDATE contents SET body = body || %s, updated_at = now() WHERE id = %s",
-                           (encode({"humanized": True, "humanized_at": datetime.now(timezone.utc).isoformat()}), cid))
+                current = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
+                before_text = extract_body_text(current["body"] if current else "")
+                paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
+                try:
+                    _assert_story_revision_quality(
+                        task_type=task_type,
+                        before_text=before_text,
+                        after_paragraphs=paragraphs,
+                        min_ratio=0.80,
+                    )
+                except OutputValidationError:
+                    db.close()
+                    raise
+                db.execute(
+                    "UPDATE contents SET body = %s, meta = meta || %s, updated_at = now() WHERE id = %s",
+                    (
+                        encode(_chapter_doc_from_paragraphs(paragraphs)),
+                        encode({"humanized": True, "humanized_at": datetime.now(timezone.utc).isoformat()}),
+                        cid,
+                    ),
+                )
+                context["chapter_text"] = "\n".join(paragraphs)
 
     # ── Common persist ──────────────────────────────────────────────────
     db.execute(
@@ -994,6 +1076,9 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
     chapter = output.get("chapter", {})
     body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
     chapter_text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
+    if _looks_like_non_narrative_text(chapter_text):
+        db.close()
+        raise OutputValidationError("write_chapter_draft returned non-narrative instructional text")
     chapter_seq = int(context.get("_chapter_seq", 1))
     chapter_meta = {"seq": chapter_seq, "word_count": count_content_chars(chapter_text)}
     cid = new_id()
@@ -1026,12 +1111,25 @@ def _persist_chapter_polish(db, node_key: str, output: dict, context: dict, run_
         return
     polished = output.get("polished", output.get("chapter", output))
     if isinstance(polished, dict) and polished.get("body"):
-        polished_body = {"type": "doc", "content": [{"type": "paragraph", "text": t}
-                                                     for t in polished.get("body", [])]}
+        current = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
+        before_text = extract_body_text(current["body"] if current else "")
+        polished_paragraphs = [
+            str(t if isinstance(t, str) else t.get("text", "")).strip()
+            for t in polished.get("body", [])
+            if str(t if isinstance(t, str) else t.get("text", "")).strip()
+        ]
+        try:
+            _assert_story_revision_quality(
+                task_type="write_polish",
+                before_text=before_text or context.get("chapter_text", ""),
+                after_paragraphs=polished_paragraphs,
+            )
+        except OutputValidationError:
+            db.close()
+            raise
+        polished_body = _chapter_doc_from_paragraphs(polished_paragraphs)
         db.execute("UPDATE contents SET body = %s, updated_at = now() WHERE id = %s", (encode(polished_body), cid))
-        context["chapter_text"] = "\n".join(
-            t if isinstance(t, str) else t.get("text", "") for t in polished.get("body", [])
-        )
+        context["chapter_text"] = "\n".join(polished_paragraphs)
 def _persist_fact_reconcile(db, node_key: str, output: dict, context: dict,
                             novel_id: str, run_id: str) -> None:
     """Reconcile chapter facts against entity states."""

@@ -205,7 +205,10 @@ def init_db() -> None:
             """
             INSERT INTO prompts (id, name, version, model, template, golden_cases)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT(name, version, model) DO NOTHING
+            ON CONFLICT(name, version, model) DO UPDATE
+            SET template = EXCLUDED.template,
+                golden_cases = EXCLUDED.golden_cases,
+                updated_at = now()
             """,
             (new_id("prm"), name, version, model, template, encode(cases)),
         )

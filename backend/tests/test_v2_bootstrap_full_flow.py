@@ -82,7 +82,12 @@ def _provider_output(task_type: str) -> dict:
         "write_fact_reconcile": {"reconciliation": {"conflicts_found": 0}},
         "final_consistency_check": {"checks": {"timeline": {"status": "pass"}}, "overall_status": "pass"},
         "final_continuity_audit": {"continuity": {"status": "continuous"}},
-        "final_humanize": {"humanized_text": "停电来得突然。林序盯着屏幕，门外响起敲门声。短信弹了出来，像有人贴着他的耳朵说话。他没有立刻开门，只把手按在桌沿，听见自己的心跳一下一下撞在安静里。", "changes": ["收紧句子"]},
+        "final_humanize": {"humanized_text": "\n".join([
+            "停电来得突然。林序盯着屏幕，门外响起敲门声。短信弹了出来，像有人贴着他的耳朵说话。",
+            "他没有立刻开门，只把手按在桌沿，听见自己的心跳一下一下撞在安静里。屏幕上那行字还亮着：三分钟后，有人会来取走你的名字。",
+            "楼道里的声控灯忽明忽暗。林序屏住呼吸，从抽屉里摸出那支没水的钢笔，笔尖却在掌心慢慢渗出墨色。",
+            "门外的人又敲了两下。这一次，短信同步跳出来：别开门。发信人是他小说里已经死去三章的女主角。"
+        ]), "changes": ["收紧句子"]},
     }
     return outputs[task_type]
 
@@ -199,6 +204,61 @@ def test_bootstrap_auto_confirms_title_for_unattended_basic_chain(seeded_novel, 
     assert novel["title"] == "《回声来信》"
     assert "human.confirmed" in events
     assert any((event["details"].get("payload") or {}).get("action") == "auto_confirmed" for event in human_events)
+
+
+def test_bootstrap_rejects_non_narrative_polish_before_overwriting_chapter(seeded_novel, monkeypatch):
+    from app.services.novel_export import extract_body_text
+    from app.workers import tasks
+
+    project_id, novel_id = seeded_novel
+
+    def provider_output(task_type: str) -> dict:
+        if task_type == "write_polish":
+            return {
+                "polished": {
+                    "body": [
+                        "本章将深入探讨如何通过精准的语言表达和逻辑结构优化文本内容。",
+                        "在润色过程中，首先需要明确章节的核心主题与目标读者。",
+                        "其次，检查句子之间的衔接与过渡，提升阅读流畅性。",
+                        "最后，删除冗余表述，替换模糊词汇。",
+                    ]
+                },
+                "changes_summary": "错误地输出了润色说明。",
+            }
+        return _provider_output(task_type)
+
+    monkeypatch.setattr(tasks, "complete", lambda **kwargs: provider_output(kwargs["task_type"]))
+    monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
+
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
+        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+
+    original_delay = tasks.execute_bootstrap.delay
+    tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]
+    try:
+        run_id = tasks.create_run(project_id, novel_id, auto_confirm_title=True)
+    finally:
+        tasks.execute_bootstrap.delay = original_delay  # type: ignore[assignment]
+
+    run, node_status = _run_state(run_id)
+    assert run["status"] == "failed"
+    assert node_status["write_polish"] == "failed"
+
+    db = connect()
+    chapter = db.execute(
+        "SELECT body FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+        (novel_id,),
+    ).fetchone()
+    failed_node = db.execute(
+        "SELECT error FROM run_nodes WHERE run_id=%s AND node_key='write_polish'",
+        (run_id,),
+    ).fetchone()
+    db.close()
+
+    assert "non-narrative" in failed_node["error"]
+    body_text = extract_body_text(chapter["body"])
+    assert "停电来得突然" in body_text
+    assert "本章将深入探讨" not in body_text
 
 
 def test_journey_a_resumes_after_provider_failure(seeded_novel, monkeypatch):

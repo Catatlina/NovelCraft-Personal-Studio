@@ -44,6 +44,8 @@ export function Progress({ run, onConfirm }: { run: Run | null; onConfirm: (titl
   const rankingTitleAccepted = human?.status === "succeeded" && (human.output?.source === "ranking_topic" || (!!selectedTitle && titles.length === 0));
   const [retrying, setRetrying] = useState("");
   const [retryMessage, setRetryMessage] = useState("");
+  const [selectedNodeKey, setSelectedNodeKey] = useState("");
+  const selectedNode = nodes.find(n => n.node_key === (selectedNodeKey || run?.context?.current_node_key)) ?? nodes.find(n => n.status === "running") ?? nodes[0];
 
   async function retry(node: RunNode) {
     if (!run) return;
@@ -64,35 +66,56 @@ export function Progress({ run, onConfirm }: { run: Run | null; onConfirm: (titl
         <p className="muted">本工作流交付书名、简介卖点、世界观、人物卡、大纲和第一章；整书续写属于后续章节生产流程。</p>
         {retryMessage && <p>{retryMessage}</p>}
       </div>
-      <div className="review-grid">
+      <div className="progress-grid">
       <div className="panel">
         <div className="timeline">
           {nodes.map(n => (
-            <div key={n.node_key} className={`node ${n.status}`}>
-              <span>{n.node_key}</span>
-              <div>
+            <button type="button" key={n.node_key} className={`node ${n.status} ${selectedNode?.node_key === n.node_key ? "active" : ""}`} onClick={() => setSelectedNodeKey(n.node_key)}>
+              <span className="node-key">{n.node_key}</span>
+              <div className="node-main">
                 <strong>{n.title}</strong><br />
                 <small style={{color:"var(--text-muted)"}}>{n.agent ?? n.kind} · 尝试 {n.attempt ?? 0} 次</small><br />
                 <small style={{color:"var(--text-muted)"}}>开始 {formatTime(n.started_at)} · 完成 {formatTime(n.finished_at)}</small>
                 {n.error && <div className="danger-text"><small>{n.error}</small></div>}
-                {RETRYABLE_STATUSES.has(n.status) && <button disabled={!!retrying} onClick={() => void retry(n)}>{retrying === n.node_key ? "重试中…" : "重试此节点"}</button>}
               </div>
               <em>{n.status}</em>
-            </div>
+            </button>
           ))}
         </div>
       </div>
-      <div className="panel human-gate">
-        <h2>书名确认</h2>
-        {rankingTitleAccepted ? <p>已采用榜单候选书名：<strong>{selectedTitle || String(human?.output?.selected_title || "已确认")}</strong></p> : human?.status === "waiting_human" ? (
-          <div className="title-choices">
-            {titles.map(t => <button key={t} onClick={() => onConfirm(t)}>{t}</button>)}
-          </div>
-        ) : (
-          <p style={{color:"var(--text-muted)"}}>
-            {human?.status === "succeeded" ? "书名已确认，继续执行..." : "等待书名候选生成..."}
-          </p>
-        )}
+      <div className="progress-side">
+        <div className="panel node-detail">
+          <h2>节点详情</h2>
+          {selectedNode ? (
+            <>
+              <div className="node-detail-head">
+                <div>
+                  <strong>{selectedNode.title}</strong>
+                  <code>{selectedNode.node_key}</code>
+                </div>
+                <span className={`pill ${selectedNode.status}`}>{selectedNode.status}</span>
+              </div>
+              <p className="muted">{selectedNode.agent ?? selectedNode.kind} · 尝试 {selectedNode.attempt ?? 0} 次</p>
+              <p className="muted">开始 {formatTime(selectedNode.started_at)} · 完成 {formatTime(selectedNode.finished_at)}</p>
+              {selectedNode.error && <div className="danger-text">{selectedNode.error}</div>}
+              {RETRYABLE_STATUSES.has(selectedNode.status) && <button disabled={!!retrying} onClick={() => void retry(selectedNode)}>{retrying === selectedNode.node_key ? "重试中…" : "重试此节点"}</button>}
+              <h3>输出</h3>
+              {selectedNode.output && Object.keys(selectedNode.output).length ? <OutputValue value={selectedNode.output} /> : <p className="muted">该节点尚未产出可展示内容。</p>}
+            </>
+          ) : <p className="muted">暂无节点。</p>}
+        </div>
+        <div className="panel human-gate">
+          <h2>书名确认</h2>
+          {rankingTitleAccepted ? <p>已采用榜单候选书名：<strong>{selectedTitle || String(human?.output?.selected_title || "已确认")}</strong></p> : human?.status === "waiting_human" ? (
+            <div className="title-choices">
+              {titles.map(t => <button key={t} onClick={() => onConfirm(t)}>{t}</button>)}
+            </div>
+          ) : (
+            <p style={{color:"var(--text-muted)"}}>
+              {human?.status === "succeeded" ? "书名已确认，继续执行..." : "等待书名候选生成..."}
+            </p>
+          )}
+        </div>
       </div>
       </div>
       <div className="panel">
