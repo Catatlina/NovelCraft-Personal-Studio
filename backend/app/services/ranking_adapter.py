@@ -159,9 +159,10 @@ def fetch_fanqie_ranking(category: str = "read", gender: str = "") -> list[dict]
         for cat in categories.get(gender, []):
             targets.append((cat["id"], cat["name"], g))
     else:
-        for gk, limit in [("male", 5), ("female", 5)]:
+        # Default: ALL categories (both genders)
+        for gk in ["male", "female"]:
             g = gender_map[gk]
-            for cat in categories.get(gk, [])[:limit]:
+            for cat in categories.get(gk, []):
                 targets.append((cat["id"], cat["name"], g))
 
     if not targets:
