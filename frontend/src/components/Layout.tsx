@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { BookOpen, Check, CircleDollarSign, Code2, FileText, GitBranch, Library, Layers, LogOut, Rocket, Settings, Sparkles, Sun, Moon, Workflow, TrendingUp, Search, Send, Lightbulb, Users, Terminal } from "lucide-react";
 
-type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
+type Tab = "dashboard" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
 
 export function Layout({ tab, setTab, title, runStatus, children }: {
   tab: Tab; setTab: (t: Tab) => void; title: string;

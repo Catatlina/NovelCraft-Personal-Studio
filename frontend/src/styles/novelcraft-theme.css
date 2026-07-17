@@ -1,0 +1,31 @@
+/* NovelCraft Theme Tokens — shared NC-specific design variables */
+/* Imported by global-v2.css and novel-prose.css */
+
+:root {
+  /* Background & Surface */
+  --nc-bg: #0a0a14;
+  --nc-card: rgba(22, 22, 50, 0.7);
+  --nc-card-solid: #161632;
+
+  /* Brand / Accent */
+  --nc-primary: #FF6B35;
+  --nc-primary-dim: rgba(255, 107, 53, 0.15);
+  --nc-accent: #00e5ff;
+  --nc-accent-dim: rgba(0, 229, 255, 0.15);
+
+  /* Glass borders */
+  --nc-glass-border: rgba(255, 255, 255, 0.06);
+  --nc-glass-border-strong: rgba(255, 255, 255, 0.1);
+
+  /* Radius */
+  --nc-radius-sm: 8px;
+  --nc-radius-md: 12px;
+  --nc-radius-lg: 16px;
+  --nc-radius-pill: 12px;
+
+  /* Shadows */
+  --nc-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --nc-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --nc-shadow-glow-primary: 0 0 20px rgba(255, 107, 53, 0.15);
+  --nc-shadow-glow-accent: 0 0 20px rgba(0, 229, 255, 0.1);
+}

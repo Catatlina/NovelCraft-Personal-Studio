@@ -22,6 +22,8 @@ import { AgentConsole } from "./components/AgentConsole";
 import { ApiError, api as baseApi, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
+import { DashboardV2 } from "./components/DashboardV2";
+import { ThemeProvider } from "./components/ThemeProvider";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
@@ -33,7 +35,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
+type Tab = "dashboard" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
@@ -53,7 +55,7 @@ function textToDoc(text: string): TipTapDoc {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("ranking");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState(() => sessionStorage.getItem("nc_token") || "");
   const [userEmail, setUserEmail] = useState("");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
@@ -443,7 +445,7 @@ export default function App() {
     final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
   }) as any;
 
-  const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点仪表盘", knowledge: "知识库浏览器", fanout: "多平台分发", versions: "版本树", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
+  const titles: Record<Tab, string> = { dashboard: "工作台", ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点仪表盘", knowledge: "知识库浏览器", fanout: "多平台分发", versions: "版本树", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
@@ -492,8 +494,10 @@ export default function App() {
   };
 
   return (
+    <ThemeProvider>
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
       {error && <div className="error">{error}</div>}
+      {tab === "dashboard" && <DashboardV2 projectId={project?.id || ""} onNavigate={(t, novelId) => { if (novelId) { const fetchNovel = async () => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); }; fetchNovel(); } setTab(t as Tab); }} />}
       {tab === "ranking" && project && <RankingCenter projectId={project.id} onBookCreated={async (novelId, runId) => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); if (runId) { setTab("progress"); await refreshRun(runId); } else setTab("library"); }} />}
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
@@ -520,5 +524,6 @@ export default function App() {
       {tab === "agents" && <AgentConsole />}
       <CommandPalette commands={cmdActions} />
     </Layout>
+    </ThemeProvider>
   );
 }
