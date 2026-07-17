@@ -1286,6 +1286,11 @@ def collect_all_rankings() -> dict:
         "fanqie": fetch_fanqie_ranking("all"),
         "qidian": fetch_qidian_ranking("monthly"),
         "zongheng": fetch_zongheng_ranking(),
+        "qimao": fetch_qimao_ranking(),
+        "qqread": fetch_qqread_ranking(),
+        "17k": fetch_17k_ranking(),
+        "jjwxc": fetch_jjwxc_ranking(),
+        "ciweimao": fetch_ciweimao_ranking(),
     }
 
 
