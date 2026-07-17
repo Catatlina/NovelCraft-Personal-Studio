@@ -251,6 +251,7 @@ def _parse_fanqie_item(item: dict, cat_name: str, rank: int) -> Optional[dict]:
         "url": f"https://fanqienovel.com/page/{book_id}",
         "read_count": item.get("read_count", item.get("readCount", 0)),
         "word_count": item.get("wordNumber", item.get("word_count", 0)),
+        "leaderboard": f"分类榜-{cat_name}",
         "creation_status": str(creation_status),
     }
 
