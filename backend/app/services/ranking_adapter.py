@@ -405,8 +405,11 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
             seen.add(dk)
             all_results.append(item)
 
-    # Phase 1b: Browser scraping (Playwright) for more leaderboard books
-    browser_items = _fetch_fanqie_via_browser()
+    # Phase 1b: Browser scraping (Playwright) — optional, skipped if unavailable
+    try:
+        browser_items = _fetch_fanqie_via_browser()
+    except Exception:
+        browser_items = []
     for item in browser_items:
         dk = _make_dedup_key(item["title"], item["author"])
         if dk not in seen:
