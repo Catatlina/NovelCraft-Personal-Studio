@@ -21,7 +21,9 @@ from app.gateway import BudgetExceeded, ProviderError, complete
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
 library_router = APIRouter(prefix="/api/v1/library", tags=["library"])
 
-SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网"}
+SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网",
+                "qimao": "七猫小说", "qqread": "QQ阅读", "17k": "17K小说",
+                "jjwxc": "晋江文学城", "ciweimao": "刺猬猫"}
 MIN_AUTOMATED_CONFIDENCE = 0.85
 
 
@@ -103,7 +105,7 @@ class RankingCaptureImportRequest(BaseModel):
     challenges server-side.
     """
     model_config = ConfigDict(extra="allow")
-    source: str = Field(pattern=r"^(fanqie|qidian|zongheng|manual)$")
+    source: str = Field(pattern=r"^(fanqie|qidian|zongheng|qimao|qqread|17k|jjwxc|ciweimao|manual)$")
     status: str = Field(default="succeeded", pattern=r"^(succeeded|user_action_required|ocr_required|schema_changed|failed)$")
     collector: str = Field(default="visible_browser", max_length=120)
     captured_at: str | None = None

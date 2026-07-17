@@ -62,6 +62,9 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [importFileName, setImportFileName] = useState("");
   const [topicTab, setTopicTab] = useState<"all" | "bookmarked">("all");
   const [scanWarning, setScanWarning] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<"single" | "multi">("single");
+  const [multiAnalysisResult, setMultiAnalysisResult] = useState<any>(null);
+  const [multiAnalysisLoading, setMultiAnalysisLoading] = useState(false);
 
   async function load() {
     const [s, p, t] = await Promise.allSettled([
@@ -171,6 +174,25 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       await load();
     } catch (error) { setMessage(`分析失败：${errorText(error)}`); }
     finally { setBusy(""); }
+  }
+
+  async function analyzeMultiPlatform() {
+    const succeeded = snapshots.filter(s => s.status === "succeeded");
+    if (succeeded.length < 2) { setMessage("需要至少 2 个成功的快照才能进行聚合分析"); return; }
+    setMultiAnalysisLoading(true); setMessage(""); setMultiAnalysisResult(null);
+    try {
+      const platformKeys = succeeded.map(s => s.source_key);
+      const result = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
+        method: "POST",
+        body: JSON.stringify({
+          analysis_mode: "multi",
+          platforms: platformKeys,
+        }),
+      });
+      setMultiAnalysisResult(result.data);
+      setMessage(`多平台聚合分析完成：${result.data.succeeded_layers || 0}/${result.data.total_layers || 0}层通过`);
+    } catch (error) { setMessage(`聚合分析失败：${errorText(error)}`); }
+    finally { setMultiAnalysisLoading(false); }
   }
 
   async function retrySnapshot(snapshot: Snapshot) {
@@ -310,6 +332,46 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         {importFileName && <small>{importFileName}：{captureArtifact ? `识别为 ${captureArtifact.source} 采集工件，状态 ${captureArtifact.status || "succeeded"}` : "已解析"} {importItems.length} 条，提交前不会上传。</small>}
       </div>
     </section>
+    {snapshots.filter(s => s.status === "succeeded").length > 0 && (
+    <section className="panel">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <strong>分析模式：</strong>
+          <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <button
+              onClick={() => { setAnalysisMode("single"); setMultiAnalysisResult(null); }}
+              style={{
+                padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                background: analysisMode === "single" ? "var(--nc-primary, #FF6B35)" : "transparent",
+                color: analysisMode === "single" ? "#fff" : "var(--text-muted)",
+              }}
+            >📋 单平台分析</button>
+            <button
+              onClick={() => setAnalysisMode("multi")}
+              style={{
+                padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                background: analysisMode === "multi" ? "var(--nc-primary, #FF6B35)" : "transparent",
+                color: analysisMode === "multi" ? "#fff" : "var(--text-muted)",
+              }}
+            >📊 多平台聚合</button>
+          </div>
+        </div>
+        {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length >= 2 && (
+          <button
+            className="primary"
+            disabled={multiAnalysisLoading}
+            onClick={() => void analyzeMultiPlatform()}
+            style={{ padding: "8px 20px", fontSize: 14, fontWeight: 700 }}
+          >
+            {multiAnalysisLoading ? "聚合分析中…" : "🚀 多平台聚合分析"}
+          </button>
+        )}
+        {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length < 2 && (
+          <small style={{ color: "var(--text-muted)" }}>需要至少 2 个成功快照才能聚合分析</small>
+        )}
+      </div>
+    </section>
+    )}
     <section className="panel"><h2>榜单快照</h2><table><thead><tr><th>来源</th><th>状态</th><th>数量</th><th>时间</th><th>操作</th></tr></thead>
       <tbody>{snapshots.map(snapshot => <React.Fragment key={snapshot.id}>
         <tr><td>{snapshot.display_name}</td><td><span className={snapshot.status === "failed" || snapshot.capture_status === "needs_review" ? "danger-text" : ""}>{snapshot.status === "failed" ? "失败" : snapshot.capture_status === "needs_review" ? "待人工复核" : snapshot.capture_status === "partial" ? "部分成功" : "成功"}</span></td><td>{snapshot.item_count}</td><td>{new Date(snapshot.captured_at).toLocaleString()}</td><td>
@@ -355,6 +417,124 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         </td></tr>}
       </React.Fragment>)}</tbody>
     </table></section>
+    {multiAnalysisResult && (
+    <section className="panel">
+      <h2>📊 多平台聚合分析结果</h2>
+      <div style={{ display: "grid", gap: 16 }}>
+        {/* Summary card */}
+        <div className="analysis-card" style={{ padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <strong style={{ fontSize: 16 }}>聚合分析摘要</strong>
+            <small style={{ color: "var(--nc-accent, #00e5ff)" }}>
+              {multiAnalysisResult.succeeded_layers || 0}/{multiAnalysisResult.total_layers || 0} 层通过
+              · {multiAnalysisResult.status || "unknown"}
+            </small>
+          </div>
+          {multiAnalysisResult.summary && <p style={{ marginBottom: 12 }}>{multiAnalysisResult.summary}</p>}
+
+          {/* Platform breakdown */}
+          {multiAnalysisResult.platform_breakdown && (
+            <div style={{ marginBottom: 12 }}>
+              <strong>平台分布：</strong>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                {Object.entries(multiAnalysisResult.platform_breakdown as Record<string, number>).map(([platform, count]) => (
+                  <span key={platform} style={{
+                    padding: "4px 10px", borderRadius: 4, fontSize: 12,
+                    background: "rgba(0,229,255,0.08)", color: "var(--nc-accent, #00e5ff)",
+                  }}>{platform}: {count}本</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Total books */}
+          {multiAnalysisResult.total_books !== undefined && (
+            <p><strong>总计分析书籍：</strong>{multiAnalysisResult.total_books} 本</p>
+          )}
+
+          {/* Top genres */}
+          {multiAnalysisResult.top_genres && Array.isArray(multiAnalysisResult.top_genres) && (
+            <div style={{ marginBottom: 12 }}>
+              <strong>热门题材（跨平台）：</strong>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {multiAnalysisResult.top_genres.map((g: any, i: number) => (
+                  <span key={i} style={{
+                    padding: "3px 10px", borderRadius: 4, fontSize: 12,
+                    background: "rgba(255,107,53,0.08)", color: "var(--nc-primary, #FF6B35)",
+                  }}>{typeof g === "string" ? g : `${g.genre || g.name}${g.count ? ` (${g.count})` : ""}`}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Common selling points */}
+          {multiAnalysisResult.common_selling_points && Array.isArray(multiAnalysisResult.common_selling_points) && (
+            <div style={{ marginBottom: 12 }}>
+              <strong>共性卖点：</strong>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+                {multiAnalysisResult.common_selling_points.map((sp: any, i: number) => (
+                  <li key={i} style={{ fontSize: 13 }}>
+                    {typeof sp === "string" ? sp : `${sp.point || sp.name}${sp.platforms ? ` [${sp.platforms.join(", ")}]` : ""}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Market signals */}
+          {multiAnalysisResult.market_signals && Array.isArray(multiAnalysisResult.market_signals) && (
+            <div style={{ marginBottom: 12 }}>
+              <strong>市场信号：</strong>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+                {multiAnalysisResult.market_signals.map((s: any, i: number) => (
+                  <li key={i} style={{ fontSize: 13 }}>
+                    {typeof s === "string" ? s : `${s.signal || s.name}${s.evidence ? ` — ${s.evidence}` : ""}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Layer-by-layer results */}
+        {multiAnalysisResult.layers && typeof multiAnalysisResult.layers === "object" && Object.keys(multiAnalysisResult.layers).length > 0 && (
+        <details open style={{ cursor: "pointer" }}>
+          <summary style={{ padding: "10px 16px", borderRadius: 6, background: "rgba(255,255,255,0.04)", fontWeight: 600, marginBottom: 8 }}>
+            🔍 逐层分析结果（点击展开/收起）
+          </summary>
+          <div style={{ display: "grid", gap: 10 }}>
+            {Object.entries(multiAnalysisResult.layers as Record<string, any>).map(([layerName, layerData]) => (
+              <div key={layerName} className="analysis-card" style={{ padding: 12 }}>
+                <strong style={{ fontSize: 14, color: "var(--nc-accent, #00e5ff)" }}>
+                  {layerName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                </strong>
+                {layerData?.status && <small style={{ marginLeft: 8 }}>· {layerData.status}</small>}
+                {layerData?.summary && <p style={{ margin: "6px 0 0", fontSize: 13 }}>{layerData.summary}</p>}
+                {layerData && typeof layerData === "object" && !layerData.summary && !layerData.status && (
+                  <pre style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>
+                    {JSON.stringify(layerData, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+        )}
+
+        {/* Heatmap / KeywordCloud */}
+        {multiAnalysisResult.heatmap && (
+          <details style={{ cursor: "pointer" }}>
+            <summary style={{ padding: "10px 16px", borderRadius: 6, background: "rgba(255,255,255,0.04)", fontWeight: 600, marginBottom: 8 }}>
+              🔥 热度图数据（点击展开）
+            </summary>
+            <pre style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", padding: 12, background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+              {JSON.stringify(multiAnalysisResult.heatmap, null, 2)}
+            </pre>
+          </details>
+        )}
+      </div>
+    </section>
+    )}
     <section className="panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>原创选题池</h2>

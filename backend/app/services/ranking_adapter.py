@@ -520,37 +520,37 @@ def _fetch_qidian_one_page(rank_type: str, page: int) -> list[dict]:
     return results
 
 
-def fetch_qidian_ranking(rank_type: str = "hotsales",
+def fetch_qidian_ranking(rank_type: str = "all",
                          max_count: Optional[int] = None) -> list[dict]:
-    """Fetch 起点中文网 ranking with multi-page pagination.
+    """Fetch 起点中文网: all 7 rank types combined (140+ books).
 
-    Args:
-        rank_type: 'hotsales'/'monthly'/'newbook'/'finished'/'recommend'/'collect'/'fans'
-        max_count: Max books to collect (default: RANKING_QIDIAN_COUNT env var, 100).
-
-    Requires China IP proxy (set RANKING_PROXY_URL).
-
-    Fetches up to 5+ pages (100+ books) by paginating through ?page=N.
+    Since pagination doesn't work (same page returned for all params),
+    we combine all 7 rank types for enough unique books.
     """
     target = max_count or _RANKING_QIDIAN_COUNT
+    if rank_type == "all":
+        # Fetch all types, dedup across them
+        all_types = list(_QIDIAN_LABELS.keys())
+        all_results: list[dict] = []
+        seen: set[str] = set()
+        for rt in all_types:
+            for item in _fetch_qidian_one_page(rt, 1):
+                dk = _make_dedup_key(item["title"], item["author"])
+                if dk not in seen:
+                    seen.add(dk)
+                    item["rank"] = len(all_results) + 1
+                    all_results.append(item)
+        return all_results[:target] if all_results else [{"source": "qidian", "degraded": True, "error": "No results from any rank type"}]
+
+    # Single rank type
     label = _QIDIAN_LABELS.get(rank_type, rank_type)
-    pages_needed = max(1, (target + _QIDIAN_PAGE_SIZE - 1) // _QIDIAN_PAGE_SIZE)
-    # Cap at 10 pages to be safe (200 books max)
-    pages_needed = min(pages_needed, 10)
-
     all_results: list[dict] = []
-    seen_ids: set[str] = set()
     seen_dedup: set[str] = set()
-
-    for page in range(1, pages_needed + 1):
+    for page in range(1, 11):
         page_items = _fetch_qidian_one_page(rank_type, page)
         if not page_items:
             break
         for item in page_items:
-            bid = item.get("source_book_id", "")
-            if bid in seen_ids:
-                continue
-            seen_ids.add(bid)
             dk = _make_dedup_key(item["title"], item["author"])
             if dk in seen_dedup:
                 continue
@@ -662,10 +662,6 @@ def fetch_zongheng_ranking(max_count: Optional[int] = None) -> list[dict]:
         if not page_items:
             break
         for item in page_items:
-            bid = item.get("source_book_id", "")
-            if bid in seen_ids:
-                continue
-            seen_ids.add(bid)
             dk = _make_dedup_key(item["title"], item["author"])
             if dk in seen_dedup:
                 continue
@@ -683,6 +679,592 @@ def fetch_zongheng_ranking(max_count: Optional[int] = None) -> list[dict]:
 
 
 # ============================================================
+# Source 4: 七猫小说 — HTML scraping via regex
+# ============================================================
+
+def _fetch_qimao_page_html(url: str) -> str:
+    """Fetch raw HTML from qimao.com."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def fetch_qimao_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch 七猫小说排行榜 via HTML scraping.
+
+    Tries to extract book cards from the rank page using regex patterns
+    matching the typical qimao.com page structure.
+    """
+    try:
+        html = _fetch_qimao_page_html("https://www.qimao.com/rank/")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen_titles: set[str] = set()
+
+    try:
+        # Strategy 1: Look for __NUXT__ or __INITIAL_STATE__ JSON
+        nuxt_match = re.search(r'window\.__NUXT__\s*=\s*({.*?});\s*</script>', html, re.DOTALL)
+        if nuxt_match:
+            try:
+                nuxt_data = json.loads(nuxt_match.group(1))
+                # Walk into state.data for book lists
+                state = nuxt_data.get("state", {})
+                rank_data = state.get("paihang", {}).get("data", [])
+                for item in rank_data[:max_count]:
+                    title = str(item.get("title", "")).strip()
+                    author = str(item.get("author", "")).strip()
+                    book_id = str(item.get("book_id", item.get("bookId", "")))
+                    if not title:
+                        continue
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    results.append({
+                        "rank": len(results) + 1,
+                        "title": title,
+                        "author": author,
+                        "source": "qimao",
+                        "source_book_id": book_id,
+                        "url": f"https://www.qimao.com/book/{book_id}/" if book_id else "",
+                        "leaderboard": "七猫热榜",
+                    })
+                if results:
+                    return results[:max_count]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+    except Exception:
+        pass
+
+    try:
+        # Strategy 2: Regex scrape book links with title attributes
+        # Match patterns like <a ... title="书名" href="/book/123/"
+        book_pattern = re.findall(
+            r'<a[^>]*title="([^"]{2,80})"[^>]*href="(/book/\d+[^"]*)"[^>]*>',
+            html,
+        )
+        for title, href in book_pattern:
+            title = title.strip()
+            if not title or title in seen_titles:
+                continue
+            seen_titles.add(title)
+            book_id = re.search(r'/book/(\d+)', href)
+            bid = book_id.group(1) if book_id else ""
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "qimao",
+                "source_book_id": bid,
+                "url": f"https://www.qimao.com{href}" if href.startswith("/") else href,
+                "leaderboard": "七猫热榜",
+            })
+            if len(results) >= max_count:
+                break
+    except Exception:
+        pass
+
+    if not results:
+        try:
+            # Strategy 3: Try API endpoint
+            api_url = "https://www.qimao.com/qimaoapi/rank/book/list?rank_type=1&offset=0&limit=50"
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+                "Referer": "https://www.qimao.com/rank/",
+            }
+            req = urllib.request.Request(api_url, headers=headers)
+            with _urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            books = data.get("data", {}).get("list", [])
+            for item in books[:max_count]:
+                title = str(item.get("title", "")).strip()
+                if not title or title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                book_id = str(item.get("book_id", item.get("bookId", "")))
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": str(item.get("author", "")).strip(),
+                    "source": "qimao",
+                    "source_book_id": book_id,
+                    "url": f"https://www.qimao.com/book/{book_id}/" if book_id else "",
+                    "leaderboard": "七猫热榜",
+                })
+        except Exception:
+            pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 5: QQ阅读 — HTML scraping via regex
+# ============================================================
+
+def fetch_qqread_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch QQ阅读排行榜 via HTML scraping.
+
+    Scrapes the rank page using regex to extract book links with titles.
+    """
+    url = "https://book.qq.com/rank.html"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://book.qq.com/",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # Strategy 1: Look for window.__INITIAL_STATE__ or similar JSON
+        json_matches = re.findall(
+            r'window\.__(?:INITIAL_STATE__|DATA__|PREFETCH_DATA__)\s*=\s*({.*?});\s*(?:</script>|window\.)',
+            html, re.DOTALL,
+        )
+        for json_str in json_matches:
+            try:
+                data = json.loads(json_str.replace("undefined", "null"))
+                # Try common paths for book lists
+                for path in ["rankList", "rank.list", "data.list", "data.rankList", "list"]:
+                    books = data
+                    for part in path.split("."):
+                        books = books.get(part, {}) if isinstance(books, dict) else {}
+                    if isinstance(books, list) and books:
+                        for item in books:
+                            if not isinstance(item, dict):
+                                continue
+                            title = str(item.get("title", item.get("bookName", item.get("name", "")))).strip()
+                            if not title or title in seen:
+                                continue
+                            seen.add(title)
+                            book_id = str(item.get("bookId", item.get("book_id", item.get("id", ""))))
+                            results.append({
+                                "rank": len(results) + 1,
+                                "title": title,
+                                "author": str(item.get("author", item.get("authorName", ""))).strip(),
+                                "source": "qqread",
+                                "source_book_id": book_id,
+                                "url": f"https://book.qq.com/book-detail/{book_id}" if book_id else "",
+                                "leaderboard": "QQ阅读榜",
+                            })
+                        if results:
+                            return results[:max_count]
+            except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+                continue
+    except Exception:
+        pass
+
+    try:
+        # Strategy 2: Regex scrape book links
+        # Match common book detail link patterns
+        link_patterns = [
+            r'<a[^>]*href="([^"]*(?:book-detail|/book/|/detail/)\d+[^"]*)"[^>]*title="([^"]{2,100})"',
+            r'<a[^>]*href="[^"]*book-detail/(\d+)[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]{2,100})</span>',
+            r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>([^<]{2,100})</a>',
+        ]
+        for pattern in link_patterns:
+            matches = re.findall(pattern, html)
+            for href, title in matches:
+                title = title.strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                bid_match = re.search(r'(\d{5,})', href)
+                book_id = bid_match.group(1) if bid_match else ""
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "qqread",
+                    "source_book_id": book_id,
+                    "url": href if href.startswith("http") else f"https://book.qq.com{href}",
+                    "leaderboard": "QQ阅读榜",
+                })
+                if len(results) >= max_count:
+                    break
+            if results:
+                break
+    except Exception:
+        pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 6: 17K小说 — HTML scraping via regex
+# ============================================================
+
+def fetch_17k_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch 17K小说排行榜 via HTML scraping.
+
+    Scrapes https://www.17k.com/top/ for book rankings.
+    """
+    url = "https://www.17k.com/top/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # Strategy 1: 17K uses <li> with data-rid/book links
+        # Match book entries with book links and title
+        book_entries = re.findall(
+            r'<a[^>]*href="(/book/\d+\.html)"[^>]*title="([^"]{2,100})"[^>]*>',
+            html,
+        )
+        for href, title in book_entries:
+            title = title.strip()
+            if not title or title in seen:
+                continue
+            seen.add(title)
+            bid_match = re.search(r'/book/(\d+)', href)
+            book_id = bid_match.group(1) if bid_match else ""
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "17k",
+                "source_book_id": book_id,
+                "url": f"https://www.17k.com{href}",
+                "leaderboard": "17K热榜",
+            })
+    except Exception:
+        pass
+
+    # Strategy 2: Try alternative patterns if needed
+    if not results:
+        try:
+            # Match broader patterns: book link + adjacent text
+            alt_matches = re.findall(
+                r'<a[^>]*href="([^"]*17k\.com/book/\d+[^"]*)"[^>]*>(?:<[^>]*>)*([^<]{2,100})(?:</[^>]*>)*</a>',
+                html,
+            )
+            for href, title in alt_matches:
+                title = re.sub(r'<[^>]*>', '', title).strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                bid_match = re.search(r'(\d{4,})', href)
+                book_id = bid_match.group(1) if bid_match else ""
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "17k",
+                    "source_book_id": book_id,
+                    "url": href,
+                    "leaderboard": "17K热榜",
+                })
+        except Exception:
+            pass
+
+    # Strategy 3: Try API
+    if not results:
+        try:
+            api_url = "https://www.17k.com/top/refactor/top100/06/v7_impv1_049_100_0_0_1_0_0_0.html"
+            req = urllib.request.Request(api_url, headers=headers)
+            with _urlopen(req, timeout=15) as resp:
+                api_html = resp.read().decode("utf-8", errors="replace")
+            items = re.findall(
+                r'<a[^>]*href="(/book/\d+\.html)"[^>]*title="([^"]{2,100})"[^>]*>',
+                api_html,
+            )
+            for href, title in items:
+                title = title.strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                bid_match = re.search(r'/book/(\d+)', href)
+                book_id = bid_match.group(1) if bid_match else ""
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "17k",
+                    "source_book_id": book_id,
+                    "url": f"https://www.17k.com{href}",
+                    "leaderboard": "17K热榜",
+                })
+        except Exception:
+            pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 7: 晋江文学城 — HTML scraping via regex
+# ============================================================
+
+def fetch_jjwxc_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch 晋江文学城排行榜 via HTML scraping.
+
+    Scrapes https://www.jjwxc.net/bookbase.php for book rankings.
+    晋江 uses gb2312/gbk encoding.
+    """
+    url = "https://www.jjwxc.net/bookbase.php"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+            # 晋江 uses gbk/gb2312 encoding
+            html = None
+            for enc in ["gbk", "gb2312", "gb18030", "utf-8"]:
+                try:
+                    html = raw.decode(enc)
+                    if "晋江" in html or "book" in html.lower():
+                        break
+                except Exception:
+                    continue
+            if html is None:
+                html = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # 晋江 bookbase uses table rows with links like <a href="onebook.php?novelid=123">
+        book_links = re.findall(
+            r'<a[^>]*href="(onebook\.php\?novelid=(\d+))"[^>]*>([^<]{2,200})</a>',
+            html,
+        )
+        for href, book_id, title in book_links:
+            title = title.strip()
+            # Filter out non-book links
+            if not title or len(title) < 2 or len(title) > 80:
+                continue
+            if any(w in title for w in ["排行榜", "更多", "下一页", "首页", "末页"]):
+                continue
+            if title in seen:
+                continue
+            seen.add(title)
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "jjwxc",
+                "source_book_id": book_id,
+                "url": f"https://www.jjwxc.net/{href}",
+                "leaderboard": "晋江书库榜",
+            })
+            if len(results) >= max_count:
+                break
+    except Exception:
+        pass
+
+    # Also try the rank page
+    if len(results) < 20:
+        try:
+            rank_url = "https://www.jjwxc.net/bookbase.php?fw0=0&fbsj0=0&ycx0=0&xx0=0&mainview0=0&sd0=0&lx0=0&fg0=0&sortType=3&isfinish=0&collectiontypes=ors&page=1"
+            req2 = urllib.request.Request(rank_url, headers=headers)
+            with _urlopen(req2, timeout=15) as resp2:
+                raw2 = resp2.read()
+                html2 = None
+                for enc in ["gbk", "gb2312", "gb18030", "utf-8"]:
+                    try:
+                        html2 = raw2.decode(enc)
+                        break
+                    except Exception:
+                        continue
+                if html2 is None:
+                    html2 = raw2.decode("utf-8", errors="replace")
+            book_links2 = re.findall(
+                r'<a[^>]*href="(onebook\.php\?novelid=(\d+))"[^>]*>([^<]{2,200})</a>',
+                html2,
+            )
+            for href, book_id, title in book_links2:
+                title = title.strip()
+                if not title or len(title) < 2 or len(title) > 80 or title in seen:
+                    continue
+                if any(w in title for w in ["排行榜", "更多", "下一页", "首页", "末页"]):
+                    continue
+                seen.add(title)
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "jjwxc",
+                    "source_book_id": book_id,
+                    "url": f"https://www.jjwxc.net/{href}",
+                    "leaderboard": "晋江书库榜",
+                })
+                if len(results) >= max_count:
+                    break
+        except Exception:
+            pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 8: 刺猬猫 — HTML scraping via regex
+# ============================================================
+
+def fetch_ciweimao_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch 刺猬猫排行榜 via HTML scraping.
+
+    Scrapes https://www.ciweimao.com/book-list for book rankings.
+    """
+    url = "https://www.ciweimao.com/book-list"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # Strategy 1: Look for embedded JSON data
+        json_patterns = [
+            r'window\.__NUXT__\s*=\s*({.*?});\s*</script>',
+            r'window\.__INITIAL_STATE__\s*=\s*({.*?});\s*</script>',
+            r'"bookList"\s*:\s*(\[.*?\])',
+        ]
+        for pattern in json_patterns:
+            matches = re.findall(pattern, html, re.DOTALL)
+            for match in matches:
+                try:
+                    data = json.loads(match.replace("undefined", "null")) if isinstance(match, str) else match
+                    if not data:
+                        continue
+                    # Handle different data shapes
+                    books = data if isinstance(data, list) else data.get("data", data.get("list", []))
+                    if isinstance(books, dict):
+                        books = books.get("list", books.get("data", []))
+                    if not isinstance(books, list):
+                        continue
+                    for item in books:
+                        if not isinstance(item, dict):
+                            continue
+                        title = str(item.get("title", item.get("book_name", item.get("name", "")))).strip()
+                        if not title or title in seen:
+                            continue
+                        seen.add(title)
+                        book_id = str(item.get("book_id", item.get("id", item.get("novel_id", ""))))
+                        results.append({
+                            "rank": len(results) + 1,
+                            "title": title,
+                            "author": str(item.get("author", item.get("author_name", ""))).strip(),
+                            "source": "ciweimao",
+                            "source_book_id": book_id,
+                            "url": f"https://www.ciweimao.com/book/{book_id}" if book_id else "",
+                            "leaderboard": "刺猬猫榜单",
+                        })
+                    if results:
+                        return results[:max_count]
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
+    except Exception:
+        pass
+
+    try:
+        # Strategy 2: Regex scrape book cards
+        # 刺猬猫 uses book cards with title links
+        book_cards = re.findall(
+            r'<a[^>]*href="(/book(?:-detail)?/(\d+))"[^>]*>[\s\S]*?<h\d[^>]*>([^<]{2,100})</h\d>',
+            html, re.DOTALL,
+        )
+        for href, book_id, title in book_cards:
+            title = title.strip()
+            if not title or title in seen:
+                continue
+            seen.add(title)
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "ciweimao",
+                "source_book_id": book_id,
+                "url": f"https://www.ciweimao.com{href}",
+                "leaderboard": "刺猬猫榜单",
+            })
+            if len(results) >= max_count:
+                break
+    except Exception:
+        pass
+
+    if not results:
+        try:
+            # Broader link matching
+            links = re.findall(
+                r'<a[^>]*href="(/book(?:-detail)?/\d+)"[^>]*>([^<]{2,100})</a>',
+                html,
+            )
+            for href, title in links:
+                title = title.strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                bid_match = re.search(r'(\d+)', href)
+                book_id = bid_match.group(1) if bid_match else ""
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "ciweimao",
+                    "source_book_id": book_id,
+                    "url": f"https://www.ciweimao.com{href}",
+                    "leaderboard": "刺猬猫榜单",
+                })
+        except Exception:
+            pass
+
+    return results[:max_count]
+
+
+# ============================================================
 # Unified ranking collector
 # ============================================================
 
@@ -690,6 +1272,11 @@ RANKING_FETCHERS = {
     "fanqie": fetch_fanqie_ranking,
     "qidian": fetch_qidian_ranking,
     "zongheng": fetch_zongheng_ranking,
+    "qimao": fetch_qimao_ranking,
+    "qqread": fetch_qqread_ranking,
+    "17k": fetch_17k_ranking,
+    "jjwxc": fetch_jjwxc_ranking,
+    "ciweimao": fetch_ciweimao_ranking,
 }
 
 
