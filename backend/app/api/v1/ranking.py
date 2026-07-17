@@ -889,6 +889,17 @@ def analyze_rankings(request: AnalyzeRequest, user: dict = Depends(get_current_u
         )
         db.commit()
 
+        # Compute frontend-friendly summary fields
+        platform_breakdown = {}
+        for bp in book_profiles:
+            p = bp.get("platform", "unknown")
+            platform_breakdown[p] = platform_breakdown.get(p, 0) + 1
+        genre_counts = {}
+        for bp in book_profiles:
+            cat = bp.get("category", "").split("|")[0].strip()
+            if cat: genre_counts[cat] = genre_counts.get(cat, 0) + 1
+        top_genres = sorted(genre_counts.items(), key=lambda x: -x[1])[:10]
+
         return ok({
             "analysis_id": analysis_id,
             "status": result["status"],
@@ -897,6 +908,11 @@ def analyze_rankings(request: AnalyzeRequest, user: dict = Depends(get_current_u
             "failed_layers": result["failed_layers"],
             "platforms": result["platforms"],
             "analysis_mode": result["analysis_mode"],
+            "summary": result.get("TrendReport", {}).get("summary", "十层分析完成"),
+            "total_books": len(book_profiles),
+            "platform_breakdown": platform_breakdown,
+            "top_genres": [{"name": g, "count": c} for g, c in top_genres],
+            "suggestions": result.get("TrendReport", {}).get("recommendations", []),
             "ScanResult": result["ScanResult"],
             "HeatMap": result["HeatMap"],
             "KeywordCloud": result["KeywordCloud"],
