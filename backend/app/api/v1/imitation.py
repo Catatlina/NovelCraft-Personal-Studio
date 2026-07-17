@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re as _re
 import socket
 import urllib.request
 from urllib.parse import urlsplit
@@ -41,12 +42,24 @@ def _assert_public_https(url: str) -> None:
 
 def _fetch_source(url: str) -> str:
     _assert_public_https(url)
-    req = urllib.request.Request(url, headers={"User-Agent": "NovelCraft/1.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; NovelCraft/1.0)"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
         content_type = resp.headers.get("Content-Type", "")
         if "text" not in content_type and "html" not in content_type:
             raise HTTPException(415, "source_url must return text/html content")
-        return resp.read(200_000).decode("utf-8", errors="replace")
+        raw = resp.read(200_000).decode("utf-8", errors="replace")
+    return _extract_text(raw)
+
+
+def _extract_text(html: str) -> str:
+    """Strip HTML tags/extract novel chapter content."""
+    text = _re.sub(r"<(script|style|noscript|nav|footer|header)[^>]*>.*?</\1>", " ", html, flags=_re.DOTALL|_re.I)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _re.sub(r"&[a-z]+;", " ", text)
+    text = _re.sub(r"\s+", " ", text)
+    # Keep only substantial paragraphs (>30 chars, like novel text)
+    paras = [p.strip() for p in text.split("\n") if len(p.strip()) > 30]
+    return "\n\n".join(paras[:50]) if paras else text[:30000]
 
 
 @router.post("")

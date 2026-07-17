@@ -22,8 +22,8 @@ router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
 library_router = APIRouter(prefix="/api/v1/library", tags=["library"])
 
 SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网",
-                "qimao": "七猫小说", "qqread": "QQ阅读", "17k": "17K小说",
-                "jjwxc": "晋江文学城", "ciweimao": "刺猬猫"}
+                "qqread": "QQ阅读", "jjwxc": "晋江文学城",
+                "sfacg": "SF轻小说", "xxsy": "潇湘书院"}
 MIN_AUTOMATED_CONFIDENCE = 0.85
 
 
@@ -105,7 +105,7 @@ class RankingCaptureImportRequest(BaseModel):
     challenges server-side.
     """
     model_config = ConfigDict(extra="allow")
-    source: str = Field(pattern=r"^(fanqie|qidian|zongheng|qimao|qqread|17k|jjwxc|ciweimao|manual)$")
+    source: str = Field(pattern=r"^(fanqie|qidian|zongheng|qqread|sfacg|xxsy|jjwxc|manual)$")
     status: str = Field(default="succeeded", pattern=r"^(succeeded|user_action_required|ocr_required|schema_changed|failed)$")
     collector: str = Field(default="visible_browser", max_length=120)
     captured_at: str | None = None
@@ -224,19 +224,13 @@ def list_sources(project_id: str, user: dict = Depends(get_current_user)):
 
 @router.post("/sources/{source_key}/scan")
 def scan_source(source_key: str, project_id: str, user: dict = Depends(get_current_user)):
-    # JS-SPA sites can't be scraped with HTTP — tell user clearly
-    _JS_SPA = {"qimao": "七猫是JS渲染页面，需浏览器采集",
-               "17k": "17K是JS渲染页面，需浏览器采集",
-               "ciweimao": "刺猬猫是JS渲染页面，需浏览器采集"}
-    if source_key in _JS_SPA:
-        raise HTTPException(400, _JS_SPA[source_key])
     return _scan_source(source_key, project_id, user)
 
 
 @router.post("/scan-all")
 def scan_all_sources(project_id: str, user: dict = Depends(get_current_user)):
     """一键采集所有可用平台数据."""
-    available = ["fanqie", "qidian", "zongheng", "qqread", "jjwxc"]
+    available = ["fanqie", "qidian", "zongheng", "qqread", "jjwxc", "sfacg", "xxsy"]
     results = {}
     errors = {}
     for source_key in available:
