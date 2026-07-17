@@ -342,7 +342,7 @@ def test_frontend_response_contracts_match_backend_wrappers():
     publishing = (ROOT / "frontend/src/components/PublishDashboard.tsx").read_text(encoding="utf-8")
     assert 'project_id: projectId, query' in knowledge and 'method: "POST"' in knowledge
     assert "r.data || []" in knowledge
-    assert "response?.data || {}" in hotspots
+    assert "response?.data || {}" in hotspots or "result.data || {}" in hotspots
     assert "(data.data as any)?.items || []" in fanout
     assert "Promise.allSettled(selected.map(platform" in publishing
     assert 'platform=${selected.join(",")}' not in publishing

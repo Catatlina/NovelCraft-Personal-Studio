@@ -8,7 +8,7 @@ import re
 import unicodedata
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from pydantic import ConfigDict
 
@@ -785,3 +785,273 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             return ok({"novel_id": novel_id, "run_id": None, "status": "planning",
                        "warning": f"book created but workflow unavailable: {exc}"})
     return ok({"novel_id": novel_id, "run_id": run_id, "status": "generating" if run_id else "planning"})
+
+
+# ── Ten-Layer Analysis (十层分析模型) ────────────────────────────────
+
+
+class AnalyzeRequest(BaseModel):
+    platforms: list[str] = Field(default_factory=list, max_length=10)
+    analysis_mode: str = Field(default="all", pattern=r"^(single|multi|all)$")
+    snapshot_id: str = Field(default="", max_length=64)
+
+
+@router.post("/analyze")
+def analyze_rankings(request: AnalyzeRequest, user: dict = Depends(get_current_user)):
+    """Run ten-layer analysis on ranking items.
+
+    Uses gateway.complete() for real AI analysis per layer.
+    Returns structured ScanResult with HeatMap, KeywordCloud, TrendReport.
+    """
+    from app.services.ten_layer_analysis import TenLayerAnalyzer
+
+    if not request.snapshot_id:
+        raise HTTPException(422, "snapshot_id is required")
+
+    db = connect()
+    try:
+        snapshot = db.execute(
+            "SELECT * FROM ranking_snapshots WHERE id = %s",
+            (request.snapshot_id,),
+        ).fetchone()
+        if not snapshot:
+            raise HTTPException(404, "snapshot not found")
+        require_member(db, snapshot["project_id"], user, write=True)
+
+        items = rows(db,
+            "SELECT * FROM ranking_items WHERE snapshot_id = %s ORDER BY rank_no",
+            (request.snapshot_id,),
+        )
+        if not items:
+            raise HTTPException(409, "snapshot has no ranking items")
+
+        # Build book profiles from ranking items
+        book_profiles = []
+        for item in items:
+            metrics = item.get("metrics") or {}
+            profile = {
+                "title": item.get("title", ""),
+                "author": item.get("author", ""),
+                "category": item.get("category", ""),
+                "platform": snapshot.get("source_key", "unknown"),
+                "rank": item.get("rank_no", 0),
+                "source_url": item.get("source_url", ""),
+                "metrics": {
+                    "confidence": float(metrics.get("confidence", 1.0)),
+                    "collector": metrics.get("collector", "unknown"),
+                },
+            }
+            book_profiles.append(profile)
+
+        analyzer = TenLayerAnalyzer(project_id=snapshot["project_id"])
+        result = analyzer.analyze(
+            book_profiles=book_profiles,
+            platforms=request.platforms or [snapshot.get("source_key", "")],
+            analysis_mode=request.analysis_mode,
+        )
+
+        # Store analysis results in market_analyses
+        analysis_id = new_id()
+        summary = result.get("TrendReport", {}).get("market_trends", [])
+        summary_text = "; ".join(str(s) for s in summary[:3]) if summary else "ten-layer analysis completed"
+        db.execute(
+            """INSERT INTO market_analyses
+               (id, project_id, snapshot_id, summary, signals, status, analysis_mode, prompt_name, prompt_version)
+               VALUES (%s, %s, %s, %s, %s, 'succeeded', 'ten_layer', 'analysis.ten_layer', '1.0.0')""",
+            (analysis_id, snapshot["project_id"], request.snapshot_id,
+             summary_text[:500], encode(result)),
+        )
+        db.commit()
+
+        return ok({
+            "analysis_id": analysis_id,
+            "status": result["status"],
+            "total_layers": result["total_layers"],
+            "succeeded_layers": result["succeeded_layers"],
+            "failed_layers": result["failed_layers"],
+            "platforms": result["platforms"],
+            "analysis_mode": result["analysis_mode"],
+            "ScanResult": result["ScanResult"],
+            "HeatMap": result["HeatMap"],
+            "KeywordCloud": result["KeywordCloud"],
+            "TrendReport": result["TrendReport"],
+            "errors": result.get("errors", []),
+        })
+    except (BudgetExceeded, ProviderError) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# Book & Chapter Deletion (V2.0 — 问题8)
+# ═══════════════════════════════════════════════
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
+@library_router.delete("/books/{book_id}")
+def delete_book(book_id: str, user: dict = Depends(get_current_user)):
+    """Soft-delete a book and all its chapters, cache, and database records."""
+    db = connect()
+    book = db.execute(
+        "SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+        (book_id,)).fetchone()
+    if not book:
+        db.close()
+        raise HTTPException(404, "book not found")
+    require_member(db, book["project_id"], user, write=True)
+
+    # Count chapters before soft-deleting
+    chapter_count = len(db.execute(
+        "SELECT id FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+        (book_id,)).fetchall())
+
+    # Soft-delete chapters first
+    db.execute(
+        "UPDATE contents SET is_deleted=TRUE, updated_at=now() "
+        "WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+        (book_id,))
+
+    # Soft-delete knowledge items
+    db.execute(
+        "UPDATE knowledge_items SET is_deleted=TRUE "
+        "WHERE content_id=%s AND is_deleted=FALSE", (book_id,))
+
+    # Soft-delete the book itself
+    db.execute(
+        "UPDATE contents SET is_deleted=TRUE, updated_at=now() "
+        "WHERE id=%s", (book_id,))
+    db.commit()
+    db.close()
+    return ok({"deleted_book_id": book_id, "deleted_chapters": chapter_count})
+
+
+@library_router.delete("/chapters/{chapter_id}")
+def delete_chapter(chapter_id: str, user: dict = Depends(get_current_user)):
+    """Soft-delete a single chapter."""
+    db = connect()
+    chapter = db.execute(
+        "SELECT c.*, p.project_id FROM contents c "
+        "JOIN contents p ON c.parent_id = p.id "
+        "WHERE c.id=%s AND c.type='chapter' AND c.is_deleted=FALSE",
+        (chapter_id,)).fetchone()
+    if not chapter:
+        db.close()
+        raise HTTPException(404, "chapter not found")
+    require_member(db, chapter["project_id"], user, write=True)
+    db.execute(
+        "UPDATE contents SET is_deleted=TRUE, updated_at=now() WHERE id=%s",
+        (chapter_id,))
+    db.commit()
+    db.close()
+    return ok({"deleted_chapter_id": chapter_id})
+
+
+@library_router.post("/books/batch-delete")
+def batch_delete_books(payload: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+    """Batch soft-delete multiple books."""
+    db = connect()
+    deleted = []
+    for book_id in payload.ids:
+        book = db.execute(
+            "SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+            (book_id,)).fetchone()
+        if not book:
+            continue
+        try:
+            require_member(db, book["project_id"], user, write=True)
+        except HTTPException:
+            continue
+        db.execute(
+            "UPDATE contents SET is_deleted=TRUE WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+            (book_id,))
+        db.execute(
+            "UPDATE knowledge_items SET is_deleted=TRUE WHERE content_id=%s AND is_deleted=FALSE",
+            (book_id,))
+        db.execute(
+            "UPDATE contents SET is_deleted=TRUE, updated_at=now() WHERE id=%s",
+            (book_id,))
+        deleted.append(book_id)
+    db.commit()
+    db.close()
+    return ok({"deleted": deleted, "count": len(deleted)})
+
+
+# ═══════════════════════════════════════════════
+# Topic Pool Management (V2.0 — 问题10)
+# ═══════════════════════════════════════════════
+
+class TopicBookmarkRequest(BaseModel):
+    bookmark: bool = True  # True=加入备选, False=取消备选
+
+
+@router.post("/topics/{topic_id}/bookmark")
+def toggle_topic_bookmark(topic_id: str, payload: TopicBookmarkRequest,
+                          user: dict = Depends(get_current_user)):
+    """Toggle bookmark status for a topic candidate. Bookmarked topics persist; unbookmarked are cleared on next scan."""
+    db = connect()
+    topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+    if not topic:
+        db.close()
+        raise HTTPException(404, "topic not found")
+    require_member(db, topic["project_id"], user, write=True)
+    db.execute(
+        "UPDATE topic_candidates SET meta = meta || %s, status = %s WHERE id = %s",
+        (json.dumps({"bookmarked": payload.bookmark}),
+         "bookmarked" if payload.bookmark else topic["status"],
+         topic_id))
+    db.commit()
+    db.close()
+    return ok({"topic_id": topic_id, "bookmarked": payload.bookmark})
+
+
+@router.delete("/topics/{topic_id}")
+def delete_topic(topic_id: str, user: dict = Depends(get_current_user)):
+    """Permanently delete a topic candidate."""
+    db = connect()
+    topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+    if not topic:
+        db.close()
+        raise HTTPException(404, "topic not found")
+    require_member(db, topic["project_id"], user, write=True)
+    db.execute("DELETE FROM topic_candidates WHERE id=%s", (topic_id,))
+    db.commit()
+    db.close()
+    return ok({"deleted_topic_id": topic_id})
+
+
+@router.post("/topics/batch-delete")
+def batch_delete_topics(payload: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+    """Batch delete topic candidates."""
+    db = connect()
+    deleted = []
+    for topic_id in payload.ids:
+        topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+        if not topic:
+            continue
+        try:
+            require_member(db, topic["project_id"], user, write=True)
+        except HTTPException:
+            continue
+        db.execute("DELETE FROM topic_candidates WHERE id=%s", (topic_id,))
+        deleted.append(topic_id)
+    db.commit()
+    db.close()
+    return ok({"deleted": deleted, "count": len(deleted)})
+
+
+@router.get("/topics/bookmarked")
+def get_bookmarked_topics(project_id: str = Query(...),
+                          user: dict = Depends(get_current_user)):
+    """List all bookmarked topic candidates for a project."""
+    db = connect()
+    require_member(db, project_id, user, write=False)
+    topics = rows(db,
+        """SELECT * FROM topic_candidates
+           WHERE project_id=%s AND meta->>'bookmarked' = 'true'
+           ORDER BY market_score DESC NULLS LAST, created_at DESC""",
+        (project_id,))
+    db.close()
+    return ok({"topics": topics, "count": len(topics)})

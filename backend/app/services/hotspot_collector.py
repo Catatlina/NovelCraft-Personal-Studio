@@ -10,7 +10,23 @@ HOTSPOT_SOURCES = {
     "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch", "history_url_env": "HOTSPOT_WEIBO_HISTORY_URL", "kind": "weibo_json"},
     "xiaohongshu": {"name": "小红书热点", "url_env": "HOTSPOT_XIAOHONGSHU_URL", "history_url_env": "HOTSPOT_XIAOHONGSHU_HISTORY_URL", "kind": "generic_json"},
     "douyin": {"name": "抖音热点", "url_env": "HOTSPOT_DOUYIN_URL", "history_url_env": "HOTSPOT_DOUYIN_HISTORY_URL", "kind": "generic_json"},
+    "toutiao": {"name": "今日头条", "url_env": "HOTSPOT_TOUTIAO_URL", "history_url_env": "HOTSPOT_TOUTIAO_HISTORY_URL", "kind": "generic_json"},
+    "kuaishou": {"name": "快手热榜", "url_env": "HOTSPOT_KUAISHOU_URL", "history_url_env": "HOTSPOT_KUAISHOU_HISTORY_URL", "kind": "generic_json"},
+    "bilibili": {"name": "B站热门", "url_env": "HOTSPOT_BILIBILI_URL", "history_url_env": "HOTSPOT_BILIBILI_HISTORY_URL", "kind": "generic_json"},
+    "google_trends_cn": {"name": "Google Trends中国", "url_env": "HOTSPOT_GOOGLE_TRENDS_CN_URL", "history_url_env": "HOTSPOT_GOOGLE_TRENDS_CN_HISTORY_URL", "kind": "generic_json"},
     "x": {"name": "X Trends", "url_env": "HOTSPOT_X_URL", "history_url_env": "HOTSPOT_X_HISTORY_URL", "kind": "generic_json"},
+}
+
+# Platform display names for overview
+PLATFORM_DISPLAY = {k: v["name"] for k, v in HOTSPOT_SOURCES.items()}
+PLATFORM_CATEGORIES = {
+    "tech": ["科技", "AI", "人工智能", "互联网", "数码", "5G", "芯片", "新能源"],
+    "entertainment": ["娱乐", "明星", "综艺", "电影", "音乐", "电视剧", "动漫", "游戏"],
+    "society": ["社会", "民生", "法制", "教育", "医疗", "交通", "天气"],
+    "finance": ["财经", "股市", "基金", "房产", "经济", "商业"],
+    "sports": ["体育", "足球", "篮球", "奥运", "电竞", "F1"],
+    "lifestyle": ["生活", "美食", "旅游", "时尚", "健身", "宠物", "家居"],
+    "international": ["国际", "外交", "军事", "地缘"],
 }
 
 DUPLICATE_WINDOW_HOURS = 24
@@ -393,4 +409,232 @@ def get_hotspot_history_report(days: int = 7) -> dict:
         "dates": by_date,
         "dates_with_rows": sorted(by_date.keys()),
         "total_rows": sum(sum(sources.values()) for sources in by_date.values()),
+    }
+
+
+def _fuzzy_title_similarity(title_a: str, title_b: str) -> float:
+    """Simple fuzzy match ratio for title dedup (0-1)."""
+    if not title_a or not title_b:
+        return 0.0
+    set_a = set(title_a)
+    set_b = set(title_b)
+    if not set_a or not set_b:
+        return 0.0
+    intersection = set_a & set_b
+    union = set_a | set_b
+    return len(intersection) / len(union) if union else 0.0
+
+
+def _normalize_hotness(raw_score, source: str) -> float:
+    """Convert platform-specific raw score to unified 0-100 hotness."""
+    score = _safe_score(raw_score)
+    if source in ("baidu",):
+        return min(100, max(1, score / 100000 * 100)) if score > 0 else 10
+    if source in ("zhihu",):
+        return min(100, max(1, score / 20000000 * 100)) if score > 0 else 10
+    if source in ("weibo",):
+        return min(100, max(1, score / 5000000 * 100)) if score > 0 else 10
+    # Generic: cap at 100
+    return min(100, max(1, float(score) / 10000 * 100)) if score > 0 else 10
+
+
+def get_hotspots_paginated(
+    user_id: str = "",
+    platforms: list[str] | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    sort_by: str = "hotness",
+) -> dict:
+    """Fetch hotspots with pagination and unified scoring.
+
+    Returns deduped, sorted hotspots from recent fetches (last 24h).
+    """
+    db = connect()
+    source_filter = ""
+    params: list = []
+    if platforms:
+        placeholders = ",".join(["%s"] * len(platforms))
+        source_filter = f"AND meta->>'source' IN ({placeholders})"
+        params = list(platforms)
+
+    total_row = db.execute(
+        f"SELECT COUNT(*) as cnt FROM knowledge_items WHERE kind='hotspot' "
+        f"AND created_at > now() - interval '24 hours' {source_filter}",
+        tuple(params),
+    ).fetchone()
+    total = total_row["cnt"] if total_row else 0
+
+    offset = (page - 1) * page_size
+    rows = db.execute(
+        f"""SELECT meta, created_at FROM knowledge_items
+            WHERE kind='hotspot' AND created_at > now() - interval '24 hours'
+            {source_filter}
+            ORDER BY (meta->>'freshness')::float DESC, created_at DESC
+            LIMIT %s OFFSET %s""",
+        tuple(params) + (page_size, offset),
+    ).fetchall()
+    db.close()
+
+    items = []
+    seen = set()
+    for row in rows:
+        meta = row.get("meta") or {}
+        title = str(meta.get("title", "")).strip()
+        source = str(meta.get("source", ""))
+        dedup_sig = f"{source}:{title}"
+        if dedup_sig in seen:
+            continue
+        seen.add(dedup_sig)
+        raw_score = meta.get("score", 0)
+        hotness = _normalize_hotness(raw_score, source)
+        trend = meta.get("trend", "stable")
+        items.append({
+            "title": title,
+            "source": source,
+            "source_name": PLATFORM_DISPLAY.get(source, source),
+            "category": meta.get("category", "general"),
+            "hotness": round(hotness, 1),
+            "trend": trend,
+            "url": meta.get("url", ""),
+            "freshness": meta.get("freshness", 1.0),
+            "fetched_at": meta.get("fetched_at", ""),
+        })
+
+    # Sort by hotness
+    items.sort(key=lambda x: x["hotness"], reverse=True)
+
+    # Cross-platform dedup by title similarity
+    deduped = []
+    for item in items:
+        dup = False
+        for existing in deduped:
+            if _fuzzy_title_similarity(item["title"], existing["title"]) > 0.75:
+                dup = True
+                break
+        if not dup:
+            deduped.append(item)
+
+    return {
+        "items": deduped,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, (total + page_size - 1) // page_size),
+    }
+
+
+def get_hotspot_overview(
+    user_id: str = "",
+    project_id: str = "",
+    platforms: list[str] | None = None,
+) -> dict:
+    """Generate a hotspot overview with AI summary, categories, trends, predictions.
+
+    Calls gateway.complete() for AI analysis. Returns structured overview data.
+    """
+    # Get raw hotspots first
+    paginated = get_hotspots_paginated(
+        user_id=user_id,
+        platforms=platforms,
+        page=1,
+        page_size=50,
+    )
+    items = paginated.get("items", [])
+
+    if not items:
+        return {
+            "summary": "暂无热点数据，请先刷新热点采集。",
+            "categories": {},
+            "trends": [],
+            "predicted_viral": [],
+            "recommended_angles": [],
+            "total_hotspots": 0,
+            "sources_active": [],
+        }
+
+    # Categorize hotspots
+    categories: dict[str, list[dict]] = {}
+    for item in items:
+        cat = "general"
+        for cat_key, keywords in PLATFORM_CATEGORIES.items():
+            if any(kw in str(item.get("category", "")) or kw in str(item.get("title", ""))
+                   for kw in keywords):
+                cat = cat_key
+                break
+        categories.setdefault(cat, []).append(item)
+
+    # Trend analysis
+    trends = []
+    trend_counts = {"rising": 0, "new": 0, "stable": 0, "cooling": 0}
+    for item in items:
+        t = item.get("trend", "stable")
+        trend_counts[t] = trend_counts.get(t, 0) + 1
+    for trend_name, count in trend_counts.items():
+        if count > 0:
+            trends.append({
+                "name": trend_name,
+                "label": {"rising": "📈 上升", "new": "🆕 新热点", "stable": "➡️ 稳定", "cooling": "📉 降温"}.get(trend_name, trend_name),
+                "count": count,
+            })
+
+    # Sort by hotness for predictions
+    top_items = sorted(items, key=lambda x: x["hotness"], reverse=True)[:10]
+    rising_items = [it for it in items if it.get("trend") == "rising"]
+
+    predicted_viral = [
+        {
+            "title": it["title"],
+            "source": it["source_name"],
+            "hotness": it["hotness"],
+            "reason": "上升趋势 + 高热度" if it["trend"] == "rising" else "跨平台分布",
+        }
+        for it in (rising_items[:5] or top_items[:5])
+    ]
+
+    recommended_angles = [
+        {
+            "title": it["title"][:40],
+            "source": it["source_name"],
+            "angle": f"从{it.get('category', '热点')}角度切入，结合{it['source_name']}平台特点创作内容",
+            "hotness": it["hotness"],
+        }
+        for it in top_items[:8]
+    ]
+
+    # AI summary via gateway when project_id provided
+    summary = ""
+    if project_id:
+        try:
+            from app.gateway import complete
+            titles_text = "\n".join(
+                f"- [{it['source_name']}] {it['title']}" for it in top_items[:20]
+            )
+            output = complete(
+                run_id=None,
+                node_key=None,
+                project_id=project_id,
+                task_type="hotspot_overview_summary",
+                prompt_name="hotspot.overview_summary",
+                variables={
+                    "hotspot_titles": titles_text,
+                    "total_count": str(len(items)),
+                    "trends": json.dumps(trends, ensure_ascii=False),
+                },
+                client_mutation_id=f"hotspot-overview:{project_id}:v1",
+            )
+            summary = output.get("summary", "") or output.get("text", "")
+        except Exception:
+            summary = f"今日共采集 {len(items)} 条热点，来自 {len(set(it['source'] for it in items))} 个平台。" + \
+                       f"热度最高话题：{top_items[0]['title'][:30] if top_items else '暂无'}。"
+
+    return {
+        "summary": summary,
+        "categories": {k: len(v) for k, v in sorted(categories.items(), key=lambda x: -len(x[1]))},
+        "category_items": categories,
+        "trends": trends,
+        "predicted_viral": predicted_viral,
+        "recommended_angles": recommended_angles,
+        "total_hotspots": len(items),
+        "sources_active": list(set(it["source"] for it in items)),
+        "generated_at": datetime.utcnow().isoformat(),
     }

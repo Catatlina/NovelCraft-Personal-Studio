@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { Search, BookOpen, ArrowLeft } from "lucide-react";
+import { Search, BookOpen, ArrowLeft, Trash2 } from "lucide-react";
 
 type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
 type BookDetail = { book: Book; synopsis: string; genre: string; outline: unknown; latest_chapter?: any; chapters: any[]; total_words: number };
@@ -62,6 +62,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [statusFilter, setStatusFilter] = useState("");
   const [sortBy, setSortBy] = useState<"created" | "updated" | "title" | "chapters">("created");
   const [page, setPage] = useState(0);
+  // V2.0: Delete functionality
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
   const PAGE_SIZE = 10;
   const pollers = useRef<Record<string, number>>({});
 
@@ -190,6 +193,34 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       link.click();
       URL.revokeObjectURL(link.href);
     } catch (caught) { setNotice(`导出失败：${String(caught)}`); } finally { setBusy(""); }
+  };
+
+  // V2.0: Delete book
+  const deleteBook = async (book: Book) => {
+    setBusy(book.id); setNotice("");
+    try {
+      const result = await api<Wrapped<{ deleted_book_id: string; deleted_chapters: number }>>(
+        `/api/v1/library/books/${book.id}`, { method: "DELETE" });
+      setNotice(`已删除《${book.title}》（含 ${result.data.deleted_chapters} 个章节）。`);
+      setBooks(prev => prev.filter(b => b.id !== book.id));
+      setSelectedBooks(prev => { const next = new Set(prev); next.delete(book.id); return next; });
+    } catch (caught) { setNotice(`删除失败：${String(caught)}`); }
+    finally { setBusy(""); setDeleteConfirm(null); }
+  };
+
+  const batchDelete = async () => {
+    if (!selectedBooks.size) return;
+    setBusy("batch"); setNotice("");
+    try {
+      const ids = [...selectedBooks];
+      await api(`/api/v1/library/books/batch-delete`, {
+        method: "POST", body: JSON.stringify({ ids }),
+      });
+      setNotice(`已批量删除 ${ids.length} 本书。`);
+      setBooks(prev => prev.filter(b => !selectedBooks.has(b.id)));
+      setSelectedBooks(new Set());
+    } catch (caught) { setNotice(`批量删除失败：${String(caught)}`); }
+    finally { setBusy(""); }
   };
 
   const manualReviewChapter = async (chapter: any, decision: "approve" | "reject", reason = "") => {
@@ -333,12 +364,23 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     </div>
     <label className="muted">批量章节数 <input type="number" min={1} max={50} value={batchCount}
       onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} style={{ width: "4em" }} /></label>
+    {selectedBooks.size > 0 && <button className="danger" disabled={busy === "batch"} onClick={() => void batchDelete()}>
+      <Trash2 size={14} />批量删除 ({selectedBooks.size})
+    </button>}
     <div className="book-table">{paged.map((book, index) => {
       const batch = batches[book.id];
       const completion = completions[book.id];
       const rank = page * PAGE_SIZE + index + 1;
       return <article className="book-row" key={book.id}>
-        <strong>{rank}. {book.title}</strong>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={selectedBooks.has(book.id)}
+            onChange={() => setSelectedBooks(prev => {
+              const next = new Set(prev);
+              next.has(book.id) ? next.delete(book.id) : next.add(book.id);
+              return next;
+            })} title="选择批量删除" />
+          <strong>{rank}. {book.title}</strong>
+        </div>
         <p>{book.synopsis || book.meta?.idea || "暂无简介"}</p>
         <small>{book.genre || book.meta?.genre || "未分类"} · 创建 {new Date(book.created_at).toLocaleString()} · 最新章节 {book.latest_chapter_title || "暂无"} · {book.total_words ?? completion?.total_words ?? 0} 字</small>
         {completion ? <div style={{ display: "grid", gap: 4 }}>
@@ -365,6 +407,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
           <button disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入章节目录</button>
           <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
           <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
+          <button className="danger" disabled={busy === book.id} onClick={() => setDeleteConfirm(book.id)} title="删除此书及全部章节">
+            <Trash2 size={14} />
+          </button>
         </div>
         {importBookId === book.id && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
           <strong>章节目录预览</strong>
@@ -387,5 +432,19 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     </div>}
     {loading && <p className="muted">正在加载书库…</p>}
     {!loading && !books.length && !error && <p className="muted">书库为空。可以从扫榜中心或灵感入口创建小说。</p>}
+    {/* V2.0: Delete confirmation modal */}
+    {deleteConfirm && <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+        <h3>确认删除</h3>
+        <p>确定删除《{books.find(b => b.id === deleteConfirm)?.title || "未知"}》？此操作将同时删除该书所有章节和知识条目，不可撤销。</p>
+        <div className="row-actions">
+          <button onClick={() => setDeleteConfirm(null)}>取消</button>
+          <button className="danger" disabled={busy === deleteConfirm}
+            onClick={() => { const book = books.find(b => b.id === deleteConfirm); if (book) deleteBook(book); }}>
+            {busy === deleteConfirm ? "删除中…" : "确认删除"}
+          </button>
+        </div>
+      </div>
+    </div>}
   </section>;
 }

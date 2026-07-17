@@ -51,6 +51,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [sources, setSources] = useState<Source[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [bookmarkedTopics, setBookmarkedTopics] = useState<Topic[]>([]);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [openSnapshotId, setOpenSnapshotId] = useState("");
@@ -59,6 +60,8 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [captureArtifact, setCaptureArtifact] = useState<CaptureArtifact | null>(null);
   const [importSource, setImportSource] = useState("manual_import");
   const [importFileName, setImportFileName] = useState("");
+  const [topicTab, setTopicTab] = useState<"all" | "bookmarked">("all");
+  const [scanWarning, setScanWarning] = useState(false);
 
   async function load() {
     const [s, p, t] = await Promise.allSettled([
@@ -208,6 +211,49 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     finally { setBusy(""); }
   }
 
+  // ── Topic Pool Actions ───────────────────────────────────
+  async function toggleBookmark(topic: Topic) {
+    setBusy(`bookmark:${topic.id}`); setMessage("");
+    try {
+      await api(`/api/v1/ranking/topics/${topic.id}/bookmark`, { method: "POST", body: JSON.stringify({ bookmark: true }) });
+      await load();
+    } catch (error) { setMessage(`收藏失败：${errorText(error)}`); }
+    finally { setBusy(""); }
+  }
+
+  async function deleteTopic(topic: Topic) {
+    if (!confirm(`确定删除选题「${topic.title}」？`)) return;
+    setBusy(`delete-topic:${topic.id}`); setMessage("");
+    try {
+      await api(`/api/v1/ranking/topics/${topic.id}`, { method: "DELETE" });
+      setMessage(`已删除「${topic.title}」`);
+      await load();
+    } catch (error) { setMessage(`删除失败：${errorText(error)}`); }
+    finally { setBusy(""); }
+  }
+
+  async function batchDeleteAll() {
+    const ids = (topicTab === "bookmarked" ? bookmarkedTopics : topics).map(t => t.id);
+    if (!ids.length) return;
+    if (!confirm(`确定删除全部 ${ids.length} 个选题？此操作不可撤销。`)) return;
+    setBusy("batch-delete"); setMessage("");
+    try {
+      await api("/api/v1/ranking/topics/batch-delete", { method: "POST", body: JSON.stringify({ ids }) });
+      setMessage(`已批量删除 ${ids.length} 个选题`);
+      await load();
+    } catch (error) { setMessage(`批量删除失败：${errorText(error)}`); }
+    finally { setBusy(""); }
+  }
+
+  async function loadBookmarked() {
+    try {
+      const result = await api<Wrapped<Topic[]>>(`/api/v1/ranking/topics/bookmarked?project_id=${projectId}`);
+      setBookmarkedTopics(Array.isArray(result.data) ? result.data : (result.data as any)?.topics || []);
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => { if (topicTab === "bookmarked") void loadBookmarked(); }, [topicTab, projectId]);
+
   return <div style={{ display: "grid", gap: 16 }}>
     {message && <div className="panel">{message}</div>}
     <section className="panel"><h2>小说榜单源</h2><div className="grid-cards">
@@ -282,15 +328,111 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         </td></tr>}
       </React.Fragment>)}</tbody>
     </table></section>
-    <section className="panel"><h2>原创选题池</h2><div className="grid-cards">
-      {topics.map(topic => <article className="feature-card" key={topic.id}><strong>{topic.title}</strong><small>{topic.genre} · 市场分 {topic.market_score}</small><p>{topic.premise}</p>
-        {topic.target_audience && <small><b>目标受众：</b>{topic.target_audience}</small>}
-        {!!topic.differentiators?.length && <small><b>差异化：</b>{topic.differentiators.join("；")}</small>}
-        {!!topic.market_evidence?.length && <small><b>市场依据：</b>{topic.market_evidence.join("；")}</small>}
-        {topic.risk && <small className="danger-text"><b>风险：</b>{topic.risk}</small>}
-        {topic.originality_notes && <small><b>原创边界：</b>{topic.originality_notes}</small>}
-        <button className="primary" disabled={!!busy} onClick={() => topic.novel_id ? void onBookCreated(topic.novel_id) : void createBook(topic)}>{topic.novel_id ? "打开书库作品" : "创建作品并生成策划+首章"}</button>
-      </article>)}
-    </div></section>
+    <section className="panel">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>原创选题池</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            style={{
+              padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+              background: topicTab === "all" ? "var(--nc-primary, #FF6B35)" : "rgba(255,255,255,0.06)",
+              color: topicTab === "all" ? "#fff" : "var(--text-muted)",
+            }}
+            onClick={() => setTopicTab("all")}
+          >
+            全部选题 ({topics.length})
+          </button>
+          <button
+            style={{
+              padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+              background: topicTab === "bookmarked" ? "var(--nc-primary, #FF6B35)" : "rgba(255,255,255,0.06)",
+              color: topicTab === "bookmarked" ? "#fff" : "var(--text-muted)",
+            }}
+            onClick={() => { setTopicTab("bookmarked"); void loadBookmarked(); }}
+          >
+            ⭐ 备选池 ({bookmarkedTopics.length})
+          </button>
+        </div>
+      </div>
+
+      {scanWarning && (
+        <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(255,152,0,0.1)", color: "#ff9100", fontSize: 12, marginBottom: 10 }}>
+          ⚠️ 新一轮扫描后，非备选选题将被清空。建议将心仪选题加入⭐备选池。
+        </div>
+      )}
+
+      {/* Batch delete button */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, justifyContent: "flex-end" }}>
+        {((topicTab === "all" && topics.length > 0) || (topicTab === "bookmarked" && bookmarkedTopics.length > 0)) && (
+          <button
+            disabled={busy === "batch-delete"}
+            onClick={() => void batchDeleteAll()}
+            style={{
+              padding: "6px 12px", borderRadius: 6, border: "1px solid #ff5252", background: "transparent",
+              color: "#ff5252", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            <span>🗑</span> 全部删除
+          </button>
+        )}
+      </div>
+
+      <div className="grid-cards">
+        {(topicTab === "bookmarked" ? bookmarkedTopics : topics).map(topic => {
+          const isBookmarked = (topic as any).meta?.bookmarked || false;
+          return (
+            <article className="feature-card" key={topic.id}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <strong>{topic.title}</strong>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    disabled={busy === `bookmark:${topic.id}`}
+                    onClick={() => void toggleBookmark(topic)}
+                    title={isBookmarked ? "已收藏" : "加入备选池"}
+                    style={{
+                      background: "transparent", border: `1px solid ${isBookmarked ? "#ff9100" : "rgba(255,255,255,0.12)"}`,
+                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 14, color: isBookmarked ? "#ff9100" : "#888",
+                    }}
+                  >
+                    {isBookmarked ? "⭐" : "☆"}
+                  </button>
+                  <button
+                    disabled={busy === `delete-topic:${topic.id}`}
+                    onClick={() => void deleteTopic(topic)}
+                    title="删除选题"
+                    style={{
+                      background: "transparent", border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 12, color: "#ff5252",
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
+              </div>
+              <small>{topic.genre} · 市场分 {topic.market_score}{isBookmarked ? " · ⭐ 已收藏" : ""}</small>
+              <p>{topic.premise}</p>
+              {topic.target_audience && <small><b>目标受众：</b>{topic.target_audience}</small>}
+              {!!topic.differentiators?.length && <small><b>差异化：</b>{topic.differentiators.join("；")}</small>}
+              {!!topic.market_evidence?.length && <small><b>市场依据：</b>{topic.market_evidence.join("；")}</small>}
+              {topic.risk && <small className="danger-text"><b>风险：</b>{topic.risk}</small>}
+              {topic.originality_notes && <small><b>原创边界：</b>{topic.originality_notes}</small>}
+              <button className="primary" disabled={!!busy} onClick={() => topic.novel_id ? void onBookCreated(topic.novel_id) : void createBook(topic)}>
+                {topic.novel_id ? "打开书库作品" : "创建作品并生成策划+首章"}
+              </button>
+            </article>
+          );
+        })}
+        {(topicTab === "bookmarked" && !bookmarkedTopics.length) && (
+          <p style={{ color: "var(--text-muted)", fontSize: 13, gridColumn: "1 / -1", textAlign: "center", padding: 20 }}>
+            备选池为空。点击 ☆ 将选题加入备选池。
+          </p>
+        )}
+        {(topicTab === "all" && !topics.length) && (
+          <p style={{ color: "var(--text-muted)", fontSize: 13, gridColumn: "1 / -1", textAlign: "center", padding: 20 }}>
+            暂无选题。请先扫描榜单并生成分析。
+          </p>
+        )}
+      </div>
+    </section>
   </div>;
 }

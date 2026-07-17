@@ -1,0 +1,440 @@
+/* NovelCraft Novel Typography — dark tech theme */
+/* Design tokens: --nc-bg #0a0a14, --nc-primary #FF6B35, --nc-accent #00e5ff, --nc-card rgba(22,22,50,.7) */
+
+.novel-prose {
+  max-width: 720px;
+  margin: 0 auto;
+  font-family: 'Georgia', 'Noto Serif SC', 'Songti SC', 'SimSun', serif;
+  font-size: 16px;
+  line-height: 1.8;
+  color: #e0e0e0;
+  padding: 2em 1em;
+  text-rendering: optimizeLegibility;
+}
+
+.novel-prose p {
+  text-indent: 2em;
+  margin-bottom: 1.2em;
+  text-align: justify;
+  hyphens: auto;
+}
+
+.novel-prose p.dialogue,
+.novel-prose .dialogue {
+  text-indent: 0;
+}
+
+.novel-prose h2 {
+  font-size: 1.4em;
+  text-align: center;
+  margin: 2em 0 1em;
+  color: var(--nc-primary, #FF6B35);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.novel-prose h3 {
+  font-size: 1.15em;
+  text-align: center;
+  margin: 1.5em 0 0.8em;
+  font-weight: 600;
+}
+
+.novel-prose hr {
+  border: none;
+  border-top: 1px solid rgba(255, 107, 53, 0.2);
+  margin: 2em auto;
+  width: 30%;
+}
+
+/* Night mode */
+.novel-prose.night-mode {
+  background: #0d0d0d;
+  color: #b8b8b8;
+}
+
+.novel-prose.night-mode h2 {
+  color: #cc5530;
+}
+
+/* Focus mode — fullscreen distraction-free */
+.novel-prose.focus-mode {
+  max-width: 680px;
+  background: var(--nc-bg, #0a0a14);
+  border: none;
+  box-shadow: none;
+}
+
+/* Paragraph variants for story formatting */
+.novel-prose p.thought {
+  font-style: italic;
+  color: #c0c0d0;
+  text-indent: 0;
+  padding-left: 1em;
+  border-left: 2px solid rgba(0, 229, 255, 0.2);
+}
+
+.novel-prose blockquote {
+  margin: 1em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--nc-accent, #00e5ff);
+  background: rgba(0, 229, 255, 0.05);
+  color: #c0c0d0;
+  font-style: italic;
+}
+
+/* Selection */
+.novel-prose ::selection {
+  background: rgba(255, 107, 53, 0.3);
+  color: #fff;
+}
+
+/* Editor area wrapper */
+.novel-editor-area {
+  position: relative;
+  min-height: 500px;
+}
+
+/* Toolbar in novel format */
+.novel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--nc-card, rgba(22, 22, 50, 0.7));
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 107, 53, 0.15);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.novel-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #8b8fa8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.novel-toolbar button:hover {
+  background: rgba(255, 107, 53, 0.1);
+  color: var(--nc-primary, #FF6B35);
+  border-color: rgba(255, 107, 53, 0.2);
+}
+
+.novel-toolbar button.active {
+  background: rgba(255, 107, 53, 0.15);
+  color: var(--nc-primary, #FF6B35);
+  border-color: rgba(255, 107, 53, 0.3);
+}
+
+.novel-toolbar .toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+.novel-toolbar .toolbar-spacer {
+  flex: 1;
+}
+
+/* Right panel — AI Assistant */
+.ai-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--nc-card, rgba(22, 22, 50, 0.7));
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 229, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.ai-panel-tabs {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ai-panel-tabs button {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #555970);
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.ai-panel-tabs button:hover {
+  color: var(--text-primary, #e8eaf0);
+}
+
+.ai-panel-tabs button.active {
+  color: var(--nc-accent, #00e5ff);
+  border-bottom-color: var(--nc-accent, #00e5ff);
+  background: rgba(0, 229, 255, 0.05);
+}
+
+.ai-panel-content {
+  padding: 16px;
+  flex: 1;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-panel-content h4 {
+  font-size: 13px;
+  color: var(--nc-accent, #00e5ff);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.ai-panel-content .ai-result {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  font-family: 'Georgia', 'Noto Serif SC', serif;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.ai-panel-content .ai-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  padding: 20px;
+}
+
+/* Status bar */
+.novel-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  background: var(--nc-card, rgba(22, 22, 50, 0.7));
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted, #555970);
+}
+
+.novel-status-bar .stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.novel-status-bar .stat-value {
+  color: var(--nc-accent, #00e5ff);
+  font-weight: 600;
+}
+
+.novel-status-bar .stat-saving {
+  color: var(--nc-primary, #FF6B35);
+  animation: pulse-save 1.5s ease-in-out infinite;
+}
+
+.novel-status-bar .stat-saved {
+  color: var(--success, #31b572);
+}
+
+@keyframes pulse-save {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Floating toolbar on text selection */
+.floating-toolbar {
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--nc-card, rgba(22, 22, 50, 0.95));
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 107, 53, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, calc(-100% - 8px));
+}
+
+.floating-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #8b8fa8);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.floating-toolbar button:hover {
+  background: rgba(255, 107, 53, 0.1);
+  color: var(--nc-primary, #FF6B35);
+  border-color: rgba(255, 107, 53, 0.2);
+}
+
+/* Fullscreen mode */
+.fullscreen-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--nc-bg, #0a0a14);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen-editor .novel-prose {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.fullscreen-editor .novel-toolbar {
+  flex-shrink: 0;
+}
+
+/* Left panel — chapter list tree */
+.chapter-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chapter-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #8b8fa8);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.chapter-tree-item:hover {
+  background: rgba(255, 107, 53, 0.06);
+  color: var(--text-primary, #e8eaf0);
+}
+
+.chapter-tree-item.active {
+  background: rgba(255, 107, 53, 0.12);
+  color: var(--nc-primary, #FF6B35);
+  border-color: rgba(255, 107, 53, 0.2);
+}
+
+.chapter-tree-item .chapter-seq {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(0, 229, 255, 0.1);
+  color: var(--nc-accent, #00e5ff);
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.chapter-tree-item.active .chapter-seq {
+  background: rgba(255, 107, 53, 0.2);
+  color: var(--nc-primary, #FF6B35);
+}
+
+/* Deai pipeline layer display */
+.deai-layer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.deai-layer .layer-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.15);
+  color: var(--nc-accent, #00e5ff);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.deai-layer .layer-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.deai-layer .layer-score {
+  font-size: 11px;
+  color: var(--nc-accent, #00e5ff);
+  font-weight: 600;
+}
+
+.deai-layer.running .layer-num {
+  animation: pulse-save 1s ease-in-out infinite;
+}
+
+.deai-layer.done .layer-num {
+  background: rgba(49, 181, 114, 0.2);
+  color: var(--success, #31b572);
+}
+
+.deai-score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.deai-score-badge.high-ai {
+  background: rgba(222, 75, 94, 0.15);
+  color: var(--danger, #de4b5e);
+}
+
+.deai-score-badge.medium-ai {
+  background: rgba(242, 169, 59, 0.15);
+  color: var(--warning, #f2a93b);
+}
+
+.deai-score-badge.low-ai {
+  background: rgba(49, 181, 114, 0.15);
+  color: var(--success, #31b572);
+}

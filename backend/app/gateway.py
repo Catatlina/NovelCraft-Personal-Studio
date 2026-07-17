@@ -351,6 +351,18 @@ class _TextOutput(_StrictOutput):
     text: str = Field(min_length=1)
 
 
+class _DeaiLayerOutput(_LenientOutput):
+    """De-AI pipeline layers: text + optional change log."""
+    text: str = Field(min_length=1)
+    changes: list[str] = Field(default_factory=list)
+
+
+class _DeaiScoreOutput(_LenientOutput):
+    """De-AI scoring result."""
+    score: int = Field(ge=0, le=100)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class _StyleImitationOutput(_LenientOutput):
     title: str = Field(min_length=2)
     style_profile: dict[str, Any]
@@ -405,6 +417,15 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "editor_expand": _TextOutput,
     "editor_condense": _TextOutput,
     "editor_deai": _TextOutput,
+    # ── De-AI 7-layer pipeline ──
+    "deai_detect": _DeaiLayerOutput,
+    "deai_colloquialize": _DeaiLayerOutput,
+    "deai_rhythm": _DeaiLayerOutput,
+    "deai_character": _DeaiLayerOutput,
+    "deai_context": _DeaiLayerOutput,
+    "deai_deduplicate": _DeaiLayerOutput,
+    "deai_polish": _DeaiLayerOutput,
+    "deai_score": _DeaiScoreOutput,
     "style_imitation": _StyleImitationOutput,
 }
 

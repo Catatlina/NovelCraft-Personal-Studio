@@ -43,6 +43,7 @@ from .api.v1.batch_endpoints import router as batch_router
 from .api.v1.complete_api import router as complete_router
 from .api.v1.ranking import library_router, router as ranking_router
 from .api.v1.fusion import router as fusion_router
+from .api.v1.deai import router as deai_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -75,6 +76,7 @@ app.include_router(batch_router)
 app.include_router(complete_router)
 app.include_router(ranking_router)
 app.include_router(fusion_router, prefix="/api/v1")
+app.include_router(deai_router)
 init_metrics(app)
 install_rate_limiter(app)
 
