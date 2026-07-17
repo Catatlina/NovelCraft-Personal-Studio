@@ -224,6 +224,12 @@ def list_sources(project_id: str, user: dict = Depends(get_current_user)):
 
 @router.post("/sources/{source_key}/scan")
 def scan_source(source_key: str, project_id: str, user: dict = Depends(get_current_user)):
+    # JS-SPA sites can't be scraped with HTTP — tell user clearly
+    _JS_SPA = {"qimao": "七猫是JS渲染页面，需浏览器采集",
+               "17k": "17K是JS渲染页面，需浏览器采集",
+               "ciweimao": "刺猬猫是JS渲染页面，需浏览器采集"}
+    if source_key in _JS_SPA:
+        raise HTTPException(400, _JS_SPA[source_key])
     return _scan_source(source_key, project_id, user)
 
 
