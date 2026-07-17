@@ -192,10 +192,11 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     if (succeeded.length < 2) { setMessage("需要至少 2 个成功的快照才能进行聚合分析"); return; }
     setMultiAnalysisLoading(true); setMessage(""); setMultiAnalysisResult(null);
     try {
-      const platformKeys = succeeded.map(s => s.source_key);
+      const platformKeys = [...new Set(succeeded.map(s => s.source_key))];
       const result = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
         method: "POST",
         body: JSON.stringify({
+          snapshot_id: succeeded[0].id,
           analysis_mode: "multi",
           platforms: platformKeys,
         }),
