@@ -74,7 +74,8 @@ a{color:inherit;text-decoration:none}
 .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border)}
 
 /* ============ APP SHELL ============ */
-.app-shell{flex:1;display:flex;min-height:0}
+.app-shell{display:none;flex:1;min-height:0}
+.app-view.active .app-shell{display:flex}
 .sidebar{width:248px;flex-shrink:0;background:var(--bg-elev);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:16px 12px;overflow-y:auto;transition:width .25s ease}
 .sidebar.collapsed{width:72px}
 .sidebar.collapsed .brand-text,.sidebar.collapsed .nav-label,.sidebar.collapsed .nav-group-title,.sidebar.collapsed .nav-chevron,.sidebar.collapsed .sidebar-bottom .label{display:none}

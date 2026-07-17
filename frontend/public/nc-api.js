@@ -70,7 +70,6 @@ window.enterApp = async function() {
     await NC.login(email, password);
     document.getElementById('loginView').classList.remove('active');
     document.getElementById('appView').classList.add('active');
-    document.getElementById('appView').style.display = 'flex';
     ncToast('登录成功');
     setTimeout(loadWorkspaceData, 100);
   } catch (e) {
