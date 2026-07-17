@@ -221,6 +221,13 @@ function ncWithDataId(html, item, idx) {
   return html.replace(/^(\s*<[a-zA-Z][^>]*)(\s*\/?>)/, '$1 data-id="' + ncEsc(id) + '"$2');
 }
 
+// 预算接口（/api/v1/admin/budgets）真实返回【数组】；取 monthly 作用域优先，否则取首个。
+// 修复 BUG-2：原 loader 把 d 当对象读 b.limit_cny，在数组上为 undefined→全 0。
+function ncFirstBudget(d) {
+  const arr = Array.isArray(d) ? d : [d];
+  return arr.find((x) => x && x.scope === 'monthly') || arr[0] || {};
+}
+
 /* ---------- B0: 当前项目上下文 ---------- */
 let _ncProjectId = sessionStorage.getItem('nc_project') || '';
 Object.defineProperty(NC, 'currentProjectId', {
@@ -282,7 +289,11 @@ NC.withState = async function (container, promiseFn, renderFn, emptyText) {
   try {
     const data = await promiseFn();
     if (typeof renderFn === 'function') await renderFn(data);
-    else if (emptyText != null) el.innerHTML = emptyText;
+    // 修复 BUG-6：renderFn 因空数据早退未写入时，容器仍停在“加载中…”。
+    // 此时恢复写死兜底，或写入 emptyText，避免永久卡死。
+    if (el.innerHTML === '加载中…') {
+      el.innerHTML = (emptyText != null) ? emptyText : fallback;
+    }
   } catch (e) {
     ncToast('加载失败: ' + extractErrorMessage(e.message));
     el.innerHTML = fallback; // 失败恢复写死内容
@@ -327,16 +338,19 @@ NC.loadOverview = async function () {
     () => NC.api('/api/v1/analytics/dashboard'),
     (d) => {
       const data = d || {};
-      const stats = data.stats || data.summary || data;
-      const cards = Array.isArray(stats) ? stats : [
-        { label: '本周 AI 生成字数', value: ncNum(stats.generated_words ?? stats.words_this_week), hint: stats.words_trend ? '较上周 ' + stats.words_trend : '' },
-        { label: '活跃项目', value: ncNum(stats.active_projects ?? stats.project_count), hint: stats.project_trend || '' },
-        { label: 'AI 调用次数', value: ncNum(stats.ai_calls ?? stats.total_ai_calls), hint: stats.ai_calls_trend || '' },
-        { label: '本月成本', value: '¥' + ncNum(stats.cost_month ?? stats.month_cost), hint: stats.budget_hint || '预算内' },
+      // 修复 BUG-1：真实 /api/v1/analytics/dashboard 返回 { metrics_glossary, totals, ... }，
+      // totals = { total_reads, total_likes, total_shares, total_revenue, total_posts }（当前全 0，属正常）。
+      // 不再读不存在的 stats/summary/trend/genres/activity 字段。
+      const t = data.totals || {};
+      const cards = [
+        { label: '发布内容', value: ncNum(t.total_posts), hint: '已发布作品数' },
+        { label: '总阅读', value: ncNum(t.total_reads), hint: '累计阅读量' },
+        { label: '总点赞', value: ncNum(t.total_likes), hint: '累计点赞' },
+        { label: '总收入', value: '¥' + ncNum(t.total_revenue), hint: '累计收益' },
       ];
       NC.statCards('#overview-stats', cards);
 
-      const trend = Array.isArray(data.trend) ? data.trend : (Array.isArray(stats.trend) ? stats.trend : []);
+      const trend = Array.isArray(data.trend) ? data.trend : [];
       const tEl = document.getElementById('overview-trend');
       if (tEl && trend.length) {
         const max = Math.max.apply(null, trend.map((x) => ncNum(x.value ?? x.count ?? x)));
@@ -347,7 +361,7 @@ NC.loadOverview = async function () {
         }).join('');
       }
 
-      const genres = Array.isArray(data.genres) ? data.genres : (Array.isArray(stats.genres) ? stats.genres : []);
+      const genres = Array.isArray(data.genres) ? data.genres : [];
       const gEl = document.getElementById('overview-genre');
       if (gEl && genres.length) {
         const colors = ['#6366F1', '#22D3EE', '#FB923C', '#34D399', '#F87171'];
@@ -356,7 +370,7 @@ NC.loadOverview = async function () {
         ).join('');
       }
 
-      const acts = Array.isArray(data.activity) ? data.activity : (Array.isArray(stats.activity) ? stats.activity : []);
+      const acts = Array.isArray(data.activity) ? data.activity : [];
       const aEl = document.getElementById('overview-activity');
       if (aEl && acts.length) {
         aEl.innerHTML = acts.map((a) =>
@@ -387,7 +401,7 @@ NC.loadWorkspace = async function () {
     await NC.withState('#ws-stats',
       () => NC.apiGet('/api/v1/admin/budgets', true),
       (d) => {
-        const b = d || {};
+        const b = ncFirstBudget(d); // 修复 BUG-2：budgets 返回数组
         const limit = ncNum(b.limit_cny ?? b.limit);
         const spent = ncNum(b.spent_cny ?? b.spent);
         const pct = limit ? Math.round((spent / limit) * 100) : 0;
@@ -424,28 +438,28 @@ NC.loadRanking = async function () {
     });
 
   await NC.withState('#ranking-tbody',
-    () => Promise.all([NC.apiGet('/api/v1/ranking/snapshots', true), NC.apiGet('/api/v1/ranking/topics', true)]),
-    (res) => {
-      const snaps = res[0], topics = res[1];
-      const rows = Array.isArray(snaps) ? snaps : (snaps && snaps.items ? snaps.items : []);
+    () => NC.apiGet('/api/v1/ranking/topics', true),
+    (d) => {
+      // 修复 BUG-3：/ranking/snapshots 元素无 title/author/heat 字段；
+      // 改用 /ranking/topics，返回 {id,title,genre,market_score,status}（含真实书名/类型/热度分）。
+      const rows = Array.isArray(d) ? d : (d && d.items ? d.items : (d && d.topics ? d.topics : []));
       const tbody = document.getElementById('ranking-tbody');
       if (!tbody) return;
       if (rows.length) {
         tbody.innerHTML = rows.map((r, i) => {
-          const wc = ncNum(r.week_change);
-          return '<tr data-id="' + ncEsc(r.id ?? r.topic_id ?? i) + '">' +
+          const score = ncNum(r.market_score ?? r.score);
+          return '<tr data-id="' + ncEsc(r.id ?? i) + '">' +
             '<td><span class="rank ' + (i < 3 ? 'top' : '') + '">' + (i + 1) + '</span></td>' +
-            '<td><b>' + ncEsc(r.title ?? r.book_title ?? '—') + '</b></td>' +
+            '<td><b>' + ncEsc(r.title ?? '—') + '</b></td>' +
             '<td>' + ncEsc(r.author ?? '—') + '</td>' +
-            '<td>' + ncEsc(r.category ?? r.genre ?? '—') + '</td>' +
-            '<td>' + ncEsc(r.heat ?? r.hotness ?? '—') + '</td>' +
-            '<td><span class="' + (wc > 0 ? 'up' : 'down') + '">' + (wc > 0 ? '↑' : '↓') + Math.abs(wc) + '%</span></td>' +
+            '<td>' + ncEsc(r.genre ?? '—') + '</td>' +
+            '<td>' + ncEsc(score) + '</td>' +
+            '<td>—</td>' +
             '<td><button class="btn-sm btn-ghost" onclick="showToast(\'已加入书库\')">+ 收藏</button></td>' +
             '</tr>';
         }).join('');
       } else {
-        const hasTopics = topics && (Array.isArray(topics) ? topics.length : (topics && topics.items ? topics.items.length : 0));
-        tbody.innerHTML = hasTopics ? '' : '<tr><td colspan="7" style="text-align:center;color:var(--text-3)">暂无榜单数据</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-3)">暂无榜单数据</td></tr>';
       }
     });
 };
@@ -489,11 +503,15 @@ NC.loadHotspot = async function () {
   await NC.withState('#hotspot-suggest',
     () => NC.api('/api/v1/hotspots/overview'),
     (d) => {
-      const sug = (d && d.suggestions) ? d.suggestions : (Array.isArray(d) ? d : []);
+      // 修复 BUG-4：真实 /hotspots/overview 无 suggestions 字段，改用
+      // recommended_angles[{title,source,angle,hotness}] 或 predicted_viral[{title,source,hotness,reason}]。
+      const sug = (d && (d.recommended_angles || d.predicted_viral))
+        ? (d.recommended_angles || d.predicted_viral)
+        : (Array.isArray(d) ? d : []);
       const el = document.getElementById('hotspot-suggest');
       if (el && sug.length) {
         el.innerHTML = sug.slice(0, 6).map((s) =>
-          '<div class="ticket" style="margin-bottom:12px"><h5>' + ncEsc(s.title ?? s.topic ?? '') + '</h5><div class="meta"><span class="badge ' + (s.potential === 'high' ? 'orange' : 'cyan') + '">' + ncEsc(s.tag ?? '建议') + '</span><span>' + ncEsc(s.reason ?? '') + '</span></div></div>'
+          '<div class="ticket" style="margin-bottom:12px"><h5>' + ncEsc(s.title ?? '') + '</h5><div class="meta"><span class="badge cyan">' + ncEsc(s.source ?? '建议') + '</span><span>' + ncEsc(s.angle ?? s.reason ?? '') + '</span></div></div>'
         ).join('');
       }
     });
@@ -517,6 +535,8 @@ NC.loadDistribution = async function () {
             '<div class="foot"><span class="badge ' + (configured ? 'green' : 'gray') + '"><span class="dot ' + (configured ? 'green' : 'gray') + '"></span>' + (configured ? '已连接' : '未连接') + '</span><button class="btn-sm btn-ghost" onclick="showToast(\'已发布\')">发布</button></div>' +
             '</div>';
         }).join('');
+      } else {
+        grid.innerHTML = '<div style="color:var(--text-3);padding:24px">暂未连接分发平台</div>';
       }
     });
 };
@@ -556,7 +576,7 @@ NC.loadCost = async function () {
   await NC.withState('#cost-stats',
     () => NC.apiGet('/api/v1/admin/budgets', true),
     (d) => {
-      const b = d || {};
+      const b = ncFirstBudget(d); // 修复 BUG-2：budgets 返回数组
       const limit = ncNum(b.limit_cny ?? b.limit);
       const spent = ncNum(b.spent_cny ?? b.spent);
       const calls = ncNum(b.call_count ?? b.calls);
@@ -571,23 +591,30 @@ NC.loadCost = async function () {
     });
 
   await NC.withState('#cost-bars',
-    () => NC.api('/api/v1/publish/roi').catch(() => NC.api('/api/v1/analytics/roi')),
+    () => NC.api('/api/v1/analytics/roi'),
     (d) => {
-      const models = (d && d.models) ? d.models : (Array.isArray(d) ? d : []);
+      // 修复 BUG-5：/publish/roi 与 /analytics/roi 均无 models 字段；
+      // 改用 /analytics/roi 聚合字段渲染成本概览。
+      const data = d || {};
+      const metrics = [
+        { label: '总成本(元)', value: ncNum(data.total_cost_cny) },
+        { label: '内容数', value: ncNum(data.content_count) },
+        { label: '总字数', value: ncNum(data.total_words) },
+        { label: '千字成本(元)', value: ncNum(data.cost_per_1k_words) },
+      ];
       const el = document.getElementById('cost-bars');
-      if (el && models.length) {
-        const max = Math.max.apply(null, models.map((m) => ncNum(m.cost ?? m.spend)));
-        el.innerHTML = models.map((m) => {
-          const v = ncNum(m.cost ?? m.spend);
-          const h = max ? Math.round((v / max) * 100) : 0;
-          return '<div class="bar" style="height:' + h + '%"><span>' + ncEsc(m.model ?? m.name) + '</span></div>';
+      if (el) {
+        const max = Math.max.apply(null, metrics.map((m) => m.value)) || 1;
+        el.innerHTML = metrics.map((m) => {
+          const h = Math.round((m.value / max) * 100);
+          return '<div class="bar" style="height:' + h + '%"><span>' + ncEsc(m.label) + ' ' + m.value + '</span></div>';
         }).join('');
       }
       const lg = document.getElementById('cost-legend');
-      if (lg && models.length) {
+      if (lg) {
         const colors = ['#6366F1', '#22D3EE', '#FB923C', '#34D399', '#F87171'];
-        lg.innerHTML = models.map((m, i) =>
-          '<div class="legend-item"><span class="sw" style="background:' + colors[i % colors.length] + '"></span>' + ncEsc(m.model ?? m.name) + ' ¥' + ncNum(m.cost ?? m.spend) + '</div>'
+        lg.innerHTML = metrics.map((m, i) =>
+          '<div class="legend-item"><span class="sw" style="background:' + colors[i % colors.length] + '"></span>' + ncEsc(m.label) + '：' + m.value + '</div>'
         ).join('');
       }
     });
@@ -616,7 +643,8 @@ NC.loadWorkflow = async function () {
     (d) => {
       const list = Array.isArray(d) ? d : (d && d.workflows ? d.workflows : (d && d.items ? d.items : []));
       const dag = document.getElementById('workflow-dag');
-      if (!dag || !list.length) return;
+      if (!dag) return;
+      if (!list.length) { dag.innerHTML = '<div class="node"><h5>暂无工作流</h5><p>前往工作流编排创建</p></div>'; return; }
       const wf = list[0] || {};
       const nodes = (wf.definition && wf.definition.nodes) ? wf.definition.nodes : (Array.isArray(wf.nodes) ? wf.nodes : []);
       if (nodes.length) {
@@ -651,7 +679,7 @@ NC.loadSettings = async function () {
     await NC.withState('#settings-budget-fields',
       () => NC.apiGet('/api/v1/admin/budgets', true),
       (d) => {
-        const b = d || {};
+        const b = ncFirstBudget(d); // 修复 BUG-2：budgets 返回数组
         const limit = ncNum(b.limit_cny ?? b.limit);
         const spent = ncNum(b.spent_cny ?? b.spent);
         const pct = limit ? Math.round((spent / limit) * 100) : 0;
