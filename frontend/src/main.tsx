@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles.css";
+import "./styles/proto.css";  // MUST come after styles.css to override tokens
 
 // SW registration lives here (not an inline <script>) so a strict CSP can use
 // script-src 'self' without an inline-script hash/nonce.
