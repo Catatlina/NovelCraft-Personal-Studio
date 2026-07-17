@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Save, RotateCcw } from "lucide-react";
+import { Save, RotateCcw, Wand2, Sparkles, Bot, RefreshCcw, Send } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 import "../styles/proto.css";
+import "../styles/novel-prose.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
@@ -17,7 +18,6 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   applyOfflineAiResult?: (id: string, text: string) => void;
   streamPreview?: string;
   editorAiReview?: { review?: any; next?: any } | null;
-  // ── New: De-AI pipeline state ──
   deaiResult?: { original_score?: number; final_score?: number; layers?: Array<{ name: string; label: string; score_before: number; score_after: number; status: string }>; final_text?: string } | null;
   deaiLoading?: boolean;
 }) {
@@ -37,6 +37,28 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   const [isNightMode, setNightMode] = useState(false);
   const [isFocusMode, setFocusMode] = useState(false);
 
+  // ── AI chat state ──
+  const [aiChatInput, setAiChatInput] = useState("");
+  const [aiChatMessages, setAiChatMessages] = useState<Array<{ role: "system" | "user"; text: string }>>([
+    { role: "system", text: "检测到本章情绪偏「治愈收束」，建议下一章以「微光」意象承接，保持节奏。" },
+  ]);
+
+  const sendAiMessage = () => {
+    const text = aiChatInput.trim();
+    if (!text) return;
+    setAiChatMessages(prev => [...prev, { role: "user", text }]);
+    setAiChatInput("");
+    runEditorOp("polish"); // trigger AI operation; the result will feed back via editorAiReview
+  };
+
+  // ── Feed AI review into chat ──
+  useEffect(() => {
+    if (editorAiReview?.review?.issues?.length) {
+      const msgs = editorAiReview.review.issues.map((issue: string) => `• ${issue}`).join("\n");
+      setAiChatMessages(prev => [...prev, { role: "system", text: `七维审查结果：\n${msgs}` }]);
+    }
+  }, [editorAiReview?.review?.issues]);
+
   // ── Keyboard shortcut: Escape to exit fullscreen ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -46,8 +68,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     return () => window.removeEventListener("keydown", handler);
   }, [isFullscreen]);
 
-  // NC-LIB-003: debounced autosave — 3s after the last edit, only when the draft
-  // actually differs from the persisted chapter. Conflict resolution pauses it.
+  // NC-LIB-003: debounced autosave
   const saveRef = useRef(saveChapter);
   saveRef.current = saveChapter;
   const [autoSavedAt, setAutoSavedAt] = useState("");
@@ -71,62 +92,43 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     }));
   }, [chapters]);
 
+  // ── Word count ──
+  const wordCount = useMemo(() => {
+    const text = editorText.replace(/<[^>]*>/g, "");
+    return text.replace(/\s/g, "").length;
+  }, [editorText]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* ── Top bar: chapter select, title, save, view toggles ── */}
-      <div className="card" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 16px", flexWrap: "wrap" }}>
-        <select
-          value={chapter?.id ?? ""}
-          onChange={event => selectChapter(event.target.value)}
-          disabled={!chapters.length}
-          aria-label="选择章节"
-          className="form-input"
-          style={{ minWidth: 180, width: "auto", height: 34 }}
-        >
-          {chapters.map((item, index) => (
-            <option key={item.id} value={item.id}>
-              {Number(item.meta?.seq || index + 1)}. {item.title}
-            </option>
-          ))}
-        </select>
-        <input
-          value={chapter?.title ?? ""}
-          readOnly
-          className="form-input"
-          style={{
-            flex: 1, minWidth: 120, background: "transparent", border: "none",
-            fontSize: 18, fontWeight: 600, color: "var(--text-1)", height: 34
-          }}
-        />
-        <button onClick={saveChapter} disabled={!chapter} className="btn-sm btn-primary" style={{ width: "auto", padding: "0 14px" }}>
-          <Save size={15} /> 保存
-        </button>
-        <small style={{ color: "var(--text-3)", fontSize: 12 }} data-testid="autosave-status">
-          {dirty ? (<>未保存改动…</>) : autoSavedAt ? (<>已自动保存 {autoSavedAt}</>) : ""}
-        </small>
+      {/* ── Breadcrumb ── */}
+      <div className="breadcrumb">
+        <b>NovelCraft</b> › 编辑器
+      </div>
 
-        {/* View toggles */}
-        <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-          <button
-            onClick={() => setFocusMode(!isFocusMode)}
-            title="专注模式"
-            className="btn-sm btn-ghost"
-          >
-            {isFocusMode ? "👁 专注中" : "📝 专注"}
+      {/* ── Page head ── */}
+      <div className="page-head" style={{ marginBottom: 14 }}>
+        <div>
+          <h1 style={{ fontFamily: "var(--font-read)" }}>
+            {chapter ? chapter.title : "编辑器"}
+          </h1>
+          <p>
+            {autoSavedAt ? <>自动保存于 {autoSavedAt}</> : "未保存"}
+            {chapter ? <> · 字数 {wordCount.toLocaleString()}</> : null}
+            {dirty && <> · <span style={{ color: "var(--orange)" }}>有未保存改动</span></>}
+          </p>
+        </div>
+        <div className="head-actions">
+          <button className="btn-sm btn-ghost" onClick={() => runEditorOp("outline")}>
+            大纲
           </button>
-          <button
-            onClick={() => setNightMode(!isNightMode)}
-            title="夜间模式"
-            className="btn-sm btn-ghost"
-          >
-            {isNightMode ? "☀️" : "🌙"}
+          <button className="btn-sm btn-ghost" onClick={() => runEditorOp("continue")}>
+            <Bot size={13} /> AI 续写
           </button>
-          <button
-            onClick={() => setFullscreen(!isFullscreen)}
-            title={isFullscreen ? "退出全屏" : "全屏"}
-            className="btn-sm btn-ghost"
-          >
-            {isFullscreen ? "↙ 退出全屏" : "⛶ 全屏"}
+          <button className="btn-sm btn-ghost" onClick={() => runEditorOp("polish")}>
+            <Wand2 size={13} /> AI 润色
+          </button>
+          <button onClick={saveChapter} disabled={!chapter} className="btn-sm btn-primary" style={{ width: "auto", padding: "0 14px" }}>
+            <Save size={15} /> 保存
           </button>
         </div>
       </div>
@@ -163,31 +165,56 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         </div>
       ) : null}
 
-      {/* ── Main editor area with chapter tree (left) + editor (center) + AI panel (right) ── */}
-      <div style={{ display: "flex", gap: 12, flex: 1, minHeight: 0 }}>
-        {/* ── Left: Chapter tree (hidden in focus mode) ── */}
-        {!isFocusMode && chapters.length > 1 && (
-          <div className="sidebar" style={{ width: 200 }}>
-            <div className="card-title" style={{ padding: "4px 8px 8px", fontSize: 13 }}>
-              章节目录
-            </div>
-            <div className="chapter-tree">
-              {chapterTree.map(ch => (
-                <button
-                  key={ch.id}
-                  className={`chapter-tree-item ${chapter?.id === ch.id ? "active" : ""}`}
-                  onClick={() => selectChapter(ch.id)}
-                >
-                  <span className="chapter-seq">{ch.seq}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ch.title}</span>
-                </button>
-              ))}
-            </div>
+      {/* ── 3-column editor layout (prototype) ── */}
+      <div className="editor" style={{ flex: 1, minHeight: 0 }}>
+        {/* LEFT: Chapter outline */}
+        <div className="ed-side">
+          <div className="card-title" style={{ marginBottom: 12 }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+              <path d="M3 3h18v18H3z"/><path d="M9 3v18M3 9h6"/>
+            </svg>
+            章节目录
           </div>
-        )}
+          {chapterTree.length > 0 ? (
+            chapterTree.map(ch => (
+              <div
+                key={ch.id}
+                className={`outline-item${chapter?.id === ch.id ? " active" : ""}`}
+                onClick={() => selectChapter(ch.id)}
+                style={chapter?.id === ch.id ? { color: "var(--primary-light)", background: "var(--primary-dim)" } : {}}
+              >
+                <span style={{ opacity: 0.5, fontSize: 11, minWidth: 24 }}>{ch.seq}.</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ch.title}</span>
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: 12, color: "var(--text-3)", padding: "8px 10px" }}>
+              暂无章节
+            </div>
+          )}
 
-        {/* ── Center: RichEditor ── */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Chapter selector dropdown (compact, for large lists) */}
+          {chapters.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <select
+                value={chapter?.id ?? ""}
+                onChange={event => selectChapter(event.target.value)}
+                aria-label="选择章节"
+                className="form-input"
+                style={{ height: 34, fontSize: 12 }}
+              >
+                {chapters.map((item, index) => (
+                  <option key={item.id} value={item.id}>
+                    {Number(item.meta?.seq || index + 1)}. {item.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* CENTER: Novel prose editor */}
+        <div className="ed-main" style={{ padding: 0, display: "flex", flexDirection: "column" }}>
           <RichEditor
             value={editorText}
             onChange={setEditorText}
@@ -205,37 +232,95 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onToggleFullscreen={() => setFullscreen(!isFullscreen)}
             onToggleNightMode={() => setNightMode(!isNightMode)}
             onToggleFocusMode={() => setFocusMode(!isFocusMode)}
+            hideAiPanel={true}
           />
+        </div>
+
+        {/* RIGHT: AI Assistant */}
+        <div className="ed-aside" style={{ display: "flex", flexDirection: "column" }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+              <rect x="3" y="11" width="18" height="10" rx="2"/>
+              <circle cx="12" cy="5" r="2"/>
+            </svg>
+            AI 写作助手
+          </div>
+
+          {/* AI chat messages */}
+          <div style={{ flex: 1, overflowY: "auto", marginBottom: 8 }}>
+            {aiChatMessages.map((msg, i) => (
+              <div key={i} className={`ai-msg${msg.role === "user" ? " user" : ""}`}>
+                {msg.text}
+              </div>
+            ))}
+
+            {/* De-AI results display */}
+            {deaiResult && (
+              <div className="ai-msg" style={{ borderColor: "var(--primary)", background: "var(--primary-dim)" }}>
+                <strong style={{ color: "var(--primary-light)" }}>去AI味完成</strong>
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  原始: {deaiResult.original_score ?? "--"}分 → 最终: {deaiResult.final_score ?? "--"}分
+                </div>
+                {(deaiResult.layers || []).map((layer: any, i: number) => (
+                  <div key={i} style={{ fontSize: 11, marginTop: 2, color: "var(--text-2)" }}>
+                    {layer.label}: {layer.score_before} → {layer.score_after} ({layer.status === "pass" ? "✓" : "—"})
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {deaiLoading && (
+              <div className="ai-msg" style={{ color: "var(--text-2)" }}>
+                <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite", marginRight: 8 }} />
+                去AI味处理中…
+              </div>
+            )}
+          </div>
+
+          {/* AI prompt input */}
+          <div className="ai-prompt" style={{ marginTop: "auto" }}>
+            <input
+              placeholder="向 AI 助手提问…"
+              value={aiChatInput}
+              onChange={e => setAiChatInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") sendAiMessage(); }}
+            />
+            <button className="btn-sm btn-primary" style={{ width: "auto", height: 38 }} onClick={sendAiMessage}>
+              <Send size={14} /> 发送
+            </button>
+          </div>
         </div>
       </div>
 
       {/* ── Bottom: Version history ── */}
-      <div className="card" style={{ marginTop: 12, padding: "14px 18px" }}>
-        <div className="card-title" style={{ marginBottom: 10 }}>
-          版本历史
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {versions.map(v => (
-          <button key={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
-            <RotateCcw size={12} /> {v.label}
-            <small style={{ color: "var(--text-3)", marginLeft: 4 }}>{new Date(v.created_at).toLocaleString()}</small>
-          </button>
-        ))}
-        </div>
-        {offlineAiResults?.length ? (
-          <>
-            <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>离线 AI 结果</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {offlineAiResults?.map(result => (
-              <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
-                应用 AI 结果
-                <small style={{ color: "var(--text-3)", marginLeft: 4, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.text.slice(0, 36)}…</small>
+      {versions.length > 0 && (
+        <div className="card" style={{ marginTop: 12, padding: "14px 18px" }}>
+          <div className="card-title" style={{ marginBottom: 10 }}>
+            版本历史
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {versions.map(v => (
+              <button key={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
+                <RotateCcw size={12} /> {v.label}
+                <small style={{ color: "var(--text-3)", marginLeft: 4 }}>{new Date(v.created_at).toLocaleString()}</small>
               </button>
             ))}
-            </div>
-          </>
-        ) : null}
-      </div>
+          </div>
+          {offlineAiResults?.length ? (
+            <>
+              <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>离线 AI 结果</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {offlineAiResults?.map(result => (
+                  <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
+                    应用 AI 结果
+                    <small style={{ color: "var(--text-3)", marginLeft: 4, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.text.slice(0, 36)}…</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
 
       {/* ── Fullscreen overlay ── */}
       {isFullscreen && (
@@ -261,6 +346,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onToggleFullscreen={() => setFullscreen(false)}
             onToggleNightMode={() => setNightMode(!isNightMode)}
             onToggleFocusMode={() => setFocusMode(!isFocusMode)}
+            hideAiPanel={true}
           />
         </div>
       )}

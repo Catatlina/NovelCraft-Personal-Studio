@@ -497,7 +497,7 @@ export default function App() {
     <ThemeProvider>
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
       {error && <div className="error">{error}</div>}
-      {tab === "dashboard" && <DashboardV2 projectId={project?.id || ""} onNavigate={(t, novelId) => { if (novelId) { const fetchNovel = async () => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); }; fetchNovel(); } setTab(t as Tab); }} />}
+      {tab === "dashboard" && <DashboardV2 projectId={project?.id || ""} onNavigate={(tab: string) => setTab(tab as Tab)} />}
       {tab === "ranking" && project && <RankingCenter projectId={project.id} onBookCreated={async (novelId, runId) => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); if (runId) { setTab("progress"); await refreshRun(runId); } else setTab("library"); }} />}
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
