@@ -309,7 +309,9 @@ def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get
         raise HTTPException(status_code=404, detail="project not found")
     ensure_project_member(conn, project_id, user, {"owner", "editor"})
     novel_id = new_id("cnt")
-    title = payload.idea[:26] + ("..." if len(payload.idea) > 26 else "")
+    # The title is a human gate. Preserve the raw idea in meta and keep the
+    # library label neutral until the user chooses a generated/custom title.
+    title = "待命名作品"
     body = {"type": "doc", "content": []}
     meta = payload.model_dump()
     conn.execute(
@@ -846,16 +848,49 @@ async def generate_video_script(
     return ok({"platform": platform, "script": output})
 
 
-@app.get("/api/v1/runs/{run_id}")
-def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn, run = load_run_for_user(run_id, user)
+def _hydrate_run(conn, run: dict) -> dict:
+    run = dict(run)
+    run_id = str(run["id"])
     nodes = [dict(row) for row in conn.execute("SELECT * FROM run_nodes WHERE run_id = %s ORDER BY node_key", (run_id,)).fetchall()]
     for node in nodes:
         node["output"] = decode(node["output"], {})
     run["context"] = decode(run["context"], {})
     run["nodes"] = nodes
+    return run
+
+
+@app.get("/api/v1/runs/latest")
+def get_latest_run(project_id: str | None = None, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Restore the user's newest workflow after a browser reload or device switch."""
+    conn = connect()
+    params: list[str] = [user["id"]]
+    project_filter = ""
+    if project_id:
+        project_filter = " AND wr.project_id = %s"
+        params.append(project_id)
+    run = conn.execute(
+        """SELECT wr.*
+           FROM workflow_runs wr
+           JOIN project_members pm ON pm.project_id = wr.project_id
+           WHERE pm.user_id = %s""" + project_filter + """
+           ORDER BY wr.created_at DESC, wr.id DESC
+           LIMIT 1""",
+        tuple(params),
+    ).fetchone()
+    if not run:
+        conn.close()
+        raise HTTPException(status_code=404, detail="workflow run not found")
+    hydrated = _hydrate_run(conn, dict(run))
     conn.close()
-    return ok(run)
+    return ok(hydrated)
+
+
+@app.get("/api/v1/runs/{run_id}")
+def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, run = load_run_for_user(run_id, user)
+    hydrated = _hydrate_run(conn, run)
+    conn.close()
+    return ok(hydrated)
 
 
 @app.get("/api/v1/runs/{run_id}/ledger")
@@ -1184,7 +1219,20 @@ def agents_status(user: dict = Depends(get_current_user)) -> ApiResponse:
     rows = [dict(r) for r in conn.execute(
         """SELECT rn.agent AS name,
                   COUNT(*) AS task_count,
-                  COUNT(*) FILTER (WHERE rn.status = 'running') AS running_count,
+                  COUNT(*) FILTER (
+                    WHERE rn.status = 'running'
+                      AND wr.status = 'running'
+                      AND wr.current_node_key = rn.node_key
+                      AND rn.started_at >= now() - interval '30 minutes'
+                  ) AS running_count,
+                  COUNT(*) FILTER (
+                    WHERE rn.status = 'running'
+                      AND NOT (
+                        wr.status = 'running'
+                        AND wr.current_node_key = rn.node_key
+                        AND rn.started_at >= now() - interval '30 minutes'
+                      )
+                  ) AS stale_running_count,
                   MAX(COALESCE(rn.finished_at, rn.started_at)) AS last_run
            FROM run_nodes rn
            JOIN workflow_runs wr ON wr.id = rn.run_id
@@ -1195,7 +1243,7 @@ def agents_status(user: dict = Depends(get_current_user)) -> ApiResponse:
     ).fetchall()]
     conn.close()
     return ok([{"name": r["name"],
-                "status": "running" if r["running_count"] else "idle",
+                "status": "running" if r["running_count"] else ("stale" if r["stale_running_count"] else "idle"),
                 "task_count": int(r["task_count"]),
                 "last_run": str(r["last_run"]) if r["last_run"] else "--"} for r in rows])
 

@@ -8,7 +8,6 @@ from app.core.security import get_current_user
 from app.db import connect, encode, new_id
 from app.gateway import BudgetExceeded, ProviderError, complete
 from app.services.hotspot_collector import (
-    analyze_hotspots,
     backfill_hotspot_history,
     fetch_hotspots,
     get_hotspot_history_report,
@@ -44,9 +43,8 @@ def get_hotspots(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=502, detail={
             "code": "HOTSPOT_SOURCES_FAILED", "sources": source_status,
         })
-    angles = analyze_hotspots(items)
     return {"code": 0, "message": "ok",
-            "data": {"hotspots": items, "creative_angles": angles, "sources": source_status}}
+            "data": {"hotspots": items, "sources": source_status}}
 
 
 @router.get("/hotspots/trend-report")

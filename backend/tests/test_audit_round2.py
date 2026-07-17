@@ -149,6 +149,32 @@ def test_agents_status_aggregates_real_run_nodes(authed):
     assert architect["last_run"] != "--"
 
 
+def test_agents_status_does_not_report_stale_node_as_running(authed):
+    from app.db import connect, encode, new_id
+
+    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    novel_id = client.post(f"/api/v1/projects/{project_id}/novels", headers=headers,
+                           json={"idea": "过期 agent 状态", "genre": "科幻", "style": "紧凑", "target_words": 10000}).json()["data"]["id"]
+    db = connect()
+    run_id = new_id()
+    db.execute(
+        "INSERT INTO workflow_runs (id, project_id, novel_id, workflow_key, status, current_node_key, context) "
+        "VALUES (%s,%s,%s,'bootstrap','running','stale_node',%s)",
+        (run_id, project_id, novel_id, encode({})),
+    )
+    db.execute(
+        "INSERT INTO run_nodes (id, run_id, node_key, kind, agent, title, status, started_at) "
+        "VALUES (%s,%s,'stale_node','agent','StaleAuditAgent','陈旧任务','running',now() - interval '2 hours')",
+        (new_id(), run_id),
+    )
+    db.commit()
+    db.close()
+
+    data = client.get("/api/v1/agents/status", headers=headers).json()["data"]
+    stale = next(a for a in data if a["name"] == "StaleAuditAgent")
+    assert stale["status"] == "stale"
+
+
 # --- ai_edit leaves a version branch (C5-03) -----------------------------------
 
 def test_ai_edit_creates_version_branch(authed, monkeypatch):

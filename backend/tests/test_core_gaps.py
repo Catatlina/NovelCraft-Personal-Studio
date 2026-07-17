@@ -46,7 +46,10 @@ def test_local_embedding_is_deterministic_and_normalized():
 
 
 def test_refresh_cookie_requires_csrf_and_rotates():
-    with TestClient(app) as client:
+    # Production deliberately marks the refresh cookie Secure.  Use an HTTPS
+    # test origin so TestClient exercises the real cookie/CSRF path instead of
+    # silently dropping the cookie on an http:// request.
+    with TestClient(app, base_url="https://testserver") as client:
         email = f"refresh-{uuid.uuid4().hex}@nc.dev"
         registered = client.post("/api/v1/auth/register", json={"email": email, "password": "test1234"})
         assert registered.status_code == 200
@@ -64,7 +67,7 @@ def test_refresh_cookie_requires_csrf_and_rotates():
         assert refreshed.json()["data"]["access_token"]
         assert client.cookies.get("refresh_token") != old_refresh
 
-    with TestClient(app) as replay_client:
+    with TestClient(app, base_url="https://testserver") as replay_client:
         replay = replay_client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
         assert replay.status_code == 401
 
@@ -83,7 +86,9 @@ def test_batch_chapter_count_is_bounded():
         assert response.status_code == 422
 
 
-def test_knowledge_reindex_replaces_old_chunks():
+def test_knowledge_reindex_replaces_old_chunks(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_BACKEND", "hash")
+    monkeypatch.setenv("NOVELCRAFT_ALLOW_HASH_EMBEDDING", "true")
     db = connect()
     project = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
     item_id = new_id()
@@ -251,7 +256,9 @@ def test_offline_ai_mutation_replay_returns_cached_result():
     assert result == expected
 
 
-def test_docx_extraction_and_project_scoped_knowledge_import():
+def test_docx_extraction_and_project_scoped_knowledge_import(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_BACKEND", "hash")
+    monkeypatch.setenv("NOVELCRAFT_ALLOW_HASH_EMBEDDING", "true")
     from docx import Document
 
     document = Document()

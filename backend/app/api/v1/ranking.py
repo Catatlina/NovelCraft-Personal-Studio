@@ -667,11 +667,15 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
         LEFT JOIN LATERAL (
             SELECT COUNT(*) AS chapter_count,
                    COALESCE(SUM(
-                       CASE
-                         WHEN jsonb_typeof(c.body->'content')='array'
-                         THEN length(regexp_replace(c.body::text, '[\\"{}:\\[\\],typecontentparagraphtext]', '', 'g'))
-                         ELSE length(c.body::text)
-                       END
+                       COALESCE(
+                         CASE WHEN COALESCE(c.meta->>'word_count','') ~ '^\\d+$'
+                              THEN (c.meta->>'word_count')::int END,
+                         (SELECT COALESCE(SUM(length(regexp_replace(part->>'text', '\\s+', '', 'g'))), 0)
+                            FROM jsonb_array_elements(
+                              CASE WHEN jsonb_typeof(c.body->'content')='array'
+                                   THEN c.body->'content' ELSE '[]'::jsonb END
+                            ) AS part)
+                       )
                    ),0) AS total_words
             FROM contents c
             WHERE c.parent_id=n.id AND c.type='chapter' AND c.is_deleted=FALSE
@@ -703,6 +707,12 @@ def get_book_detail(book_id: str, user: dict = Depends(get_current_user)):
     db.close()
     meta = book.get("meta") or {}
     latest = chapters[-1] if chapters else None
+    from app.services.novel_export import extract_body_text
+    from app.services.text_metrics import count_content_chars
+    total_words = sum(
+        int((chapter.get("meta") or {}).get("word_count") or count_content_chars(extract_body_text(chapter.get("body"))))
+        for chapter in chapters
+    )
     return ok({
         "book": dict(book),
         "synopsis": meta.get("synopsis") or meta.get("idea") or "",
@@ -711,7 +721,7 @@ def get_book_detail(book_id: str, user: dict = Depends(get_current_user)):
         "latest_chapter": latest,
         "chapters": chapters,
         "knowledge": knowledge,
-        "total_words": sum(len(str(ch.get("body") or "")) for ch in chapters),
+        "total_words": total_words,
     })
 
 
@@ -749,12 +759,12 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
         analysis = db.execute("SELECT snapshot_id FROM market_analyses WHERE id=%s", (topic["analysis_id"],)).fetchone()
         snapshot_id = analysis["snapshot_id"] if analysis else None
     novel_id = new_id(); meta = {"idea": topic["premise"], "genre": topic["genre"], "style": payload.style,
-        "target_words": payload.target_words, "selected_title": topic["title"], "source_type": "ranking_topic",
+        "target_words": payload.target_words, "suggested_title": topic["title"], "source_type": "ranking_topic",
         "source_ref_id": topic_id, "analysis_id": topic["analysis_id"], "snapshot_id": snapshot_id,
         "workflow_scope": "planning_and_chapter1"}
     db.execute("""INSERT INTO contents (id,project_id,type,title,body,meta,status,owner_id,generation_key)
                   VALUES (%s,%s,'novel',%s,%s,%s,'planning',%s,%s)""",
-               (novel_id, topic["project_id"], topic["title"], encode({"type":"doc","content":[]}),
+               (novel_id, topic["project_id"], "待命名作品", encode({"type":"doc","content":[]}),
                 encode(meta), user["id"], f"ranking-topic:{topic_id}:novel:v1"))
     db.execute("UPDATE topic_candidates SET status='planned', novel_id=%s WHERE id=%s", (novel_id, topic_id))
     db.commit(); db.close()

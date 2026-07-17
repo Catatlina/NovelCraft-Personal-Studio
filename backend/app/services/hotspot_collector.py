@@ -345,25 +345,6 @@ def store_hotspots(items: list[dict], fetched_at: str | None = None, collection_
     return count
 
 
-def analyze_hotspots(items: list[dict]) -> list[dict]:
-    angles = []
-    templates = [
-        ("如果「{title}」发生在虚构世界里会怎样？", "fiction"),
-        ("「{title}」背后的故事，比新闻更精彩", "narrative"),
-        ("从「{title}」看人性的复杂", "human_nature"),
-        ("「{title}」揭示的系统性真相", "analysis"),
-    ]
-    for item in items[:8]:
-        for tpl, atype in templates:
-            angles.append({
-                "topic": item.get("title", ""),
-                "angle": tpl.format(title=item.get("title", "")),
-                "category": item.get("category", ""),
-                "angle_type": atype,
-            })
-    return angles
-
-
 def get_hotspot_trend_report() -> dict:
     """NC-HM-001: Aggregated trend report — counts by trend and freshness."""
     db = connect()

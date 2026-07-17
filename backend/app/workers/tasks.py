@@ -184,6 +184,42 @@ def _assert_min_chapter_length(task_type: str, text: str) -> None:
         raise OutputValidationError(f"{task_type} chapter too short: {chars}/{MIN_CHAPTER_CHARS} chars")
 
 
+def _draft_length_feedback(output: dict) -> str:
+    """Return a concrete retry instruction when a draft misses the hard length gate."""
+    chapter = output.get("chapter") if isinstance(output, dict) else None
+    body = chapter.get("body", []) if isinstance(chapter, dict) else []
+    text = "\n".join(
+        part if isinstance(part, str) else str(part.get("text", ""))
+        for part in body if isinstance(part, (str, dict))
+    )
+    try:
+        _assert_min_chapter_length("write_chapter_draft", text)
+    except OutputValidationError as exc:
+        return str(exc)
+    return ""
+
+
+def _quality_evidence_payload(output: dict, self_review: dict | None = None) -> dict:
+    """Build the durable seven-dimension provenance stored on a chapter."""
+    score_by_status = {"pass": 90, "warning": 65, "fail": 35}
+    checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
+    dimensions = {
+        name: score_by_status.get(str(check.get("status", "")), 0)
+        for name, check in checks.items() if isinstance(check, dict)
+    }
+    self_review = self_review if isinstance(self_review, dict) else {}
+    score = self_review.get("self_score")
+    if score is None and dimensions:
+        score = sum(dimensions.values()) / len(dimensions)
+    issues = [str(item) for item in self_review.get("weaknesses", []) if str(item).strip()]
+    return {
+        "score": float(score or 0),
+        "dimensions": dimensions,
+        "issues": issues,
+        "source": "write_self_review+final_consistency_check",
+    }
+
+
 def _chapter_outline_for_seq(context: dict, chapter_seq: int) -> dict:
     """Select exactly one outline so prose never consumes later chapters."""
     outlines = context.get("chapter_outlines") or []
@@ -719,16 +755,33 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         + "；".join(fidelity_feedback[:8])
                     )
             else:
-                output = complete(
-                    run_id=run_id,
-                    node_key=node_key,
-                    project_id=project_id,
-                    task_type=task_type or "",
-                    prompt_name=f"bootstrap.{task_type}" if task_type else "",
-                    variables=run_context,
-                    client_mutation_id=client_mutation_id,
-                )
-                output = validate_task_output(task_type or "", output)
+                length_feedback = ""
+                quality_attempts = 3 if task_type == "write_chapter_draft" else 1
+                for quality_attempt in range(1, quality_attempts + 1):
+                    variables = {**run_context, "length_retry_feedback": length_feedback}
+                    output = complete(
+                        run_id=run_id,
+                        node_key=node_key,
+                        project_id=project_id,
+                        task_type=task_type or "",
+                        prompt_name=f"bootstrap.{task_type}" if task_type else "",
+                        variables=variables,
+                        client_mutation_id=(
+                            f"{client_mutation_id}:quality:{quality_attempt}"
+                            if quality_attempts > 1 else client_mutation_id
+                        ),
+                    )
+                    output = validate_task_output(task_type or "", output)
+                    if task_type != "write_chapter_draft":
+                        break
+                    length_feedback = _draft_length_feedback(output)
+                    if not length_feedback:
+                        break
+                else:
+                    raise OutputValidationError(
+                        f"write_chapter_draft failed length gate after {quality_attempts} real generations: "
+                        f"{length_feedback}"
+                    )
         except BudgetExceeded:
             _mark_node(run_id, node_key, "pending_budget", "budget exceeded")
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
@@ -1128,6 +1181,12 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                                knowledge_ids_to_reindex)
     elif task_type == "write_self_review":
         context["self_review"] = output
+        cid = context.get("chapter_id", "")
+        if cid:
+            db.execute(
+                "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                (encode({"self_review": output, "review_score": output.get("self_score")}), cid),
+            )
     elif task_type == "write_polish":
         _persist_chapter_polish(db, node_key, output, context, run_id)
     elif task_type == "write_length_check":
@@ -1156,6 +1215,15 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 raise OutputValidationError(
                     "final consistency gate rejected chapter: " + ", ".join(failed_checks.keys())
                 )
+            cid = context.get("chapter_id", "")
+            if cid:
+                db.execute(
+                    "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                    (encode({
+                        "final_consistency_check": output,
+                        "review_7dim": _quality_evidence_payload(output, context.get("self_review")),
+                    }), cid),
+                )
         if task_type == "final_continuity_audit":
             continuity = output.get("continuity") if isinstance(output.get("continuity"), dict) else {}
             if continuity.get("status") != "continuous" or bool(continuity.get("gaps")):
@@ -1168,6 +1236,12 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 db.commit()
                 db.close()
                 raise OutputValidationError("final continuity gate rejected chapter")
+            cid = context.get("chapter_id", "")
+            if cid:
+                db.execute(
+                    "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                    (encode({"final_continuity_audit": output}), cid),
+                )
         if task_type == "final_humanize":
             cid = context.get("chapter_id", "")
             if cid and output.get("humanized_text"):
@@ -1185,11 +1259,16 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 except OutputValidationError:
                     db.close()
                     raise
+                from app.services.text_metrics import count_content_chars
                 db.execute(
                     "UPDATE contents SET body = %s, meta = meta || %s, updated_at = now() WHERE id = %s",
                     (
                         encode(_chapter_doc_from_paragraphs(paragraphs)),
-                        encode({"humanized": True, "humanized_at": datetime.now(timezone.utc).isoformat()}),
+                        encode({
+                            "humanized": True,
+                            "humanized_at": datetime.now(timezone.utc).isoformat(),
+                            "word_count": count_content_chars("\n".join(paragraphs)),
+                        }),
                         cid,
                     ),
                 )

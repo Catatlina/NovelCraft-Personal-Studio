@@ -32,26 +32,37 @@ def _chunk_text(text: str, size: int = 800, overlap: int = 100) -> list[str]:
 
 def rebuild_item_embeddings(item_id: str) -> int:
     """Atomically replace an item's chunks with embeddings from the configured backend."""
-    db = connect()
-    item = db.execute("SELECT body FROM knowledge_items WHERE id = %s AND is_deleted = FALSE", (item_id,)).fetchone()
+    read_db = connect()
+    try:
+        item = read_db.execute(
+            "SELECT body FROM knowledge_items WHERE id = %s AND is_deleted = FALSE",
+            (item_id,),
+        ).fetchone()
+    finally:
+        # Never hold a pooled transaction open during a remote/local embedding
+        # operation. Provider failures previously leaked one connection per
+        # knowledge item until the Celery worker exhausted all 20 slots.
+        read_db.close()
     if not item:
-        db.close()
         return 0
     chunks = _chunk_text(item.get("body", ""))
     vectors, backend = embed_texts(chunks)
-    db.execute("DELETE FROM knowledge_vectors WHERE item_id = %s", (item_id,))
-    for chunk_no, (chunk, vector) in enumerate(zip(chunks, vectors)):
-        db.execute(
-            "INSERT INTO knowledge_vectors (id, item_id, chunk_no, embedding, chunk_text) VALUES (%s, %s, %s, %s::vector, %s)",
-            (new_id(), item_id, chunk_no, _vector_literal(vector), chunk),
+    write_db = connect()
+    try:
+        write_db.execute("DELETE FROM knowledge_vectors WHERE item_id = %s", (item_id,))
+        for chunk_no, (chunk, vector) in enumerate(zip(chunks, vectors)):
+            write_db.execute(
+                "INSERT INTO knowledge_vectors (id, item_id, chunk_no, embedding, chunk_text) VALUES (%s, %s, %s, %s::vector, %s)",
+                (new_id(), item_id, chunk_no, _vector_literal(vector), chunk),
+            )
+        # provenance: which backend produced this item's vectors (for reindex audits)
+        write_db.execute(
+            "UPDATE knowledge_items SET meta = COALESCE(meta,'{}'::jsonb) || jsonb_build_object('embedding_backend', %s::text) WHERE id = %s",
+            (backend, item_id),
         )
-    # provenance: which backend produced this item's vectors (for reindex audits)
-    db.execute(
-        "UPDATE knowledge_items SET meta = COALESCE(meta,'{}'::jsonb) || jsonb_build_object('embedding_backend', %s::text) WHERE id = %s",
-        (backend, item_id),
-    )
-    db.commit()
-    db.close()
+        write_db.commit()
+    finally:
+        write_db.close()
     return len(chunks)
 
 

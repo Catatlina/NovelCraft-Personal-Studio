@@ -60,7 +60,6 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/workers/tasks.py:batch_generate_chapters_task": "Celery orchestration; generation occurs in _generate_next_chapter_unlocked via gateway",
     "backend/app/services/hotspot_collector.py:_safe_score": "numeric normalization of collected source scores",
     "backend/app/services/hotspot_collector.py:compute_freshness_score": "deterministic recency score from timestamps",
-    "backend/app/services/hotspot_collector.py:analyze_hotspots": "deterministic angle/ranking over already collected hotspots, not AI generation",
     "backend/app/services/fusion_deep_book.py:layered_ai_planning": "legacy deterministic helper not counted as active product AI",
     "backend/app/services/m3_deep.py:generate_topic_bank": "static category bank, not personalized/generated content",
     "backend/app/services/publish_hub.py:generate_roi_report": "database aggregation report",

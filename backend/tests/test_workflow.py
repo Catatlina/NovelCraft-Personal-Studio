@@ -44,6 +44,45 @@ def test_run_404_for_unknown(client):
     assert r.status_code == 404
 
 
+def test_latest_run_restores_newest_project_workflow(client):
+    token = _auth(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    pid = client.get("/api/v1/projects", headers=headers).json()["data"][0]["id"]
+    novel = client.post(
+        f"/api/v1/projects/{pid}/novels",
+        headers=headers,
+        json={"idea": "restore latest run", "genre": "test", "style": "t", "target_words": 5000},
+    ).json()["data"]
+    created = client.post(f"/api/v1/novels/{novel['id']}/bootstrap", headers=headers).json()["data"]
+
+    response = client.get(f"/api/v1/runs/latest?project_id={pid}", headers=headers)
+
+    assert response.status_code == 200
+    restored = response.json()["data"]
+    assert restored["id"] == created["run_id"]
+    assert restored["project_id"] == pid
+    assert restored["novel_id"] == novel["id"]
+    assert restored["nodes"]
+
+
+def test_latest_run_does_not_leak_other_users_workflow(client):
+    first_token = _auth(client)
+    first_headers = {"Authorization": f"Bearer {first_token}"}
+    first_pid = client.get("/api/v1/projects", headers=first_headers).json()["data"][0]["id"]
+    novel = client.post(
+        f"/api/v1/projects/{first_pid}/novels",
+        headers=first_headers,
+        json={"idea": "private run", "genre": "test", "style": "t", "target_words": 5000},
+    ).json()["data"]
+    client.post(f"/api/v1/novels/{novel['id']}/bootstrap", headers=first_headers)
+
+    second_token = _auth(client)
+    second_headers = {"Authorization": f"Bearer {second_token}"}
+    response = client.get(f"/api/v1/runs/latest?project_id={first_pid}", headers=second_headers)
+
+    assert response.status_code == 404
+
+
 def test_human_confirm_requires_auth(client):
     r = client.post("/api/v1/runs/00000000-0000-0000-0000-000000000000/nodes/n2/confirm",
                     json={"selected_title": "test"})

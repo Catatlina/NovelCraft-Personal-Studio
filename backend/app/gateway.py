@@ -345,6 +345,18 @@ class _LocalizeNamesOutput(_LenientOutput):
     name_map: dict[str, str] = Field(default_factory=dict)
 
 
+class _TextOutput(_StrictOutput):
+    """Editor operations must never turn an empty provider payload into success."""
+
+    text: str = Field(min_length=1)
+
+
+class _StyleImitationOutput(_LenientOutput):
+    title: str = Field(min_length=2)
+    style_profile: dict[str, Any]
+    text: str = Field(min_length=800)
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -387,6 +399,13 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "translate_segment": _TranslateSegmentOutput,
     "cultural_localize": _CulturalLocalizeOutput,
     "localize_names": _LocalizeNamesOutput,
+    "editor_polish": _TextOutput,
+    "editor_rewrite": _TextOutput,
+    "editor_continue": _TextOutput,
+    "editor_expand": _TextOutput,
+    "editor_condense": _TextOutput,
+    "editor_deai": _TextOutput,
+    "style_imitation": _StyleImitationOutput,
 }
 
 
@@ -401,6 +420,9 @@ def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
     payload = {key: value for key, value in output.items() if key != "_meta"}
     try:
         validated = model.model_validate(payload).model_dump()
+        if task_type.startswith("editor_") or task_type == "style_imitation":
+            if not str(validated.get("text") or "").strip():
+                raise OutputValidationError(f"provider returned empty text for {task_type}")
         if metadata is not None:
             validated["_meta"] = metadata
         return validated
@@ -861,6 +883,8 @@ def _complete_stream_impl(
         raise ProviderError(f"streaming is not supported for provider: {provider}")
 
     full_text = "".join(chunks)
+    if not full_text.strip():
+        raise OutputValidationError(f"provider returned empty streamed text for {task_type}")
     prompt_tokens = int(usage.get("prompt_tokens", 0)) or max(1, len(prompt_text) // 4)
     completion_tokens = int(usage.get("completion_tokens", 0)) or max(1, len(full_text) // 4)
     latency_ms = int((time.perf_counter() - start) * 1000)

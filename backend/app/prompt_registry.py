@@ -394,7 +394,7 @@ $title_samples
     ("editor.condense", "3.0.0", "deepseek",
      "请缩写以下文本，保留核心情节与关键信息，删除冗余。\n$selection\n输出 JSON: {\"text\":\"缩写后的文本\"}"),
 
-    ("style.imitation", "3.0.0", "deepseek",
+    ("style.imitation", "3.0.1", "deepseek",
      """你是文风学习与原创仿写助手。请只学习原文的叙述节奏、句长、视角、情绪推进、段落密度，不复制原文人物、设定、专名、桥段和连续表达。
 
 原文：
@@ -402,6 +402,11 @@ $source_text
 
 任务：
 $instruction
+
+硬性要求：
+1. 正文必须明确满足上述任务指定的题材、人物关系和场景，不得转写成与任务无关的散文或名篇仿作。
+2. 不得调用、复述或套用原文之外的既有文学名篇、网络范文和标志性名句。
+3. 正文至少 800 字；不足、跑题或复用具体元素均视为失败。
 
 输出 JSON: {"title":"样稿标题","style_profile":{"pov":"视角","sentence_rhythm":"句长节奏","dialogue_ratio":"对话比例","tone":"语气","taboos":["不可复用项"]},"text":"原创仿写样稿，至少800字"}"""),
 
@@ -689,6 +694,7 @@ $plan_output
 本章细纲：$_chapter_outline
 场景节拍表：$scene_beats
 前文上下文：$_context_window
+上次长度门禁反馈：$length_retry_feedback
 
 创作目标：
 1. 优先级固定为：用户原始需求 > 不可变事实 > 创作圣经 > 本章细纲 > 其他规划；下游规划一旦与原始需求冲突，必须服从原始需求
@@ -869,6 +875,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":""}]}',
     "editor_expand":        '{"text":"扩写后文本"}',
     "editor_condense":      '{"text":"缩写后文本"}',
+    "style_imitation":      '{"title":"样稿标题","style_profile":{"pov":"视角","sentence_rhythm":"句长节奏","dialogue_ratio":"对话比例","tone":"语气","taboos":["不可复用项"]},"text":"不少于800字且严格满足任务的原创样稿"}',
     "summarize_volume":     '{"summary":"卷摘要"}',
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
