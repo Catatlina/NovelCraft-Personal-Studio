@@ -463,7 +463,7 @@ def _fetch_qidian_one_page(rank_type: str, page: int) -> list[dict]:
     label = _QIDIAN_LABELS.get(rank_type, rank_type)
     base_url = _QIDIAN_MOBILE_URLS.get(rank_type, _QIDIAN_MOBILE_URLS["hotsales"])
     if page > 1:
-        url = f"{base_url}?page={page}"
+        url = f"{base_url}?pageNum={page}"
     else:
         url = base_url
 
