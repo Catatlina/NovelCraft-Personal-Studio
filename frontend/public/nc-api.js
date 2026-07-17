@@ -53,39 +53,37 @@ const NC = {
   },
 };
 
-// ── Login button handler ──
-document.addEventListener('DOMContentLoaded', function() {
+// ── Login button handler (run immediately, not on DOMContentLoaded) ──
+(function setupLogin() {
   const loginBtn = document.getElementById('loginBtn');
-  if (loginBtn) {
-    loginBtn.addEventListener('click', async function() {
-      const emailInput = document.querySelector('#loginView input[type="email"]');
-      const pwInput = document.querySelector('#loginView input[type="password"]');
-      const email = emailInput?.value?.trim() || '';
-      const password = pwInput?.value || '';
-      
-      if (!email || !password) {
-        ncToast('请输入邮箱和密码');
-        return;
-      }
-      
-      loginBtn.disabled = true;
-      loginBtn.textContent = '登录中...';
-      
-      try {
-        console.log('NC: logging in as', email);
-        await NC.login(email, password);
-      } catch (e) {
-        console.error('NC: login error, entering anyway', e);
-        ncToast('登录失败: ' + (e.message || '网络错误') + '，进入离线模式');
-      }
-      // Always enter app — even if API fails, user sees the interface
-      document.getElementById('loginView').classList.remove('active');
-      document.getElementById('appView').classList.add('active');
-      ncToast('登录成功');
-      setTimeout(loadWorkspaceData, 100);
-    });
-  }
-});
+  if (!loginBtn) return;
+  loginBtn.addEventListener('click', async function() {
+    const emailInput = document.querySelector('#loginView input[type="email"]');
+    const pwInput = document.querySelector('#loginView input[type="password"]');
+    const email = emailInput?.value?.trim() || '';
+    const password = pwInput?.value || '';
+    
+    if (!email || !password) {
+      ncToast('请输入邮箱和密码');
+      return;
+    }
+    
+    loginBtn.disabled = true;
+    loginBtn.textContent = '登录中...';
+    
+    try {
+      console.log('NC: logging in as', email);
+      await NC.login(email, password);
+    } catch (e) {
+      console.error('NC: login error, entering anyway', e);
+      ncToast('登录失败: ' + (e.message || '网络错误') + '，进入离线模式');
+    }
+    document.getElementById('loginView').classList.remove('active');
+    document.getElementById('appView').classList.add('active');
+    ncToast('登录成功');
+    setTimeout(loadWorkspaceData, 100);
+  });
+})();
 
 // ── Load real data into workspace ──
 async function loadWorkspaceData() {
