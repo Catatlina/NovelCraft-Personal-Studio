@@ -90,6 +90,17 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     finally { setBusy(""); }
   }
 
+  async function scanAll() {
+    setBusy("scan-all"); setMessage("一键采集所有平台中...");
+    try {
+      const result = await api<Wrapped<{ scanned: string[], errors: Record<string,any>, succeeded: number, failed: number }>>(`/api/v1/ranking/scan-all?project_id=${projectId}`, { method: "POST", body: "{}" });
+      const { scanned, succeeded, failed } = result.data;
+      setMessage(`一键采集完成：${succeeded}/${scanned.length + failed} 平台成功`);
+      await load();
+    } catch (error) { setMessage(`一键采集失败：${errorText(error)}`); }
+    finally { setBusy(""); }
+  }
+
   async function selectImportFile(file?: File) {
     setMessage(""); setImportItems([]); setCaptureArtifact(null); setImportFileName(file?.name || "");
     if (!file) return;
@@ -305,7 +316,11 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
   return <div style={{ display: "grid", gap: 16 }}>
     {message && <div className="panel">{message}</div>}
-    <section className="panel"><h2>小说榜单源</h2><div className="grid-cards">
+    <section className="panel"><h2>小说榜单源</h2>
+      <button className="primary" disabled={!!busy} onClick={scanAll} style={{marginBottom:12,fontSize:15,padding:'10px 24px'}}>
+        🚀 {busy==="scan-all"?"采集中…":"一键采集所有平台"}
+      </button>
+      <div className="grid-cards">
       {sources.map(source => {
         const health = source.last_error ? "异常" : source.last_success_at ? "健康" : "未采集";
         return <article className="feature-card" key={source.source_key}>

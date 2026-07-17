@@ -227,6 +227,25 @@ def scan_source(source_key: str, project_id: str, user: dict = Depends(get_curre
     return _scan_source(source_key, project_id, user)
 
 
+@router.post("/scan-all")
+def scan_all_sources(project_id: str, user: dict = Depends(get_current_user)):
+    """一键采集所有可用平台数据."""
+    available = ["fanqie", "qidian", "zongheng", "qqread", "jjwxc"]
+    results = {}
+    errors = {}
+    for source_key in available:
+        try:
+            r = _scan_source(source_key, project_id, user)
+            results[source_key] = r
+        except HTTPException as e:
+            errors[source_key] = {"status": e.status_code, "detail": str(e.detail)}
+        except Exception as e:
+            errors[source_key] = {"status": 500, "detail": str(e)}
+    return ok({"scanned": list(results.keys()), "errors": errors,
+               "total_sources": len(available), "succeeded": len(results),
+               "failed": len(errors)})
+
+
 def _persist_ranking_snapshot(
     db,
     *,
