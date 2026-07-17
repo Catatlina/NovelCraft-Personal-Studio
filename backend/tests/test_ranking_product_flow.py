@@ -58,7 +58,7 @@ def test_all_supported_ranking_sources_have_registered_fetchers():
     from app.services.ranking_adapter import RANKING_FETCHERS
 
     assert set(RANKING_FETCHERS) == set(SOURCE_NAMES)
-    expected = {"fanqie", "qidian", "zongheng", "qimao", "qqread", "17k", "jjwxc", "ciweimao"}
+    expected = {"fanqie", "qidian", "zongheng", "qqread", "jjwxc", "sfacg", "xxsy"}
     assert set(RANKING_FETCHERS) >= expected, f"Missing: {expected - set(RANKING_FETCHERS)}"
     assert all(callable(fetcher) for fetcher in RANKING_FETCHERS.values())
 

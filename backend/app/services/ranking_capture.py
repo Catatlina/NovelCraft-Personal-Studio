@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 
-ALLOWED_CAPTURE_SOURCES = {"fanqie", "qidian", "zongheng", "qimao", "qqread", "17k", "jjwxc", "ciweimao", "manual"}
+ALLOWED_CAPTURE_SOURCES = {"fanqie", "qidian", "zongheng", "qqread", "sfacg", "xxsy", "jjwxc", "manual"}
 REQUIRED_IMPORT_FIELDS = {"rank", "title"}
 
 

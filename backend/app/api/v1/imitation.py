@@ -53,13 +53,16 @@ def _fetch_source(url: str) -> str:
 
 def _extract_text(html: str) -> str:
     """Strip HTML tags/extract novel chapter content."""
-    text = _re.sub(r"<(script|style|noscript|nav|footer|header)[^>]*>.*?</\1>", " ", html, flags=_re.DOTALL|_re.I)
+    # Remove scripts, styles, nav, footer, header entirely
+    text = _re.sub(r"<(script|style|noscript|nav|footer|header)[^>]*>.*?</\1>", " ", html, flags=_re.DOTALL | _re.I)
+    # Replace block-level tags with newlines, inline tags with space
+    text = _re.sub(r"</?(p|div|br|h\d|li|tr|article|section)[^>]*>", "\n", text, flags=_re.I)
     text = _re.sub(r"<[^>]+>", " ", text)
     text = _re.sub(r"&[a-z]+;", " ", text)
-    text = _re.sub(r"\s+", " ", text)
-    # Keep only substantial paragraphs (>30 chars, like novel text)
-    paras = [p.strip() for p in text.split("\n") if len(p.strip()) > 30]
-    return "\n\n".join(paras[:50]) if paras else text[:30000]
+    # Normalize whitespace per line, keep paragraph breaks
+    lines = [_re.sub(r"\s+", " ", line).strip() for line in text.split("\n")]
+    paras = [line for line in lines if len(line) > 15]
+    return "\n\n".join(paras[:50]) if paras else " ".join(lines)[:30000]
 
 
 @router.post("")
