@@ -370,7 +370,9 @@ export function HotspotDashboard() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
               {hotspots.map((h, i) => {
                 const trendMeta = trendStyle(h.trend);
-                const busy = busyKey === `${h.source}:${h.title}`;
+                const cardKey = `${h.source}:${h.title}`;
+                const busy = busyKey === cardKey;
+                const generated = generatedKeys.has(cardKey);
                 return (
                   <div key={i} className="panel" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -396,14 +398,17 @@ export function HotspotDashboard() {
                       disabled={busy}
                       onClick={() => void generate(h)}
                       style={{
-                        padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer",
+                        padding: "6px 12px", borderRadius: 6, cursor: busy ? "default" : "pointer",
                         fontSize: 12, fontWeight: 600,
-                        background: "var(--nc-primary, #FF6B35)", color: "#fff",
+                        background: generated ? "rgba(0,230,118,0.15)" : "var(--nc-primary, #FF6B35)",
+                        color: generated ? "#00e676" : "#fff",
                         display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                         opacity: busy ? 0.6 : 1,
+                        border: generated ? "1px solid rgba(0,230,118,0.3)" : "none",
+                        transition: "all 0.3s",
                       }}
                     >
-                      {busy ? "⏳ 生成中…" : <><Plus size={12} /> 一键生成</>}
+                      {busy ? "⏳ 生成中…" : generated ? <>✓ 已生成</> : <><Plus size={12} /> 一键生成</>}
                     </button>
                   </div>
                 );
@@ -538,7 +543,7 @@ export function HotspotDashboard() {
               <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
                 平台：{articleDetail.platform} · 热点：{articleDetail.hotspot_title} · 状态：{articleDetail.status} · {articleDetail.created_at}
               </div>
-              <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.8, color: "#ccc", background: "rgba(255,255,255,0.03)", padding: 16, borderRadius: 8, maxHeight: "60vh", overflow: "auto" }}>
+              <div className="novel-prose" style={{ background: "rgba(255,255,255,0.03)", padding: 16, borderRadius: 8, maxHeight: "60vh", overflow: "auto" }}>
                 {articleDetail.full_text || "暂无内容"}
               </div>
             </div>

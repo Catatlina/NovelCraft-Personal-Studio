@@ -18,8 +18,8 @@ HOTSPOT_SOURCES = {
                  "fallback_url": "https://www.kuaishou.com/?isHome=1"},
     "bilibili": {"name": "B站热门", "url_env": "HOTSPOT_BILIBILI_URL", "history_url_env": "HOTSPOT_BILIBILI_HISTORY_URL", "kind": "bilibili_json",
                  "fallback_url": "https://api.bilibili.com/x/web-interface/popular?ps=20"},
-    "google_trends_cn": {"name": "Google Trends中国", "url_env": "HOTSPOT_GOOGLE_TRENDS_CN_URL", "history_url_env": "HOTSPOT_GOOGLE_TRENDS_CN_HISTORY_URL", "kind": "google_trends_rss",
-                         "fallback_url": "https://trends.google.com/trends/trendingsearches/daily/rss?geo=CN"},
+    "google_trends_cn": {"name": "Google Trends中国", "url_env": "HOTSPOT_GOOGLE_TRENDS_CN_URL", "history_url_env": "HOTSPOT_GOOGLE_TRENDS_CN_HISTORY_URL", "kind": "google_trends_json",
+                         "fallback_url": "https://trends.google.com/trending?geo=CN"},
     "x": {"name": "X Trends", "url_env": "HOTSPOT_X_URL", "history_url_env": "HOTSPOT_X_HISTORY_URL", "kind": "generic_json"},
 }
 
@@ -108,8 +108,120 @@ def _configured_history_url(cfg: dict, collection_date: str, connection: dict | 
     return raw.replace("{date}", collection_date).replace("{yyyy-mm-dd}", collection_date)
 
 
+def _html_extract_titles(html_text: str, source_name: str, base_url: str) -> list[dict]:
+    """Extract hotspot titles from HTML pages using multiple regex strategies.
+
+    Chinese SPA platforms embed JSON state in <script> tags; we extract
+    title-like fields from those blobs. Falls back to <title> tags and
+    generic word/name patterns.
+    """
+    import html as _html
+    import re
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    # Strategy 1: Extract JSON blobs from <script> tags
+    json_blobs: list[str] = []
+    for m in re.finditer(
+        r'<script[^>]*?(?:id="(?:__NEXT_DATA__|RENDER_DATA|__INITIAL_STATE__|SSR_DATA)"[^>]*?|'
+        r'type="application/json"[^>]*?)>(.*?)</script>',
+        html_text, re.DOTALL | re.IGNORECASE,
+    ):
+        json_blobs.append(m.group(1))
+    # Also try window.__DATA__ = ... patterns
+    for m in re.finditer(r'window\.\w+\s*=\s*(\{.*?\});', html_text, re.DOTALL):
+        json_blobs.append(m.group(1))
+
+    # Combine all blobs for title extraction
+    search_text = html_text + "\n" + "\n".join(json_blobs)
+
+    # Strategy 2a: Look for title/word/name in JSON-like structures
+    title_patterns = [
+        (r'"title"\s*:\s*"([^"]{2,200})"', None),
+        (r'"word"\s*:\s*"([^"]{2,200})"', None),
+        (r'"name"\s*:\s*"([^"]{2,200})"', None),
+        (r'"query"\s*:\s*"([^"]{2,200})"', None),
+        (r'"noteTitle"\s*:\s*"([^"]{2,200})"', None),
+        (r'"ClusterIdStr"[^}]*?"title"\s*:\s*"([^"]{2,200})"', None),
+    ]
+    # Platform-specific scoring patterns
+    hot_score_patterns = [
+        r'"hotScore"\s*:\s*(\d+(?:\.\d+)?)',
+        r'"hotValue"\s*:\s*(\d+(?:\.\d+)?)',
+        r'"hot_value"\s*:\s*(\d+(?:\.\d+)?)',
+        r'"HotValue"\s*:\s*(\d+(?:\.\d+)?)',
+        r'"score"\s*:\s*(\d+(?:\.\d+)?)',
+        r'"view_count"\s*:\s*(\d+(?:\.\d+)?)',
+    ]
+
+    for pattern, _group_name in title_patterns:
+        for m in re.finditer(pattern, search_text):
+            title = _html.unescape(m.group(1)).strip()
+            if not title or len(title) < 2 or len(title) > 200:
+                continue
+            # Filter out non-content titles (URLs, JSON keys, etc.)
+            if title.startswith("{") or title.startswith("[") or title.startswith("http"):
+                continue
+            norm = title.lower()
+            if norm in seen:
+                continue
+            # Try to find associated hot score in nearby context
+            ctx_start = max(0, m.start() - 500)
+            ctx_end = min(len(search_text), m.end() + 500)
+            ctx = search_text[ctx_start:ctx_end]
+            hot_score = 0
+            for sp in hot_score_patterns:
+                sm = re.search(sp, ctx)
+                if sm:
+                    hot_score = _safe_score(sm.group(1))
+                    break
+            seen.add(norm)
+            results.append({
+                "title": title,
+                "category": "general",
+                "raw_score": hot_score,
+                "url": base_url,
+            })
+            if len(results) >= 20:
+                break
+        if len(results) >= 20:
+            break
+
+    # Strategy 2b: Look for <a> tags with titles (desktop HTML pages)
+    if not results:
+        for m in re.finditer(r'<a[^>]*?title="([^"]{2,200})"[^>]*?>', html_text, re.IGNORECASE):
+            title = _html.unescape(m.group(1)).strip()
+            if title and title not in seen and not title.startswith("http"):
+                seen.add(title)
+                results.append({
+                    "title": title,
+                    "category": "general",
+                    "raw_score": 0,
+                    "url": base_url,
+                })
+                if len(results) >= 20:
+                    break
+
+    # Strategy 3: Extract from <title> tag (fallback)
+    if not results:
+        tm = re.search(r'<title>(.*?)</title>', html_text, re.IGNORECASE)
+        if tm:
+            page_title = _html.unescape(tm.group(1)).strip()
+            if page_title and page_title not in seen:
+                results.append({
+                    "title": page_title,
+                    "category": "general",
+                    "raw_score": 0,
+                    "url": base_url,
+                })
+
+    return results
+
+
 def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]:
     kind = cfg.get("kind", "generic_json")
+
+    # ── HTML parsers ──────────────────────────────────────────────
     if kind == "baidu_html":
         import html
         import re
@@ -118,7 +230,14 @@ def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]
         return [{"title": html.unescape(title), "category": "general", "raw_score": 0, "url": cfg.get("url", "")}
                 for title in titles[:20] if title.strip()]
 
+    if kind in ("toutiao_html", "xiaohongshu_html", "douyin_html", "kuaishou_html"):
+        text = payload.decode("utf-8", errors="replace")
+        base_url = _configured_url(cfg) or ""
+        return _html_extract_titles(text, source, base_url)
+
+    # ── JSON parsers ──────────────────────────────────────────────
     data = json.loads(payload)
+
     if kind == "zhihu_json":
         raw = data.get("data", [])
         return [{
@@ -127,6 +246,7 @@ def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]
             "raw_score": item.get("detail_text", item.get("raw_hot", 0)),
             "url": item.get("target", {}).get("url", ""),
         } for item in raw[:20]]
+
     if kind == "weibo_json":
         raw = data.get("data", data).get("realtime", []) if isinstance(data.get("data", data), dict) else []
         return [{
@@ -136,6 +256,125 @@ def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]
             "url": "https://s.weibo.com/weibo?q=" + urllib.parse.quote(item.get("word", "")),
         } for item in raw[:20]]
 
+    if kind == "bilibili_json":
+        # B站公开热门API: api.bilibili.com/x/web-interface/popular
+        if data.get("code") != 0:
+            return []
+        raw = data.get("data", {}).get("list", [])
+        if not raw:
+            raw = data.get("data", [])
+        if isinstance(raw, dict):
+            raw = raw.get("list", [])
+        parsed = []
+        for item in (raw if isinstance(raw, list) else [])[:20]:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title", "")
+            stat = item.get("stat", {}) or {}
+            url = item.get("short_link_v2") or item.get("short_link") or item.get("url", "")
+            if url and not url.startswith("http"):
+                url = "https://www.bilibili.com/video/" + str(item.get("bvid", ""))
+            parsed.append({
+                "title": str(title),
+                "category": item.get("tname", "general"),
+                "raw_score": stat.get("view", stat.get("play", 0)),
+                "url": url,
+            })
+        return parsed
+
+    # ── Google Trends multi-format parser ──────────────────────────
+    if kind == "google_trends_json":
+        import re as _gt_re
+        import xml.etree.ElementTree as ET
+        text = payload.decode("utf-8", errors="replace")
+        parsed: list[dict] = []
+
+        # Format 1: RSS/XML (for env-provided RSS URLs)
+        if text.strip().startswith("<?xml") or text.strip().startswith("<rss"):
+            try:
+                root = ET.fromstring(text)
+                ns = {"ht": "https://trends.google.com/trends/trendingsearches"}
+                for item_el in root.iter("item"):
+                    title_el = item_el.find("title")
+                    traffic_el = item_el.find("ht:approx_traffic", ns)
+                    title = (title_el.text or "").strip() if title_el is not None else ""
+                    traffic = traffic_el.text.strip() if traffic_el is not None and traffic_el.text else "0"
+                    if title:
+                        traffic_upper = traffic.upper().replace(",", "")
+                        score = 0
+                        try:
+                            if "M" in traffic_upper:
+                                score = float(traffic_upper.replace("M", "").replace("+", "")) * 1000000
+                            elif "K" in traffic_upper:
+                                score = float(traffic_upper.replace("K", "").replace("+", "")) * 1000
+                            else:
+                                score = float(_gt_re.sub(r'[^\d.]', '', traffic) or "0")
+                        except ValueError:
+                            score = 0
+                        parsed.append({"title": title, "category": "general", "raw_score": score, "url": ""})
+                        if len(parsed) >= 20:
+                            break
+                if parsed:
+                    return parsed
+            except ET.ParseError:
+                pass  # fall through to regex
+
+        # Format 2: )]}', prefix JSON (Google Trends dailytrends API)
+        json_text = text
+        if text.startswith(")]}',"):
+            json_text = text[text.index("\n") + 1:] if "\n" in text else text[5:]
+        try:
+            data = json.loads(json_text)
+            # dailytrends API structure
+            default = data.get("default", {})
+            trending_days = default.get("trendingSearchesDays", [])
+            for day in trending_days[:3]:  # take latest 1 day's searches, up to 3 days as fallback
+                searches = day.get("trendingSearches", [])
+                for s in searches:
+                    title = (s.get("title", {}) or {}).get("query", "")
+                    if not title:
+                        title = s.get("title", "")
+                    traffic = s.get("formattedTraffic", "0")
+                    # Parse formattedTraffic like "200K+" or "1M+"
+                    traffic_upper = str(traffic).upper().replace(",", "")
+                    score = 0
+                    try:
+                        if "M" in traffic_upper:
+                            score = float(traffic_upper.replace("M", "").replace("+", "")) * 1000000
+                        elif "K" in traffic_upper:
+                            score = float(traffic_upper.replace("K", "").replace("+", "")) * 1000
+                        else:
+                            score = float(_gt_re.sub(r'[^\d.]', '', str(traffic)) or "0")
+                    except ValueError:
+                        score = 0
+                    url = ""
+                    articles = s.get("articles", [])
+                    if articles and isinstance(articles, list) and len(articles) > 0:
+                        url = articles[0].get("url", "")
+                    parsed.append({"title": title, "category": "general", "raw_score": score, "url": url})
+                    if len(parsed) >= 20:
+                        break
+                if parsed:
+                    break
+            if parsed:
+                return parsed
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass  # fall through to HTML
+
+        # Format 3: HTML fallback — try regex extraction
+        parsed = _html_extract_titles(text, source, _configured_url(cfg) or "")
+        if parsed:
+            return parsed
+
+        # Format 4: RSS regex fallback (last resort)
+        titles = _gt_re.findall(r'<title>(.*?)</title>', text)
+        for t in titles[1:21]:  # skip channel title
+            t = t.strip()
+            if t and "Google Trends" not in t and "Daily Search" not in t:
+                parsed.append({"title": t, "category": "general", "raw_score": 0, "url": ""})
+        return parsed
+
+    # ── Generic JSON fallback ─────────────────────────────────────
     raw = data.get("data", data.get("items", data.get("trends", [])))
     if isinstance(raw, dict):
         raw = raw.get("list", raw.get("items", raw.get("trends", [])))
@@ -162,13 +401,42 @@ def _fetch_source_items(source_key: str, cfg: dict, url: str, connection: dict |
         if "positional" not in str(exc) and "argument" not in str(exc):
             raise
         opener = _hotspot_opener()
-    headers = {"User-Agent": _BROWSER_UA, "Accept": "application/json", "Referer": "https://www." + source_key + ".com/"}
+
+    kind = cfg.get("kind", "generic_json")
+    is_html_kind = kind.endswith("_html") or kind == "baidu_html" or kind == "google_trends_json"
+    is_rss_kind = kind == "google_trends_json"
+
+    headers = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" if (is_html_kind or is_rss_kind) else "application/json",
+    }
+    # Build Referer from source or URL
+    if source_key == "bilibili":
+        headers["Referer"] = "https://www.bilibili.com/"
+    elif source_key == "google_trends_cn":
+        headers["Referer"] = "https://trends.google.com/"
+    elif source_key == "toutiao":
+        headers["Referer"] = "https://www.toutiao.com/"
+    elif source_key == "xiaohongshu":
+        headers["Referer"] = "https://www.xiaohongshu.com/"
+    elif source_key == "douyin":
+        headers["Referer"] = "https://www.douyin.com/"
+    elif source_key == "kuaishou":
+        headers["Referer"] = "https://www.kuaishou.com/"
+    else:
+        headers["Referer"] = "https://www." + source_key + ".com/"
+
+    # B站 API requires specific Origin/Referer headers
+    if source_key == "bilibili":
+        headers["Origin"] = "https://www.bilibili.com"
+
     cookie = _source_cookie(source_key, connection)
     if cookie:
         if source_key == "x" and (connection or {}).get("bearer_token"):
             headers["Authorization"] = f"Bearer {cookie}"
         else:
             headers["Cookie"] = cookie
+
     req = urllib.request.Request(url, headers=headers)
     with opener.open(req, timeout=timeout) as resp:
         return _parse_hotspot_payload(source_key, cfg, resp.read())

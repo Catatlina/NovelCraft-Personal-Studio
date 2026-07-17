@@ -438,3 +438,9 @@
   background: rgba(49, 181, 114, 0.15);
   color: var(--success, #31b572);
 }
+
+/* Toast slide-up animation */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
