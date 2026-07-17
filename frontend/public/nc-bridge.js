@@ -1,4 +1,13 @@
 /* NovelCraft API Bridge — connects prototype UI to real backend */
+
+// Local toast (don't rely on inline script's showToast timing)
+function ncToast(msg) {
+  const to = document.getElementById('toast');
+  const msgEl = document.getElementById('toastMsg');
+  if (msgEl) msgEl.textContent = msg;
+  if (to) { to.classList.add('show'); setTimeout(() => to.classList.remove('show'), 2400); }
+}
+
 const NC = {
   base: '',
   token: sessionStorage.getItem('nc_token') || '',
@@ -22,7 +31,7 @@ const NC = {
       sessionStorage.setItem('nc_token', NC.token);
       return data;
     } catch (e) {
-      showToast('登录失败: ' + e.message);
+      ncToast('登录失败: ' + e.message);
       throw e;
     }
   },
@@ -52,7 +61,7 @@ window.enterApp = async function() {
   const password = pwInput?.value || '';
   
   if (!email || !password) {
-    showToast('请输入邮箱和密码');
+    ncToast('请输入邮箱和密码');
     return;
   }
 
@@ -62,7 +71,7 @@ window.enterApp = async function() {
     document.getElementById('loginView').classList.remove('active');
     document.getElementById('appView').classList.add('active');
     document.getElementById('appView').style.display = 'flex';
-    showToast('登录成功，欢迎回到 NovelCraft');
+    ncToast('登录成功');
     setTimeout(loadWorkspaceData, 100);
   } catch (e) {
     console.error('NC: login error', e);
