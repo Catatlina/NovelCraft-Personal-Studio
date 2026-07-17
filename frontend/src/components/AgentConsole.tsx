@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Terminal, Activity } from "lucide-react";
 import { api } from "../lib/api";
+import "../styles/proto.css";
 
 type AgentStatus = { name: string; status: string; task_count: number; last_run: string };
 
@@ -16,8 +17,10 @@ export function AgentConsole() {
   useEffect(load, []);
 
   return (
-    <div className="panel">
-      <h3><Terminal size={14} /> Agent 运行控制台</h3>
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title"><Terminal size={14} /> Agent 运行控制台</div>
+      </div>
       <table style={{ width: "100%", fontSize: 13 }}>
         <thead><tr><th>Agent</th><th>状态</th><th>任务数</th><th>最近运行</th></tr></thead>
         <tbody>
@@ -25,11 +28,7 @@ export function AgentConsole() {
             <tr key={a.name}>
               <td style={{ fontWeight: 600 }}>{a.name}</td>
               <td>
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 4,
-                  color: a.status === "running" ? "var(--success)" : a.status === "stale" ? "var(--warning)" : "var(--text-muted)"
-                }}>
-                  <Activity size={10} />
+                <span className={`badge ${a.status === "running" ? "green" : a.status === "stale" ? "orange" : "gray"}`}>
                   {a.status === "running" ? "运行中" : a.status === "stale" ? "异常未收敛" : "空闲"}
                 </span>
               </td>
@@ -39,9 +38,9 @@ export function AgentConsole() {
           ))}
         </tbody>
       </table>
-      {!agents.length && <p className="muted" style={{ fontSize: 12 }}>暂无 Agent 运行记录 — 启动一次生成工作流后此处显示真实节点统计。</p>}
+      {!agents.length && <div className="empty"><p>暂无 Agent 运行记录 — 启动一次生成工作流后此处显示真实节点统计。</p></div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={load}><Activity size={12} /> 刷新</button>
+        <button className="btn-sm" onClick={load}><Activity size={12} /> 刷新</button>
       </div>
     </div>
   );

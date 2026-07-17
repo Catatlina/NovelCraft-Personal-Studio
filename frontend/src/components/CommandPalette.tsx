@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Search } from "lucide-react";
+import "../styles/proto.css";
 
 type Command = { id: string; label: string; action: () => void };
 
@@ -21,16 +22,57 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
 
   if (!open) return null;
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", paddingTop: "15vh" }} onClick={() => setOpen(false)}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 12, width: 520, maxHeight: "60vh", overflow: "hidden", border: "1px solid var(--border-strong)", boxShadow: "var(--shadow-md)" }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: "1px solid var(--border-subtle)" }}>
-          <Search size={18} style={{ color: "var(--text-muted)" }} />
-          <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索命令..." style={{ border: "none", background: "transparent", flex: 1, fontSize: 15, outline: "none", color: "var(--text-primary)" }} />
-          <kbd style={{ fontSize: 12, color: "var(--text-muted)", border: "1px solid var(--border-subtle)", borderRadius: 4, padding: "2px 6px" }}>esc</kbd>
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(11,15,25,0.55)", // --bg with opacity
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
+        display: "flex", justifyContent: "center", paddingTop: "15vh",
+      }}
+      onClick={() => setOpen(false)}
+    >
+      <div
+        style={{
+          background: "var(--bg-elev)", borderRadius: "var(--r-xl)", width: 520, maxHeight: "60vh",
+          overflow: "hidden", border: "1px solid var(--border-strong)",
+          boxShadow: "var(--shadow-card), 0 0 40px rgba(99,102,241,.12)",
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Search bar */}
+        <div className="search-box" style={{ width: "100%", borderRadius: 0, border: "none", borderBottom: "1px solid var(--border)", padding: "12px 16px" }}>
+          <Search size={18} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+          <input
+            autoFocus
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="搜索命令..."
+          />
+          <kbd style={{
+            fontSize: 12, color: "var(--text-3)", border: "1px solid var(--border)",
+            borderRadius: 4, padding: "2px 6px", fontFamily: "inherit", flexShrink: 0,
+          }}>
+            esc
+          </kbd>
         </div>
+
+        {/* Results */}
         <div style={{ overflow: "auto", maxHeight: "calc(60vh - 52px)", padding: 8 }}>
           {filtered.map(c => (
-            <button key={c.id} onClick={() => { c.action(); setOpen(false); }} style={{ width: "100%", justifyContent: "flex-start", padding: "10px 12px", border: "none", borderRadius: 8, marginBottom: 2 }}>
+            <button
+              key={c.id}
+              onClick={() => { c.action(); setOpen(false); }}
+              style={{
+                width: "100%", justifyContent: "flex-start", padding: "10px 12px",
+                border: "none", borderRadius: "var(--r-sm)", marginBottom: 2,
+                background: "transparent", color: "var(--text-2)", fontSize: 14,
+                fontWeight: 500, textAlign: "left", cursor: "pointer",
+                transition: "background .15s, color .15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-1)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-2)"; }}
+            >
               {c.label}
             </button>
           ))}

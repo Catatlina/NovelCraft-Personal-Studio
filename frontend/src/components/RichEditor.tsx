@@ -8,6 +8,7 @@ import {
   Moon, Sun, Eye, EyeOff, Type, Gauge
 } from "lucide-react";
 import "../styles/novel-prose.css";
+import "../styles/proto.css";
 
 type Props = {
   value: string;
@@ -132,51 +133,51 @@ export function RichEditor({
   return (
     <div className="novel-editor-area" ref={editorRef}>
       {/* ── Toolbar ── */}
-      <div className="novel-toolbar">
+      <div className="novel-toolbar" style={{ background: "var(--bg-elev)", border: "1px solid var(--border)" }}>
         {/* Text formatting */}
-        <button onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive("bold") ? "active" : ""} title="加粗 (Ctrl+B)">
+        <button onClick={() => editor.chain().focus().toggleBold().run()} className={`icon-btn ${editor.isActive("bold") ? "active" : ""}`} title="加粗 (Ctrl+B)" style={{ width: 32, height: 32 }}>
           <Bold size={15} />
         </button>
-        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive("italic") ? "active" : ""} title="斜体 (Ctrl+I)">
+        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={`icon-btn ${editor.isActive("italic") ? "active" : ""}`} title="斜体 (Ctrl+I)" style={{ width: 32, height: 32 }}>
           <Italic size={15} />
         </button>
-        <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive("heading", { level: 2 }) ? "active" : ""} title="章节标题">
+        <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={`icon-btn ${editor.isActive("heading", { level: 2 }) ? "active" : ""}`} title="章节标题" style={{ width: 32, height: 32 }}>
           <Heading size={15} />
         </button>
-        <button onClick={() => editor.chain().focus().toggleBulletList().run()} className={editor.isActive("bulletList") ? "active" : ""} title="列表">
+        <button onClick={() => editor.chain().focus().toggleBulletList().run()} className={`icon-btn ${editor.isActive("bulletList") ? "active" : ""}`} title="列表" style={{ width: 32, height: 32 }}>
           <List size={15} />
         </button>
 
         <div className="toolbar-divider" />
 
         {/* Undo/Redo */}
-        <button onClick={() => editor.chain().focus().undo().run()} title="撤销">
+        <button onClick={() => editor.chain().focus().undo().run()} className="icon-btn" title="撤销" style={{ width: 32, height: 32 }}>
           <Undo size={15} />
         </button>
-        <button onClick={() => editor.chain().focus().redo().run()} title="重做">
+        <button onClick={() => editor.chain().focus().redo().run()} className="icon-btn" title="重做" style={{ width: 32, height: 32 }}>
           <Redo size={15} />
         </button>
 
         <div className="toolbar-divider" />
 
         {/* AI operations */}
-        <button onClick={() => onAiOp?.("polish")} title="AI润色选中文本" style={{ width: "auto", padding: "0 8px", gap: 4 }}>
+        <button onClick={() => onAiOp?.("polish")} className="btn-sm btn-ghost" title="AI润色选中文本" style={{ gap: 4 }}>
           <Wand2 size={13} /> 润色
         </button>
-        <button onClick={() => onAiOp?.("deai")} title="七层去AI味" style={{ width: "auto", padding: "0 8px", gap: 4 }}>
+        <button onClick={() => onAiOp?.("deai")} className="btn-sm btn-ghost" title="七层去AI味" style={{ gap: 4 }}>
           <RefreshCcw size={13} /> 去AI味
         </button>
 
         <div className="toolbar-spacer" />
 
         {/* View toggles */}
-        <button onClick={onToggleFocusMode} className={isFocusMode ? "active" : ""} title="专注模式">
+        <button onClick={onToggleFocusMode} className={`icon-btn ${isFocusMode ? "active" : ""}`} title="专注模式" style={{ width: 32, height: 32 }}>
           <EyeOff size={15} />
         </button>
-        <button onClick={onToggleNightMode} className={isNightMode ? "active" : ""} title="夜间模式">
+        <button onClick={onToggleNightMode} className={`icon-btn ${isNightMode ? "active" : ""}`} title="夜间模式" style={{ width: 32, height: 32 }}>
           {isNightMode ? <Sun size={15} /> : <Moon size={15} />}
         </button>
-        <button onClick={onToggleFullscreen} title={isFullscreen ? "退出全屏" : "全屏"}>
+        <button onClick={onToggleFullscreen} className="icon-btn" title={isFullscreen ? "退出全屏" : "全屏"} style={{ width: 32, height: 32 }}>
           {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
         </button>
       </div>
@@ -185,18 +186,21 @@ export function RichEditor({
       {showFloatBar && (
         <div
           className="floating-toolbar"
-          style={{ left: barPos.x, top: barPos.y }}
+          style={{
+            left: barPos.x, top: barPos.y,
+            background: "var(--bg-elev)", border: "1px solid var(--border)"
+          }}
         >
-          <button onClick={() => handleFloatOp("polish")}>
+          <button onClick={() => handleFloatOp("polish")} className="btn-sm btn-ghost">
             <Wand2 size={12} /> 润色
           </button>
-          <button onClick={() => handleFloatOp("rewrite")}>
+          <button onClick={() => handleFloatOp("rewrite")} className="btn-sm btn-ghost">
             <Sparkles size={12} /> 改写
           </button>
-          <button onClick={() => handleFloatOp("deai")}>
+          <button onClick={() => handleFloatOp("deai")} className="btn-sm btn-ghost">
             <RefreshCcw size={12} /> 去AI味
           </button>
-          <button onClick={() => handleFloatOp("continue")}>
+          <button onClick={() => handleFloatOp("continue")} className="btn-sm btn-ghost">
             <Bot size={12} /> 续写
           </button>
         </div>
@@ -205,11 +209,14 @@ export function RichEditor({
       {/* ── Right panel: AI Assistant ── */}
       <div style={{ display: "flex", gap: 12 }}>
         {/* ── Main editor area ── */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="card" style={{ flex: 1, minWidth: 0, padding: 16 }}>
           <EditorContent editor={editor} style={{ minHeight: isFullscreen ? "calc(100vh - 180px)" : 420 }} />
 
           {/* ── Status bar ── */}
-          <div className="novel-status-bar">
+          <div className="novel-status-bar" style={{
+            background: "transparent", border: "none", borderTop: "1px solid var(--border)",
+            borderRadius: 0, marginTop: 12, marginBottom: 0, padding: "10px 0 0"
+          }}>
             <span className="stat">
               <Type size={12} />
               <span className="stat-value">{stats.words.toLocaleString()}</span> 字
@@ -218,19 +225,19 @@ export function RichEditor({
               <Gauge size={12} />
               <span className="stat-value">{stats.readingTime}</span> 分钟阅读
             </span>
-            <span className="stat">
+            <span style={{ fontSize: 12, color: "var(--text-3)" }}>
               共 <span className="stat-value">{stats.paragraphs}</span> 段
             </span>
             <span style={{ flex: 1 }} />
-            {dirty && <span className="stat stat-saving">● 未保存</span>}
-            {!dirty && autoSavedAt && <span className="stat stat-saved">已保存 {autoSavedAt}</span>}
+            {dirty && <span className="stat stat-saving" style={{ color: "var(--orange)" }}>● 未保存</span>}
+            {!dirty && autoSavedAt && <span className="stat stat-saved" style={{ color: "var(--green)" }}>已保存 {autoSavedAt}</span>}
           </div>
         </div>
 
         {/* ── AI Panel (Right sidebar) ── */}
         {!isFocusMode && (
-          <div className="ai-panel" style={{ width: 300, flexShrink: 0 }}>
-            <div className="ai-panel-tabs">
+          <div className="ai-panel card" style={{ width: 300, flexShrink: 0, padding: 0 }}>
+            <div className="ai-panel-tabs" style={{ borderBottom: "1px solid var(--border)" }}>
               <button className={aiTab === "review" ? "active" : ""} onClick={() => setAiTab("review")}>
                 审查
               </button>
@@ -248,24 +255,24 @@ export function RichEditor({
                   <h4>七维评分</h4>
                   {aiReview?.review ? (
                     <>
-                      <p style={{ fontSize: 28, fontWeight: 800, color: "var(--nc-primary)" }}>
+                      <p style={{ fontSize: 28, fontWeight: 800, color: "var(--primary-light)" }}>
                         {aiReview.review.score ?? "--"}
                       </p>
                       <div style={{ fontSize: 12, marginTop: 8 }}>
                         {(aiReview.review.issues || []).map((issue, i) => (
-                          <p key={i} style={{ marginBottom: 4, color: "var(--text-secondary)" }}>
+                          <p key={i} style={{ marginBottom: 4, color: "var(--text-2)" }}>
                             • {issue}
                           </p>
                         ))}
                       </div>
                     </>
                   ) : (
-                    <p className="muted" style={{ fontSize: 12 }}>点击"七维审查"获取AI评价</p>
+                    <p className="muted" style={{ fontSize: 12, color: "var(--text-3)" }}>点击"七维审查"获取AI评价</p>
                   )}
                   {aiReview?.next && (
                     <>
                       <h4 style={{ marginTop: 16 }}>下一章规划</h4>
-                      <strong style={{ color: "var(--nc-accent)" }}>{aiReview.next.next_title || "下一章"}</strong>
+                      <strong style={{ color: "var(--cyan)" }}>{aiReview.next.next_title || "下一章"}</strong>
                       {aiReview.next.goals && (
                         <div style={{ fontSize: 11, marginTop: 4 }}>
                           {aiReview.next.goals.map((g, i) => <p key={i}>🎯 {g}</p>)}
@@ -288,11 +295,11 @@ export function RichEditor({
                   ) : deaiResult ? (
                     <div>
                       <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>原始:</span>
+                        <span style={{ fontSize: 12, color: "var(--text-3)" }}>原始:</span>
                         <span className={`deai-score-badge ${deaiResult.original_score && deaiResult.original_score >= 60 ? "high-ai" : deaiResult.original_score && deaiResult.original_score >= 30 ? "medium-ai" : "low-ai"}`}>
                           {deaiResult.original_score ?? "--"}分
                         </span>
-                        <span style={{ color: "var(--nc-accent)" }}>→</span>
+                        <span style={{ color: "var(--primary-light)" }}>→</span>
                         <span className={`deai-score-badge ${deaiResult.final_score && deaiResult.final_score >= 60 ? "high-ai" : deaiResult.final_score && deaiResult.final_score >= 30 ? "medium-ai" : "low-ai"}`}>
                           {deaiResult.final_score ?? "--"}分
                         </span>
@@ -308,7 +315,7 @@ export function RichEditor({
                       ))}
                     </div>
                   ) : (
-                    <p className="muted" style={{ fontSize: 12 }}>
+                    <p className="muted" style={{ fontSize: 12, color: "var(--text-3)" }}>
                       点击"去AI味"按钮执行七层管线处理
                     </p>
                   )}
@@ -319,7 +326,7 @@ export function RichEditor({
               {aiTab === "suggest" && (
                 <div>
                   <h4>AI 写作建议</h4>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  <div style={{ fontSize: 12, color: "var(--text-2)" }}>
                     <p>选中文本后使用浮动工具栏进行：</p>
                     <ul style={{ paddingLeft: 16, marginTop: 8, lineHeight: 1.8 }}>
                       <li><strong>润色</strong> — 优化文笔，保持原意</li>
@@ -329,11 +336,8 @@ export function RichEditor({
                     </ul>
                     <button
                       onClick={() => onAiOp?.("deai")}
-                      style={{
-                        marginTop: 12, width: "100%", justifyContent: "center",
-                        background: "rgba(255,107,53,0.1)", color: "var(--nc-primary)",
-                        border: "1px solid rgba(255,107,53,0.2)"
-                      }}
+                      className="btn-sm btn-primary"
+                      style={{ marginTop: 12, width: "100%", justifyContent: "center" }}
                     >
                       <RefreshCcw size={14} /> 整章去AI味
                     </button>

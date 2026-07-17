@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Search, BookOpen, FileText } from "lucide-react";
 import { api } from "../lib/api";
+import "../styles/proto.css";
 
 type KnowledgeItem = {
   id: string; kind: string; title: string; body: string;
@@ -22,8 +23,10 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div className="panel">
-        <h3><BookOpen size={14} /> 知识库检索</h3>
+      <div className="card">
+        <div className="card-head">
+          <div className="card-title"><BookOpen size={14} /> 知识库检索</div>
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
             placeholder="搜索知识库..."
@@ -39,19 +42,16 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
             <option value="hotspot">热点</option>
             <option value="ranking">榜单</option>
           </select>
-          <button disabled={!projectId} onClick={search}><Search size={14} /> 搜索</button>
+          <button className="btn-sm" disabled={!projectId} onClick={search}><Search size={14} /> 搜索</button>
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
         {results.map(item => (
-          <div key={item.id} className="panel" style={{ fontSize: 13, padding: 12 }}>
+          <div key={item.id} className="card" style={{ fontSize: 13, padding: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ fontWeight: 600 }}>{item.title?.slice(0, 60)}</span>
-              <span style={{
-                fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                background: "var(--surface-raised)", color: "var(--text-muted)"
-              }}>
+              <span className="badge gray">
                 {item.kind}
                 {item.similarity ? ` · ${(item.similarity * 100).toFixed(0)}%` : ""}
               </span>
@@ -64,9 +64,10 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
       </div>
 
       {results.length === 0 && query && (
-        <div style={{ textAlign: "center", padding: 32, color: "var(--text-muted)" }}>
-          <FileText size={32} />
-          <p>未找到匹配的知识条目</p>
+        <div className="empty">
+          <div className="empty-ic"><FileText size={26} /></div>
+          <h3>未找到匹配的知识条目</h3>
+          <p>尝试更换关键词或筛选条件</p>
         </div>
       )}
     </div>

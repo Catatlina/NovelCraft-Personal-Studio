@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, api } from "../lib/api";
+import "../styles/proto.css";
 
 type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string; capture_status?: string; user_action_required?: boolean; ocr_required?: boolean };
@@ -315,149 +316,334 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
   useEffect(() => { if (topicTab === "bookmarked") void loadBookmarked(); }, [topicTab, projectId]);
 
-  return <div style={{ display: "grid", gap: 16 }}>
-    {message && <div className="panel">{message}</div>}
-    <section className="panel"><h2>小说榜单源</h2>
-      <button className="primary" disabled={!!busy} onClick={scanAll} style={{marginBottom:12,fontSize:15,padding:'10px 24px'}}>
-        🚀 {busy==="scan-all"?"采集中…":"一键采集所有平台"}
-      </button>
-      <div className="grid-cards">
-      {sources.map(source => {
-        const health = source.last_error ? "异常" : source.last_success_at ? "健康" : "未采集";
-        return <article className="feature-card" key={source.source_key}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <strong>{source.display_name}</strong>
-          <span className={source.last_error ? "danger-text" : ""} style={{ fontSize: 12 }}>{health}</span>
-        </div>
-        <small>{source.last_success_at ? `最近成功：${new Date(source.last_success_at).toLocaleString()}` : "最近成功：暂无"}</small>
-        {source.capture_status && <small>采集状态：{source.capture_status}</small>}
-        {source.user_action_required && <span className="danger-text">需要用户在浏览器完成验证后重新采集</span>}
-        {source.ocr_required && <span>该来源需要截图/OCR 采集</span>}
-        {source.last_error && <span className="danger-text">{source.last_error}</span>}
-        <button className="primary" disabled={!!busy} onClick={() => scan(source)}>{busy === `scan:${source.source_key}` ? "采集中…" : "立即扫榜"}</button>
-      </article>; })}
-    </div>
-      <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-        <strong>导入已有榜单文件</strong>
-        <small>支持 UTF-8 CSV、普通 JSON 数组，或浏览器/OCR 采集工件。番茄 OCR / 起点会话工件会自动保留截图、置信度和来源证据。</small>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <input aria-label="榜单来源标识" value={importSource} onChange={event => setImportSource(event.target.value)} placeholder="来源标识，例如 qidian_manual" />
-          <input aria-label="选择榜单文件" type="file" accept=".csv,.json,text/csv,application/json" onChange={event => void selectImportFile(event.target.files?.[0])} />
-          <button className="primary" disabled={!!busy || !importItems.length} onClick={() => void importRanking()}>{busy === "import" ? "导入中…" : "导入榜单"}</button>
-        </div>
-        {importFileName && <small>{importFileName}：{captureArtifact ? `识别为 ${captureArtifact.source} 采集工件，状态 ${captureArtifact.status || "succeeded"}` : "已解析"} {importItems.length} 条，提交前不会上传。</small>}
+  // Status badge helper
+  const statusBadge = (status: string, captureStatus?: string) => {
+    if (status === "failed") return <span className="badge red">失败</span>;
+    if (captureStatus === "needs_review") return <span className="badge orange">待人工复核</span>;
+    if (captureStatus === "partial") return <span className="badge orange">部分成功</span>;
+    return <span className="badge green">成功</span>;
+  };
+
+  return <div style={{ display: "grid", gap: 20 }}>
+    {/* ── Page head ── */}
+    <div className="page-head">
+      <div>
+        <h1>榜单中心</h1>
+        <p>采集各大平台热门榜单，AI 分析市场趋势与原创选题</p>
       </div>
-    </section>
+      <div className="head-actions">
+        <button
+          className="btn-primary"
+          style={{ width: "auto", padding: "0 24px", height: 42 }}
+          disabled={!!busy}
+          onClick={scanAll}
+        >
+          🚀 {busy === "scan-all" ? "采集中…" : "一键采集所有平台"}
+        </button>
+      </div>
+    </div>
+
+    {/* ── Message banner ── */}
+    {message && (
+      <div
+        style={{
+          padding: "10px 16px",
+          borderRadius: "var(--r-md)",
+          background: "var(--primary-dim)",
+          color: "var(--primary-light)",
+          fontSize: 13,
+          fontWeight: 500,
+        }}
+      >
+        {message}
+      </div>
+    )}
+
+    {/* ── Source cards + import ── */}
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title" style={{ gap: 6 }}>
+          <span>📡</span> 榜单源
+        </div>
+        <span className="card-sub">{sources.length} 个平台</span>
+      </div>
+      <div className="grid grid-3">
+        {sources.map(source => {
+          const healthLabel = source.last_error ? "异常" : source.last_success_at ? "健康" : "未采集";
+          const healthBadge = source.last_error ? "red" : source.last_success_at ? "green" : "gray";
+          return <div className="card" key={source.source_key} style={{ padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+              <strong style={{ fontSize: 14 }}>{source.display_name}</strong>
+              <span className={`badge ${healthBadge}`}>{healthLabel}</span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.6 }}>
+              <div>{source.last_success_at ? `最近成功：${new Date(source.last_success_at).toLocaleString()}` : "最近成功：暂无"}</div>
+              {source.capture_status && <div>采集状态：{source.capture_status}</div>}
+              {source.user_action_required && <div style={{ color: "var(--red)" }}>需要用户在浏览器完成验证后重新采集</div>}
+              {source.ocr_required && <div>该来源需要截图/OCR 采集</div>}
+              {source.last_error && <div style={{ color: "var(--red)" }}>{source.last_error}</div>}
+            </div>
+            <button
+              className="btn-sm btn-primary"
+              style={{ marginTop: 10, width: "100%" }}
+              disabled={!!busy}
+              onClick={() => scan(source)}
+            >
+              {busy === `scan:${source.source_key}` ? "采集中…" : "立即扫榜"}
+            </button>
+          </div>;
+        })}
+      </div>
+
+      {/* ── Import section ── */}
+      <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+        <strong style={{ fontSize: 14, display: "block", marginBottom: 4 }}>导入已有榜单文件</strong>
+        <small style={{ color: "var(--text-2)" }}>支持 UTF-8 CSV、普通 JSON 数组，或浏览器/OCR 采集工件。番茄 OCR / 起点会话工件会自动保留截图、置信度和来源证据。</small>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <input
+            aria-label="榜单来源标识"
+            value={importSource}
+            onChange={event => setImportSource(event.target.value)}
+            placeholder="来源标识，例如 qidian_manual"
+            className="form-input"
+            style={{ width: 200 }}
+          />
+          <input
+            aria-label="选择榜单文件"
+            type="file"
+            accept=".csv,.json,text/csv,application/json"
+            onChange={event => void selectImportFile(event.target.files?.[0])}
+            style={{ fontSize: 13 }}
+          />
+          <button
+            className="btn-primary"
+            style={{ width: "auto", padding: "0 18px", height: 38 }}
+            disabled={!!busy || !importItems.length}
+            onClick={() => void importRanking()}
+          >
+            {busy === "import" ? "导入中…" : "导入榜单"}
+          </button>
+        </div>
+        {importFileName && (
+          <small style={{ color: "var(--text-2)", display: "block", marginTop: 6 }}>
+            {importFileName}：{captureArtifact ? `识别为 ${captureArtifact.source} 采集工件，状态 ${captureArtifact.status || "succeeded"}` : "已解析"}{" "}
+            {importItems.length} 条，提交前不会上传。
+          </small>
+        )}
+      </div>
+    </div>
+
+    {/* ── Analysis mode selector ── */}
     {snapshots.filter(s => s.status === "succeeded").length > 0 && (
-    <section className="panel">
+    <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <strong>分析模式：</strong>
-          <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
+          <strong style={{ fontSize: 13 }}>分析模式：</strong>
+          <div className="seg" style={{ width: "auto" }}>
             <button
+              className={analysisMode === "single" ? "on" : ""}
               onClick={() => { setAnalysisMode("single"); setMultiAnalysisResult(null); }}
-              style={{
-                padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                background: analysisMode === "single" ? "var(--nc-primary, #FF6B35)" : "transparent",
-                color: analysisMode === "single" ? "#fff" : "var(--text-muted)",
-              }}
-            >📋 单平台分析</button>
+            >
+              📋 单平台分析
+            </button>
             <button
+              className={analysisMode === "multi" ? "on" : ""}
               onClick={() => setAnalysisMode("multi")}
-              style={{
-                padding: "6px 14px", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                background: analysisMode === "multi" ? "var(--nc-primary, #FF6B35)" : "transparent",
-                color: analysisMode === "multi" ? "#fff" : "var(--text-muted)",
-              }}
-            >📊 多平台聚合</button>
+            >
+              📊 多平台聚合
+            </button>
           </div>
         </div>
         {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length >= 2 && (
           <button
-            className="primary"
+            className="btn-primary"
+            style={{ width: "auto", padding: "0 20px", height: 40, fontSize: 14 }}
             disabled={multiAnalysisLoading}
             onClick={() => void analyzeMultiPlatform()}
-            style={{ padding: "8px 20px", fontSize: 14, fontWeight: 700 }}
           >
             {multiAnalysisLoading ? "聚合分析中…" : "🚀 多平台聚合分析"}
           </button>
         )}
         {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length < 2 && (
-          <small style={{ color: "var(--text-muted)" }}>需要至少 2 个成功快照才能聚合分析</small>
+          <small style={{ color: "var(--text-2)" }}>需要至少 2 个成功快照才能聚合分析</small>
         )}
       </div>
-    </section>
+    </div>
     )}
-    <section className="panel"><h2>榜单快照</h2><table><thead><tr><th>来源</th><th>状态</th><th>数量</th><th>时间</th><th>操作</th></tr></thead>
-      <tbody>{snapshots.map(snapshot => <React.Fragment key={snapshot.id}>
-        <tr><td>{snapshot.display_name}</td><td><span className={snapshot.status === "failed" || snapshot.capture_status === "needs_review" ? "danger-text" : ""}>{snapshot.status === "failed" ? "失败" : snapshot.capture_status === "needs_review" ? "待人工复核" : snapshot.capture_status === "partial" ? "部分成功" : "成功"}</span></td><td>{snapshot.item_count}</td><td>{new Date(snapshot.captured_at).toLocaleString()}</td><td>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <button disabled={!!busy} onClick={() => void toggleSnapshot(snapshot)}>{openSnapshotId === snapshot.id ? "收起" : snapshot.status === "succeeded" ? "查看榜单" : "查看错误"}</button>
-            {snapshot.status === "succeeded" && <button disabled={!!busy} onClick={() => void validateMetadata(snapshot)}>{busy === `validate:${snapshot.id}` ? "校验中…" : "交叉校验元数据"}</button>}
-            {snapshot.status === "succeeded" && (snapshot.capture_status === "needs_review" || snapshot.capture_status === "partial") && <button className="primary" disabled={!!busy} onClick={() => void confirmCapture(snapshot)}>{busy === `confirm:${snapshot.id}` ? "确认中…" : "确认采集证据"}</button>}
-            {snapshot.status === "succeeded" && snapshot.capture_status !== "needs_review" && snapshot.capture_status !== "partial" && <button disabled={!!busy} onClick={() => analyze(snapshot)}>生成分析与选题</button>}
-            {snapshot.status === "failed" && <button className="primary" disabled={!!busy} onClick={() => retrySnapshot(snapshot)}>{busy === `retry:${snapshot.id}` ? "重试中…" : "重新采集"}</button>}
-          </div>
-        </td></tr>
-        {openSnapshotId === snapshot.id && <tr><td colSpan={5}>
-          {snapshot.status === "failed" ? <div className="danger-text"><strong>失败详情：</strong>{snapshot.error || "数据源未返回可用榜单，暂无更多错误信息"}</div> :
-            busy === `detail:${snapshot.id}` ? <small>正在加载榜单详情…</small> :
-            <div><strong>榜单前 10 条</strong>
-              <ol style={{ margin: "10px 0 0", paddingLeft: 24 }}>
-                {(snapshotDetails[snapshot.id]?.items || []).slice(0, 10).map(item => {
-                  const collector = item.collector || item.metrics?.collector || "未记录";
-                  const confidence = item.confidence ?? item.metrics?.confidence;
-                  const evidence = item.evidence || item.metrics?.evidence;
-                  const lowConfidence = confidence !== undefined && confidence < 0.85;
-                  return <li key={item.id} style={{ marginBottom: 10 }}>
-                    {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer">{item.title || "未命名作品"}</a> : (item.title || "未命名作品")}
-                    <small> · {item.author || "未知作者"}{item.category ? ` · ${item.category}` : ""}</small>
-                    <div><small>采集器：{collector} · 置信度：{confidence === undefined ? "未记录" : `${Math.round(confidence * 100)}%`} · 证据：{evidenceText(evidence)}</small></div>
-                    <div><small>元数据交叉校验：{item.metadata_status || "unvalidated"}{item.metrics?.validation ? ` · ${evidenceText(item.metrics.validation)}` : ""}</small></div>
-                    {lowConfidence && <div className="danger-text"><small>低置信度：请人工核对原始证据后再用于市场分析。</small></div>}
-                  </li>;
-                })}
-              </ol>
-              {snapshotDetails[snapshot.id] && snapshotDetails[snapshot.id].items.length === 0 && <small>该快照没有榜单条目</small>}
-              {snapshotDetails[snapshot.id]?.latest_analysis && <div className="analysis-card" style={{ marginTop: 14 }}>
-                <strong>AI 市场分析</strong><small> · {snapshotDetails[snapshot.id].latest_analysis?.analysis_mode}</small>
-                <p>{snapshotDetails[snapshot.id].latest_analysis?.summary || "未产出摘要"}</p>
-                <p><b>目标受众：</b>{snapshotDetails[snapshot.id].latest_analysis?.audience?.primary || "未产出"}</p>
-                <p><b>标题模式：</b>{snapshotDetails[snapshot.id].latest_analysis?.title_patterns?.map(item => item.pattern).filter(Boolean).join("、") || "未产出"}</p>
-                <p><b>开篇节奏：</b>{snapshotDetails[snapshot.id].latest_analysis?.pacing?.opening || "未产出"}</p>
-                <p><b>市场信号：</b>{snapshotDetails[snapshot.id].latest_analysis?.market_signals?.map(item => item.signal).filter(Boolean).join("；") || "未产出"}</p>
-                <p><b>原创约束：</b>{snapshotDetails[snapshot.id].latest_analysis?.originality_constraints?.join("；") || "未产出"}</p>
-                <small>原创风险检查仅作辅助，不构成版权或法律结论。</small>
-              </div>}
-            </div>}
-        </td></tr>}
-      </React.Fragment>)}</tbody>
-    </table></section>
+
+    {/* ── Snapshots table ── */}
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">
+          <span>📸</span> 榜单快照
+        </div>
+        <span className="card-sub">{snapshots.length} 条记录</span>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>来源</th>
+              <th>状态</th>
+              <th>数量</th>
+              <th>时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {snapshots.length === 0 ? (
+              <tr>
+                <td colSpan={5}>
+                  <div className="empty" style={{ border: "none", padding: 30 }}>
+                    <p>暂无快照记录，请先扫描榜单源或导入榜单文件。</p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              snapshots.map(snapshot => <React.Fragment key={snapshot.id}>
+                <tr>
+                  <td>{snapshot.display_name}</td>
+                  <td>{statusBadge(snapshot.status, snapshot.capture_status)}</td>
+                  <td>{snapshot.item_count}</td>
+                  <td style={{ fontSize: 12, color: "var(--text-2)" }}>{new Date(snapshot.captured_at).toLocaleString()}</td>
+                  <td>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      <button
+                        className="btn-sm"
+                        style={{ background: "var(--bg-hover)", color: "var(--text-2)" }}
+                        disabled={!!busy}
+                        onClick={() => void toggleSnapshot(snapshot)}
+                      >
+                        {openSnapshotId === snapshot.id ? "收起" : snapshot.status === "succeeded" ? "查看榜单" : "查看错误"}
+                      </button>
+                      {snapshot.status === "succeeded" && (
+                        <button
+                          className="btn-sm"
+                          style={{ background: "var(--bg-hover)", color: "var(--text-2)" }}
+                          disabled={!!busy}
+                          onClick={() => void validateMetadata(snapshot)}
+                        >
+                          {busy === `validate:${snapshot.id}` ? "校验中…" : "交叉校验元数据"}
+                        </button>
+                      )}
+                      {snapshot.status === "succeeded" && (snapshot.capture_status === "needs_review" || snapshot.capture_status === "partial") && (
+                        <button
+                          className="btn-sm btn-primary"
+                          style={{ width: "auto" }}
+                          disabled={!!busy}
+                          onClick={() => void confirmCapture(snapshot)}
+                        >
+                          {busy === `confirm:${snapshot.id}` ? "确认中…" : "确认采集证据"}
+                        </button>
+                      )}
+                      {snapshot.status === "succeeded" && snapshot.capture_status !== "needs_review" && snapshot.capture_status !== "partial" && (
+                        <button
+                          className="btn-sm"
+                          style={{ background: "var(--bg-hover)", color: "var(--text-2)" }}
+                          disabled={!!busy}
+                          onClick={() => analyze(snapshot)}
+                        >
+                          生成分析与选题
+                        </button>
+                      )}
+                      {snapshot.status === "failed" && (
+                        <button
+                          className="btn-sm btn-primary"
+                          style={{ width: "auto" }}
+                          disabled={!!busy}
+                          onClick={() => retrySnapshot(snapshot)}
+                        >
+                          {busy === `retry:${snapshot.id}` ? "重试中…" : "重新采集"}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                {openSnapshotId === snapshot.id && (
+                  <tr>
+                    <td colSpan={5} style={{ whiteSpace: "normal", padding: "16px 20px" }}>
+                      {snapshot.status === "failed" ? (
+                        <div style={{ color: "var(--red)", fontSize: 13 }}>
+                          <strong>失败详情：</strong>{snapshot.error || "数据源未返回可用榜单，暂无更多错误信息"}
+                        </div>
+                      ) : busy === `detail:${snapshot.id}` ? (
+                        <small style={{ color: "var(--text-2)" }}>正在加载榜单详情…</small>
+                      ) : (
+                        <div>
+                          <strong style={{ fontSize: 14 }}>榜单前 10 条</strong>
+                          <ol style={{ margin: "10px 0 0", paddingLeft: 24, fontSize: 13 }}>
+                            {(snapshotDetails[snapshot.id]?.items || []).slice(0, 10).map(item => {
+                              const collector = item.collector || item.metrics?.collector || "未记录";
+                              const confidence = item.confidence ?? item.metrics?.confidence;
+                              const evidence = item.evidence || item.metrics?.evidence;
+                              const lowConfidence = confidence !== undefined && confidence < 0.85;
+                              return <li key={item.id} style={{ marginBottom: 10, lineHeight: 1.7 }}>
+                                {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary-light)" }}>{item.title || "未命名作品"}</a> : (item.title || "未命名作品")}
+                                <small style={{ color: "var(--text-2)" }}> · {item.author || "未知作者"}{item.category ? ` · ${item.category}` : ""}</small>
+                                <div><small style={{ color: "var(--text-3)" }}>采集器：{collector} · 置信度：{confidence === undefined ? "未记录" : `${Math.round(confidence * 100)}%`} · 证据：{evidenceText(evidence)}</small></div>
+                                <div><small style={{ color: "var(--text-3)" }}>元数据交叉校验：{item.metadata_status || "unvalidated"}{item.metrics?.validation ? ` · ${evidenceText(item.metrics.validation)}` : ""}</small></div>
+                                {lowConfidence && <div style={{ color: "var(--red)", fontSize: 12 }}>低置信度：请人工核对原始证据后再用于市场分析。</div>}
+                              </li>;
+                            })}
+                          </ol>
+                          {snapshotDetails[snapshot.id] && snapshotDetails[snapshot.id].items.length === 0 && (
+                            <small style={{ color: "var(--text-2)" }}>该快照没有榜单条目</small>
+                          )}
+                          {snapshotDetails[snapshot.id]?.latest_analysis && (
+                            <div className="card" style={{ marginTop: 14, padding: 16, background: "var(--primary-dim)", borderColor: "rgba(99,102,241,.2)" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                <strong style={{ fontSize: 14 }}>AI 市场分析</strong>
+                                <span className="badge purple">{snapshotDetails[snapshot.id].latest_analysis?.analysis_mode}</span>
+                              </div>
+                              <p style={{ fontSize: 13, marginBottom: 8 }}>{snapshotDetails[snapshot.id].latest_analysis?.summary || "未产出摘要"}</p>
+                              <p style={{ fontSize: 13, marginBottom: 4 }}><b>目标受众：</b>{snapshotDetails[snapshot.id].latest_analysis?.audience?.primary || "未产出"}</p>
+                              <p style={{ fontSize: 13, marginBottom: 4 }}><b>标题模式：</b>{snapshotDetails[snapshot.id].latest_analysis?.title_patterns?.map(item => item.pattern).filter(Boolean).join("、") || "未产出"}</p>
+                              <p style={{ fontSize: 13, marginBottom: 4 }}><b>开篇节奏：</b>{snapshotDetails[snapshot.id].latest_analysis?.pacing?.opening || "未产出"}</p>
+                              <p style={{ fontSize: 13, marginBottom: 4 }}><b>市场信号：</b>{snapshotDetails[snapshot.id].latest_analysis?.market_signals?.map(item => item.signal).filter(Boolean).join("；") || "未产出"}</p>
+                              <p style={{ fontSize: 13, marginBottom: 4 }}><b>原创约束：</b>{snapshotDetails[snapshot.id].latest_analysis?.originality_constraints?.join("；") || "未产出"}</p>
+                              <small style={{ color: "var(--text-3)" }}>原创风险检查仅作辅助，不构成版权或法律结论。</small>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>)
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {/* ── Multi-platform analysis results ── */}
     {multiAnalysisResult && (
-    <section className="panel">
-      <h2>📊 多平台聚合分析结果</h2>
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">
+          <span>📊</span> 多平台聚合分析结果
+        </div>
+        <span className="badge cyan">
+          {multiAnalysisResult.succeeded_layers || 0}/{multiAnalysisResult.total_layers || 0} 层通过
+        </span>
+      </div>
       <div style={{ display: "grid", gap: 16 }}>
+
         {/* Summary card */}
-        <div className="analysis-card" style={{ padding: 16 }}>
+        <div className="card" style={{ padding: 16, background: "var(--primary-dim)", borderColor: "rgba(99,102,241,.2)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <strong style={{ fontSize: 16 }}>聚合分析摘要</strong>
-            <small style={{ color: "var(--nc-accent, #00e5ff)" }}>
-              {multiAnalysisResult.succeeded_layers || 0}/{multiAnalysisResult.total_layers || 0} 层通过
-              · {multiAnalysisResult.status || "unknown"}
-            </small>
+            <strong style={{ fontSize: 15 }}>聚合分析摘要</strong>
+            <span className="badge purple">{multiAnalysisResult.status || "unknown"}</span>
           </div>
-          {multiAnalysisResult.summary && <p style={{ marginBottom: 12 }}>{multiAnalysisResult.summary}</p>}
+          {multiAnalysisResult.summary && <p style={{ fontSize: 13, marginBottom: 12 }}>{multiAnalysisResult.summary}</p>}
 
           {/* Platform breakdown */}
           {multiAnalysisResult.platform_breakdown && (
             <div style={{ marginBottom: 12 }}>
-              <strong>平台分布：</strong>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+              <strong style={{ fontSize: 13 }}>平台分布：</strong>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                 {Object.entries(multiAnalysisResult.platform_breakdown as Record<string, number>).map(([platform, count]) => (
-                  <span key={platform} style={{
-                    padding: "4px 10px", borderRadius: 4, fontSize: 12,
-                    background: "rgba(0,229,255,0.08)", color: "var(--nc-accent, #00e5ff)",
-                  }}>{platform}: {count}本</span>
+                  <span key={platform} className="badge cyan">{platform}: {count}本</span>
                 ))}
               </div>
             </div>
@@ -465,19 +651,18 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
           {/* Total books */}
           {multiAnalysisResult.total_books !== undefined && (
-            <p><strong>总计分析书籍：</strong>{multiAnalysisResult.total_books} 本</p>
+            <p style={{ fontSize: 13 }}><strong>总计分析书籍：</strong>{multiAnalysisResult.total_books} 本</p>
           )}
 
           {/* Top genres */}
           {multiAnalysisResult.top_genres && Array.isArray(multiAnalysisResult.top_genres) && (
             <div style={{ marginBottom: 12 }}>
-              <strong>热门题材（跨平台）：</strong>
+              <strong style={{ fontSize: 13 }}>热门题材（跨平台）：</strong>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                 {multiAnalysisResult.top_genres.map((g: any, i: number) => (
-                  <span key={i} style={{
-                    padding: "3px 10px", borderRadius: 4, fontSize: 12,
-                    background: "rgba(255,107,53,0.08)", color: "var(--nc-primary, #FF6B35)",
-                  }}>{typeof g === "string" ? g : `${g.genre || g.name}${g.count ? ` (${g.count})` : ""}`}</span>
+                  <span key={i} className="badge orange">
+                    {typeof g === "string" ? g : `${g.genre || g.name}${g.count ? ` (${g.count})` : ""}`}
+                  </span>
                 ))}
               </div>
             </div>
@@ -486,12 +671,10 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           {/* Common selling points */}
           {multiAnalysisResult.common_selling_points && Array.isArray(multiAnalysisResult.common_selling_points) && (
             <div style={{ marginBottom: 12 }}>
-              <strong>共性卖点：</strong>
-              <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+              <strong style={{ fontSize: 13 }}>共性卖点：</strong>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 13 }}>
                 {multiAnalysisResult.common_selling_points.map((sp: any, i: number) => (
-                  <li key={i} style={{ fontSize: 13 }}>
-                    {typeof sp === "string" ? sp : `${sp.point || sp.name}${sp.platforms ? ` [${sp.platforms.join(", ")}]` : ""}`}
-                  </li>
+                  <li key={i}>{typeof sp === "string" ? sp : `${sp.point || sp.name}${sp.platforms ? ` [${sp.platforms.join(", ")}]` : ""}`}</li>
                 ))}
               </ul>
             </div>
@@ -500,12 +683,10 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           {/* Market signals */}
           {multiAnalysisResult.market_signals && Array.isArray(multiAnalysisResult.market_signals) && (
             <div style={{ marginBottom: 12 }}>
-              <strong>市场信号：</strong>
-              <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+              <strong style={{ fontSize: 13 }}>市场信号：</strong>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 13 }}>
                 {multiAnalysisResult.market_signals.map((s: any, i: number) => (
-                  <li key={i} style={{ fontSize: 13 }}>
-                    {typeof s === "string" ? s : `${s.signal || s.name}${s.evidence ? ` — ${s.evidence}` : ""}`}
-                  </li>
+                  <li key={i}>{typeof s === "string" ? s : `${s.signal || s.name}${s.evidence ? ` — ${s.evidence}` : ""}`}</li>
                 ))}
               </ul>
             </div>
@@ -515,19 +696,19 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         {/* Layer-by-layer results */}
         {multiAnalysisResult.layers && typeof multiAnalysisResult.layers === "object" && Object.keys(multiAnalysisResult.layers).length > 0 && (
         <details open style={{ cursor: "pointer" }}>
-          <summary style={{ padding: "10px 16px", borderRadius: 6, background: "rgba(255,255,255,0.04)", fontWeight: 600, marginBottom: 8 }}>
+          <summary style={{ padding: "10px 16px", borderRadius: "var(--r-sm)", background: "var(--bg-hover)", fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
             🔍 逐层分析结果（点击展开/收起）
           </summary>
           <div style={{ display: "grid", gap: 10 }}>
             {Object.entries(multiAnalysisResult.layers as Record<string, any>).map(([layerName, layerData]) => (
-              <div key={layerName} className="analysis-card" style={{ padding: 12 }}>
-                <strong style={{ fontSize: 14, color: "var(--nc-accent, #00e5ff)" }}>
+              <div key={layerName} className="card" style={{ padding: 12 }}>
+                <strong style={{ fontSize: 14, color: "var(--primary-light)" }}>
                   {layerName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
                 </strong>
-                {layerData?.status && <small style={{ marginLeft: 8 }}>· {layerData.status}</small>}
+                {layerData?.status && <small style={{ marginLeft: 8, color: "var(--text-2)" }}>· {layerData.status}</small>}
                 {layerData?.summary && <p style={{ margin: "6px 0 0", fontSize: 13 }}>{layerData.summary}</p>}
                 {layerData && typeof layerData === "object" && !layerData.summary && !layerData.status && (
-                  <pre style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>
+                  <pre style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-2)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>
                     {JSON.stringify(layerData, null, 2)}
                   </pre>
                 )}
@@ -540,37 +721,35 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         {/* Heatmap / KeywordCloud */}
         {multiAnalysisResult.heatmap && (
           <details style={{ cursor: "pointer" }}>
-            <summary style={{ padding: "10px 16px", borderRadius: 6, background: "rgba(255,255,255,0.04)", fontWeight: 600, marginBottom: 8 }}>
+            <summary style={{ padding: "10px 16px", borderRadius: "var(--r-sm)", background: "var(--bg-hover)", fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
               🔥 热度图数据（点击展开）
             </summary>
-            <pre style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", padding: 12, background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+            <pre style={{ fontSize: 12, color: "var(--text-3)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", padding: 12, background: "rgba(0,0,0,0.2)", borderRadius: "var(--r-sm)" }}>
               {JSON.stringify(multiAnalysisResult.heatmap, null, 2)}
             </pre>
           </details>
         )}
       </div>
-    </section>
+    </div>
     )}
-    <section className="panel">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>原创选题池</h2>
+
+    {/* ── Topic pool ── */}
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">
+          <span>💡</span> 原创选题池
+        </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button
-            style={{
-              padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-              background: topicTab === "all" ? "var(--nc-primary, #FF6B35)" : "rgba(255,255,255,0.06)",
-              color: topicTab === "all" ? "#fff" : "var(--text-muted)",
-            }}
+            className={`btn-sm ${topicTab === "all" ? "btn-primary" : ""}`}
+            style={{ width: topicTab === "all" ? "auto" : "auto", background: topicTab !== "all" ? "var(--bg-hover)" : "", color: topicTab !== "all" ? "var(--text-2)" : "" }}
             onClick={() => setTopicTab("all")}
           >
             全部选题 ({topics.length})
           </button>
           <button
-            style={{
-              padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-              background: topicTab === "bookmarked" ? "var(--nc-primary, #FF6B35)" : "rgba(255,255,255,0.06)",
-              color: topicTab === "bookmarked" ? "#fff" : "var(--text-muted)",
-            }}
+            className={`btn-sm ${topicTab === "bookmarked" ? "btn-primary" : ""}`}
+            style={{ width: "auto", background: topicTab !== "bookmarked" ? "var(--bg-hover)" : "", color: topicTab !== "bookmarked" ? "var(--text-2)" : "" }}
             onClick={() => { setTopicTab("bookmarked"); void loadBookmarked(); }}
           >
             ⭐ 备选池 ({bookmarkedTopics.length})
@@ -579,42 +758,40 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       </div>
 
       {scanWarning && (
-        <div style={{ padding: "8px 12px", borderRadius: 6, background: "rgba(255,152,0,0.1)", color: "#ff9100", fontSize: 12, marginBottom: 10 }}>
+        <div style={{ padding: "8px 12px", borderRadius: "var(--r-sm)", background: "rgba(251,146,60,.12)", color: "var(--orange)", fontSize: 12, marginBottom: 12 }}>
           ⚠️ 新一轮扫描后，非备选选题将被清空。建议将心仪选题加入⭐备选池。
         </div>
       )}
 
       {/* Batch delete button */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 10, justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, justifyContent: "flex-end" }}>
         {((topicTab === "all" && topics.length > 0) || (topicTab === "bookmarked" && bookmarkedTopics.length > 0)) && (
           <button
             disabled={busy === "batch-delete"}
             onClick={() => void batchDeleteAll()}
-            style={{
-              padding: "6px 12px", borderRadius: 6, border: "1px solid #ff5252", background: "transparent",
-              color: "#ff5252", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 4,
-            }}
+            className="btn-sm"
+            style={{ background: "transparent", border: "1px solid var(--red)", color: "var(--red)", display: "flex", alignItems: "center", gap: 4 }}
           >
             <span>🗑</span> 全部删除
           </button>
         )}
       </div>
 
-      <div className="grid-cards">
+      <div className="grid grid-3">
         {(topicTab === "bookmarked" ? bookmarkedTopics : topics).map(topic => {
           const isBookmarked = (topic as any).meta?.bookmarked || false;
           return (
-            <article className="feature-card" key={topic.id}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <strong>{topic.title}</strong>
+            <div className="card" key={topic.id} style={{ padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <strong style={{ fontSize: 14 }}>{topic.title}</strong>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button
                     disabled={busy === `bookmark:${topic.id}`}
                     onClick={() => void toggleBookmark(topic)}
                     title={isBookmarked ? "已收藏" : "加入备选池"}
                     style={{
-                      background: "transparent", border: `1px solid ${isBookmarked ? "#ff9100" : "rgba(255,255,255,0.12)"}`,
-                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 14, color: isBookmarked ? "#ff9100" : "#888",
+                      background: "transparent", border: `1px solid ${isBookmarked ? "var(--orange)" : "var(--border)"}`,
+                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 14, color: isBookmarked ? "var(--orange)" : "var(--text-3)",
                     }}
                   >
                     {isBookmarked ? "⭐" : "☆"}
@@ -624,38 +801,47 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                     onClick={() => void deleteTopic(topic)}
                     title="删除选题"
                     style={{
-                      background: "transparent", border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 12, color: "#ff5252",
+                      background: "transparent", border: "1px solid var(--border)",
+                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 12, color: "var(--red)",
                     }}
                   >
                     🗑
                   </button>
                 </div>
               </div>
-              <small>{topic.genre} · 市场分 {topic.market_score}{isBookmarked ? " · ⭐ 已收藏" : ""}</small>
-              <p>{topic.premise}</p>
-              {topic.target_audience && <small><b>目标受众：</b>{topic.target_audience}</small>}
-              {!!topic.differentiators?.length && <small><b>差异化：</b>{topic.differentiators.join("；")}</small>}
-              {!!topic.market_evidence?.length && <small><b>市场依据：</b>{topic.market_evidence.join("；")}</small>}
-              {topic.risk && <small className="danger-text"><b>风险：</b>{topic.risk}</small>}
-              {topic.originality_notes && <small><b>原创边界：</b>{topic.originality_notes}</small>}
-              <button className="primary" disabled={!!busy} onClick={() => topic.novel_id ? void onBookCreated(topic.novel_id) : void createBook(topic)}>
+              <small style={{ color: "var(--text-2)", display: "block", marginBottom: 6 }}>
+                {topic.genre} · 市场分 {topic.market_score}{isBookmarked ? " · ⭐ 已收藏" : ""}
+              </small>
+              <p style={{ fontSize: 13, color: "var(--text-1)", marginBottom: 8 }}>{topic.premise}</p>
+              {topic.target_audience && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>目标受众：</b>{topic.target_audience}</small>}
+              {!!topic.differentiators?.length && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>差异化：</b>{topic.differentiators.join("；")}</small>}
+              {!!topic.market_evidence?.length && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>市场依据：</b>{topic.market_evidence.join("；")}</small>}
+              {topic.risk && <small style={{ color: "var(--red)", display: "block", marginBottom: 2 }}><b>风险：</b>{topic.risk}</small>}
+              {topic.originality_notes && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>原创边界：</b>{topic.originality_notes}</small>}
+              <button
+                className="btn-sm btn-primary"
+                style={{ marginTop: 8, width: "100%" }}
+                disabled={!!busy}
+                onClick={() => topic.novel_id ? void onBookCreated(topic.novel_id) : void createBook(topic)}
+              >
                 {topic.novel_id ? "打开书库作品" : "创建作品并生成策划+首章"}
               </button>
-            </article>
+            </div>
           );
         })}
-        {(topicTab === "bookmarked" && !bookmarkedTopics.length) && (
-          <p style={{ color: "var(--text-muted)", fontSize: 13, gridColumn: "1 / -1", textAlign: "center", padding: 20 }}>
-            备选池为空。点击 ☆ 将选题加入备选池。
-          </p>
+
+        {/* Empty states */}
+        {topicTab === "bookmarked" && !bookmarkedTopics.length && (
+          <div className="empty" style={{ gridColumn: "1 / -1" }}>
+            <p>备选池为空。点击 ☆ 将选题加入备选池。</p>
+          </div>
         )}
-        {(topicTab === "all" && !topics.length) && (
-          <p style={{ color: "var(--text-muted)", fontSize: 13, gridColumn: "1 / -1", textAlign: "center", padding: 20 }}>
-            暂无选题。请先扫描榜单并生成分析。
-          </p>
+        {topicTab === "all" && !topics.length && (
+          <div className="empty" style={{ gridColumn: "1 / -1" }}>
+            <p>暂无选题。请先扫描榜单并生成分析。</p>
+          </div>
         )}
       </div>
-    </section>
+    </div>
   </div>;
 }

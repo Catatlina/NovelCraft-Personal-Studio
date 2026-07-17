@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Save, RotateCcw } from "lucide-react";
 import { RichEditor } from "./RichEditor";
+import "../styles/proto.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
@@ -73,18 +74,14 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* ── Top bar: chapter select, title, save, view toggles ── */}
-      <div style={{
-        display: "flex", gap: 8, alignItems: "center", marginBottom: 8,
-        padding: "8px 12px", background: "var(--nc-card, rgba(22,22,50,.7))",
-        backdropFilter: "blur(12px)", borderRadius: 8, border: "1px solid rgba(255,107,53,.15)",
-        flexWrap: "wrap"
-      }}>
+      <div className="card" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 16px", flexWrap: "wrap" }}>
         <select
           value={chapter?.id ?? ""}
           onChange={event => selectChapter(event.target.value)}
           disabled={!chapters.length}
           aria-label="选择章节"
-          style={{ minWidth: 180 }}
+          className="form-input"
+          style={{ minWidth: 180, width: "auto", height: 34 }}
         >
           {chapters.map((item, index) => (
             <option key={item.id} value={item.id}>
@@ -95,37 +92,39 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         <input
           value={chapter?.title ?? ""}
           readOnly
+          className="form-input"
           style={{
             flex: 1, minWidth: 120, background: "transparent", border: "none",
-            fontSize: 18, fontWeight: 600, color: "var(--text-primary)"
+            fontSize: 18, fontWeight: 600, color: "var(--text-1)", height: 34
           }}
         />
-        <button onClick={saveChapter} disabled={!chapter} className="primary" style={{ padding: "6px 12px" }}>
+        <button onClick={saveChapter} disabled={!chapter} className="btn-sm btn-primary" style={{ width: "auto", padding: "0 14px" }}>
           <Save size={15} /> 保存
         </button>
-        <small className="muted" data-testid="autosave-status">
+        <small style={{ color: "var(--text-3)", fontSize: 12 }} data-testid="autosave-status">
           {dirty ? (<>未保存改动…</>) : autoSavedAt ? (<>已自动保存 {autoSavedAt}</>) : ""}
         </small>
 
         {/* View toggles */}
-        <div style={{ display: "flex", gap: 2, marginLeft: "auto" }}>
+        <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
           <button
             onClick={() => setFocusMode(!isFocusMode)}
             title="专注模式"
-            style={{ border: isFocusMode ? "1px solid var(--nc-accent)" : undefined, background: isFocusMode ? "rgba(0,229,255,.1)" : undefined }}
+            className="btn-sm btn-ghost"
           >
             {isFocusMode ? "👁 专注中" : "📝 专注"}
           </button>
           <button
             onClick={() => setNightMode(!isNightMode)}
             title="夜间模式"
-            style={{ border: isNightMode ? "1px solid var(--nc-accent)" : undefined }}
+            className="btn-sm btn-ghost"
           >
             {isNightMode ? "☀️" : "🌙"}
           </button>
           <button
             onClick={() => setFullscreen(!isFullscreen)}
             title={isFullscreen ? "退出全屏" : "全屏"}
+            className="btn-sm btn-ghost"
           >
             {isFullscreen ? "↙ 退出全屏" : "⛶ 全屏"}
           </button>
@@ -134,32 +133,32 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
 
       {/* ── Stream preview ── */}
       {streamPreview ? (
-        <div className="panel" style={{ maxHeight: 160, overflowY: "auto", fontSize: 13, whiteSpace: "pre-wrap", marginBottom: 8 }}>
-          <small className="muted">AI 生成中…</small>
-          <div>{streamPreview}</div>
+        <div className="card" style={{ maxHeight: 160, overflowY: "auto", fontSize: 13, whiteSpace: "pre-wrap", marginBottom: 12, padding: 12 }}>
+          <small style={{ color: "var(--cyan)" }}>AI 生成中…</small>
+          <div style={{ marginTop: 4 }}>{streamPreview}</div>
         </div>
       ) : null}
 
       {/* ── Offline notice ── */}
       {(offlineNotice || offlineQueueCount) ? (
-        <div className="pill pending" style={{ marginBottom: 8 }}>
+        <div className="badge orange" style={{ marginBottom: 12, padding: "8px 14px", fontSize: 12 }}>
           {offlineNotice || `离线队列 ${offlineQueueCount} 项`}
         </div>
       ) : null}
 
       {/* ── Conflict resolution ── */}
       {conflict && !conflictDismissed ? (
-        <div className="panel" style={{ marginBottom: 12 }}>
-          <h2>离线版本冲突</h2>
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--orange)", marginBottom: 12 }}>离线版本冲突</h2>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <label>本地稿<textarea value={localConflictText} readOnly rows={8} /></label>
-            <label>服务器稿<textarea value={serverText} readOnly rows={8} /></label>
-            <label>合并稿<textarea value={mergeText} onChange={event => setMergeText(event.target.value)} rows={8} /></label>
+            <label style={{ fontSize: 12, color: "var(--text-2)" }}>本地稿<textarea className="form-input" value={localConflictText} readOnly rows={8} style={{ marginTop: 4, background: "rgba(0,0,0,.25)", fontSize: 12 }} /></label>
+            <label style={{ fontSize: 12, color: "var(--text-2)" }}>服务器稿<textarea className="form-input" value={serverText} readOnly rows={8} style={{ marginTop: 4, background: "rgba(0,0,0,.25)", fontSize: 12 }} /></label>
+            <label style={{ fontSize: 12, color: "var(--text-2)" }}>合并稿<textarea className="form-input" value={mergeText} onChange={event => setMergeText(event.target.value)} rows={8} style={{ marginTop: 4, background: "rgba(0,0,0,.25)", fontSize: 12 }} /></label>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={() => { setEditorText(localConflictText); setConflictDismissed(true); }}>采用本地稿</button>
-            <button onClick={() => { setEditorText(serverText); setConflictDismissed(true); }}>采用服务器稿</button>
-            <button className="primary" onClick={() => { setEditorText(mergeText); setConflictDismissed(true); }}>采用合并稿</button>
+            <button className="btn-sm btn-ghost" onClick={() => { setEditorText(localConflictText); setConflictDismissed(true); }}>采用本地稿</button>
+            <button className="btn-sm btn-ghost" onClick={() => { setEditorText(serverText); setConflictDismissed(true); }}>采用服务器稿</button>
+            <button className="btn-sm btn-primary" style={{ width: "auto" }} onClick={() => { setEditorText(mergeText); setConflictDismissed(true); }}>采用合并稿</button>
           </div>
         </div>
       ) : null}
@@ -168,13 +167,10 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
       <div style={{ display: "flex", gap: 12, flex: 1, minHeight: 0 }}>
         {/* ── Left: Chapter tree (hidden in focus mode) ── */}
         {!isFocusMode && chapters.length > 1 && (
-          <div style={{
-            width: 200, flexShrink: 0, overflowY: "auto",
-            background: "var(--nc-card, rgba(22,22,50,.7))",
-            backdropFilter: "blur(12px)", borderRadius: 10,
-            border: "1px solid rgba(0,229,255,.1)", padding: 8
-          }}>
-            <h2 style={{ fontSize: 13, padding: "0 12px 8px", color: "var(--text-muted)", margin: 0 }}>章节目录</h2>
+          <div className="sidebar" style={{ width: 200 }}>
+            <div className="card-title" style={{ padding: "4px 8px 8px", fontSize: 13 }}>
+              章节目录
+            </div>
             <div className="chapter-tree">
               {chapterTree.map(ch => (
                 <button
@@ -214,21 +210,31 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
       </div>
 
       {/* ── Bottom: Version history ── */}
-      <div className="panel versions" style={{ marginTop: 12 }}>
-        <h2>版本历史</h2>
+      <div className="card" style={{ marginTop: 12, padding: "14px 18px" }}>
+        <div className="card-title" style={{ marginBottom: 10 }}>
+          版本历史
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {versions.map(v => (
-          <button key={v.id} onClick={() => restoreVersion(v.id)}>
-            <RotateCcw size={14} />{v.label}
-            <small>{new Date(v.created_at).toLocaleString()}</small>
+          <button key={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
+            <RotateCcw size={12} /> {v.label}
+            <small style={{ color: "var(--text-3)", marginLeft: 4 }}>{new Date(v.created_at).toLocaleString()}</small>
           </button>
         ))}
-        {offlineAiResults?.length ? <h2>离线 AI 结果</h2> : null}
-        {offlineAiResults?.map(result => (
-          <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)}>
-            应用 AI 结果
-            <small>{result.text.slice(0, 36)}…</small>
-          </button>
-        ))}
+        </div>
+        {offlineAiResults?.length ? (
+          <>
+            <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>离线 AI 结果</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {offlineAiResults?.map(result => (
+              <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
+                应用 AI 结果
+                <small style={{ color: "var(--text-3)", marginLeft: 4, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.text.slice(0, 36)}…</small>
+              </button>
+            ))}
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* ── Fullscreen overlay ── */}

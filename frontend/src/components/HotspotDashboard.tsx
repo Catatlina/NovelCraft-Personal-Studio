@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import {
   TrendingUp, Zap, Target, Plus, BookOpen, Trash2, Edit3,
-  RefreshCw, Eye, X, ChevronLeft, ChevronRight, Star, FileText
+  RefreshCw, Eye, X, ChevronLeft, ChevronRight, Star, FileText,
 } from "lucide-react";
 import { api } from "../lib/api";
+import "../styles/proto.css";
 import "../styles/novel-prose.css";
 
 type HotspotItem = {
@@ -247,12 +248,21 @@ export function HotspotDashboard() {
   };
 
   // ── Trend badge color ────────────────────────────────────────
-  const trendStyle = (trend: string) => {
+  const trendBadgeClass = (trend: string) => {
     switch (trend) {
-      case "rising": return { bg: "rgba(0,230,118,0.15)", color: "#00e676" };
-      case "new": return { bg: "rgba(0,229,255,0.15)", color: "#00e5ff" };
-      case "cooling": return { bg: "rgba(255,82,82,0.15)", color: "#ff5252" };
-      default: return { bg: "rgba(158,158,158,0.15)", color: "#9e9e9e" };
+      case "rising": return "badge orange";
+      case "new": return "badge cyan";
+      case "cooling": return "badge red";
+      default: return "badge gray";
+    }
+  };
+
+  const trendLabel = (trend: string) => {
+    switch (trend) {
+      case "rising": return "📈 上升";
+      case "new": return "🆕 新品";
+      case "cooling": return "📉 降温";
+      default: return "➡️ 平稳";
     }
   };
 
@@ -264,78 +274,91 @@ export function HotspotDashboard() {
     return "#00e5ff";
   };
 
-  // ── Styles ───────────────────────────────────────────────────
-  const tabBtnStyle = (active: boolean) => ({
-    padding: "8px 18px",
-    border: "none",
-    borderRadius: 6,
-    cursor: "pointer",
-    fontSize: 14,
-    fontWeight: active ? 600 : 400,
-    background: active ? "var(--nc-primary, #FF6B35)" : "rgba(255,255,255,0.06)",
-    color: active ? "#fff" : "var(--text-muted, #888)",
-  });
-
-  const chipStyle = (active: boolean) => ({
-    padding: "4px 12px",
-    borderRadius: 20,
-    border: `1px solid ${active ? "var(--nc-primary, #FF6B35)" : "rgba(255,255,255,0.12)"}`,
-    background: active ? "rgba(255,107,53,0.15)" : "transparent",
-    color: active ? "var(--nc-primary, #FF6B35)" : "var(--text-muted, #888)",
-    fontSize: 12,
-    cursor: "pointer",
-  });
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case "published": return "badge green";
+      case "draft": return "badge purple";
+      case "review": return "badge orange";
+      default: return "badge gray";
+    }
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Header */}
-      <div className="panel" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <TrendingUp size={16} /> 热点看板
-        </h3>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button style={tabBtnStyle(tab === "hotspots")} onClick={() => { setTab("hotspots"); setError(""); }}>
-            📊 今日热点
-          </button>
-          <button style={tabBtnStyle(tab === "overview")} onClick={() => { setTab("overview"); setError(""); }}>
-            🔍 热点总览
-          </button>
-          <button style={tabBtnStyle(tab === "library")} onClick={() => { setTab("library"); setError(""); }}>
-            📚 文库
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* ── Page head ──────────────────────────────────────────── */}
+      <div className="page-head">
+        <div>
+          <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <TrendingUp size={20} style={{ color: "var(--primary-light)" }} /> 热点看板
+          </h1>
+          <p>实时追踪全网热点，AI一键生成多平台内容</p>
+        </div>
+        <div className="head-actions">
+          <button
+            className="btn-sm"
+            disabled={loading}
+            onClick={() => { void loadHotspots(); }}
+            style={{
+              background: "var(--primary)", color: "#fff",
+              display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            <RefreshCw size={14} /> {loading ? "加载中…" : "刷新"}
           </button>
         </div>
       </div>
 
-      {error && <div className="panel" style={{ color: "#ff5252", fontSize: 13 }}>{error}</div>}
-      {notice && <div className="panel" style={{ color: "#00e676", fontSize: 13 }}>{notice}</div>}
+      {/* ── Main tabs ──────────────────────────────────────────── */}
+      <div className="tabs">
+        <button className={`tab${tab === "hotspots" ? " on" : ""}`} onClick={() => { setTab("hotspots"); setError(""); }}>
+          📊 今日热点
+        </button>
+        <button className={`tab${tab === "overview" ? " on" : ""}`} onClick={() => { setTab("overview"); setError(""); }}>
+          🔍 热点总览
+        </button>
+        <button className={`tab${tab === "library" ? " on" : ""}`} onClick={() => { setTab("library"); setError(""); }}>
+          📚 文库
+        </button>
+      </div>
+
+      {/* ── Notices ────────────────────────────────────────────── */}
+      {error && (
+        <div className="card" style={{ borderColor: "rgba(248,113,113,.25)", padding: 12 }}>
+          <span style={{ color: "var(--red)", fontSize: 13 }}>{error}</span>
+        </div>
+      )}
+      {notice && (
+        <div className="card" style={{ borderColor: "rgba(52,211,153,.25)", padding: 12 }}>
+          <span style={{ color: "var(--green)", fontSize: 13 }}>{notice}</span>
+        </div>
+      )}
+
+      {/* ── Toast ──────────────────────────────────────────────── */}
       {toast && (
         <div style={{
           position: "fixed", bottom: 24, right: 24, zIndex: 999,
-          background: "var(--nc-card, rgba(22,22,50,0.95))",
+          background: "var(--bg-elev)",
           backdropFilter: "blur(16px)",
-          border: "1px solid rgba(0,229,255,0.2)",
-          borderRadius: 12, padding: "14px 20px",
+          border: "1px solid var(--border-strong)",
+          borderRadius: "var(--r-lg)", padding: "14px 20px",
           display: "flex", alignItems: "center", gap: 12,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-          animation: "slideUp 0.3s ease-out",
+          boxShadow: "var(--shadow-card)",
+          animation: "fadeUp 0.3s ease-out",
         }}>
-          <span style={{ fontSize: 14, fontWeight: 500, color: "#e0e0e0" }}>✅ {toast.message}</span>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-1)" }}>✅ {toast.message}</span>
           {toast.actionLabel && (
             <button
               onClick={toast.onAction}
-              style={{
-                background: "var(--nc-primary, #FF6B35)", color: "#fff",
-                border: "none", borderRadius: 6, padding: "6px 14px",
-                fontSize: 13, fontWeight: 600, cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
+              className="btn-sm"
+              style={{ background: "var(--primary)", color: "#fff" }}
             >
               {toast.actionLabel}
             </button>
           )}
           <button
             onClick={() => setToast(null)}
-            style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}
+            className="btn-ghost"
+            style={{ padding: "2px 6px", fontSize: 16 }}
           >
             <X size={14} />
           </button>
@@ -345,70 +368,90 @@ export function HotspotDashboard() {
       {/* ── Tab 1: 今日热点 ──────────────────────────────────── */}
       {tab === "hotspots" && (
         <>
-          {/* Platform selector chips */}
-          <div className="panel" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>平台筛选：</span>
+          {/* Platform filter tabs */}
+          <div className="tabs">
             {ALL_PLATFORMS.map(p => (
-              <button key={p.key} style={chipStyle(selectedPlatforms.includes(p.key))} onClick={() => togglePlatform(p.key)}>
+              <button
+                key={p.key}
+                className={`tab${selectedPlatforms.includes(p.key) ? " on" : ""}`}
+                onClick={() => togglePlatform(p.key)}
+              >
                 {p.name}
               </button>
             ))}
             {selectedPlatforms.length > 0 && (
-              <button style={{ ...chipStyle(false), color: "#ff5252" }} onClick={() => { setSelectedPlatforms([]); setPage(1); }}>
-                清除
+              <button
+                className="tab"
+                style={{ color: "var(--red)" }}
+                onClick={() => { setSelectedPlatforms([]); setPage(1); }}
+              >
+                清除筛选
               </button>
             )}
-            <button disabled={loading} onClick={() => { void loadHotspots(); }} style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, padding: "4px 12px", background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color: "#00e5ff", cursor: "pointer", fontSize: 12 }}>
-              <RefreshCw size={12} /> {loading ? "加载中…" : "刷新"}
-            </button>
           </div>
 
-          {/* Hotspot cards */}
+          {/* Hotspot cards as activity/cards */}
           {loading ? (
-            <div className="panel" style={{ textAlign: "center", color: "var(--text-muted)" }}>正在加载热点…</div>
+            <div className="empty">
+              <div className="empty-ic">
+                <RefreshCw size={24} style={{ animation: "spin 1s linear infinite" }} />
+              </div>
+              <h3>正在加载热点</h3>
+              <p>正在从各平台抓取最新热点数据…</p>
+            </div>
+          ) : hotspots.length === 0 ? (
+            <div className="empty">
+              <div className="empty-ic">
+                <Zap size={24} />
+              </div>
+              <h3>暂无热点数据</h3>
+              <p>当前筛选条件下没有热点内容，请尝试切换平台或刷新。</p>
+            </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+            <div className="card-grid">
               {hotspots.map((h, i) => {
-                const trendMeta = trendStyle(h.trend);
                 const cardKey = `${h.source}:${h.title}`;
                 const busy = busyKey === cardKey;
                 const generated = generatedKeys.has(cardKey);
                 return (
-                  <div key={i} className="panel" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div key={i} className="card" style={{ display: "flex", flexDirection: "column", gap: 10, padding: 16 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.4, flex: 1 }}>{h.title?.slice(0, 60)}</div>
-                      <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: trendMeta.bg, color: trendMeta.color, whiteSpace: "nowrap" }}>
-                        {h.trend === "rising" ? "📈" : h.trend === "new" ? "🆕" : h.trend === "cooling" ? "📉" : "➡️"}
+                      <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.4, flex: 1 }}>
+                        {h.title?.slice(0, 60)}
+                      </div>
+                      <span className={trendBadgeClass(h.trend)}>
+                        {trendLabel(h.trend)}
                       </span>
                     </div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, color: "var(--text-muted)" }}>
-                      <span style={{ padding: "1px 6px", borderRadius: 3, background: "rgba(0,229,255,0.1)", color: "#00e5ff" }}>
-                        {h.source_name || h.source}
-                      </span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-3)" }}>
+                      <span className="badge cyan">{h.source_name || h.source}</span>
                       <span>{h.category}</span>
                     </div>
                     {/* Hotness bar */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <div style={{ width: `${h.hotness}%`, height: "100%", borderRadius: 3, background: hotnessColor(h.hotness), transition: "width 0.3s" }} />
+                      <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--bg-hover)", overflow: "hidden" }}>
+                        <div style={{
+                          width: `${h.hotness}%`, height: "100%", borderRadius: 3,
+                          background: hotnessColor(h.hotness), transition: "width 0.3s",
+                        }} />
                       </div>
-                      <span style={{ fontSize: 11, color: hotnessColor(h.hotness), fontWeight: 600, minWidth: 36 }}>{h.hotness}</span>
+                      <span style={{ fontSize: 12, color: hotnessColor(h.hotness), fontWeight: 600, minWidth: 36 }}>
+                        {h.hotness}
+                      </span>
                     </div>
                     <button
                       disabled={busy}
                       onClick={() => void generate(h)}
+                      className="btn-sm"
                       style={{
-                        padding: "6px 12px", borderRadius: 6, cursor: busy ? "default" : "pointer",
-                        fontSize: 12, fontWeight: 600,
-                        background: generated ? "rgba(0,230,118,0.15)" : "var(--nc-primary, #FF6B35)",
-                        color: generated ? "#00e676" : "#fff",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                        background: generated
+                          ? "rgba(52,211,153,.14)" : "var(--primary)",
+                        color: generated ? "var(--green)" : "#fff",
                         opacity: busy ? 0.6 : 1,
-                        border: generated ? "1px solid rgba(0,230,118,0.3)" : "none",
-                        transition: "all 0.3s",
+                        justifyContent: "center",
                       }}
                     >
-                      {busy ? "⏳ 生成中…" : generated ? <>✓ 已生成</> : <><Plus size={12} /> 一键生成</>}
+                      {busy ? "⏳ 生成中…" : generated ? "✓ 已生成" : <><Plus size={12} /> 一键生成</>}
                     </button>
                   </div>
                 );
@@ -418,15 +461,23 @@ export function HotspotDashboard() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="panel" style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center" }}>
-              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
-                style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color: "#00e5ff", cursor: page <= 1 ? "default" : "pointer", padding: "6px 10px", opacity: page <= 1 ? 0.4 : 1 }}>
-                <ChevronLeft size={14} />
+            <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "center", padding: "12px 0" }}>
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage(p => p - 1)}
+                className="icon-btn"
+                style={{ opacity: page <= 1 ? 0.4 : 1 }}
+              >
+                <ChevronLeft size={16} />
               </button>
-              <span style={{ fontSize: 13 }}>{page} / {totalPages}（共 {totalItems} 条）</span>
-              <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
-                style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color: "#00e5ff", cursor: page >= totalPages ? "default" : "pointer", padding: "6px 10px", opacity: page >= totalPages ? 0.4 : 1 }}>
-                <ChevronRight size={14} />
+              <span style={{ fontSize: 13, color: "var(--text-2)" }}>{page} / {totalPages}（共 {totalItems} 条）</span>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="icon-btn"
+                style={{ opacity: page >= totalPages ? 0.4 : 1 }}
+              >
+                <ChevronRight size={16} />
               </button>
             </div>
           )}
@@ -437,80 +488,110 @@ export function HotspotDashboard() {
       {tab === "overview" && (
         <>
           {overviewLoading ? (
-            <div className="panel" style={{ textAlign: "center", color: "var(--text-muted)", padding: 40 }}>
-              <RefreshCw size={20} style={{ animation: "spin 1s linear infinite" }} /> AI分析中…
+            <div className="empty">
+              <div className="empty-ic">
+                <RefreshCw size={24} style={{ animation: "spin 1s linear infinite" }} />
+              </div>
+              <h3>AI 分析中</h3>
+              <p>正在生成热点总览与选题推荐…</p>
             </div>
           ) : overview ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* AI Summary */}
-              <div className="panel">
-                <h4 style={{ margin: "0 0 8px", display: "flex", alignItems: "center", gap: 6 }}>
-                  <FileText size={14} /> AI 热点摘要
-                </h4>
-                <p style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-secondary, #ccc)", margin: 0 }}>
+              <div className="card">
+                <div className="card-head">
+                  <div className="card-title">
+                    <FileText size={18} /> AI 热点摘要
+                  </div>
+                </div>
+                <p style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-2)", margin: 0 }}>
                   {overview.summary}
                 </p>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
                 {/* Categories */}
-                <div className="panel">
-                  <h4 style={{ margin: "0 0 8px" }}>📂 热点分类</h4>
+                <div className="card">
+                  <div className="card-head">
+                    <div className="card-title">
+                      <Target size={18} /> 热点分类
+                    </div>
+                    <span className="card-sub">{Object.keys(overview.categories).length} 类</span>
+                  </div>
                   {Object.entries(overview.categories).map(([cat, count]) => (
-                    <div key={cat} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <span>{cat}</span>
-                      <span style={{ color: "#00e5ff", fontWeight: 600 }}>{count}</span>
+                    <div key={cat} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, borderBottom: "1px solid var(--border)" }}>
+                      <span style={{ color: "var(--text-2)" }}>{cat}</span>
+                      <span style={{ color: "var(--cyan)", fontWeight: 600 }}>{count}</span>
                     </div>
                   ))}
                 </div>
 
                 {/* Trends */}
-                <div className="panel">
-                  <h4 style={{ margin: "0 0 8px" }}>📊 趋势分析</h4>
+                <div className="card">
+                  <div className="card-head">
+                    <div className="card-title">
+                      <TrendingUp size={18} /> 趋势分析
+                    </div>
+                    <span className="card-sub">{overview.trends.length} 项</span>
+                  </div>
                   {overview.trends.map(t => (
-                    <div key={t.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                      <span>{t.label}</span>
-                      <span style={{ color: "#FF6B35", fontWeight: 600 }}>{t.count}</span>
+                    <div key={t.name} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, borderBottom: "1px solid var(--border)" }}>
+                      <span style={{ color: "var(--text-2)" }}>{t.label}</span>
+                      <span style={{ color: "var(--orange)", fontWeight: 600 }}>{t.count}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Predicted viral */}
-              <div className="panel">
-                <h4 style={{ margin: "0 0 8px" }}>🔥 爆文预测</h4>
-                <div style={{ display: "grid", gap: 6 }}>
+              <div className="card">
+                <div className="card-head">
+                  <div className="card-title">
+                    <Zap size={18} /> 爆文预测
+                  </div>
+                  <span className="card-sub">{overview.predicted_viral.length} 条</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
                   {overview.predicted_viral.map((v, i) => (
-                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 13 }}>
-                      <Star size={12} color="#ff9100" />
-                      <span style={{ flex: 1 }}>{v.title}</span>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{v.source}</span>
-                      <span style={{ fontSize: 11, color: hotnessColor(v.hotness) }}>{v.hotness}</span>
+                    <div key={i} className="activity" style={{ alignItems: "center" }}>
+                      <div className="av-sm">
+                        <Star size={14} />
+                      </div>
+                      <div>
+                        <p style={{ fontWeight: 500 }}>{v.title}</p>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <span className="badge gray">{v.source}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: hotnessColor(v.hotness) }}>
+                            热度 {v.hotness}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Recommended angles */}
-              <div className="panel">
-                <h4 style={{ margin: "0 0 8px" }}>💡 推荐选题</h4>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
+              <div className="card">
+                <div className="card-head">
+                  <div className="card-title">
+                    <BookOpen size={18} /> 推荐选题
+                  </div>
+                  <span className="card-sub">{overview.recommended_angles.length} 个</span>
+                </div>
+                <div className="card-grid">
                   {overview.recommended_angles.map((ra, i) => (
-                    <div key={i} className="panel" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div key={i} className="card" style={{ display: "flex", flexDirection: "column", gap: 8, padding: 16 }}>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{ra.title}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{ra.source} · 热度 {ra.hotness}</div>
-                      <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.5 }}>{ra.angle}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-3)" }}>{ra.source} · 热度 {ra.hotness}</div>
+                      <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.5 }}>{ra.angle}</div>
                       <button
                         onClick={() => {
                           const h = overview.category_items?.[Object.keys(overview.category_items || {})[0]]?.find(x => x.title?.slice(0, 40) === ra.title);
                           if (h) void generate(h);
                         }}
-                        style={{
-                          padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer",
-                          fontSize: 12, fontWeight: 600,
-                          background: "var(--nc-primary, #FF6B35)", color: "#fff",
-                          display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                        }}
+                        className="btn-sm"
+                        style={{ background: "var(--primary)", color: "#fff", justifyContent: "center" }}
                       >
                         <Plus size={12} /> 一键生成
                       </button>
@@ -520,8 +601,12 @@ export function HotspotDashboard() {
               </div>
             </div>
           ) : (
-            <div className="panel" style={{ textAlign: "center", color: "var(--text-muted)", padding: 40 }}>
-              暂无总览数据。请刷新热点后重试。
+            <div className="empty">
+              <div className="empty-ic">
+                <FileText size={24} />
+              </div>
+              <h3>暂无总览数据</h3>
+              <p>请刷新热点后重试。</p>
             </div>
           )}
         </>
@@ -531,37 +616,43 @@ export function HotspotDashboard() {
       {tab === "library" && (
         <>
           {articleDetail ? (
-            /* Article detail modal */
-            <div className="panel">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h3 style={{ margin: 0 }}>{articleDetail.title}</h3>
-                <button onClick={() => setArticleDetail(null)}
-                  style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color: "#888", cursor: "pointer", padding: "4px 10px", display: "flex", alignItems: "center", gap: 4 }}>
+            /* Article detail */
+            <div className="card">
+              <div className="card-head">
+                <div className="card-title">{articleDetail.title}</div>
+                <button onClick={() => setArticleDetail(null)} className="btn-ghost" style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <X size={14} /> 关闭
                 </button>
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
-                平台：{articleDetail.platform} · 热点：{articleDetail.hotspot_title} · 状态：{articleDetail.status} · {articleDetail.created_at}
+              <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                <span className="badge cyan">{articleDetail.platform}</span>
+                {articleDetail.hotspot_title && <span className="badge gray">📌 {articleDetail.hotspot_title}</span>}
+                <span className={statusBadge(articleDetail.status)}>{articleDetail.status}</span>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>{articleDetail.created_at}</span>
               </div>
-              <div className="novel-prose" style={{ background: "rgba(255,255,255,0.03)", padding: 16, borderRadius: 8, maxHeight: "60vh", overflow: "auto" }}>
+              <div className="novel-prose" style={{ background: "var(--bg-hover)", padding: 16, borderRadius: "var(--r-sm)", maxHeight: "60vh", overflow: "auto" }}>
                 {articleDetail.full_text || "暂无内容"}
               </div>
             </div>
           ) : editArticle ? (
             /* Edit modal */
-            <div className="panel">
-              <h4 style={{ margin: "0 0 12px" }}>编辑文章</h4>
-              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>标题</label>
-              <input
-                style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "#fff", marginBottom: 12 }}
-                value={editArticle.title}
-                onChange={e => setEditArticle({ ...editArticle, title: e.target.value })}
-              />
+            <div className="card">
+              <div className="card-head">
+                <div className="card-title">编辑文章</div>
+              </div>
+              <div className="field">
+                <label>标题</label>
+                <input
+                  className="form-input"
+                  value={editArticle.title}
+                  onChange={e => setEditArticle({ ...editArticle, title: e.target.value })}
+                />
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={saveEdit} style={{ padding: "8px 16px", borderRadius: 6, border: "none", background: "var(--nc-primary, #FF6B35)", color: "#fff", cursor: "pointer" }}>
+                <button onClick={saveEdit} className="btn-sm" style={{ background: "var(--primary)", color: "#fff" }}>
                   保存
                 </button>
-                <button onClick={() => setEditArticle(null)} style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#888", cursor: "pointer" }}>
+                <button onClick={() => setEditArticle(null)} className="btn-ghost">
                   取消
                 </button>
               </div>
@@ -569,54 +660,82 @@ export function HotspotDashboard() {
           ) : (
             <>
               {articleLoading ? (
-                <div className="panel" style={{ textAlign: "center", color: "var(--text-muted)" }}>加载中…</div>
+                <div className="empty">
+                  <div className="empty-ic">
+                    <RefreshCw size={24} style={{ animation: "spin 1s linear infinite" }} />
+                  </div>
+                  <h3>加载中</h3>
+                </div>
+              ) : articles.length === 0 ? (
+                <div className="empty">
+                  <div className="empty-ic">
+                    <BookOpen size={24} />
+                  </div>
+                  <h3>文库为空</h3>
+                  <p>从今日热点生成文章后在此查看。</p>
+                </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {articles.map(a => (
-                    <div key={a.id} className="panel" style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{a.title}</div>
-                        <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 6 }}>
-                          {a.summary?.slice(0, 120)}{(a.summary || "").length > 120 ? "…" : ""}
-                        </div>
-                        <div style={{ display: "flex", gap: 6, fontSize: 11, color: "var(--text-muted)", flexWrap: "wrap" }}>
-                          <span style={{ padding: "1px 6px", borderRadius: 3, background: "rgba(0,229,255,0.1)", color: "#00e5ff" }}>{a.platform}</span>
-                          {a.hotspot_title && <span>📌 {a.hotspot_title?.slice(0, 20)}</span>}
-                          <span>{a.status}</span>
-                          <span>{a.created_at?.slice(0, 10)}</span>
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                        <button onClick={() => void viewArticle(a.id)}
-                          style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, color: "#00e5ff", cursor: "pointer", padding: "4px 8px", display: "flex", alignItems: "center", gap: 2, fontSize: 11 }}>
-                          <Eye size={12} /> 查看
-                        </button>
-                        <button onClick={() => startEdit(a)}
-                          style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, color: "#ffc107", cursor: "pointer", padding: "4px 8px", display: "flex", alignItems: "center", gap: 2, fontSize: 11 }}>
-                          <Edit3 size={12} /> 编辑
-                        </button>
-                        <button onClick={() => void deleteArticle(a.id, a.title)}
-                          style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 4, color: "#ff5252", cursor: "pointer", padding: "4px 8px", display: "flex", alignItems: "center", gap: 2, fontSize: 11 }}>
-                          <Trash2 size={12} /> 删除
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {!articles.length && <div className="panel" style={{ textAlign: "center", color: "var(--text-muted)", padding: 40 }}>文库为空。从今日热点生成文章后在此查看。</div>}
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>标题</th>
+                        <th>平台</th>
+                        <th>热点来源</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th style={{ textAlign: "right" }}>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {articles.map(a => (
+                        <tr key={a.id}>
+                          <td style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {a.title}
+                          </td>
+                          <td><span className="badge cyan">{a.platform}</span></td>
+                          <td className="cell-sub">{a.hotspot_title?.slice(0, 24) || "—"}</td>
+                          <td><span className={statusBadge(a.status)}>{a.status}</span></td>
+                          <td className="cell-sub">{a.created_at?.slice(0, 10)}</td>
+                          <td>
+                            <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                              <button onClick={() => void viewArticle(a.id)} className="btn-ghost" title="查看" style={{ padding: "4px 8px" }}>
+                                <Eye size={14} />
+                              </button>
+                              <button onClick={() => startEdit(a)} className="btn-ghost" title="编辑" style={{ padding: "4px 8px", color: "var(--yellow)" }}>
+                                <Edit3 size={14} />
+                              </button>
+                              <button onClick={() => void deleteArticle(a.id, a.title)} className="btn-ghost" title="删除" style={{ padding: "4px 8px", color: "var(--red)" }}>
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
               {/* Article pagination */}
               {articleTotalPages > 1 && (
-                <div className="panel" style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center" }}>
-                  <button disabled={articlePage <= 1} onClick={() => setArticlePage(p => p - 1)}
-                    style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color: "#00e5ff", cursor: articlePage <= 1 ? "default" : "pointer", padding: "6px 10px", opacity: articlePage <= 1 ? 0.4 : 1 }}>
-                    <ChevronLeft size={14} />
+                <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "center", padding: "12px 0" }}>
+                  <button
+                    disabled={articlePage <= 1}
+                    onClick={() => setArticlePage(p => p - 1)}
+                    className="icon-btn"
+                    style={{ opacity: articlePage <= 1 ? 0.4 : 1 }}
+                  >
+                    <ChevronLeft size={16} />
                   </button>
-                  <span style={{ fontSize: 13 }}>{articlePage} / {articleTotalPages}</span>
-                  <button disabled={articlePage >= articleTotalPages} onClick={() => setArticlePage(p => p + 1)}
-                    style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color: "#00e5ff", cursor: articlePage >= articleTotalPages ? "default" : "pointer", padding: "6px 10px", opacity: articlePage >= articleTotalPages ? 0.4 : 1 }}>
-                    <ChevronRight size={14} />
+                  <span style={{ fontSize: 13, color: "var(--text-2)" }}>{articlePage} / {articleTotalPages}</span>
+                  <button
+                    disabled={articlePage >= articleTotalPages}
+                    onClick={() => setArticlePage(p => p + 1)}
+                    className="icon-btn"
+                    style={{ opacity: articlePage >= articleTotalPages ? 0.4 : 1 }}
+                  >
+                    <ChevronRight size={16} />
                   </button>
                 </div>
               )}
