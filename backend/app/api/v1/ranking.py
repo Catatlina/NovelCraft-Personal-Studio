@@ -241,7 +241,7 @@ def scan_all_sources(project_id: str, user: dict = Depends(get_current_user)):
             errors[source_key] = {"status": e.status_code, "detail": str(e.detail)}
         except Exception as e:
             errors[source_key] = {"status": 500, "detail": str(e)}
-    return ok({"scanned": list(results.keys()), "errors": errors, "skipped": skipped_js,
+    return ok({"scanned": list(results.keys()), "errors": errors,
                "total_sources": len(available), "succeeded": len(results),
                "failed": len(errors)})
 

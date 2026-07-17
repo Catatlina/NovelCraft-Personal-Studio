@@ -213,7 +213,7 @@ $selection
 输出 JSON: {"text":"去AI味后的文本"}"""),
 
     # ── Narrative: 章节管理 (AI_NovelGenerator) ──
-    ("narrative.gen_next_chapter", "3.0.0", "deepseek",
+    ("narrative.gen_next_chapter", "3.1.0", "deepseek",
      """你是职业网文作家。请根据上下文写一个可直接发布的完整章节。
 
 上下文（包含前文章节摘要、人物状态、伏笔状态）：
@@ -223,15 +223,21 @@ $context
 人工/AI反馈：$review_feedback
 
 要求：
-1. 保持人物性格一致——参考人物档案
-2. 伏笔要么推进要么回收——不能种了不管
-3. 字数不得低于 3000 字；若前章更长，则与前章相当
-4. 结尾留钩子，但不要用"新的篇章开始了"这类总结句
-5. 必须写小说正文：用动作、对话、场景细节和心理微反应推进，不写说明文、计划书、创作建议
-6. 如果是重写，保留章节序号和核心剧情目标，但要显著改善冲突密度、画面感、口语节奏和去 AI 味
+1. 章节编号必须严格按上下文指定的序号，如上下文说"第5章"，则title必须以"第5章"开头
+2. 标题要跳脱、有趣、有网感。示范风格：
+   - 反套路：「第3章 金手指？不，这是要命的」「第7章 众所周知，主角捡到的东西都会炸」
+   - 口语钩子：「第12章 师父，你坑我的时候可不这样」「第25章 不好意思，这boss我认识」
+   - 悬念：「第41章 她死前说的最后一个字」「第58章 那一剑落下的时候，所有人都笑了」
+   禁止使用「初入XX」「突破XX」「XX之战」等模板化标题
+3. 保持人物性格一致——参考人物档案
+4. 伏笔要么推进要么回收——不能种了不管
+5. 字数不得低于 1500 字；若前章更长，则与前章相当
+6. 结尾留钩子，但不要用"新的篇章开始了"这类总结句
+7. 必须写小说正文：用动作、对话、场景细节和心理微反应推进，不写说明文、计划书、创作建议
+8. 如果是重写，保留章节序号和核心剧情目标，但要显著改善冲突密度、画面感、口语节奏和去 AI 味
 
-输出 JSON: {"chapter":{"title":"第N章 标题","body":["段落一","段落二",...]}}
-body 至少 12 段，总字数不得低于 3000 字；低于 3000 字视为失败。"""),
+输出 JSON: {"chapter":{"title":"第N章 创意标题","body":["段落一","段落二",...]}}
+body 至少 8 段，总字数不得低于 1500 字；低于 1500 字视为失败。"""),
 
     ("narrative.plan_next_chapter", "3.0.0", "deepseek",
      """你是长篇小说责编。请基于当前章节和七维审查视角，规划下一章。
@@ -943,7 +949,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "editor_continue":      '{"text":"续写后文本"}',
     "editor_deai":          '{"text":"去AI味后文本"}',
     "summarize_chapter":    '{"summary":"","entities":[],"timeline":[],"foreshadowings":[]}',
-    "gen_next_chapter":     '{"chapter":{"title":"第N章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}} (body 至少 6 段)',
+    "gen_next_chapter":     '{"chapter":{"title":"第N章 创意标题","body":["段落一","段落二","段落三","段落四","段落五","段落六","段落七","段落八"]}} (body 至少 8 段)',
     "book_analysis":        '{"title":"书名","total_paragraphs":0,"opening_hook":"开篇钩子分析","detected_tropes":["套路"],"rhythm":"节奏判断","avg_paragraph_length":0,"structure_cards":{"three_act":"三幕结构判断","save_the_cat":"关键节拍判断"},"style_profile":{"tone":"文风","strengths":["优点"]},"risks":["风险"],"recommendations":["建议"]}',
     "gen_daily_brief":      '{"title":"标题","body":["段落或脚本分镜"],"meta":{"tags":["标签"],"summary":"摘要","cta":"互动引导"}}',
     "hm_daily_brief":       '{"wechat_draft":"公众号草稿","toutiao_draft":"头条草稿","xhs_draft":"小红书草稿"}',

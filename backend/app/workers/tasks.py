@@ -95,7 +95,7 @@ NODE_STAGE["human_confirm_title"] = "human"
 
 # Default budget per chapter (all 5 writing nodes combined)
 DEFAULT_CHAPTER_BUDGET_CNY = 0.50
-MIN_CHAPTER_CHARS = 3000
+MIN_CHAPTER_CHARS = 1500
 
 # Per-node budget allocation (planning ≈ blueprint < writing < finalization)
 NODE_BUDGET_MULTIPLIERS: dict[str, float] = {
