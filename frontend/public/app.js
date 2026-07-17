@@ -20,6 +20,10 @@ function goPage(p) {
     settings: '设置'
   };
   const t = document.querySelector('.page.active h1');
+  // B1：进入屏后加载真实数据（未接屏的 p 在 loadPageData 内被忽略）
+  if (typeof NC !== 'undefined' && typeof NC.loadPageData === 'function') {
+    try { NC.loadPageData(p); } catch (e) { console.error('[app] loadPageData', p, e); }
+  }
 }
 
 document.querySelectorAll('.nav-item[data-page]').forEach(n => n.addEventListener('click', () => goPage(n.dataset.page)));
