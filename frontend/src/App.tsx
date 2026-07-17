@@ -21,7 +21,7 @@ import { CollaborationPanel } from "./components/Collaboration";
 import { AgentConsole } from "./components/AgentConsole";
 import { ApiError, api as baseApi, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
-import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
+import { BarChart3, Code2, LayoutDashboard, LogOut, Puzzle, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 import { DashboardV2 } from "./components/DashboardV2";
 import { ThemeProvider } from "./components/ThemeProvider";
 
@@ -522,6 +522,39 @@ export default function App() {
       {tab === "foreshadowing" && novel && <ForeshadowingBoard novelId={novel.id} />}
       {tab === "collaboration" && project && <CollaborationPanel projectId={project.id} />}
       {tab === "agents" && <AgentConsole />}
+      {tab === "overview" && (
+        <div className="page active"><div className="content">
+          <div className="page-head"><div><h1>{titles[tab]}</h1><p>该页面正在建设中…</p></div></div>
+          <div className="empty">
+            <div className="empty-ic"><BarChart3 size={48} /></div>
+            <h3>{titles[tab]}</h3>
+            <p>该功能模块正在开发中，预计近期上线。返回工作台查看可用功能。</p>
+            <button className="btn-sm btn-primary" onClick={() => setTab('dashboard')}>返回工作台</button>
+          </div>
+        </div></div>
+      )}
+      {tab === "workspace" && (
+        <div className="page active"><div className="content">
+          <div className="page-head"><div><h1>{titles[tab]}</h1><p>该页面正在建设中…</p></div></div>
+          <div className="empty">
+            <div className="empty-ic"><LayoutDashboard size={48} /></div>
+            <h3>{titles[tab]}</h3>
+            <p>该功能模块正在开发中，预计近期上线。返回工作台查看可用功能。</p>
+            <button className="btn-sm btn-primary" onClick={() => setTab('dashboard')}>返回工作台</button>
+          </div>
+        </div></div>
+      )}
+      {tab === "plugins" && (
+        <div className="page active"><div className="content">
+          <div className="page-head"><div><h1>{titles[tab]}</h1><p>该页面正在建设中…</p></div></div>
+          <div className="empty">
+            <div className="empty-ic"><Puzzle size={48} /></div>
+            <h3>{titles[tab]}</h3>
+            <p>该功能模块正在开发中，预计近期上线。返回工作台查看可用功能。</p>
+            <button className="btn-sm btn-primary" onClick={() => setTab('dashboard')}>返回工作台</button>
+          </div>
+        </div></div>
+      )}
       <CommandPalette commands={cmdActions} />
     </Layout>
     </ThemeProvider>

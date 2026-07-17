@@ -35,60 +35,109 @@ export function Wizard({ idea, setIdea, genre, setGenre, style, setStyle, target
   }
 
   return (
-    <div className="panel" style={{ maxWidth: 720 }}>
-      {keyMissing && (
-        <p style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 12px", marginBottom:16,
-                    border:"1px solid var(--warning)", borderRadius:8, color:"var(--warning)", fontSize:14 }}>
-          <AlertTriangle size={14}/>
-          尚未配置 AI API Key（服务器也未配置全局 Key）。生成会在第一个 AI 节点失败——请先到「系统设置」填入 DeepSeek API Key。
-        </p>
-      )}
-      <label style={{ display: "flex", flexDirection: "column", gap: 8, fontWeight: 600, marginBottom: 16 }}>
-        灵感 *
-        <textarea
-          value={idea} onChange={e => { setIdea(e.target.value); if (errors.idea) setErrors({...errors, idea:""}); }}
-          rows={4} placeholder="用几句话描述你的故事创意..."
-          style={errors.idea ? { borderColor: "var(--warning)" } : {}}
-        />
-        {errors.idea && <small style={{color:"var(--warning)",display:"flex",alignItems:"center",gap:4}}><AlertTriangle size={12}/>{errors.idea}</small>}
-      </label>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontWeight: 600, fontSize: 14 }}>
-          题材 *
-          <select
-            value={genre} onChange={e => { setGenre(e.target.value); if (errors.genre) setErrors({...errors, genre:""}); }}
-            style={errors.genre ? { borderColor: "var(--warning)" } : {}}
-          >
-            <option value="">选择题材</option>
-            {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-          {errors.genre && <small style={{color:"var(--warning)"}}>{errors.genre}</small>}
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontWeight: 600, fontSize: 14 }}>
-          风格 *
-          <input
-            value={style} onChange={e => { setStyle(e.target.value); if (errors.style) setErrors({...errors, style:""}); }}
-            placeholder="例如：克制、悬疑"
-            style={errors.style ? { borderColor: "var(--warning)" } : {}}
-          />
-          {errors.style && <small style={{color:"var(--warning)"}}>{errors.style}</small>}
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, fontWeight: 600, fontSize: 14 }}>
-          目标字数 *
-          <input
-            type="number" value={targetWords} min={5000} max={5000000} step={10000}
-            onChange={e => { setTargetWords(Number(e.target.value)); if (errors.targetWords) setErrors({...errors, targetWords:""}); }}
-            style={errors.targetWords ? { borderColor: "var(--warning)" } : {}}
-          />
-          {errors.targetWords && <small style={{color:"var(--warning)"}}>{errors.targetWords}</small>}
-        </label>
+    <div style={{ maxWidth: 720 }}>
+      {/* Page head */}
+      <div className="page-head">
+        <div>
+          <h1>启动 Bootstrap</h1>
+          <p>输入你的故事灵感，AI 将为你生成完整的小说大纲与章节规划</p>
+        </div>
       </div>
 
-      <button className="primary" onClick={validate} disabled={busy}>
-        {busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-        启动 Bootstrap
-      </button>
+      {/* Key missing warning */}
+      {keyMissing && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "12px 16px", marginBottom: 20,
+          borderRadius: "var(--r-sm)",
+          background: "rgba(251,191,36,.1)",
+          border: "1px solid rgba(251,191,36,.3)",
+          color: "var(--yellow)", fontSize: 13
+        }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span>尚未配置 AI API Key（服务器也未配置全局 Key）。生成会在第一个 AI 节点失败——请先到「系统设置」填入 DeepSeek API Key。</span>
+        </div>
+      )}
+
+      {/* Main card */}
+      <div className="card">
+        {/* 灵感 field */}
+        <div className="field">
+          <label>灵感 <span style={{ color: "var(--red)" }}>*</span></label>
+          <textarea
+            className={`form-input${errors.idea ? " has-error" : ""}`}
+            value={idea}
+            onChange={e => { setIdea(e.target.value); if (errors.idea) setErrors({...errors, idea:""}); }}
+            rows={4}
+            placeholder="用几句话描述你的故事创意..."
+            style={errors.idea ? { borderColor: "var(--red)" } : {}}
+          />
+          {errors.idea && (
+            <span className="hint" style={{ color: "var(--red)", display: "flex", alignItems: "center", gap: 4 }}>
+              <AlertTriangle size={12} />{errors.idea}
+            </span>
+          )}
+        </div>
+
+        {/* 题材 — segmented control */}
+        <div className="field">
+          <label>题材 <span style={{ color: "var(--red)" }}>*</span></label>
+          <div className="seg" style={{ flexWrap: "wrap" }}>
+            {GENRES.map(g => (
+              <button
+                key={g}
+                type="button"
+                className={genre === g ? "on" : ""}
+                onClick={() => { setGenre(g); if (errors.genre) setErrors({...errors, genre:""}); }}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+          {errors.genre && (
+            <span className="hint" style={{ color: "var(--red)" }}>{errors.genre}</span>
+          )}
+        </div>
+
+        {/* 风格 + 目标字数 — 2-column grid */}
+        <div className="grid grid-2">
+          <div className="field">
+            <label>风格 <span style={{ color: "var(--red)" }}>*</span></label>
+            <input
+              className={`form-input${errors.style ? " has-error" : ""}`}
+              value={style}
+              onChange={e => { setStyle(e.target.value); if (errors.style) setErrors({...errors, style:""}); }}
+              placeholder="例如：克制、悬疑"
+              style={errors.style ? { borderColor: "var(--red)" } : {}}
+            />
+            {errors.style && (
+              <span className="hint" style={{ color: "var(--red)" }}>{errors.style}</span>
+            )}
+          </div>
+          <div className="field">
+            <label>目标字数 <span style={{ color: "var(--red)" }}>*</span></label>
+            <input
+              className={`form-input${errors.targetWords ? " has-error" : ""}`}
+              type="number"
+              value={targetWords}
+              min={5000}
+              max={5000000}
+              step={10000}
+              onChange={e => { setTargetWords(Number(e.target.value)); if (errors.targetWords) setErrors({...errors, targetWords:""}); }}
+              style={errors.targetWords ? { borderColor: "var(--red)" } : {}}
+            />
+            {errors.targetWords && (
+              <span className="hint" style={{ color: "var(--red)" }}>{errors.targetWords}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Submit */}
+        <button className="btn-primary" onClick={validate} disabled={busy} style={{ marginTop: 8 }}>
+          {busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+          启动 Bootstrap
+        </button>
+      </div>
     </div>
   );
 }

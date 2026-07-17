@@ -341,105 +341,132 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     </section>;
   }
 
-  return <section className="panel"><h2>统一书库</h2>{error && <div className="error">{error}</div>}
-    {notice && <div className="muted">{notice}</div>}
-    {/* NC-LIB-002: Search + filter + sort toolbar */}
-    <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-        <Search size={14} /><input placeholder="搜索书名或简介…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ flex: 1 }} />
+  return <section className="panel">
+    <div className="page-head">
+      <div>
+        <h1>统一书库</h1>
+        <p>{filtered.length} 本 · {books.length} 本总计</p>
       </div>
-      <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0); }} style={{ width: 100 }}>
+      <div className="head-actions">
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-2)" }}>
+          批次章节数
+          <input type="number" min={1} max={50} value={batchCount}
+            onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
+            className="form-input" style={{ width: 64, height: 34, padding: "0 8px" }} />
+        </label>
+        {selectedBooks.size > 0 && <button className="btn-sm" style={{ background: "var(--red)", color: "#fff" }} disabled={busy === "batch"} onClick={() => void batchDelete()}>
+          <Trash2 size={14} />批量删除 ({selectedBooks.size})
+        </button>}
+      </div>
+    </div>
+    {error && <div className="badge red" style={{ marginBottom: 12 }}>{error}</div>}
+    {notice && <div className="badge gray" style={{ marginBottom: 12 }}>{notice}</div>}
+    {/* NC-LIB-002: Search + filter + sort toolbar */}
+    <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="search-box" style={{ flex: 1, maxWidth: 400 }}>
+        <Search size={14} /><input placeholder="搜索书名或简介…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} />
+      </div>
+      <select className="form-input" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0); }} style={{ width: 120, height: 38 }}>
         <option value="">全部状态</option>
-        <option value="draft">draft</option>
-        <option value="planning">planning</option>
-        <option value="generated">generated</option>
-        <option value="completed">completed</option>
+        <option value="draft">📄 draft</option>
+        <option value="planning">📋 planning</option>
+        <option value="generated">⚡ generated</option>
+        <option value="completed">✅ completed</option>
       </select>
-      <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+      <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value as any)} style={{ width: 120, height: 38 }}>
         <option value="created">最新创建</option>
         <option value="updated">最近编辑</option>
         <option value="title">按书名</option>
         <option value="chapters">按章节数</option>
       </select>
     </div>
-    <label className="muted">批量章节数 <input type="number" min={1} max={50} value={batchCount}
-      onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} style={{ width: "4em" }} /></label>
-    {selectedBooks.size > 0 && <button className="danger" disabled={busy === "batch"} onClick={() => void batchDelete()}>
-      <Trash2 size={14} />批量删除 ({selectedBooks.size})
-    </button>}
-    <div className="book-table">{paged.map((book, index) => {
-      const batch = batches[book.id];
-      const completion = completions[book.id];
-      const rank = page * PAGE_SIZE + index + 1;
-      return <article className="book-row" key={book.id}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input type="checkbox" checked={selectedBooks.has(book.id)}
-            onChange={() => setSelectedBooks(prev => {
-              const next = new Set(prev);
-              next.has(book.id) ? next.delete(book.id) : next.add(book.id);
-              return next;
-            })} title="选择批量删除" />
-          <strong>{rank}. {book.title}</strong>
-        </div>
-        <p>{book.synopsis || book.meta?.idea || "暂无简介"}</p>
-        <small>{book.genre || book.meta?.genre || "未分类"} · 创建 {new Date(book.created_at).toLocaleString()} · 最新章节 {book.latest_chapter_title || "暂无"} · {book.total_words ?? completion?.total_words ?? 0} 字</small>
-        {completion ? <div style={{ display: "grid", gap: 4 }}>
-          <small>章节 {book.chapter_count ?? completion.total_chapters} · 已审核 {completion.reviewed_chapters}</small>
-          <small>生成进度 {completion.generation_percent ?? "目标未设置"}{completion.generation_percent !== null && completion.generation_percent !== undefined ? "%" : ""} · 审核覆盖 {completion.review_percent ?? 0}% · 平均审核分 {completion.average_review_score || "暂无"}</small>
-          {(completion.quality_warnings || []).length > 0 && <div className="danger-text"><strong>质量警告：</strong>{completion.quality_warnings?.join("；")}</div>}
-          {!completion.ready_for_release && completion.total_chapters > 0 && <small>当前仅表示章节已生成，不代表质量验收或整书完成。</small>}
-        </div> : <small className="muted">正在加载章节完成度与质量状态…</small>}
-        {batch && <div className={batch.status === "failed" ? "danger-text" : "muted"}>
-          批次 {batch.status}：{batch.completed_count}/{batch.requested_count}
-          {batch.cancel_requested ? " · 已请求取消" : ""}{batch.blocker_code ? ` · ${batch.blocker_code}` : ""}
-          {batch.error ? ` — ${batch.error}` : ""}
-          {batch.status === "succeeded" && <div><small>生成批次已结束，请继续核对审核覆盖和连续性风险。</small></div>}
-        </div>}
-        <div className="row-actions">
-          <button onClick={() => void openDetail(book)}>查看详情</button>
-          <button onClick={() => void onOpen(book.id)}>进入编辑</button>
-          <button disabled={busy === book.id} onClick={() => void continueOne(book)}>续写一章</button>
-          <button disabled={busy === book.id} onClick={() => void startBatch(book)}>批量生成</button>
-          {batch && ["pending", "running"].includes(batch.status) &&
-            <button disabled={busy === book.id} onClick={() => void cancelBatch(book, batch)}>取消批次</button>}
-          {batch && batch.status === "failed" &&
-            <button disabled={busy === book.id} onClick={() => void resumeBatch(book, batch)}>恢复批次</button>}
-          <button disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入章节目录</button>
-          <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
-          <button disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
-          <button className="danger" disabled={busy === book.id} onClick={() => setDeleteConfirm(book.id)} title="删除此书及全部章节">
-            <Trash2 size={14} />
-          </button>
-        </div>
-        {importBookId === book.id && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-          <strong>章节目录预览</strong>
-          <small>粘贴 TXT 目录；预览不会写入，点击确认后才创建空白计划章节。重复标题由后端跳过。</small>
-          <textarea rows={7} value={directoryText} onChange={event => setDirectoryText(event.target.value)} placeholder={"第1章 初入异界\n第2章 规则觉醒"} />
-          <small>识别 {importPreview.length} 条{directoryText.trim() && !importPreview.length ? "；当前格式无法识别" : ""}</small>
-          {importPreview.length > 0 && <ol style={{ maxHeight: 150, overflow: "auto", margin: 0, paddingLeft: 24 }}>
-            {importPreview.slice(0, 20).map((chapter, index) => <li key={`${chapter.raw}:${index}`}>第{chapter.seq}章 {chapter.title}</li>)}
-          </ol>}
-          {importPreview.length > 20 && <small>仅预览前 20 条，确认时提交全部 {importPreview.length} 条。</small>}
-          <button className="primary" disabled={busy === book.id || !importPreview.length} onClick={() => void importDirectory(book)}>{busy === book.id ? "导入中…" : `确认导入 ${importPreview.length} 条`}</button>
-        </div>}
-      </article>;
-    })}</div>
-    {/* NC-LIB-002: Pagination */}
-    {totalPages > 1 && <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 12 }}>
-      <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>上一页</button>
-      <span style={{ fontSize: 13 }}>{page + 1} / {totalPages} (共 {filtered.length} 本)</span>
-      <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
-    </div>}
-    {loading && <p className="muted">正在加载书库…</p>}
-    {!loading && !books.length && !error && <p className="muted">书库为空。可以从扫榜中心或灵感入口创建小说。</p>}
+    {!loading && !books.length && !error ? <div className="empty">
+      <div className="empty-ic"><BookOpen size={26} /></div>
+      <h3>书库为空</h3>
+      <p>可以从扫榜中心或灵感入口创建小说，开始你的创作之旅。</p>
+    </div> : <>
+      <div className="grid grid-3">{paged.map((book, index) => {
+        const batch = batches[book.id];
+        const completion = completions[book.id];
+        const rank = page * PAGE_SIZE + index + 1;
+        const badgeClass = book.status === "draft" ? "gray" : book.status === "planning" ? "cyan" : book.status === "generated" ? "purple" : book.status === "completed" ? "green" : "gray";
+        return <div className="card" key={book.id}>
+          <div className="card-head">
+            <div className="card-title" style={{ gap: 6 }}>
+              <input type="checkbox" checked={selectedBooks.has(book.id)}
+                onChange={() => setSelectedBooks(prev => {
+                  const next = new Set(prev);
+                  next.has(book.id) ? next.delete(book.id) : next.add(book.id);
+                  return next;
+                })} title="选择批量删除" />
+              <span>{rank}. {book.title}</span>
+            </div>
+            <span className={`badge ${badgeClass}`}>{book.status}</span>
+          </div>
+          <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 10, lineHeight: 1.5 }}>{book.synopsis || book.meta?.idea || "暂无简介"}</p>
+          <div className="card-sub" style={{ marginBottom: 8 }}>
+            {book.genre || book.meta?.genre || "未分类"} · 创建 {new Date(book.created_at).toLocaleDateString()} · {book.total_words ?? completion?.total_words ?? 0} 字
+          </div>
+          {completion ? <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 8, lineHeight: 1.7 }}>
+            <div>章节 {book.chapter_count ?? completion.total_chapters} · 已审核 {completion.reviewed_chapters}</div>
+            <div>生成进度 {completion.generation_percent ?? "目标未设置"}{completion.generation_percent !== null && completion.generation_percent !== undefined ? "%" : ""} · 审核覆盖 {completion.review_percent ?? 0}% · 平均分 {completion.average_review_score || "暂无"}</div>
+            {(completion.quality_warnings || []).length > 0 && <div style={{ color: "var(--red)", fontWeight: 500 }}>⚠ 质量警告：{completion.quality_warnings?.join("；")}</div>}
+            {!completion.ready_for_release && completion.total_chapters > 0 && <div>当前仅表示章节已生成，不代表质量验收或整书完成。</div>}
+          </div> : <div className="card-sub" style={{ marginBottom: 8 }}>正在加载章节完成度与质量状态…</div>}
+          {batch && <div style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
+            {batch.status === "failed" ? <span className="badge red">批次失败</span> : batch.status === "succeeded" ? <span className="badge green">批次完成</span> : <span className="badge orange">批次 {batch.status}</span>}
+            <span style={{ color: "var(--text-3)", marginLeft: 6 }}>{batch.completed_count}/{batch.requested_count}</span>
+            {batch.cancel_requested ? <span style={{ color: "var(--orange)", marginLeft: 6 }}>· 已请求取消</span> : ""}
+            {batch.blocker_code ? <span style={{ color: "var(--text-3)", marginLeft: 6 }}>· {batch.blocker_code}</span> : ""}
+            {batch.error && <div style={{ color: "var(--red)", fontSize: 11, marginTop: 3 }}>{batch.error}</div>}
+            {batch.status === "succeeded" && <div style={{ color: "var(--text-3)", fontSize: 11, marginTop: 3 }}>生成批次已结束，请继续核对审核覆盖和连续性风险。</div>}
+          </div>}
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
+            <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} onClick={() => void openDetail(book)}>查看详情</button>
+            <button className="btn-sm" style={{ background: "var(--primary-dim)", color: "var(--primary-light)" }} onClick={() => void onOpen(book.id)}>进入编辑</button>
+            <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => void continueOne(book)}>续写一章</button>
+            <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => void startBatch(book)}>批量生成</button>
+            {batch && ["pending", "running"].includes(batch.status) &&
+              <button className="btn-sm" style={{ background: "rgba(248,113,113,.14)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => void cancelBatch(book, batch)}>取消批次</button>}
+            {batch && batch.status === "failed" &&
+              <button className="btn-sm" style={{ background: "rgba(251,146,60,.14)", color: "var(--orange)" }} disabled={busy === book.id} onClick={() => void resumeBatch(book, batch)}>恢复批次</button>}
+            <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入目录</button>
+            <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
+            <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
+            <button className="btn-sm" style={{ background: "rgba(248,113,113,.14)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => setDeleteConfirm(book.id)} title="删除此书及全部章节">
+              <Trash2 size={14} />
+            </button>
+          </div>
+          {importBookId === book.id && <div style={{ marginTop: 14, padding: 14, background: "var(--bg)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+            <strong style={{ fontSize: 13 }}>章节目录预览</strong>
+            <small style={{ display: "block", color: "var(--text-3)", marginTop: 4 }}>粘贴 TXT 目录；预览不会写入，点击确认后才创建空白计划章节。重复标题由后端跳过。</small>
+            <textarea className="form-input" rows={5} value={directoryText} onChange={event => setDirectoryText(event.target.value)} placeholder={"第1章 初入异界\n第2章 规则觉醒"} style={{ marginTop: 8 }} />
+            <small style={{ display: "block", color: "var(--text-3)", marginTop: 4 }}>识别 {importPreview.length} 条{directoryText.trim() && !importPreview.length ? "；当前格式无法识别" : ""}</small>
+            {importPreview.length > 0 && <ol style={{ maxHeight: 120, overflow: "auto", margin: "6px 0", paddingLeft: 24, fontSize: 12, color: "var(--text-2)" }}>
+              {importPreview.slice(0, 20).map((chapter, i) => <li key={`${chapter.raw}:${i}`}>第{chapter.seq}章 {chapter.title}</li>)}
+            </ol>}
+            {importPreview.length > 20 && <small style={{ display: "block", color: "var(--text-3)" }}>仅预览前 20 条，确认时提交全部 {importPreview.length} 条。</small>}
+            <button className="btn-sm" style={{ background: "var(--primary-dim)", color: "var(--primary-light)", marginTop: 8 }} disabled={busy === book.id || !importPreview.length} onClick={() => void importDirectory(book)}>{busy === book.id ? "导入中…" : `确认导入 ${importPreview.length} 条`}</button>
+          </div>}
+        </div>;
+      })}</div>
+      {/* NC-LIB-002: Pagination */}
+      {totalPages > 1 && <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 20 }}>
+        <button className="btn-ghost" disabled={page === 0} onClick={() => setPage(p => p - 1)}>上一页</button>
+        <span style={{ fontSize: 13, color: "var(--text-2)" }}>{page + 1} / {totalPages} (共 {filtered.length} 本)</span>
+        <button className="btn-ghost" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
+      </div>}
+    </>}
+    {loading && <p style={{ color: "var(--text-3)", textAlign: "center", padding: 20 }}>正在加载书库…</p>}
     {/* V2.0: Delete confirmation modal */}
-    {deleteConfirm && <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
-        <h3>确认删除</h3>
-        <p>确定删除《{books.find(b => b.id === deleteConfirm)?.title || "未知"}》？此操作将同时删除该书所有章节和知识条目，不可撤销。</p>
-        <div className="row-actions">
-          <button onClick={() => setDeleteConfirm(null)}>取消</button>
-          <button className="danger" disabled={busy === deleteConfirm}
+    {deleteConfirm && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
+      onClick={() => setDeleteConfirm(null)}>
+      <div className="card" onClick={e => e.stopPropagation()} style={{ maxWidth: 400, width: "90%", padding: 24 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>确认删除</h3>
+        <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 16 }}>确定删除《{books.find(b => b.id === deleteConfirm)?.title || "未知"}》？此操作将同时删除该书所有章节和知识条目，不可撤销。</p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn-ghost" onClick={() => setDeleteConfirm(null)}>取消</button>
+          <button className="btn-sm" style={{ background: "var(--red)", color: "#fff" }} disabled={busy === deleteConfirm}
             onClick={() => { const book = books.find(b => b.id === deleteConfirm); if (book) deleteBook(book); }}>
             {busy === deleteConfirm ? "删除中…" : "确认删除"}
           </button>
