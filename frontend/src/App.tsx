@@ -35,7 +35,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "dashboard" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
+type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
@@ -445,7 +445,7 @@ export default function App() {
     final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
   }) as any;
 
-  const titles: Record<Tab, string> = { dashboard: "工作台", ranking: "扫榜选书", library: "书库管理", wizard: "灵感创作", progress: "创作进度", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用成本", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
+  const titles: Record<Tab, string> = { dashboard: "工作台", overview: "数据概览", workspace: "工作区", ranking: "扫榜选书", library: "书库管理", wizard: "灵感创作", progress: "创作进度", review: "质量审阅", editor: "章节编辑器", costs: "AI 成本", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);

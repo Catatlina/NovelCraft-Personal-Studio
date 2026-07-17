@@ -1,331 +1,155 @@
-import React, { useEffect, useRef, useState } from "react";
-import {
-  BookOpen,
-  Bot,
-  ChevronDown,
-  Code2,
-  DollarSign,
-  FileText,
-  GitBranch,
-  Layers,
-  Layout as LayoutIcon,
-  LayoutDashboard,
-  Library,
-  LogOut,
-  PanelLeft,
-  PanelLeftClose,
-  PenTool,
-  Radio,
-  Search,
-  Send,
-  Settings,
-  Share2,
-  Sparkles,
-  Sun,
-  Moon,
-  Target,
-  TrendingUp,
-  Users,
-  Wrench,
-} from "lucide-react";
-import "../styles/proto.css";
+import React, { useState } from "react";
+import { Search, Bell, Sun, Moon, LogOut, ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
+import '../styles/proto.css';
 
-type Tab =
-  | "dashboard"
-  | "ranking"
-  | "library"
-  | "wizard"
-  | "progress"
-  | "review"
-  | "editor"
-  | "costs"
-  | "prompts"
-  | "dag"
-  | "settings"
-  | "studio"
-  | "publish"
-  | "hotspot"
-  | "knowledge"
-  | "fanout"
-  | "versions"
-  | "foreshadowing"
-  | "collaboration"
-  | "agents";
+type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
 
-interface NavItem {
-  tab: Tab;
-  label: string;
-  icon: React.ReactNode;
+function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick: () => void }) {
+  return (
+    <div className={`nav-item${active ? ' active' : ''}`} onClick={onClick} style={{ cursor: 'pointer' }}>
+      {icon}
+      <span className="nav-label">{label}</span>
+    </div>
+  );
 }
 
-interface NavGroup {
-  id: string;
-  label: string;
-  items: NavItem[];
-  /** true = collapsible with chevron, false = flat items always visible */
-  collapsible: boolean;
+function NavGroup({ title, icon, defaultOpen, children }: { title: string; icon?: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen ?? true);
+  return (
+    <div className={`nav-group${open ? '' : ' collapsed'}`}>
+      <div className="nav-group-title" onClick={() => setOpen(!open)}>
+        {title}
+        <ChevronDown className="nav-chevron" size={14} />
+      </div>
+      <div className="nav-sub">{children}</div>
+    </div>
+  );
 }
 
-/** ── Sidebar nav groups matching prototype structure ── */
-const NAV_GROUPS: NavGroup[] = [
-  {
-    id: "overview",
-    label: "",
-    collapsible: false,
-    items: [
-      { tab: "dashboard", label: "概览", icon: <LayoutDashboard size={17} /> },
-      { tab: "dashboard", label: "工作台", icon: <LayoutIcon size={17} /> },
-    ],
-  },
-  {
-    id: "writing",
-    label: "小说创作",
-    collapsible: true,
-    items: [
-      { tab: "wizard", label: "灵感创作", icon: <Sparkles size={17} /> },
-      { tab: "ranking", label: "扫榜选书", icon: <TrendingUp size={17} /> },
-      { tab: "library", label: "书库管理", icon: <Library size={17} /> },
-      { tab: "editor", label: "编辑器", icon: <FileText size={17} /> },
-      { tab: "progress", label: "创作进度", icon: <GitBranch size={17} /> },
-      { tab: "review", label: "审阅", icon: <BookOpen size={17} /> },
-      { tab: "foreshadowing", label: "伏笔看板", icon: <Target size={17} /> },
-    ],
-  },
-  {
-    id: "media",
-    label: "自媒体中心",
-    collapsible: true,
-    items: [
-      { tab: "hotspot", label: "热点追踪", icon: <TrendingUp size={17} /> },
-      { tab: "studio", label: "内容工作室", icon: <Layers size={17} /> },
-      { tab: "fanout", label: "多平台分发", icon: <Send size={17} /> },
-      { tab: "knowledge", label: "知识库", icon: <Search size={17} /> },
-    ],
-  },
-  {
-    id: "tools",
-    label: "工具服务",
-    collapsible: true,
-    items: [
-      { tab: "publish", label: "发布看板", icon: <Send size={17} /> },
-      { tab: "costs", label: "成本追踪", icon: <DollarSign size={17} /> },
-      { tab: "prompts", label: "Prompt 管理", icon: <Code2 size={17} /> },
-      { tab: "dag", label: "工作流编排", icon: <Share2 size={17} /> },
-      { tab: "versions", label: "版本树", icon: <GitBranch size={17} /> },
-      { tab: "collaboration", label: "协作管理", icon: <Users size={17} /> },
-      { tab: "agents", label: "智能体", icon: <Bot size={17} /> },
-    ],
-  },
-  {
-    id: "settings",
-    label: "",
-    collapsible: false,
-    items: [
-      { tab: "settings", label: "设置", icon: <Settings size={17} /> },
-    ],
-  },
-];
-
-/** Find which group contains the active tab */
-function findGroupForTab(tab: Tab): string {
-  for (const g of NAV_GROUPS) {
-    if (g.items.some((item) => item.tab === tab)) return g.id;
-  }
-  return "";
-}
-
-export function Layout({
-  tab,
-  setTab,
-  title,
-  runStatus,
-  children,
-}: {
-  tab: Tab;
-  setTab: (t: Tab) => void;
-  title: string;
-  runStatus?: string;
-  children: React.ReactNode;
+export function Layout({ tab, setTab, title, children }: {
+  tab: Tab; setTab: (t: Tab) => void; title: string;
+  runStatus?: string; children: React.ReactNode;
 }) {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const workspaceRef = useRef<HTMLElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [dark, setDark] = useState(true);
 
-  // ── Collapsible group state: expanded set ──
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    const gid = findGroupForTab(tab);
-    if (gid) s.add(gid);
-    // Expand all collapsible groups by default
-    for (const g of NAV_GROUPS) {
-      if (g.collapsible) s.add(g.id);
-    }
-    return s;
-  });
+  const toggleTheme = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.setAttribute('data-theme', next ? 'dark' : 'light');
+  };
 
-  // Auto-expand parent group when tab changes
-  useEffect(() => {
-    const gid = findGroupForTab(tab);
-    if (gid) {
-      setExpanded((prev) => {
-        if (prev.has(gid)) return prev;
-        const next = new Set(prev);
-        next.add(gid);
-        return next;
-      });
-    }
-  }, [tab]);
-
-  // Scroll to top on tab change
-  useEffect(() => {
-    workspaceRef.current?.scrollTo(0, 0);
-    window.scrollTo(0, 0);
-  }, [tab]);
-
-  // ── Theme ──
-  function toggleTheme() {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    document.documentElement.setAttribute("data-theme", next);
-  }
-
-  // ── Sidebar collapse ──
-  function toggleSidebar() {
-    setSidebarCollapsed((prev) => !prev);
-  }
-
-  // ── Group expand/collapse ──
-  function toggleGroup(groupId: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return next;
-    });
-  }
+  const isActive = (t: Tab) => tab === t;
 
   return (
-    <div className="layout">
-      {/* ══════════ SIDEBAR ══════════ */}
-      <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
-        {/* Brand */}
+    <div className="app-shell">
+      {/* Sidebar */}
+      <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
         <div className="sidebar-brand">
           <div className="brand-icon">
-            <LayoutIcon size={18} />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           </div>
           <span className="brand-text">NovelCraft</span>
         </div>
 
-        {/* Navigation groups */}
-        {NAV_GROUPS.map((group) => {
-          const isExpanded = expanded.has(group.id);
-          const hasActive = group.items.some((item) => item.tab === tab);
+        {/* 概览 */}
+        <div className="nav-group">
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>}
+            label="概览" active={isActive('overview')} onClick={() => setTab('overview')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>}
+            label="工作台" active={isActive('dashboard')} onClick={() => setTab('dashboard')} />
+        </div>
 
-          if (group.collapsible) {
-            // Collapsible group: title + chevron + sub-items
-            return (
-              <div
-                key={group.id}
-                className={`nav-group${isExpanded ? "" : " collapsed"}`}
-              >
-                <button
-                  className="nav-group-title"
-                  onClick={() => toggleGroup(group.id)}
-                >
-                  {group.label}
-                  <ChevronDown size={14} className="nav-chevron" />
-                </button>
-                <div className="nav-sub">
-                  {group.items.map((item) => (
-                    <button
-                      key={item.tab}
-                      className={`nav-item${
-                        tab === item.tab ? " active" : ""
-                      }`}
-                      onClick={() => setTab(item.tab)}
-                    >
-                      {item.icon}
-                      <span className="nav-label">{item.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          }
+        {/* 小说创作 */}
+        <NavGroup title="小说创作" defaultOpen={['wizard','ranking','library','editor','progress','review','foreshadowing'].includes(tab)}>
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>}
+            label="灵感创作" active={isActive('wizard')} onClick={() => setTab('wizard')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>}
+            label="扫榜选书" active={isActive('ranking')} onClick={() => setTab('ranking')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>}
+            label="书库管理" active={isActive('library')} onClick={() => setTab('library')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>}
+            label="编辑器" active={isActive('editor')} onClick={() => setTab('editor')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
+            label="创作进度" active={isActive('progress')} onClick={() => setTab('progress')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>}
+            label="审阅" active={isActive('review')} onClick={() => setTab('review')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7l3 3M17 7l-3 3M7 17l3-3M17 17l-3-3"/></svg>}
+            label="伏笔看板" active={isActive('foreshadowing')} onClick={() => setTab('foreshadowing')} />
+        </NavGroup>
 
-          // Flat group: items always visible
-          return (
-            <div key={group.id} className="nav-group">
-              {group.items.map((item) => (
-                <button
-                  key={item.tab + "-" + item.label}
-                  className={`nav-item${tab === item.tab ? " active" : ""}`}
-                  onClick={() => setTab(item.tab)}
-                >
-                  {item.icon}
-                  <span className="nav-label">{item.label}</span>
-                </button>
-              ))}
-            </div>
-          );
-        })}
+        {/* 自媒体中心 */}
+        <NavGroup title="自媒体中心" defaultOpen={['hotspot','studio','fanout','knowledge'].includes(tab)}>
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/></svg>}
+            label="热点追踪" active={isActive('hotspot')} onClick={() => setTab('hotspot')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
+            label="内容工作室" active={isActive('studio')} onClick={() => setTab('studio')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>}
+            label="多平台分发" active={isActive('fanout')} onClick={() => setTab('fanout')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>}
+            label="知识库" active={isActive('knowledge')} onClick={() => setTab('knowledge')} />
+        </NavGroup>
 
-        {/* Bottom section */}
+        {/* 工具服务 */}
+        <NavGroup title="工具服务" defaultOpen={['publish','costs','prompts','dag','versions','plugins','collaboration','agents'].includes(tab)}>
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>}
+            label="发布看板" active={isActive('publish')} onClick={() => setTab('publish')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>}
+            label="成本追踪" active={isActive('costs')} onClick={() => setTab('costs')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>}
+            label="Prompt管理" active={isActive('prompts')} onClick={() => setTab('prompts')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4v7a2 2 0 0 1-2 2H6"/></svg>}
+            label="工作流编排" active={isActive('dag')} onClick={() => setTab('dag')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>}
+            label="版本树" active={isActive('versions')} onClick={() => setTab('versions')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}
+            label="插件管理" active={isActive('plugins')} onClick={() => setTab('plugins')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/></svg>}
+            label="智能体" active={isActive('agents')} onClick={() => setTab('agents')} />
+        </NavGroup>
+
+        {/* 设置 */}
+        <div className="nav-group">
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
+            label="设置" active={isActive('settings')} onClick={() => setTab('settings')} />
+        </div>
+
+        {/* Bottom */}
         <div className="sidebar-bottom">
-          <div className="theme-row">
-            <button
-              className="nav-item"
-              onClick={toggleTheme}
-              title="切换主题"
-            >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-              <span className="label">
-                {theme === "dark" ? "亮色" : "暗色"}
-              </span>
-            </button>
-            <button
-              className="nav-item"
-              onClick={() => (window as any).__ncLogout?.()}
-              title="退出"
-            >
-              <LogOut size={17} />
-              <span className="label">退出</span>
-            </button>
-          </div>
-          <button
-            className="nav-item collapse-btn"
-            onClick={toggleSidebar}
-            title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
-          >
-            {sidebarCollapsed ? (
-              <PanelLeft size={17} />
-            ) : (
-              <PanelLeftClose size={17} />
-            )}
-            <span className="label">
-              {sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
-            </span>
+          <button className="nav-item" onClick={toggleTheme} title="切换主题">
+            {dark ? <Sun size={17} /> : <Moon size={17} />}
+            <span className="label">{dark ? '暗色' : '亮色'}</span>
+          </button>
+          <button className="nav-item" title="退出" onClick={() => {
+            sessionStorage.removeItem('nc_token');
+            window.location.reload();
+          }}>
+            <LogOut size={17} />
+            <span className="label">退出</span>
+          </button>
+          <button className="nav-item collapse-btn" onClick={() => setCollapsed(!collapsed)} title="收起">
+            {collapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}
+            <span className="label">{collapsed ? '展开' : '收起侧栏'}</span>
           </button>
         </div>
       </aside>
 
-      {/* ══════════ MAIN ══════════ */}
-      <section className="workspace" ref={workspaceRef}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 18,
-          }}
-        >
-          <h1 style={{ fontSize: 24, margin: 0 }}>{title}</h1>
-          {runStatus && (
-            <span className={`pill ${runStatus}`}>{runStatus}</span>
-          )}
+      {/* Main */}
+      <main className="app-main">
+        <header className="topbar">
+          <div className="search-box">
+            <Search size={16} />
+            <input placeholder="搜索项目、章节或命令… (Ctrl+K)" />
+          </div>
+          <div className="topbar-right">
+            <button className="icon-btn" title="通知"><Bell size={18} /></button>
+            <div className="avatar">A</div>
+          </div>
+        </header>
+        <div className="content">
+          {children}
         </div>
-        {children}
-      </section>
+      </main>
     </div>
   );
 }
