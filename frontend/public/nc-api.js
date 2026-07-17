@@ -424,37 +424,70 @@ NC.loadWorkspace = async function () {
     });
 };
 
-// 扫榜选书（需项目）
+// 扫榜选书 —— 实时热销榜（按平台快照），需项目。
+// 取数路径：sources → 选中 source 最新 snapshot(id) → snapshots/{id}.items(ranking_items)
+// 注意：/ranking/snapshots 列表只返回快照元数据；书行在 /ranking/snapshots/{id} 的 items 中。
 NC.loadRanking = async function () {
   if (!NC.needProject()) return;
+
+  // 1) 平台下拉（option value = source_key）
   await NC.withState('#ranking-source-select',
     () => NC.apiGet('/api/v1/ranking/sources', true),
     (d) => {
       const sources = Array.isArray(d) ? d : (d && d.sources ? d.sources : []);
       const sel = document.getElementById('ranking-source-select');
-      if (sel) sel.innerHTML = sources.map((s) =>
+      if (!sel) return;
+      sel.innerHTML = sources.map((s) =>
         '<option value="' + ncEsc(s.source_key ?? s.key) + '" ' + (s.enabled ? '' : 'disabled') + '>' + ncEsc(s.display_name ?? s.name) + '</option>'
       ).join('');
+      // 记忆已选 source；否则默认第一个
+      if (NC._rankingSource && sources.some((s) => (s.source_key ?? s.key) === NC._rankingSource)) {
+        sel.value = NC._rankingSource;
+      } else if (sources.length) {
+        NC._rankingSource = sSourceKey(sources[0]);
+      }
+      sel.onchange = () => { NC._rankingSource = sel.value; NC.loadRankingTable(); };
     });
 
+  // 2)+3) 拉当前 source 最新快照书榜
+  await NC.loadRankingTable();
+};
+
+// 取 source_key 的小工具
+function sSourceKey(s) { return s && (s.source_key ?? s.key); }
+
+// 渲染当前选中 source 的快照书榜（#ranking-tbody）
+NC.loadRankingTable = async function () {
+  if (!NC.needProject()) return;
+  const sourceKey = NC._rankingSource;
+  if (!sourceKey) return;
   await NC.withState('#ranking-tbody',
-    () => NC.apiGet('/api/v1/ranking/topics', true),
-    (d) => {
-      // 修复 BUG-3：/ranking/snapshots 元素无 title/author/heat 字段；
-      // 改用 /ranking/topics，返回 {id,title,genre,market_score,status}（含真实书名/类型/热度分）。
-      const rows = Array.isArray(d) ? d : (d && d.items ? d.items : (d && d.topics ? d.topics : []));
+    async () => {
+      // 2) 该 source 的最新快照 id（captured_at 最大者）
+      const snaps = await NC.apiGet('/api/v1/ranking/snapshots', true);
+      const list = Array.isArray(snaps) ? snaps : (snaps && snaps.items ? snaps.items : []);
+      const mine = list.filter((s) => (s.source_key ?? s.key) === sourceKey);
+      mine.sort((a, b) => String(b.captured_at || '').localeCompare(String(a.captured_at || '')));
+      const latest = mine[0];
+      if (!latest || !latest.id) return [];
+      // 3) 快照书行
+      const detail = await NC.api('/api/v1/ranking/snapshots/' + encodeURIComponent(latest.id));
+      const items = (detail && detail.items) ? detail.items : (Array.isArray(detail) ? detail : []);
+      return items;
+    },
+    (items) => {
       const tbody = document.getElementById('ranking-tbody');
       if (!tbody) return;
-      if (rows.length) {
-        tbody.innerHTML = rows.map((r, i) => {
-          const score = ncNum(r.market_score ?? r.score);
-          return '<tr data-id="' + ncEsc(r.id ?? i) + '">' +
-            '<td><span class="rank ' + (i < 3 ? 'top' : '') + '">' + (i + 1) + '</span></td>' +
+      if (items && items.length) {
+        tbody.innerHTML = items.map((r) => {
+          const rankNo = ncNum(r.rank_no ?? 0) || 1;
+          return '<tr data-id="' + ncEsc(r.id ?? '') + '">' +
+            '<td><span class="rank ' + (rankNo <= 3 ? 'top' : '') + '">' + rankNo + '</span></td>' +
             '<td><b>' + ncEsc(r.title ?? '—') + '</b></td>' +
             '<td>' + ncEsc(r.author ?? '—') + '</td>' +
-            '<td>' + ncEsc(r.genre ?? '—') + '</td>' +
-            '<td>' + ncEsc(score) + '</td>' +
-            '<td>—</td>' +
+            '<td>' + ncEsc(r.category ?? '—') + '</td>' +
+            '<td>—</td>' + // 热度：metrics 字段名待 QA 真机确认，暂显「—」
+            '<td>—</td>' + // 周涨：同上
             '<td><button class="btn-sm btn-ghost" onclick="showToast(\'已加入书库\')">+ 收藏</button></td>' +
             '</tr>';
         }).join('');
@@ -462,6 +495,20 @@ NC.loadRanking = async function () {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-3)">暂无榜单数据</td></tr>';
       }
     });
+};
+
+// 刷新：触发该 source 重新扫描，再拉书榜（bookmark 本期占位不调，避免 422）
+NC.refreshRanking = async function () {
+  if (!NC.needProject()) return;
+  const sourceKey = NC._rankingSource;
+  if (!sourceKey) { NC.loadRanking(); return; }
+  try {
+    await NC.api('/api/v1/ranking/sources/' + encodeURIComponent(sourceKey) + '/scan?project_id=' + encodeURIComponent(NC.currentProjectId), { method: 'POST' });
+    ncToast('已开始重新扫描 ' + sourceKey);
+  } catch (e) {
+    ncToast('扫描失败: ' + extractErrorMessage(e.message));
+  }
+  await NC.loadRankingTable();
 };
 
 // 书库管理（需项目）
