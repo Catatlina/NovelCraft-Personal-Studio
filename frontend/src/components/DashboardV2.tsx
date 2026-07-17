@@ -197,16 +197,16 @@ export function DashboardV2({ projectId, onNavigate }: DashboardV2Props) {
     setRecentError("");
     try {
       const data = await api<any[]>("/api/v1/projects");
-      const projects: RecentProject[] = (data || [])
-        .slice(0, 5)
-        .map((p: any) => ({
-          id: p.id,
-          title: p.name || p.title || "未命名项目",
-          status: p.status || "draft",
-          updated_at: p.updated_at || p.created_at || new Date().toISOString(),
-          total_words: p.total_words || p.word_count || 0,
-          chapter_count: p.chapter_count || 0,
-        }));
+      const projects: RecentProject[] = Array.isArray(data)
+        ? data.slice(0, 5).map((p: any) => ({
+            id: p.id,
+            title: p.name || p.title || "未命名项目",
+            status: p.status || "draft",
+            updated_at: p.updated_at || p.created_at || new Date().toISOString(),
+            total_words: p.total_words || p.word_count || 0,
+            chapter_count: p.chapter_count || 0,
+          }))
+        : [];
       setRecentProjects(projects);
     } catch (e: any) {
       setRecentError(e?.message || "加载失败");
