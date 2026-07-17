@@ -286,22 +286,15 @@ def _fetch_fanqie_one_category(cat_id: str, cat_name: str, gender: str,
 
 
 def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = None) -> list[dict]:
-    """Fetch 番茄小说 ranking with full leaderboard coverage.
+    """Fetch 番茄小说 rankings: SSR default rank + all category rankings.
+
+    Combines two data sources:
+    1. SSR-rendered default/reading rank (top ~15 cross-category books)
+    2. Category API for per-category rankings (37 categories × both genders)
 
     Args:
-        leaderboard: Leaderboard type. One of:
-            'all' (全站榜), 'main' (主榜), 'newbook' (新书榜),
-            'hotsales' (热销榜), 'completed' (完结榜), 'recommend' (推荐榜),
-            'monthly' (月榜), 'weekly' (周榜), 'daily' (日榜),
-            'category' (分类榜), 'male' (男频), 'female' (女频)
-        max_count: Max books to collect (default: RANKING_FANQIE_COUNT env var, 100).
-
-    Features:
-      - Expands to ALL categories (both genders) for most leaderboard types
-      - Auto-paginates to hit target count
-      - Deduplicates by title+author hash
-      - Uses ThreadPoolExecutor for concurrent category fetching
-      - Retry logic: 3 attempts with exponential backoff
+        leaderboard: 'all' (default), 'newbook', 'male', 'female'
+        max_count: Max books (default: RANKING_FANQIE_COUNT env var, 100)
     """
     target = max_count or _RANKING_FANQIE_COUNT
     rank_mold = _FANQIE_MOLD_MAP.get(leaderboard, "2")
@@ -312,14 +305,15 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
         return [{"source": "fanqie", "degraded": True,
                  "error": "Fanqie rank page unreachable — check network"}]
 
+    # Phase 1: Scrape SSR default ranking (top books from https://fanqienovel.com/rank/N)
+    ssr_books = _scrape_fanqie_ssr_rank(meta)
+    all_results: list[dict] = list(ssr_books)
+    seen_dedup: set[str] = {_make_dedup_key(b["title"], b["author"]) for b in all_results}
+
+    # Phase 2: Per-category rankings via API
     targets = _build_category_targets(meta, leaderboard)
-    # Distribute target count across categories (at least 30 per category)
-    per_cat = max(30, (target + len(targets) - 1) // len(targets))
+    per_cat = max(3, target // len(targets))  # Even distribution, at least 3 per category
 
-    all_results: list[dict] = []
-    seen_dedup: set[str] = set()
-
-    # Concurrent fetching across categories
     with ThreadPoolExecutor(max_workers=min(8, len(targets))) as executor:
         futures = {}
         for cat_id, cat_name, g in targets:
@@ -338,24 +332,80 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
                 if dk in seen_dedup:
                     continue
                 seen_dedup.add(dk)
-                # Re-rank
                 item["rank"] = len(all_results) + 1
                 item["leaderboard"] = label
                 all_results.append(item)
 
-    # If 完结榜, filter to only completed books
+    # 完结榜 filter
     if leaderboard == "completed":
         all_results = [b for b in all_results if b.get("creation_status") == "0"]
         for i, b in enumerate(all_results):
             b["rank"] = i + 1
 
-    # Truncate to target
-    all_results = all_results[:target]
-
     if not all_results:
         return [{"source": "fanqie", "degraded": True,
                  "error": "Fanqie API returned no results"}]
     return all_results
+
+
+def _scrape_fanqie_ssr_rank(meta: dict) -> list[dict]:
+    """Scrape the SSR-rendered default ranking from fanqienovel.com/rank pages.
+    Returns top-ranked books from the default reading leaderboard (not category-filtered)."""
+    import urllib.request as _ur, ssl as _ssl
+    _ctx = _ssl.create_default_context()
+    _ctx.check_hostname = False
+    _ctx.verify_mode = _ssl.CERT_NONE
+
+    results: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for page in [1, 2]:  # First 2 pages (~15-20 books)
+        url = f"https://fanqienovel.com/rank/{page}" if page > 1 else "https://fanqienovel.com/rank"
+        try:
+            req = _ur.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            with _retry_call(_ur.urlopen, req, timeout=15, context=_ctx) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+        except Exception:
+            continue
+
+        idx = html.find("__INITIAL_STATE__=")
+        if idx < 0:
+            continue
+        start = idx + len("__INITIAL_STATE__=")
+        end = html.find("</script>", start)
+        js = __import__("re").sub(r"\bundefined\b", "null", html[start:end].strip().rstrip(";").strip())
+        try:
+            state, _ = __import__("json").JSONDecoder().raw_decode(js)
+        except Exception:
+            continue
+
+        book_list = state.get("rank", {}).get("book_list", [])
+        for b in book_list:
+            bid = str(b.get("bookId", ""))
+            if not bid or bid in seen_ids:
+                continue
+            seen_ids.add(bid)
+            title = _decrypt_pua(str(b.get("bookName", "")))
+            author = _decrypt_pua(str(b.get("author", "")))
+            if not title:
+                continue
+            results.append({
+                "rank": b.get("currentPos", len(results) + 1),
+                "title": title,
+                "author": author,
+                "category": str(b.get("category", "")),
+                "source": "fanqie",
+                "source_book_id": bid,
+                "url": f"https://fanqienovel.com/page/{bid}",
+                "read_count": b.get("read_count", b.get("readCount", 0)),
+                "word_count": b.get("wordNumber", 0),
+                "leaderboard": "阅读榜(SSR)",
+            })
+        if len(book_list) < 5:
+            break
+    return results
 
 
 # ============================================================

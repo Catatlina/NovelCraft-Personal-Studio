@@ -469,23 +469,7 @@ def _scan_source(source_key: str, project_id: str, user: dict, retry_of_snapshot
     db = connect()
     require_member(db, project_id, user, write=True)
     try:
-        # For fanqie, scan ALL leaderboard types (主榜/新书/热销/完结/推荐/月/周/日/全站)
-        if source_key == "fanqie":
-            from app.services.ranking_adapter import _FANQIE_LABELS
-            all_leaderboards = ["all", "main", "newbook", "hotsales", "completed", "recommend", "monthly", "weekly", "daily"]
-            all_items: list[dict] = []
-            seen = set()
-            for lb in all_leaderboards:
-                lb_result = fetcher(leaderboard=lb, max_count=50)  # 50 per leaderboard = 450 total
-                for item in lb_result:
-                    if isinstance(item, dict) and not item.get("error"):
-                        dk = f"{item.get('title','')}|{item.get('author','')}"
-                        if dk not in seen:
-                            seen.add(dk)
-                            all_items.append(item)
-            result = all_items
-        else:
-            result = fetcher()
+        result = fetcher()
     except Exception as exc:
         result = [{"source": source_key, "error": str(exc), "degraded": True}]
     error_item = next((item for item in result if item.get("error")), None)
