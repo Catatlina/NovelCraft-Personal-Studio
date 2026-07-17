@@ -128,7 +128,7 @@ export function RichEditor({
     setShowFloatBar(false);
   }, [onAiOp]);
 
-  if (!editor) return <div style={{ padding: 20, color: "var(--text-muted)" }}>Loading editor...</div>;
+  if (!editor) return <div style={{ padding: 20, color: "var(--text-3)" }}>Loading editor...</div>;
 
   return (
     <div className="novel-editor-area" ref={editorRef}>
@@ -267,7 +267,7 @@ export function RichEditor({
                       </div>
                     </>
                   ) : (
-                    <p className="muted" style={{ fontSize: 12, color: "var(--text-3)" }}>点击"七维审查"获取AI评价</p>
+                    <p style={{ fontSize: 12, color: "var(--text-3)" }}>点击"七维审查"获取AI评价</p>
                   )}
                   {aiReview?.next && (
                     <>
@@ -315,7 +315,7 @@ export function RichEditor({
                       ))}
                     </div>
                   ) : (
-                    <p className="muted" style={{ fontSize: 12, color: "var(--text-3)" }}>
+                    <p style={{ fontSize: 12, color: "var(--text-3)" }}>
                       点击"去AI味"按钮执行七层管线处理
                     </p>
                   )}

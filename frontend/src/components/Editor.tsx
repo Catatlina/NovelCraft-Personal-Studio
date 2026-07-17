@@ -241,7 +241,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
       {isFullscreen && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 200,
-          background: "var(--nc-bg, #0a0a14)", padding: 16,
+          background: "var(--bg, #0a0a14)", padding: 16,
           display: "flex", flexDirection: "column"
         }}>
           <RichEditor
