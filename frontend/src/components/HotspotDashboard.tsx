@@ -4,6 +4,7 @@ import {
   RefreshCw, Eye, X, ChevronLeft, ChevronRight, Star, FileText
 } from "lucide-react";
 import { api } from "../lib/api";
+import "../styles/novel-prose.css";
 
 type HotspotItem = {
   title: string;
@@ -76,6 +77,8 @@ export function HotspotDashboard() {
   const [error, setError] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState("");
+  const [generatedKeys, setGeneratedKeys] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<{ message: string; actionLabel?: string; onAction?: () => void } | null>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -159,8 +162,10 @@ export function HotspotDashboard() {
 
   // ── One-click generate ───────────────────────────────────────
   const generate = async (h: HotspotItem) => {
-    setBusyKey(`${h.source}:${h.title}`);
+    const cardKey = `${h.source}:${h.title}`;
+    setBusyKey(cardKey);
     setNotice("");
+    setError("");
     try {
       const projects = await api("/api/v1/projects");
       const projectId = projects.data?.[0]?.id;
@@ -175,7 +180,17 @@ export function HotspotDashboard() {
           platforms: ["wechat", "toutiao", "baijia", "dayu", "xiaohongshu", "douyin"],
         }),
       });
-      setNotice(`✅ 已生成 ${result.data?.items?.length || 0} 篇平台内容草稿。`);
+      const count = result.data?.items?.length || 0;
+      setNotice(`✅ 已生成 ${count} 篇平台内容草稿。`);
+      // Record success on this card + show toast
+      setGeneratedKeys(prev => new Set(prev).add(cardKey));
+      setToast({
+        message: `已生成 ${count} 篇文章`,
+        actionLabel: "查看文库 →",
+        onAction: () => { setTab("library"); setToast(null); },
+      });
+      // Auto-dismiss toast after 8 seconds
+      setTimeout(() => setToast(prev => prev?.message === `已生成 ${count} 篇文章` ? null : prev), 8000);
     } catch (caught) {
       setError(`内容生成失败：${String(caught)}`);
     } finally {
@@ -293,6 +308,39 @@ export function HotspotDashboard() {
 
       {error && <div className="panel" style={{ color: "#ff5252", fontSize: 13 }}>{error}</div>}
       {notice && <div className="panel" style={{ color: "#00e676", fontSize: 13 }}>{notice}</div>}
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 999,
+          background: "var(--nc-card, rgba(22,22,50,0.95))",
+          backdropFilter: "blur(16px)",
+          border: "1px solid rgba(0,229,255,0.2)",
+          borderRadius: 12, padding: "14px 20px",
+          display: "flex", alignItems: "center", gap: 12,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          animation: "slideUp 0.3s ease-out",
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#e0e0e0" }}>✅ {toast.message}</span>
+          {toast.actionLabel && (
+            <button
+              onClick={toast.onAction}
+              style={{
+                background: "var(--nc-primary, #FF6B35)", color: "#fff",
+                border: "none", borderRadius: 6, padding: "6px 14px",
+                fontSize: 13, fontWeight: 600, cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {toast.actionLabel}
+            </button>
+          )}
+          <button
+            onClick={() => setToast(null)}
+            style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* ── Tab 1: 今日热点 ──────────────────────────────────── */}
       {tab === "hotspots" && (

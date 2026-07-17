@@ -8,12 +8,18 @@ HOTSPOT_SOURCES = {
     "baidu": {"name": "百度热搜", "url": "https://top.baidu.com/board?tab=realtime", "history_url_env": "HOTSPOT_BAIDU_HISTORY_URL", "kind": "baidu_html"},
     "zhihu": {"name": "知乎热榜", "url": "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20", "history_url_env": "HOTSPOT_ZHIHU_HISTORY_URL", "kind": "zhihu_json"},
     "weibo": {"name": "微博热搜", "url": "https://weibo.com/ajax/side/hotSearch", "history_url_env": "HOTSPOT_WEIBO_HISTORY_URL", "kind": "weibo_json"},
-    "xiaohongshu": {"name": "小红书热点", "url_env": "HOTSPOT_XIAOHONGSHU_URL", "history_url_env": "HOTSPOT_XIAOHONGSHU_HISTORY_URL", "kind": "generic_json"},
-    "douyin": {"name": "抖音热点", "url_env": "HOTSPOT_DOUYIN_URL", "history_url_env": "HOTSPOT_DOUYIN_HISTORY_URL", "kind": "generic_json"},
-    "toutiao": {"name": "今日头条", "url_env": "HOTSPOT_TOUTIAO_URL", "history_url_env": "HOTSPOT_TOUTIAO_HISTORY_URL", "kind": "generic_json"},
-    "kuaishou": {"name": "快手热榜", "url_env": "HOTSPOT_KUAISHOU_URL", "history_url_env": "HOTSPOT_KUAISHOU_HISTORY_URL", "kind": "generic_json"},
-    "bilibili": {"name": "B站热门", "url_env": "HOTSPOT_BILIBILI_URL", "history_url_env": "HOTSPOT_BILIBILI_HISTORY_URL", "kind": "generic_json"},
-    "google_trends_cn": {"name": "Google Trends中国", "url_env": "HOTSPOT_GOOGLE_TRENDS_CN_URL", "history_url_env": "HOTSPOT_GOOGLE_TRENDS_CN_HISTORY_URL", "kind": "generic_json"},
+    "xiaohongshu": {"name": "小红书热点", "url_env": "HOTSPOT_XIAOHONGSHU_URL", "history_url_env": "HOTSPOT_XIAOHONGSHU_HISTORY_URL", "kind": "xiaohongshu_html",
+                    "fallback_url": "https://www.xiaohongshu.com/explore"},
+    "douyin": {"name": "抖音热点", "url_env": "HOTSPOT_DOUYIN_URL", "history_url_env": "HOTSPOT_DOUYIN_HISTORY_URL", "kind": "douyin_html",
+               "fallback_url": "https://www.douyin.com/hot"},
+    "toutiao": {"name": "今日头条", "url_env": "HOTSPOT_TOUTIAO_URL", "history_url_env": "HOTSPOT_TOUTIAO_HISTORY_URL", "kind": "toutiao_html",
+                "fallback_url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc"},
+    "kuaishou": {"name": "快手热榜", "url_env": "HOTSPOT_KUAISHOU_URL", "history_url_env": "HOTSPOT_KUAISHOU_HISTORY_URL", "kind": "kuaishou_html",
+                 "fallback_url": "https://www.kuaishou.com/?isHome=1"},
+    "bilibili": {"name": "B站热门", "url_env": "HOTSPOT_BILIBILI_URL", "history_url_env": "HOTSPOT_BILIBILI_HISTORY_URL", "kind": "bilibili_json",
+                 "fallback_url": "https://api.bilibili.com/x/web-interface/popular?ps=20"},
+    "google_trends_cn": {"name": "Google Trends中国", "url_env": "HOTSPOT_GOOGLE_TRENDS_CN_URL", "history_url_env": "HOTSPOT_GOOGLE_TRENDS_CN_HISTORY_URL", "kind": "google_trends_rss",
+                         "fallback_url": "https://trends.google.com/trends/trendingsearches/daily/rss?geo=CN"},
     "x": {"name": "X Trends", "url_env": "HOTSPOT_X_URL", "history_url_env": "HOTSPOT_X_HISTORY_URL", "kind": "generic_json"},
 }
 
@@ -75,7 +81,10 @@ def _configured_url(cfg: dict, connection: dict | None = None) -> str:
     if cfg.get("url"):
         return str(cfg["url"])
     env_name = str(cfg.get("url_env", ""))
-    return os.getenv(env_name, "").strip() if env_name else ""
+    url = os.getenv(env_name, "").strip() if env_name else ""
+    if not url:
+        url = str(cfg.get("fallback_url", ""))
+    return url
 
 
 def _configured_history_url(cfg: dict, collection_date: str, connection: dict | None = None) -> str:

@@ -80,16 +80,36 @@ export function RichEditor({
     },
   });
 
+  // ── Auto-detect paragraphs for plain text without <p> tags ──
+  const ensureParagraphs = useCallback((html: string): string => {
+    if (!html) return "";
+    // Already has paragraph/wrapper tags
+    if (/<p[>\s]|<h[1-6]|<div|<li|<blockquote|<br\s*\/?\s*>/.test(html)) return html;
+    // Has double newlines — split by paragraphs
+    if (/\n\s*\n/.test(html)) {
+      return html
+        .split(/\n\s*\n/)
+        .map((para) => para.trim())
+        .filter(Boolean)
+        .map((para) => `<p>${para}</p>`)
+        .join("");
+    }
+    // Plain text — split by Chinese sentence delimiters
+    const sentences = html.split(/(?<=[。！？；])\s*/).filter((s) => s.trim());
+    if (sentences.length <= 1) return `<p>${html}</p>`;
+    return sentences.map((s) => `<p>${s.trim()}</p>`).join("");
+  }, []);
+
   // Sync value from outside
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
       const pos = editor.state.selection.from;
-      editor.commands.setContent(value || "");
+      editor.commands.setContent(ensureParagraphs(value || ""));
       try {
         editor.commands.setTextSelection(pos);
       } catch { /* ignore */ }
     }
-  }, [value, editor]);
+  }, [value, editor, ensureParagraphs]);
 
   // ── Stats ──
   const stats = useMemo(() => {

@@ -33,8 +33,8 @@ _VALID_COUNTS = {50, 100, 200, 500, 1000}
 if _RANKING_FANQIE_COUNT not in _VALID_COUNTS:
     _RANKING_FANQIE_COUNT = 100
 
-_RANKING_QIDIAN_COUNT = int(_os.getenv("RANKING_QIDIAN_COUNT", "100"))
-_RANKING_ZONGHENG_COUNT = int(_os.getenv("RANKING_ZONGHENG_COUNT", "100"))
+_RANKING_QIDIAN_COUNT = int(_os.getenv("RANKING_QIDIAN_COUNT", "200"))
+_RANKING_ZONGHENG_COUNT = int(_os.getenv("RANKING_ZONGHENG_COUNT", "200"))
 
 # Retry config
 _RETRY_MAX = 3
@@ -313,6 +313,74 @@ def _fetch_fanqie_rank_list(rv: str, max_count: int = 10) -> list[dict]:
         return []
 
 
+def _fetch_fanqie_via_browser() -> list[dict]:
+    """Use Playwright to scrape the rendered rank page for full leaderboard data.
+    Fallback when /api/rank/list only returns 7 books."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return []
+
+    results: list[dict] = []
+    rank_urls = [
+        ("https://fanqienovel.com/rank/all", "巅峰榜"),
+        ("https://fanqienovel.com/rank/hotsales", "热销榜"),
+        ("https://fanqienovel.com/rank/newbook", "新书榜"),
+        ("https://fanqienovel.com/rank/read", "阅读榜"),
+    ]
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+            seen = set()
+
+            for url, label in rank_urls:
+                try:
+                    page = context.new_page()
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(2000)  # Wait for JS render
+
+                    # Extract book cards — tomato uses a[href*='/page/'] for book links
+                    anchors = page.locator("a[href*='/page/']").all()
+                    for a in anchors[:30]:  # Max 30 per leaderboard
+                        try:
+                            title = (a.get_attribute("title") or a.inner_text()).strip()
+                            href = a.get_attribute("href") or ""
+                        except Exception:
+                            continue
+                        if not title or len(title) < 2 or len(title) > 40:
+                            continue
+                        # Skip non-book links
+                        if any(w in title for w in ["排行榜", "更多", "全部", "分类"]):
+                            continue
+                        dk = hashlib.sha256(title.encode()).hexdigest()
+                        if dk in seen:
+                            continue
+                        seen.add(dk)
+                        bid = href.rsplit("/", 1)[-1] if "/page/" in href else ""
+                        results.append({
+                            "rank": len(results) + 1,
+                            "title": title,
+                            "author": "",
+                            "source": "fanqie",
+                            "source_book_id": bid,
+                            "url": f"https://fanqienovel.com{href}" if href.startswith("/") else href,
+                            "leaderboard": label,
+                        })
+                    page.close()
+                except Exception:
+                    pass
+
+            browser.close()
+    except Exception:
+        pass
+
+    return results
+
+
 def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = None) -> list[dict]:
     """Fetch 番茄小说: 巅峰榜API + 全分类排名.
 
@@ -330,8 +398,16 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
     all_results: list[dict] = []
     seen: set[str] = set()
 
-    # Phase 1: Real leaderboard API
+    # Phase 1: Real leaderboard API + browser scraping
     for item in _fetch_fanqie_rank_list(rv):
+        dk = _make_dedup_key(item["title"], item["author"])
+        if dk not in seen:
+            seen.add(dk)
+            all_results.append(item)
+
+    # Phase 1b: Browser scraping (Playwright) for more leaderboard books
+    browser_items = _fetch_fanqie_via_browser()
+    for item in browser_items:
         dk = _make_dedup_key(item["title"], item["author"])
         if dk not in seen:
             seen.add(dk)
