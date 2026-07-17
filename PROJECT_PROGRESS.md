@@ -10,6 +10,13 @@
 
 ## 当前主线 (main)
 
+### 2026-07-17 WIP 收尾入库 + main 合并 + 整体部署
+
+- **WIP 收尾（@a6ed0da）**：上一会话遗留后端 WIP 逐项审查后入库——章节长度硬门禁（3 次真实重试带反馈）、七维质量证据持久化到章节 meta、移除 analyze_hotspots 模板伪 AI 输出、gateway editor/style 空输出防护、人工选名门禁（"待命名作品"占位）、`/runs/latest` 恢复端点、智能体 stale 状态识别、书库字数修真、知识库嵌入连接泄漏修复、versions.reason TEXT 迁移、nginx /api 直连（线上已提前生效，repo 补记）。
+- **合并 main（@27249e4）**：榜单三修复（起点 script tag/番茄 snake_case/番茄全分类）+ CI allowlist 并入分支；overseas_complete.py 冲突取分支侧（审计整改后继版），同步清理 main 侧遗留的 generate_consistency_report 死豁免条目。
+- **验证**：合并树全量 `pytest` → **565 passed, 9 skipped**（本地需 `NOVELCRAFT_TEST_REDIS_URL=redis://localhost:6379/15`，否则 fail-closed 503 导致误报）；truthfulness/delivery 门禁通过；前端构建通过。
+- **部署**：生产服务器从 main+分支前端的混合状态切换为整体跟随分支 @27249e4，api/worker/beat/frontend 全部重建；基础设施侧确认用户已清理家中 frpc 重复 `nc-proxy` 段（frps 日志 0 次 port already used，代理 200）。
+
 ### 2026-07-16 全量回归 + 生产浏览器巡检与修复轮
 
 - **全量回归**：本地 `pytest` → **565 passed, 9 skipped**（CI 等价环境；此前一次失败为本地 `DEEPSEEK_MODEL` 注入所致误报，CI 环境复跑通过）；`npm run build`（tsc+vite）通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py` 通过；alembic 单头 `nc_versions_reason_text` 全量迁移通过。
