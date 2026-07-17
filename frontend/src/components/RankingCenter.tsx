@@ -6,7 +6,7 @@ type Source = { source_key: string; display_name: string; last_success_at?: stri
 type Snapshot = { id: string; source_key: string; display_name: string; status: string; capture_status?: string; collector?: string; confidence?: number; validation_summary?: Record<string, unknown>; item_count: number; error?: string; captured_at: string };
 type Evidence = Record<string, unknown>;
 type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string; metadata_status?: string; collector?: string; confidence?: number; evidence?: Evidence; metrics?: { collector?: string; confidence?: number; evidence?: Evidence; validation?: Evidence } };
-type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals: Array<{ signal?: string; evidence?: string }>; audience: { primary?: string; needs?: string[] }; title_patterns: Array<{ pattern?: string }>; pacing: { opening?: string; retention_hooks?: string[] }; originality_constraints: string[] };
+type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals?: Array<{ signal?: string; evidence?: string }>; audience?: { primary?: string; needs?: string[] }; title_patterns?: Array<{ pattern?: string }>; pacing?: { opening?: string; retention_hooks?: string[] }; originality_constraints?: string[]; signals?: any; layers?: any; heatmap?: any; keywords?: any };
 type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
 type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string; originality_notes?: string; novel_id?: string };
 type ImportItem = Record<string, unknown>;
@@ -139,9 +139,36 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function analyze(snapshot: Snapshot) {
     setBusy(`analysis:${snapshot.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<MarketAnalysis>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, { method: "POST", body: "{}" });
-      setSnapshotDetails(current => ({ ...current, [snapshot.id]: { ...(current[snapshot.id] || snapshot), items: current[snapshot.id]?.items || [], latest_analysis: result.data } as SnapshotDetail }));
-      setOpenSnapshotId(snapshot.id); setMessage(result.data.summary); await load();
+      // Use new 10-layer analysis endpoint
+      const result = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
+        method: "POST",
+        body: JSON.stringify({
+          snapshot_id: snapshot.id,
+          platforms: [snapshot.source_key],
+          analysis_mode: "single",
+        }),
+      });
+      const data = result.data;
+      setSnapshotDetails(current => ({
+        ...current,
+        [snapshot.id]: {
+          ...(current[snapshot.id] || snapshot),
+          items: current[snapshot.id]?.items || [],
+          latest_analysis: {
+            analysis_id: data.analysis_id,
+            summary: `十层分析完成：${data.succeeded_layers}/${data.total_layers}层`,
+            status: data.status,
+            analysis_mode: "ten_layer",
+            signals: data.TrendReport?.market_trends || [],
+            layers: data.ScanResult || {},
+            heatmap: data.HeatMap,
+            keywords: data.KeywordCloud,
+          },
+        } as SnapshotDetail,
+      }));
+      setOpenSnapshotId(snapshot.id);
+      setMessage(`十层分析完成：${data.succeeded_layers}/${data.total_layers}层通过`);
+      await load();
     } catch (error) { setMessage(`分析失败：${errorText(error)}`); }
     finally { setBusy(""); }
   }
