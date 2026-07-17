@@ -910,7 +910,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
 <div class="toast" id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span id="toastMsg">操作成功</span></div>
 
 <script>
-function enterApp(){document.getElementById('loginView').classList.remove('active');document.getElementById('appView').classList.add('active');showToast('登录成功，欢迎回到 NovelCraft')}
+function _oldEnterApp(){/* replaced by nc-bridge.js */}
 function goPage(p){document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===p));document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active',s.dataset.page===p));document.getElementById('content').scrollTop=0;document.getElementById('sidebar').classList.remove('open');const map={overview:'概览',workspace:'工作台',inspiration:'灵感创作',ranking:'扫榜选书',library:'书库管理',editor:'编辑器',progress:'创作进度',review:'审阅',foreshadow:'伏笔看板',hotspot:'热点追踪',content:'内容工作室',distribution:'多平台分发',knowledge:'知识库',publish:'发布看板',cost:'成本追踪',prompts:'Prompt 管理',workflow:'工作流编排',version:'版本树',plugins:'插件管理',agents:'智能体',settings:'设置'};const t=document.querySelector('.page.active h1');}
 document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.addEventListener('click',()=>goPage(n.dataset.page)));
 function toggleGroup(el){el.closest('.nav-group').classList.toggle('collapsed')}

@@ -44,10 +44,12 @@ const NC = {
   },
 };
 
-// ── Enhanced login ──
-async function enterApp() {
-  const email = document.querySelector('#loginView input[type="email"]')?.value || '';
-  const password = document.querySelector('#loginView input[type="password"]')?.value || '';
+// ── Enhanced login (force-override inline enterApp) ──
+window.enterApp = async function() {
+  const emailInput = document.querySelector('#loginView input[type="email"]');
+  const pwInput = document.querySelector('#loginView input[type="password"]');
+  const email = emailInput?.value?.trim() || '';
+  const password = pwInput?.value || '';
   
   if (!email || !password) {
     showToast('请输入邮箱和密码');
@@ -55,18 +57,17 @@ async function enterApp() {
   }
 
   try {
+    console.log('NC: logging in as', email);
     await NC.login(email, password);
     document.getElementById('loginView').classList.remove('active');
     document.getElementById('appView').classList.add('active');
     document.getElementById('appView').style.display = 'flex';
     showToast('登录成功，欢迎回到 NovelCraft');
-    
-    // Load workspace data
     setTimeout(loadWorkspaceData, 100);
   } catch (e) {
-    // Error handled in NC.login
+    console.error('NC: login error', e);
   }
-}
+};
 
 // ── Load real data into workspace ──
 async function loadWorkspaceData() {
