@@ -812,9 +812,14 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
 
 
 class AnalyzeRequest(BaseModel):
-    platforms: list[str] = Field(default_factory=list, max_length=10)
+    platforms: list[str] = Field(default_factory=list, max_length=50)
     analysis_mode: str = Field(default="all", pattern=r"^(single|multi|all)$")
     snapshot_id: str = Field(default="", max_length=64)
+
+    @field_validator("platforms")
+    @classmethod
+    def dedup_platforms(cls, v: list[str]) -> list[str]:
+        return list(dict.fromkeys(v))  # preserve order, remove dups
 
 
 @router.post("/analyze")
