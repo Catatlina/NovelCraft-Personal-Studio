@@ -30,6 +30,8 @@ type Props = {
   onToggleFullscreen?: () => void;
   onToggleNightMode?: () => void;
   onToggleFocusMode?: () => void;
+  // Layout
+  hideAiPanel?: boolean;
 };
 
 export function RichEditor({
@@ -38,6 +40,7 @@ export function RichEditor({
   autoSavedAt, dirty,
   isFullscreen, isNightMode, isFocusMode,
   onToggleFullscreen, onToggleNightMode, onToggleFocusMode,
+  hideAiPanel,
 }: Props) {
   const [showFloatBar, setShowFloatBar] = useState(false);
   const [barPos, setBarPos] = useState({ x: 0, y: 0 });
@@ -234,8 +237,8 @@ export function RichEditor({
           </div>
         </div>
 
-        {/* ── AI Panel (Right sidebar) ── */}
-        {!isFocusMode && (
+        {/* ── AI Panel (Right sidebar) — hidden when hideAiPanel or focus mode ── */}
+        {!hideAiPanel && !isFocusMode && (
           <div className="ai-panel card" style={{ width: 300, flexShrink: 0, padding: 0 }}>
             <div className="ai-panel-tabs" style={{ borderBottom: "1px solid var(--border)" }}>
               <button className={aiTab === "review" ? "active" : ""} onClick={() => setAiTab("review")}>
