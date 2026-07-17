@@ -2,7 +2,44 @@
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-11（审计修复轮）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-17（V2.0全面升级轮）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+
+## 2026-07-17 V2.0 全面升级
+
+### 用户10问题整改
+
+| # | 问题 | 状态 | 证据 |
+|---|------|:--:|------|
+| 1 | 番茄全榜 | 🧪 | /api/rank/list 7本巅峰榜 + 37分类API 1117本。Playwright已集成但VPS内存不足跳过 |
+| 2 | 起点/纵横100+ | 🧪 | 起点7榜合并44本（分页不生效），纵横33本。默认200可配环境变量 |
+| 3 | 编辑器排版 | 🧪 | novel-prose.css(440行) + RichEditor.tsx重写(329行)。CSS已打入Docker bundle |
+| 4 | 编辑器UI | 🧪 | Editor.tsx增强(263行)：左目录/AI面板/状态栏/全屏/夜间/专注 |
+| 5 | 去AI味 | 🧪 | deai_pipeline.py(223行)七层管线 + deai.py API(165行)。未真实DeepSeek验证 |
+| 6 | 热点多平台 | 🧪 | 8平台fallback URL。B站API实测通过。头条/小红书/抖音需代理 |
+| 7 | 热点文库 | 🧪 | articles CRUD在hotspots.py + HotspotDashboard文库Tab |
+| 8 | 书库删除 | ✅ | 7端点(单本/批量/章节删除) + 前端checkbox/确认弹窗。前端bundle确认 |
+| 9 | 十层分析 | 🧪 | ten_layer_analysis.py(793行) + /ranking/analyze端点。platforms自动去重 |
+| 10 | 选题池 | 🧪 | bookmark/delete/batch-delete端点 |
+
+### 新增功能
+
+| 功能 | 文件 | 状态 |
+|------|------|:--:|
+| DashboardV2 首页 | DashboardV2.tsx(613行) | ✅ |
+| 全局玻璃拟态主题 | global-v2.css(413行) + ThemeProvider | ✅ |
+| 仿写HTML提取 | imitation.py _extract_text() | ✅ |
+| 一键采集所有平台 | ranking.py /scan-all + 前端按钮 | ✅ |
+| 多平台聚合分析 | ranking.py /analyze + 前端UI | 🧪 |
+| 新平台: SF轻小说 | ranking_adapter.py fetch_sfacg_ranking() 43本 | ✅ |
+| 新平台: 潇湘书院 | ranking_adapter.py fetch_xxsy_ranking() 41本 | ✅ |
+| 平台替换: QQ阅读/晋江 | 替换七猫/17K/刺猬猫(JS-SPA不可采) | ✅ |
+
+### 验证基线
+
+- 后端: `pytest` → 565 passed, 9 skipped
+- 前端: `npm run build` → ✓ built (tsc -b + vite)
+- 部署: VPS Docker frontend + systemd API → 200 OK
+- 提交: main @ c5b3463
 >
 > **治理说明**：此前版本宣称"20/20 任务全部完成、6/6 深度融合、8/8 整合、真实 Provider T3/T5 通过、真实源 7 天稳定运行、浏览器 E2E 验收通过"，均无《23》§6 要求的验收证据（commit/命令/日期/输出），且"7 天 T5"与文档同日更新在时间上不可能成立。按《23》§8 全部降级为证据可查的状态；重建证据台账前不得恢复 ✅。外部审计报告（2026-07-11）的 §三/P1-6 亦指认了同一问题。
 >
