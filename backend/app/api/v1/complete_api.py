@@ -6,6 +6,8 @@ from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 import os
 import re
+import logging
+logger = logging.getLogger(__name__)
 from app.core.security import get_current_user
 from app.db import connect
 
@@ -208,6 +210,43 @@ def get_novel_completion_endpoint(novel_id: str, user: dict = Depends(get_curren
     from app.services.novel_export import get_novel_completion_status
     require_novel_member(novel_id, user)
     return ok(get_novel_completion_status(novel_id))
+
+
+@router.post("/novels/{novel_id}/completion")
+def generate_novel_continuation(novel_id: str, user: dict = Depends(get_current_user), payload: dict | None = None):
+    """Generate continuation (mode=continue) or polish (mode=polish) text for a novel's latest chapter."""
+    require_novel_member(novel_id, user)
+    db = connect()
+    try:
+        row = db.execute(
+            "SELECT project_id, body FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE ORDER BY created_at DESC LIMIT 1",
+            (novel_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return ok({"text": "", "warning": "no chapter found"})
+    project_id = row["project_id"]
+    body = row["body"]
+    if isinstance(body, dict):
+        paragraphs = body.get("content", [])
+        text = "\n\n".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in paragraphs)
+    elif isinstance(body, list):
+        text = "\n\n".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in body)
+    else:
+        text = str(body or "")
+    mode = (payload or {}).get("mode", "continue")
+    prompt_name = "novel.continuation" if mode == "continue" else "novel.polish"
+    try:
+        from app.gateway import complete
+        out = complete(run_id=None, node_key=None, project_id=project_id,
+                       task_type="novel_continuation", prompt_name=prompt_name,
+                       variables={"text": text[:4000]})
+        gen = str(out.get("text") or out.get("sample") or "")
+    except Exception as exc:
+        logger.warning("novel continuation failed: %s", exc)
+        return ok({"text": "", "warning": f"generation failed: {exc}"})
+    return ok({"text": gen})
 
 
 # --- NC-FUS: BrowserAct + insprira fusion ---

@@ -84,7 +84,7 @@ const NC = {
   },
 
   async fetchChapters(novelId) {
-    try { return await NC.api(`/api/v1/contents?parent_id=${novelId}&type=chapter`); } catch { return []; }
+    try { return await NC.api(`/api/v1/contents?project_id=${NC.currentProjectId}&parent_id=${novelId}&type=chapter`); } catch { return []; }
   },
 };
 
@@ -929,8 +929,9 @@ NC.saveWorkflow = async function (name, projectId, nodes) {
 
 NC.runWorkflow = async function (name, projectId) {
   if (!NC.needProject()) return;
+  await NC.ensureCurrentBook();
   try {
-    await NC.api(`/api/v1/admin/workflows/${encodeURIComponent(name)}/execute`, { method: 'POST', body: JSON.stringify({ project_id: projectId }) });
+    await NC.api(`/api/v1/admin/workflows/${encodeURIComponent(name)}/execute?project_id=${encodeURIComponent(projectId)}&novel_id=${encodeURIComponent(NC.currentBookId || '')}`, { method: 'POST' });
     ncToast('工作流已运行：' + name);
   } catch (e) { ncToast('运行失败: ' + extractErrorMessage(e.message)); }
 };
@@ -983,9 +984,13 @@ NC.register = async function (email, password, name) {
 /* ---------- 灵感创作 → POST /imitation ---------- */
 NC.generateInspiration = async function (projectId, idea) {
   if (!NC.needProject()) return;
+  const ideaEl = document.getElementById('insp-idea');
   const genreEl = document.getElementById('insp-genre');
-  const genre = genreEl ? genreEl.value : '';
-  const sourceText = [idea, genre].filter(Boolean).join('\n');
+  const styleEl = document.getElementById('insp-style');
+  let sourceText = [ideaEl && ideaEl.value, genreEl && genreEl.value, styleEl && styleEl.value].filter(Boolean).join('\n');
+  if (sourceText.length < 200) {
+    sourceText += '\n（以下为创作背景补充：请在保持原有风格与题材基调的前提下，提炼文风并仿写为一段原创开篇，避免复述原文具体情节。）';
+  }
   try {
     const data = await NC.api('/api/v1/imitation', { method: 'POST', body: JSON.stringify({ project_id: projectId, source_text: sourceText }) });
     NC.renderInspiration(data);
@@ -1012,7 +1017,7 @@ NC.adaptContent = async function (projectId, topic, content, platform) {
       method: 'POST',
       body: JSON.stringify({ project_id: projectId, topic: topic || '通用', content: content || '', platform: platform || 'douyin', count: 1 }),
     });
-    const result = (data && data.result) ? (typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2)) : '';
+    const result = (data && (data.text || data.content || data.result)) ? (data.text || data.content || data.result) : (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
     const el = document.getElementById('cs-adapted');
     if (el) {
       el.innerHTML = '<div class="card-head"><div class="card-title">改编稿（' + ncEsc(platform || '通用') + '）</div><span class="badge cyan">预览</span></div>' +
@@ -1031,7 +1036,8 @@ NC.loadEditorOutline = async function () {
     (d) => {
       const el = document.getElementById('editor-outline');
       if (!el) return;
-      const outline = (d && (d.outline || d.chapters || [])) || [];
+      const outlineObj = d && d.outline;
+      const outline = Array.isArray(outlineObj) ? outlineObj : (outlineObj && outlineObj.chapters ? outlineObj.chapters : (d && d.chapters ? d.chapters : []));
       if (Array.isArray(outline) && outline.length) {
         el.innerHTML = '<div class="card-title" style="margin-bottom:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M3 3h18v18H3z"/><path d="M9 3v18M3 9h6"/></svg> 大纲</div>' +
           outline.map((o, i) => {
@@ -1048,7 +1054,7 @@ NC.loadEditorContinuation = async function () {
   await NC.ensureCurrentBook();
   if (!NC.currentBookId) { ncToast('请先从书库打开一本书'); return; }
   try {
-    const data = await NC.api(`/api/v1/novels/${encodeURIComponent(NC.currentBookId)}/completion`);
+    const data = await NC.api(`/api/v1/novels/${encodeURIComponent(NC.currentBookId)}/completion`, { method: 'POST', body: JSON.stringify({ mode: 'continue' }) });
     const text = (data && (data.text || data.content || data.completion || '')) || '';
     const body = document.getElementById('editor-body');
     if (body && text) body.innerHTML += '<p>' + ncEsc(text) + '</p>';
@@ -1060,7 +1066,7 @@ NC.loadEditorPolish = async function () {
   await NC.ensureCurrentBook();
   if (!NC.currentBookId) { ncToast('请先从书库打开一本书'); return; }
   try {
-    await NC.api(`/api/v1/novels/${encodeURIComponent(NC.currentBookId)}/completion`);
+    await NC.api(`/api/v1/novels/${encodeURIComponent(NC.currentBookId)}/completion`, { method: 'POST', body: JSON.stringify({ mode: 'polish' }) });
     ncToast('已润色（请查看编辑器）');
   } catch (e) { ncToast('润色失败: ' + extractErrorMessage(e.message)); }
 };
@@ -1090,7 +1096,7 @@ NC.loadReview = async function (contentId) {
   if (!el) return;
   if (!cid) { el.innerHTML = '<div class="muted">暂无可审阅的章节（请先从书库打开一本书）</div>'; return; }
   await NC.withState('#review-list',
-    () => NC.api(`/api/v1/contents/${encodeURIComponent(cid)}/deai/score`),
+    () => NC.api(`/api/v1/contents/${encodeURIComponent(cid)}/deai/quick-score`),
     (d) => {
       const score = d ? (d.score != null ? d.score : d.heuristic_score) : 0;
       const preview = (d && d.text_preview) || '';
@@ -1136,7 +1142,7 @@ NC.loadPlugins = async function () {
   await NC.withState('#plugins-grid',
     () => NC.api('/api/v1/skills/community'),
     (list) => {
-      const items = Array.isArray(list) ? list : (list && list.items ? list.items : []);
+      const items = Array.isArray(list) ? list : (list && (list.skills || list.items) ? (list.skills || list.items) : []);
       const grid = document.getElementById('plugins-grid');
       if (!grid) return;
       if (items.length) {
@@ -1154,7 +1160,8 @@ NC.loadPlugins = async function () {
 
 NC.loadShortStoryTemplates = async function () {
   try {
-    return await NC.api('/api/v1/short-stories/templates');
+    const t = await NC.api('/api/v1/short-stories/templates');
+    return Array.isArray(t) ? t : Object.keys(t || {}).map((k) => ({ id: k, name: (t[k] && t[k].name) || k, max_words: t[k] && t[k].max_words, structure: t[k] && t[k].structure }));
   } catch (e) { ncToast('加载模板失败: ' + extractErrorMessage(e.message)); return []; }
 };
 
