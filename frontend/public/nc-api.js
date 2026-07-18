@@ -1009,15 +1009,15 @@ NC.renderInspiration = function (data) {
     '</div><p style="font-size:13px;line-height:1.7;color:var(--text-2)">' + ncEsc(text || '') + '</p></div>';
 };
 
-/* ---------- 内容工作室 → POST /hotspots/material-suggestions ---------- */
+/* ---------- 内容工作室 → POST /hotspots/adapt ---------- */
 NC.adaptContent = async function (projectId, topic, content, platform) {
   if (!NC.needProject()) return;
   try {
-    const data = await NC.api('/api/v1/hotspots/material-suggestions', {
+    const data = await NC.api('/api/v1/hotspots/adapt', {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectId, topic: topic || '通用', content: content || '', platform: platform || 'douyin', count: 1 }),
+      body: JSON.stringify({ project_id: projectId, content: content || '', platform: platform || 'douyin', topic: topic || '' }),
     });
-    const result = (data && (data.text || data.content || data.result)) ? (data.text || data.content || data.result) : (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    const result = (data && data.text) ? data.text : (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
     const el = document.getElementById('cs-adapted');
     if (el) {
       el.innerHTML = '<div class="card-head"><div class="card-title">改编稿（' + ncEsc(platform || '通用') + '）</div><span class="badge cyan">预览</span></div>' +

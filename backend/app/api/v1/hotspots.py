@@ -107,6 +107,13 @@ class HmTopicRequest(BaseModel):
     content: str = Field(default="", max_length=8000)
 
 
+class AdaptRequest(BaseModel):
+    project_id: str
+    content: str = Field(min_length=1, max_length=8000)
+    platform: str = Field(default="douyin", max_length=40)
+    topic: str = Field(default="", max_length=200)
+
+
 @router.post("/hotspots/title-variants")
 def hotspot_title_variants(payload: HmTopicRequest, user: dict = Depends(get_current_user)):
     """NC-HM-003: real-AI title variants for A/B testing. Provider failure is a 502, never a template."""
@@ -155,6 +162,35 @@ def hotspot_material_suggestions(payload: HmTopicRequest, user: dict = Depends(g
     except (ProviderError, BudgetExceeded) as exc:
         raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
     return {"code": 0, "message": "ok", "data": result}
+
+
+@router.post("/hotspots/adapt")
+def adapt_content(payload: AdaptRequest, user: dict = Depends(get_current_user)):
+    """NC-HM: 一键改编 — 把小说原文改写为指定平台风格的自媒体文稿。"""
+    db = connect()
+    try:
+        _require_editor(db, payload.project_id, user)
+    finally:
+        db.close()
+    try:
+        out = complete(
+            run_id=None, node_key=None, project_id=payload.project_id,
+            task_type="content_adapt", prompt_name="content.adapt",
+            variables={
+                "content": payload.content[:4000],
+                "platform": payload.platform,
+                "topic": payload.topic,
+            },
+            client_mutation_id=f"adapt:{payload.project_id}:{payload.platform}"[:100],
+        )
+        text = out.get("body") or out.get("paragraphs") or out.get("script") or out.get("text") or ""
+        if isinstance(text, list):
+            text = "\n\n".join(str(p) for p in text)
+        if not text and isinstance(out, dict):
+            text = str(out.get("result") or out.get("content") or "")
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
+    return {"code": 0, "message": "ok", "data": {"text": str(text)}}
 
 
 @router.post("/hotspots/generate")
