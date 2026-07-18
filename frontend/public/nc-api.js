@@ -1096,7 +1096,7 @@ NC.loadReview = async function (contentId) {
   if (!el) return;
   if (!cid) { el.innerHTML = '<div class="muted">暂无可审阅的章节（请先从书库打开一本书）</div>'; return; }
   await NC.withState('#review-list',
-    () => NC.api(`/api/v1/contents/${encodeURIComponent(cid)}/deai/quick-score`),
+    () => NC.api(`/api/v1/contents/${encodeURIComponent(cid)}/deai/quick-score`, { method: 'POST' }),
     (d) => {
       const score = d ? (d.score != null ? d.score : d.heuristic_score) : 0;
       const preview = (d && d.text_preview) || '';
