@@ -45,10 +45,20 @@ const NC = {
       const csrf = getCsrfToken();
       if (csrf) headers['X-CSRF-Token'] = csrf;
     }
-    const res = await fetch(NC.base + path, { ...opts, headers });
-    if (!res.ok) throw new Error(await res.text());
-    const json = await res.json();
-    return json.data ?? json;
+    // 超时兜底：后端某些接口（如 /hotspots）可能挂起或 500，若 fetch 无超时，
+    // withState 会一直卡在“加载中…”。用 AbortController 在 12s 后 abort，
+    // reject 交由 withState 的 catch 走错误提示，避免界面永久卡死。
+    // 注：signal 透传给 fetch，不破坏现有 Authorization / CSRF 头逻辑。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('请求超时（>12s）')), 12000);
+    try {
+      const res = await fetch(NC.base + path, { ...opts, headers, signal: controller.signal });
+      if (!res.ok) throw new Error(await res.text());
+      const json = await res.json();
+      return json.data ?? json;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   async login(email, password) {
@@ -486,8 +496,11 @@ NC.loadRankingTable = async function () {
             '<td><b>' + ncEsc(r.title ?? '—') + '</b></td>' +
             '<td>' + ncEsc(r.author ?? '—') + '</td>' +
             '<td>' + ncEsc(r.category ?? '—') + '</td>' +
-            '<td>—</td>' + // 热度：metrics 字段名待 QA 真机确认，暂显「—」
-            '<td>—</td>' + // 周涨：同上
+            // 热度：线上 metrics={status,readers,last_update} 当前均为空，且无独立热度字段；
+            // 以 rank_no 作为热度代理（排名越前越热，有真实值）。
+            '<td>' + ncEsc(String(r.rank_no ?? '—')) + '</td>' +
+            // 周涨：后端无对应字段，维持「—」占位。
+            '<td>—</td>' +
             '<td><button class="btn-sm btn-ghost" onclick="showToast(\'已加入书库\')">+ 收藏</button></td>' +
             '</tr>';
         }).join('');
@@ -550,16 +563,24 @@ NC.loadHotspot = async function () {
   await NC.withState('#hotspot-suggest',
     () => NC.api('/api/v1/hotspots/overview'),
     (d) => {
-      // 修复 BUG-4：真实 /hotspots/overview 无 suggestions 字段，改用
-      // recommended_angles[{title,source,angle,hotness}] 或 predicted_viral[{title,source,hotness,reason}]。
-      const sug = (d && (d.recommended_angles || d.predicted_viral))
-        ? (d.recommended_angles || d.predicted_viral)
-        : (Array.isArray(d) ? d : []);
+      // 修复 BUG-4：真机确认 /hotspots/overview 返回真实结构为
+      // {summary, categories, category_items:{分类:[{title,source,source_name,category,hotness,trend,url,freshness}]}}，
+      // 并无 recommended_angles / predicted_viral 字段（旧修复读错字段，导致建议区恒空）。
+      // 这里将 category_items 各分类的数组 flatten 为统一列表。
+      let sug = [];
+      if (d && d.category_items && typeof d.category_items === 'object') {
+        sug = Object.keys(d.category_items).reduce((acc, key) => {
+          const arr = Array.isArray(d.category_items[key]) ? d.category_items[key] : [];
+          return acc.concat(arr);
+        }, []);
+      }
       const el = document.getElementById('hotspot-suggest');
       if (el && sug.length) {
         el.innerHTML = sug.slice(0, 6).map((s) =>
-          '<div class="ticket" style="margin-bottom:12px"><h5>' + ncEsc(s.title ?? '') + '</h5><div class="meta"><span class="badge cyan">' + ncEsc(s.source ?? '建议') + '</span><span>' + ncEsc(s.angle ?? s.reason ?? '') + '</span></div></div>'
+          '<div class="ticket" style="margin-bottom:12px"><h5>' + ncEsc(s.title ?? '') + '</h5><div class="meta"><span class="badge cyan">' + ncEsc(s.source_name ?? s.source ?? '建议') + '</span><span class="hot">' + ncEsc(s.hotness ?? '') + '</span><span class="trend">' + ncEsc(s.trend ?? '') + '</span></div></div>'
         ).join('');
+      } else if (el) {
+        el.innerHTML = '<div class="muted">暂无热点建议</div>';
       }
     });
 };
