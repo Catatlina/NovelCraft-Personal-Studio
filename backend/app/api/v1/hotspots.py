@@ -173,13 +173,17 @@ def adapt_content(payload: AdaptRequest, user: dict = Depends(get_current_user))
     finally:
         db.close()
     try:
+        instruction = (
+            f"把以上内容改写成{payload.platform}平台风格的自媒体文稿"
+            f"（如小红书体/公众号体/短视频脚本），保留核心情节与人物，"
+            f"用该平台自然的语气、结构与钩子，控制在适合该平台的篇幅。"
+        )
         out = complete(
             run_id=None, node_key=None, project_id=payload.project_id,
-            task_type="content_adapt", prompt_name="content.adapt",
+            task_type="editor.rewrite", prompt_name="editor.rewrite",
             variables={
-                "content": payload.content[:4000],
-                "platform": payload.platform,
-                "topic": payload.topic,
+                "selection": payload.content[:4000],
+                "instruction": instruction,
             },
             client_mutation_id=f"adapt:{payload.project_id}:{payload.platform}"[:100],
         )
