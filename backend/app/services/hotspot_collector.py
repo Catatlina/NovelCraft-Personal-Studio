@@ -1,6 +1,6 @@
 """NC-HM-001: Hotspot ingestion — fetch, dedup, trend, freshness scoring."""
 from __future__ import annotations
-import json, os, urllib.request, hashlib, urllib.parse
+import json, os, time as wall_clock, urllib.request, hashlib, urllib.parse
 from datetime import date, datetime, time, timedelta
 from app.db import connect, encode, new_id
 
@@ -394,7 +394,8 @@ def _parse_hotspot_payload(source: str, cfg: dict, payload: bytes) -> list[dict]
 
 
 def _fetch_source_items(source_key: str, cfg: dict, url: str, connection: dict | None = None) -> list[dict]:
-    timeout = int(os.getenv("HOTSPOT_FETCH_TIMEOUT", "10"))
+    # 每源超时独立可控：默认 5s（原硬编码 10s），避免单源拖垮整体。
+    timeout = int(os.getenv("HOTSPOT_FETCH_SOURCE_TIMEOUT", os.getenv("HOTSPOT_FETCH_TIMEOUT", "5")))
     try:
         opener = _hotspot_opener(str((connection or {}).get("proxy", "")))
     except TypeError as exc:
@@ -443,10 +444,22 @@ def _fetch_source_items(source_key: str, cfg: dict, url: str, connection: dict |
 
 
 def fetch_hotspots(user_id: str = "") -> tuple[list[dict], dict[str, str]]:
-    """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4)."""
+    """Fetch all sources; per-source failures are reported, never swallowed (docs/23 §4).
+
+    A global wall-clock deadline (``HOTSPOT_FETCH_DEADLINE``, default 8s) bounds the
+    whole call so ``GET /hotspots`` always returns within ~deadline seconds even when
+    overseas sources hang. Sources not reached before the deadline are marked
+    ``skipped: deadline`` rather than blocking the response.
+    """
     results: list[dict] = []
     source_status: dict[str, str] = {}
+    deadline = float(os.getenv("HOTSPOT_FETCH_DEADLINE", "8"))
+    start = wall_clock.monotonic()
     for key, cfg in HOTSPOT_SOURCES.items():
+        # 全局 deadline：超时即停止后续源抓取，保证接口 ≤ deadline 秒返回。
+        if wall_clock.monotonic() - start > deadline:
+            source_status[key] = "skipped: deadline"
+            continue
         try:
             connection = _connection_for_source(key, user_id)
             url = _configured_url(cfg, connection)

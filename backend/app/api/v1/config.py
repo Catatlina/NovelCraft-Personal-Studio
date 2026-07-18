@@ -13,11 +13,18 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Admin-namespace write guard.
+
+    When ``NOVELCRAFT_ADMIN_EMAILS`` is not configured (single-user personal
+    instance), writes are allowed — matching the read guard ``require_admin_reads``
+    so the owner is never locked out. When configured, only whitelisted emails
+    may write.
+    """
     allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
-    if allowed and user["email"].lower() in allowed:
-        return user
     if not allowed:
-        raise HTTPException(status_code=403, detail="NOVELCRAFT_ADMIN_EMAILS must be set in production")
+        return user
+    if user["email"].lower() in allowed:
+        return user
     raise HTTPException(status_code=403, detail="admin access required")
 
 

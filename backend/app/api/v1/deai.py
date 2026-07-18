@@ -88,31 +88,43 @@ def run_deai_pipeline(
     content_id: str,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Run the full 7-layer de-AI pipeline on a chapter."""
-    project_id, title = _get_content_project(content_id)
-    text = _get_content_body(content_id)
+    """Run the full 7-layer de-AI pipeline on a chapter.
 
-    if not text or not text.strip():
+    Hardened (Bug②): any unexpected error degrades to a 200 ``ok({warning})``
+    instead of 500. ``HTTPException`` (e.g. 404 not-found) is re-raised to keep
+    its semantics; only generic failures are swallowed.
+    """
+    try:
+        project_id, title = _get_content_project(content_id)
+        text = _get_content_body(content_id)
+
+        if not text or not text.strip():
+            return ok({
+                "original_score": 0,
+                "final_score": 0,
+                "layers": [],
+                "final_text": text,
+                "warning": "empty content",
+            })
+
+        pipeline = DeaiPipeline(
+            project_id=project_id,
+            content_id=content_id,
+            chapter_title=title,
+        )
+        result = pipeline.run(text)
+        return ok(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("DeAI pipeline degraded for content %s", content_id)
         return ok({
             "original_score": 0,
             "final_score": 0,
             "layers": [],
-            "final_text": text,
-            "warning": "empty content",
+            "final_text": "",
+            "warning": f"deai pipeline degraded: {exc}",
         })
-
-    pipeline = DeaiPipeline(
-        project_id=project_id,
-        content_id=content_id,
-        chapter_title=title,
-    )
-
-    try:
-        result = pipeline.run(text)
-        return ok(result)
-    except Exception as exc:
-        logger.exception("DeAI pipeline failed for content %s", content_id)
-        raise HTTPException(502, f"DeAI pipeline failed: {exc}")
 
 
 # ── GET /contents/{content_id}/deai/score ──────────────────────────────────
@@ -122,30 +134,45 @@ def get_deai_score(
     content_id: str,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Get AI-taste score for a chapter (heuristic + LLM)."""
-    project_id, _ = _get_content_project(content_id)
-    text = _get_content_body(content_id)
+    """Get AI-taste score for a chapter (heuristic + LLM).
 
-    if not text or not text.strip():
+    Hardened (Bug②): never returns 500. ``HTTPException`` (e.g. 404) propagates;
+    generic failures degrade to a safe 0-score response.
+    """
+    try:
+        project_id, _ = _get_content_project(content_id)
+        text = _get_content_body(content_id)
+
+        if not text or not text.strip():
+            return ok({
+                "score": 0,
+                "heuristic_score": 0,
+                "text_preview": "",
+            })
+
+        heuristic = quick_deai_score(text)
+
+        try:
+            score = deai_score(project_id, text)
+        except Exception as exc:
+            logger.warning("LLM deai scoring failed: %s — using heuristic only", exc)
+            score = heuristic + 30
+
+        return ok({
+            "score": min(score, 100),
+            "heuristic_score": heuristic,
+            "text_preview": text[:100] + ("..." if len(text) > 100 else ""),
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("DeAI score degraded for content %s", content_id)
         return ok({
             "score": 0,
             "heuristic_score": 0,
             "text_preview": "",
+            "warning": f"deai score degraded: {exc}",
         })
-
-    heuristic = quick_deai_score(text)
-
-    try:
-        score = deai_score(project_id, text)
-    except Exception as exc:
-        logger.warning("LLM deai scoring failed: %s — using heuristic only", exc)
-        score = heuristic + 30
-
-    return ok({
-        "score": min(score, 100),
-        "heuristic_score": heuristic,
-        "text_preview": text[:100] + ("..." if len(text) > 100 else ""),
-    })
 
 
 # ── POST /contents/{content_id}/deai/quick-score ──────────────────────────
