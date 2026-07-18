@@ -535,7 +535,7 @@ NC.loadLibrary = async function () {
       if (!grid) return;
       if (books.length) {
         grid.innerHTML = books.map((b) =>
-          '<div class="book" data-book-id="' + ncEsc(b.id ?? '') + '" onclick="goPage(\'editor\')">' +
+          '<div class="book" data-book-id="' + ncEsc(b.id ?? '') + '" onclick="NC.openBook(\'' + ncEsc(b.id ?? '') + '\')">' +
             '<div class="book-cover" style="background:linear-gradient(135deg,#6366F1,#22D3EE)">' + ncEsc((b.title || '?').slice(0, 1)) + '</div>' +
             '<div class="book-info"><h4>' + ncEsc(b.title ?? '未命名') + '</h4><p>' + ncEsc(b.genre ?? '—') + ' · ' + ncNum(b.chapter_count) + ' 章 · ' + ncEsc(statusText(b.status)) + '</p></div>' +
           '</div>'
@@ -593,17 +593,21 @@ NC.loadDistribution = async function () {
       const list = Array.isArray(res[0]) ? res[0] : (res[0] && res[0].items ? res[0].items : []);
       const grid = document.getElementById('distribution-grid');
       if (!grid) return;
-      if (list.length) {
-        grid.innerHTML = list.map((c) => {
-          const configured = c.configured || c.status === 'connected';
-          return '<div class="pcard" data-account-id="' + ncEsc(c.account_id ?? c.id ?? c.platform ?? '') + '">' +
-            '<div class="pic" style="background:rgba(34,211,238,.12);color:var(--cyan)">' + ncEsc((c.platform || '?').slice(0, 1)) + '</div>' +
-            '<h4>' + ncEsc(c.platform || c.name || '平台') + '</h4>' +
-            '<p>' + ncEsc(c.account_name || c.display_name || '未命名账号') + '</p>' +
-            '<div class="foot"><span class="badge ' + (configured ? 'green' : 'gray') + '"><span class="dot ' + (configured ? 'green' : 'gray') + '"></span>' + (configured ? '已连接' : '未连接') + '</span><button class="btn-sm btn-ghost" onclick="showToast(\'已发布\')">发布</button></div>' +
-            '</div>';
-        }).join('');
-      } else {
+          if (list.length) {
+            grid.innerHTML = list.map((c) => {
+              const configured = c.configured || c.status === 'connected';
+              const plat = ncEsc(c.platform || c.name || '');
+              const foot = configured
+                ? '<button class="btn-sm btn-ghost" onclick="NC.publishTo(\'' + plat + '\')">发布</button>'
+                : '<button class="btn-sm btn-ghost" onclick="NC.testPlatform(\'' + plat + '\')">授权</button>';
+              return '<div class="pcard" data-account-id="' + ncEsc(c.account_id ?? c.id ?? plat) + '">' +
+                '<div class="pic" style="background:rgba(34,211,238,.12);color:var(--cyan)">' + ncEsc((c.platform || '?').slice(0, 1)) + '</div>' +
+                '<h4>' + ncEsc(c.platform || c.name || '平台') + '</h4>' +
+                '<p>' + ncEsc(c.account_name || c.display_name || '未命名账号') + '</p>' +
+                '<div class="foot"><span class="badge ' + (configured ? 'green' : 'gray') + '"><span class="dot ' + (configured ? 'green' : 'gray') + '"></span>' + (configured ? '已连接' : '未连接') + '</span>' + foot + '</div>' +
+                '</div>';
+            }).join('');
+          } else {
         grid.innerHTML = '<div style="color:var(--text-3);padding:24px">暂未连接分发平台</div>';
       }
     });
@@ -774,20 +778,413 @@ NC.loadSettings = async function () {
     });
 };
 
+/* ============================================================
+ * B2 / B3 / B4 动作桥 + 内容屏加载
+ * 仅新增动作函数与 loader 分发，沿用 NC.api / NC.withState /
+ * NC.renderList / ncToast / NC.needProject 等既有约定。
+ * ============================================================ */
+
+/* ---------- 当前内容 / 书籍上下文 ---------- */
+let _ncContentId = sessionStorage.getItem('nc_content') || '';
+Object.defineProperty(NC, 'currentContentId', {
+  configurable: true,
+  get() { return _ncContentId; },
+  set(v) { _ncContentId = v || ''; if (_ncContentId) sessionStorage.setItem('nc_content', _ncContentId); },
+});
+
+let _ncBookId = sessionStorage.getItem('nc_book') || '';
+Object.defineProperty(NC, 'currentBookId', {
+  configurable: true,
+  get() { return _ncBookId; },
+  set(v) { _ncBookId = v || ''; if (_ncBookId) sessionStorage.setItem('nc_book', _ncBookId); },
+});
+
+// 从书库进入编辑器时设置当前书籍
+NC.openBook = function (id) { NC.currentBookId = id || ''; if (typeof goPage === 'function') goPage('editor'); };
+
+// 解析当前项目首个 chapter 作为审阅内容
+NC.ensureCurrentContent = async function () {
+  if (NC.currentContentId) return NC.currentContentId;
+  if (!NC.currentProjectId) return '';
+  try {
+    const books = await NC.fetchBooks(NC.currentProjectId);
+    if (Array.isArray(books) && books.length) {
+      const chapters = await NC.fetchChapters(books[0].id);
+      if (Array.isArray(chapters) && chapters.length) NC.currentContentId = chapters[0].id;
+    }
+  } catch (e) { console.warn('[NC] 解析章节内容失败', e); }
+  return NC.currentContentId;
+};
+
+// 解析当前项目首个书籍（编辑器大纲 / 续写 / 导出用）
+NC.ensureCurrentBook = async function () {
+  if (NC.currentBookId) return NC.currentBookId;
+  if (!NC.currentProjectId) return '';
+  try {
+    const books = await NC.fetchBooks(NC.currentProjectId);
+    if (Array.isArray(books) && books.length) NC.currentBookId = books[0].id;
+  } catch (e) { console.warn('[NC] 解析书籍失败', e); }
+  return NC.currentBookId;
+};
+
+// 文件上传（multipart，不走 JSON 解析）
+NC.upload = async function (path, file, query) {
+  const headers = {};
+  if (NC.token) headers['Authorization'] = `Bearer ${NC.token}`;
+  const csrf = getCsrfToken();
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  const form = new FormData();
+  form.append('file', file);
+  const url = NC.base + path + (query ? (path.indexOf('?') >= 0 ? '&' : '?') + query : '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('请求超时（>12s）')), 12000);
+  try {
+    const res = await fetch(url, { method: 'POST', headers, body: form, signal: controller.signal });
+    if (!res.ok) throw new Error(await res.text());
+    const ct = res.headers.get('content-type') || '';
+    if (ct.indexOf('application/json') >= 0) return (await res.json()).data ?? {};
+    return {};
+  } finally { clearTimeout(timer); }
+};
+
+/* ---------- 多平台分发 ---------- */
+NC.connectPlatform = async function (payload) {
+  let p = payload;
+  if (!p || !p.platform) {
+    const plat = window.prompt('连接平台标识（如 wechat / xiaohongshu / douyin / x）：', 'xiaohongshu');
+    if (!plat) return;
+    p = { platform: plat.trim(), account_name: plat.trim() };
+  }
+  try {
+    await NC.api('/api/v1/platform-connections', { method: 'POST', body: JSON.stringify(p) });
+    ncToast('已连接平台：' + p.platform);
+    await NC.loadDistribution();
+  } catch (e) { ncToast('连接失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.testPlatform = async function (platform) {
+  try {
+    const data = await NC.api(`/api/v1/platform-connections/${encodeURIComponent(platform)}/test`, { method: 'POST' });
+    ncToast('授权检测：' + ((data && data.status) || 'ok'));
+  } catch (e) { ncToast('授权检测失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.registerAccount = async function (payload) {
+  let p = payload;
+  if (!p || !p.platform) {
+    const plat = window.prompt('注册发布账号的平台（如 wechat / xiaohongshu / douyin）：', 'wechat');
+    if (!plat) return;
+    p = { platform: plat.trim(), account_name: plat.trim() };
+  }
+  try {
+    await NC.api(`/api/v1/publish/account/register?platform=${encodeURIComponent(p.platform)}&account_name=${encodeURIComponent(p.account_name)}`, { method: 'POST' });
+    ncToast('已注册账号：' + p.platform);
+    await NC.loadDistribution();
+  } catch (e) { ncToast('注册失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.publishTo = async function (platform) {
+  try {
+    await NC.api(`/api/v1/publish/${encodeURIComponent(platform)}?title=${encodeURIComponent('来自 NovelCraft 的发布')}&body=${encodeURIComponent('')}`, { method: 'POST' });
+    ncToast('已提交发布：' + platform);
+    await NC.loadDistribution();
+  } catch (e) { ncToast('发布失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- 设置 ---------- */
+NC.saveBudget = async function (pid, scope, limit) {
+  if (!NC.needProject()) return;
+  try {
+    await NC.api(`/api/v1/admin/budgets/${encodeURIComponent(pid)}/${encodeURIComponent(scope)}`, {
+      method: 'PUT', body: JSON.stringify({ limit_cny: Number(limit) || 0 }),
+    });
+    ncToast('已保存预算');
+    await NC.loadSettings();
+  } catch (e) { ncToast('保存预算失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.saveSetting = async function (key, value) {
+  try {
+    await NC.api(`/api/v1/admin/settings/${encodeURIComponent(key)}`, {
+      method: 'PUT', body: JSON.stringify({ value: String(value) }),
+    });
+    ncToast('已保存设置：' + key);
+    await NC.loadSettings();
+  } catch (e) { ncToast('保存设置失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- 工作流 ---------- */
+NC.saveWorkflow = async function (name, projectId, nodes) {
+  if (!NC.needProject()) return;
+  if (!nodes || !nodes.length) {
+    nodes = Array.from(document.querySelectorAll('#workflow-dag .node h5')).map((h, i) => ({ label: h.textContent.trim(), name: 'node' + (i + 1) }));
+  }
+  if (!nodes.length) { ncToast('没有可保存的节点'); return; }
+  try {
+    await NC.api(`/api/v1/admin/workflows/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ project_id: projectId, nodes }) });
+    ncToast('已保存工作流：' + name);
+    await NC.loadWorkflow();
+  } catch (e) { ncToast('保存工作流失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.runWorkflow = async function (name, projectId) {
+  if (!NC.needProject()) return;
+  try {
+    await NC.api(`/api/v1/admin/workflows/${encodeURIComponent(name)}/execute`, { method: 'POST', body: JSON.stringify({ project_id: projectId }) });
+    ncToast('工作流已运行：' + name);
+  } catch (e) { ncToast('运行失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- 热点报告 ---------- */
+NC.generateHotspotReport = async function (payload) {
+  if (!NC.needProject()) return;
+  const p = payload || {};
+  if (!p.title) {
+    const first = document.querySelector('#hotspot-flow .activity p b');
+    p.title = first ? first.textContent.trim() : '今日热点创作';
+  }
+  p.project_id = NC.currentProjectId;
+  if (!p.platforms || !p.platforms.length) p.platforms = ['wechat', 'xiaohongshu', 'douyin'];
+  try {
+    await NC.api('/api/v1/hotspots/generate', { method: 'POST', body: JSON.stringify(p) });
+    ncToast('已生成热点报告');
+    await NC.loadHotspot();
+  } catch (e) { ncToast('生成报告失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- 认证 ---------- */
+NC.logout = async function () {
+  try { await NC.api('/api/v1/auth/logout', { method: 'POST' }); } catch (e) { /* 忽略 */ }
+  NC.token = '';
+  sessionStorage.removeItem('nc_token');
+  const loginView = document.getElementById('loginView');
+  const appView = document.getElementById('appView');
+  if (appView) appView.classList.remove('active');
+  if (loginView) loginView.classList.add('active');
+  ncToast('已退出登录');
+};
+
+NC.register = async function (email, password, name) {
+  const data = await NC.api('/api/v1/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, display_name: name || '' }),
+  });
+  NC.token = data.access_token;
+  sessionStorage.setItem('nc_token', NC.token);
+  await NC.ensureCurrentProject();
+  const loginView = document.getElementById('loginView');
+  const appView = document.getElementById('appView');
+  if (loginView) loginView.classList.remove('active');
+  if (appView) appView.classList.add('active');
+  ncToast('注册成功');
+  setTimeout(loadWorkspaceData, 100);
+};
+
+/* ---------- 灵感创作 → POST /imitation ---------- */
+NC.generateInspiration = async function (projectId, idea) {
+  if (!NC.needProject()) return;
+  const genreEl = document.getElementById('insp-genre');
+  const genre = genreEl ? genreEl.value : '';
+  const sourceText = [idea, genre].filter(Boolean).join('\n');
+  try {
+    const data = await NC.api('/api/v1/imitation', { method: 'POST', body: JSON.stringify({ project_id: projectId, source_text: sourceText }) });
+    NC.renderInspiration(data);
+    ncToast('已生成灵感方案');
+  } catch (e) { ncToast('生成失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.renderInspiration = function (data) {
+  const el = document.getElementById('inspiration-results');
+  if (!el) return;
+  const title = data && data.title;
+  const text = data && data.text;
+  if (!text && !title) { el.innerHTML = '<div class="muted">暂无方案，请调整灵感后重试</div>'; return; }
+  el.innerHTML = '<div class="card" style="margin-bottom:16px"><div class="card-head"><div class="card-title">' +
+    ncEsc(title || '生成方案') + '</div>' + (data && data.style_profile ? '<span class="badge purple">风格已学</span>' : '') +
+    '</div><p style="font-size:13px;line-height:1.7;color:var(--text-2)">' + ncEsc(text || '') + '</p></div>';
+};
+
+/* ---------- 内容工作室 → POST /hotspots/material-suggestions ---------- */
+NC.adaptContent = async function (projectId, topic, content, platform) {
+  if (!NC.needProject()) return;
+  try {
+    const data = await NC.api('/api/v1/hotspots/material-suggestions', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId, topic: topic || '通用', content: content || '', platform: platform || 'douyin', count: 1 }),
+    });
+    const result = (data && data.result) ? (typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2)) : '';
+    const el = document.getElementById('cs-adapted');
+    if (el) {
+      el.innerHTML = '<div class="card-head"><div class="card-title">改编稿（' + ncEsc(platform || '通用') + '）</div><span class="badge cyan">预览</span></div>' +
+        '<p style="font-size:13px;line-height:1.8;color:var(--text-2)">' + ncEsc(result || '（无返回内容）') + '</p>';
+    }
+    ncToast('已生成改编稿');
+  } catch (e) { ncToast('改编失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- 编辑器：大纲 / 续写 / 润色 / 导出 ---------- */
+NC.loadEditorOutline = async function () {
+  await NC.ensureCurrentBook();
+  if (!NC.currentBookId) { ncToast('请先从书库打开一本书'); return; }
+  await NC.withState('#editor-outline',
+    () => NC.api(`/api/v1/ranking/library/books/${encodeURIComponent(NC.currentBookId)}`),
+    (d) => {
+      const el = document.getElementById('editor-outline');
+      if (!el) return;
+      const outline = (d && (d.outline || d.chapters || [])) || [];
+      if (Array.isArray(outline) && outline.length) {
+        el.innerHTML = '<div class="card-title" style="margin-bottom:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M3 3h18v18H3z"/><path d="M9 3v18M3 9h6"/></svg> 大纲</div>' +
+          outline.map((o, i) => {
+            const label = typeof o === 'string' ? o : (o.title || o.name || o.label || '章节');
+            return '<div class="outline-item' + (i > 0 ? ' lvl2' : '') + '">' + ncEsc(label) + '</div>';
+          }).join('');
+      } else {
+        el.innerHTML = '<div class="card-title" style="margin-bottom:12px">大纲</div><div class="muted">暂无大纲</div>';
+      }
+    });
+};
+
+NC.loadEditorContinuation = async function () {
+  await NC.ensureCurrentBook();
+  if (!NC.currentBookId) { ncToast('请先从书库打开一本书'); return; }
+  try {
+    const data = await NC.api(`/api/v1/novels/${encodeURIComponent(NC.currentBookId)}/completion`);
+    const text = (data && (data.text || data.content || data.completion || '')) || '';
+    const body = document.getElementById('editor-body');
+    if (body && text) body.innerHTML += '<p>' + ncEsc(text) + '</p>';
+    ncToast('已生成续写内容');
+  } catch (e) { ncToast('续写失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.loadEditorPolish = async function () {
+  await NC.ensureCurrentBook();
+  if (!NC.currentBookId) { ncToast('请先从书库打开一本书'); return; }
+  try {
+    await NC.api(`/api/v1/novels/${encodeURIComponent(NC.currentBookId)}/completion`);
+    ncToast('已润色（请查看编辑器）');
+  } catch (e) { ncToast('润色失败: ' + extractErrorMessage(e.message)); }
+};
+
+NC.exportNovel = function (novelId, fmt) {
+  if (!novelId) { ncToast('请先从书库打开一本书'); return; }
+  fmt = fmt || 'markdown';
+  const url = `/api/v1/novels/${encodeURIComponent(novelId)}/export/${encodeURIComponent(fmt)}`;
+  // epub 是真实文件流，直接下载；txt/markdown 返回 JSON（data 为文本），前端取文本下载
+  if (fmt === 'epub') { window.open(url, '_blank'); return; }
+  NC.api(url).then((data) => {
+    const text = (data && (data.text || data.content || data)) || '';
+    const blob = new Blob([String(text)], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (novelId || 'novel') + '.' + (fmt === 'txt' ? 'txt' : 'md');
+    a.click();
+    URL.revokeObjectURL(a.href);
+    ncToast('已导出 ' + fmt);
+  }).catch((e) => ncToast('导出失败: ' + extractErrorMessage(e.message)));
+};
+
+/* ---------- 审阅：去 AI 评分 / 运行 ---------- */
+NC.loadReview = async function (contentId) {
+  const cid = contentId || await NC.ensureCurrentContent();
+  const el = document.getElementById('review-list');
+  if (!el) return;
+  if (!cid) { el.innerHTML = '<div class="muted">暂无可审阅的章节（请先从书库打开一本书）</div>'; return; }
+  await NC.withState('#review-list',
+    () => NC.api(`/api/v1/contents/${encodeURIComponent(cid)}/deai/score`),
+    (d) => {
+      const score = d ? (d.score != null ? d.score : d.heuristic_score) : 0;
+      const preview = (d && d.text_preview) || '';
+      el.innerHTML = '<div class="activity"><div class="av-sm" style="color:var(--cyan);background:rgba(34,211,238,.12)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>' +
+        '<div><p><b>AI 味评分：' + ncEsc(score) + '/100</b>（启发式 ' + ncEsc(d ? d.heuristic_score : '?') + '）</p><time>' + ncEsc(preview) + '</time></div></div>';
+    });
+};
+
+NC.runDeai = async function (contentId) {
+  const cid = contentId || await NC.ensureCurrentContent();
+  if (!cid) { ncToast('暂无可处理的章节内容'); return; }
+  try {
+    const data = await NC.api(`/api/v1/contents/${encodeURIComponent(cid)}/deai`, { method: 'POST' });
+    const el = document.getElementById('review-list');
+    if (el && data) {
+      const layers = Array.isArray(data.layers) ? data.layers : [];
+      const finalText = data.final_text || '';
+      let html = '<div class="activity"><div class="av-sm" style="color:var(--green);background:rgba(52,211,153,.12)"><b>✓</b></div><div><p><b>去 AI 完成：</b>原始 ' + ncEsc(data.original_score != null ? data.original_score : 0) + ' → 优化 ' + ncEsc(data.final_score != null ? data.final_score : 0) + '</p><time>7 层管线处理</time></div></div>';
+      if (layers.length) {
+        html += layers.map((l) => '<div class="activity"><div class="av-sm"><span class="dot cyan"></span></div><div><p><b>' + ncEsc(l.name || l.layer || '层') + '</b>：' + ncEsc(l.note || '') + '</p></div></div>').join('');
+      }
+      if (finalText) {
+        html += '<div class="activity"><div class="av-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><p>' + ncEsc(finalText.slice(0, 400)) + (finalText.length > 400 ? '…' : '') + '</p><time>去 AI 后文本</time></div></div>';
+      }
+      el.innerHTML = html;
+    }
+    ncToast('去 AI 处理完成');
+  } catch (e) { ncToast('去 AI 失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- 知识库导入 ---------- */
+NC.newKnowledge = async function (projectId, file) {
+  if (!NC.needProject()) return;
+  if (!file) { ncToast('请选择要导入的文件'); return; }
+  try {
+    await NC.upload('/api/v1/knowledge/import', file, 'project_id=' + encodeURIComponent(projectId));
+    ncToast('已导入知识文档：' + file.name);
+  } catch (e) { ncToast('导入失败: ' + extractErrorMessage(e.message)); }
+};
+
+/* ---------- B4：插件列表 / 模板 ---------- */
+NC.loadPlugins = async function () {
+  await NC.withState('#plugins-grid',
+    () => NC.api('/api/v1/skills/community'),
+    (list) => {
+      const items = Array.isArray(list) ? list : (list && list.items ? list.items : []);
+      const grid = document.getElementById('plugins-grid');
+      if (!grid) return;
+      if (items.length) {
+        grid.innerHTML = items.map((p) => {
+          const enabled = p.enabled || p.is_enabled || p.status === 'enabled';
+          return '<div class="pcard"><div class="pic">' + ncEsc((p.name || '?').slice(0, 1)) + '</div><h4>' + ncEsc(p.name || '插件') + '</h4><p>' + ncEsc(p.description || '') + '</p>' +
+            '<div class="foot"><span class="badge ' + (enabled ? 'green' : 'gray') + '">' + (enabled ? '已启用' : '未启用') + '</span>' +
+            '<button class="btn-sm btn-ghost" onclick="showToast(\'插件在线管理暂未开放\')">' + (enabled ? '停用' : '启用') + '</button></div></div>';
+        }).join('');
+      } else {
+        grid.innerHTML = '<div style="color:var(--text-3);padding:24px">暂无社区插件</div>';
+      }
+    });
+};
+
+NC.loadShortStoryTemplates = async function () {
+  try {
+    return await NC.api('/api/v1/short-stories/templates');
+  } catch (e) { ncToast('加载模板失败: ' + extractErrorMessage(e.message)); return []; }
+};
+
+/* ---------- 内容屏 loader（进入屏时触发，具体动作由按钮发起） ---------- */
+NC.loadInspiration = async function () { /* 灵感方案由「生成灵感」按钮触发，进入屏不自动拉取 */ };
+NC.loadEditor = async function () { await NC.ensureCurrentBook(); };
+NC.loadReviewPage = async function () { await NC.loadReview(); };
+NC.loadContentStudio = async function () { /* 改编稿由「一键改编」按钮触发 */ };
+NC.loadKnowledge = async function () { /* 文档导入由「+ 新建」按钮触发 */ };
+
 /* ---------- B1: goPage 分发 ---------- */
 NC.loadPageData = async function (p) {
   const map = {
     overview: NC.loadOverview,
     workspace: NC.loadWorkspace,
+    inspiration: NC.loadInspiration,
     ranking: NC.loadRanking,
     library: NC.loadLibrary,
+    editor: NC.loadEditor,
+    review: NC.loadReviewPage,
     hotspot: NC.loadHotspot,
+    'content-studio': NC.loadContentStudio,
     distribution: NC.loadDistribution,
+    knowledge: NC.loadKnowledge,
     publish: NC.loadPublish,
     cost: NC.loadCost,
     prompts: NC.loadPrompts,
     workflow: NC.loadWorkflow,
     settings: NC.loadSettings,
+    plugins: NC.loadPlugins,
   };
   const loader = map[p];
   if (typeof loader !== 'function') return; // 未接屏（inspiration/editor 等）不处理

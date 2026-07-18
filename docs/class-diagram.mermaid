@@ -1,0 +1,84 @@
+classDiagram
+    %% ── 前端桥接层（本次新增动作函数）──
+    class NC {
+        +string token
+        +string currentProjectId
+        +string currentContentId
+        +api(path, opts) data
+        +generateInspiration(projectId, idea) data
+        +adaptContent(projectId, topic, content, platform) data
+        +publishTo(platform, contentId) data
+        +connectPlatform(payload) data
+        +testPlatform(platform) data
+        +registerAccount(payload) data
+        +saveBudget(pid, scope, limit) data
+        +saveSetting(key, value) data
+        +saveWorkflow(name, projectId, nodes) data
+        +runWorkflow(name, projectId) data
+        +generateHotspotReport(payload) data
+        +logout() data
+        +register(email, password, name) data
+        +loadReview(contentId) data
+        +runDeai(contentId) data
+        +exportNovel(novelId, fmt) data
+        +newKnowledge(projectId, file) data
+        +loadPlugins() data
+        +loadShortStoryTemplates() data
+    }
+
+    %% ── 后端服务（Bug2 新建/修复）──
+    class DeaiPipeline {
+        +__init__(project_id, content_id, chapter_title)
+        +run(text) dict
+    }
+    class HotspotCollector {
+        +fetch_hotspots(user_id) tuple
+    }
+    class config {
+        +require_admin(user) user
+        +require_admin_reads(user) user
+    }
+
+    NC ..> DeaiPipeline : 经 /contents/{id}/deai 端点内部调用
+    note for NC "所有动作经 NC.api→fetch 后端；\n自动注入 token/CSRF、12s 超时、解包 json.data"
+
+    %% ── 关键请求 Schema（块3修复 + 块4复用）──
+    class ImitationRequest {
+        +string project_id
+        +string source_text  // 灵感文本 ≥200字
+        +string source_url
+        +string instruction
+    }
+    class HmTopicRequest {
+        +string project_id
+        +string topic
+        +int count
+        +string platform
+        +string content  // 原文
+    }
+    class SettingUpdateRequest {
+        +string value  // ≤4000
+    }
+    class RegisterRequest {
+        +string email
+        +string password  // ≥8
+        +string display_name
+    }
+    class TopicBookmarkRequest {
+        +bool bookmark  // True=加入备选
+    }
+    class DeaiRunResponse {
+        +int original_score
+        +int final_score
+        +list layers
+        +string final_text
+    }
+    class DeaiScoreResponse {
+        +int score
+        +int heuristic_score
+        +string text_preview
+    }
+
+    note for ImitationRequest "inspiration 生成灵感 → POST /imitation (Decision A)"
+    note for HmTopicRequest "content-studio 改编 → POST /hotspots/material-suggestions (Decision B)"
+    note for TopicBookmarkRequest "存在但仅作用于 topic_candidates；ranking 表行无 topic_id → 本期占位"

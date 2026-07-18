@@ -57,11 +57,25 @@ function switchTab(el, id) {
   ['set-general', 'set-provider', 'set-budget', 'set-team'].forEach(i => document.getElementById(i).style.display = i === id ? 'block' : 'none');
 }
 
-/* Register button (onclick="enterApp()") — minimal stub.
- * ncToast is defined in nc-api.js; since app.js loads first we guard defensively
- * so a click never throws a ReferenceError. */
+/* Register button (onclick="enterApp()").
+ * Collects the email/password already typed into the login form and delegates
+ * to NC.register, which hits POST /auth/register and drops the user into the app
+ * on success. Falls back to the old stub message if NC is unavailable. */
 function enterApp() {
-  if (typeof ncToast === 'function') {
+  const emailInput = document.querySelector('#loginView input[type="email"]');
+  const pwInput = document.querySelector('#loginView input[type="password"]');
+  const email = emailInput?.value?.trim() || '';
+  const password = pwInput?.value || '';
+  if (!email || !password) {
+    if (typeof ncToast === 'function') ncToast('请输入邮箱和密码以注册');
+    return;
+  }
+  if (typeof NC !== 'undefined' && typeof NC.register === 'function') {
+    NC.register(email, password).catch((e) => {
+      const msg = (typeof extractErrorMessage === 'function') ? extractErrorMessage(e.message) : (e.message || '注册失败');
+      if (typeof ncToast === 'function') ncToast('注册失败: ' + msg);
+    });
+  } else if (typeof ncToast === 'function') {
     ncToast('注册功能开发中');
   } else {
     alert('注册功能开发中');

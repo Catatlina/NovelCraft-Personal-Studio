@@ -396,7 +396,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
     <div class="sidebar-bottom">
       <div class="theme-row">
         <button class="nav-item" onclick="toggleTheme()" title="切换主题"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/></svg><span class="label">暗色</span></button>
-        <button class="nav-item" onclick="showToast('已退出登录')" title="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span class="label">退出</span></button>
+        <button class="nav-item" onclick="NC.logout()" title="退出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span class="label">退出</span></button>
       </div>
       <button class="nav-item collapse-btn" onclick="toggleSidebar()" title="收起"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg><span class="label">收起侧栏</span></button>
     </div>
@@ -531,11 +531,11 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
         <div class="layout-2">
           <div class="card">
             <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg> 创作参数</div></div>
-            <div class="field"><label>核心灵感 / 想法 *</label><textarea class="form-input" placeholder="例如：一个能听见城市记忆的巡夜人">一个末世废墟中靠修复旧物记忆为生的少年，意外唤醒了一台会写诗的机器人。</textarea></div>
-            <div class="field"><label>题材</label><select class="form-input"><option>科幻</option><option>玄幻</option><option>都市</option><option>悬疑</option><option>历史</option></select></div>
+            <div class="field"><label>核心灵感 / 想法 *</label><textarea id="insp-idea" class="form-input" placeholder="例如：一个能听见城市记忆的巡夜人">一个末世废墟中靠修复旧物记忆为生的少年，意外唤醒了一台会写诗的机器人。</textarea></div>
+            <div class="field"><label>题材</label><select id="insp-genre" class="form-input"><option>科幻</option><option>玄幻</option><option>都市</option><option>悬疑</option><option>历史</option></select></div>
             <div class="field"><label>风格基调</label><div class="seg"><button class="on">治愈</button><button>暗黑</button><button>热血</button><button>轻松</button></div></div>
             <div class="field"><label>目标字数</label><select class="form-input"><option>短篇（3k-5k）</option><option>中篇（10k-30k）</option><option>长篇（50k+）</option></select></div>
-            <button class="btn-sm btn-primary" style="width:100%;height:42px;justify-content:center" onclick="showToast('已生成 3 个灵感方案')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> 生成灵感</button>
+            <button class="btn-sm btn-primary" style="width:100%;height:42px;justify-content:center" onclick="NC.generateInspiration(NC.currentProjectId, document.getElementById('insp-idea').value)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> 生成灵感</button>
           </div>
           <div id="inspiration-results">
             <div class="card" style="margin-bottom:16px"><div class="card-head"><div class="card-title">方案 A · 诗与废墟</div><span class="badge purple">推荐</span></div><p style="font-size:13px;line-height:1.7;color:var(--text-2)">废土之上，少年阿言靠「记忆针灸」修复旧物残存的故事。某日一台战前诗机苏醒，开始用诗句预言城市的消亡。两人在捡垃圾的旅途里，逐渐拼出真相……</p><div style="margin-top:12px;display:flex;gap:8px"><span class="badge gray">治愈</span><span class="badge gray">成长</span><span class="badge gray">废土</span></div></div>
@@ -593,7 +593,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <section class="page" data-page="editor">
         <div class="breadcrumb"><b>NovelCraft</b> › 小说创作 › 编辑器</div>
         <div class="page-head" style="margin-bottom:14px"><div><h1 style="font-family:var(--font-read)">星渊纪元 · 第 12 章</h1><p>自动保存于 14:32 · 字数 3,204</p></div>
-          <div class="head-actions"><button class="btn-sm btn-ghost">大纲</button><button class="btn-sm btn-ghost">AI 续写</button><button class="btn-sm btn-primary" onclick="showToast('已生成续写内容')">AI 润色</button></div>
+          <div class="head-actions"><button class="btn-sm btn-ghost" onclick="NC.loadEditorOutline()">大纲</button><button class="btn-sm btn-ghost" onclick="NC.loadEditorContinuation()">AI 续写</button><button class="btn-sm btn-primary" onclick="NC.loadEditorPolish()">AI 润色</button><select id="editor-export-fmt" class="form-input" style="width:92px;height:32px"><option value="markdown">MD</option><option value="txt">TXT</option><option value="epub">EPUB</option></select><button class="btn-sm btn-ghost" onclick="NC.exportNovel(NC.currentBookId, document.getElementById('editor-export-fmt').value)">导出</button></div>
         </div>
         <div class="editor">
           <div class="ed-side" id="editor-outline">
@@ -649,7 +649,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <!-- REVIEW -->
       <section class="page" data-page="review">
         <div class="breadcrumb"><b>NovelCraft</b> › 小说创作 › 审阅</div>
-        <div class="page-head"><div><h1>审阅</h1><p>批注、协作与版本对比</p></div><button class="btn-sm btn-primary" onclick="showToast('已打开对比视图')">版本对比</button></div>
+        <div class="page-head"><div><h1>审阅</h1><p>批注、协作与版本对比</p></div><button class="btn-sm btn-ghost" onclick="showToast('版本对比功能开发中')">版本对比</button><button class="btn-sm btn-primary" onclick="NC.runDeai()">运行去AI</button></div>
         <div class="card">
           <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 待处理批注</div><span class="badge orange">3 条</span></div>
           <div id="review-list">
@@ -683,7 +683,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <!-- HOTSPOT -->
       <section class="page" data-page="hotspot">
         <div class="breadcrumb"><b>NovelCraft</b> › 自媒体中心 › 热点追踪</div>
-        <div class="page-head"><div><h1>热点追踪</h1><p>实时捕获社交平台热点，转化为创作灵感</p></div><button class="btn-sm btn-primary" onclick="showToast('已生成热点报告')">生成报告</button></div>
+        <div class="page-head"><div><h1>热点追踪</h1><p>实时捕获社交平台热点，转化为创作灵感</p></div><button class="btn-sm btn-primary" onclick="NC.generateHotspotReport({})">生成报告</button></div>
         <div class="layout-2">
           <div>
             <div class="card" style="margin-bottom:16px"><div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> 今日热度趋势</div></div>
@@ -714,7 +714,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <section class="page" data-page="content-studio">
         <div class="breadcrumb"><b>NovelCraft</b> › 自媒体中心 › 内容工作室</div>
         <div class="page-head"><div><h1>内容工作室</h1><p>将小说内容改编为多平台自媒体文稿</p></div>
-          <div class="head-actions"><select class="form-input" style="width:130px;height:36px"><option>知乎体</option><option>小红书体</option><option>公众号体</option><option>短视频脚本</option></select><button class="btn-sm btn-primary" onclick="showToast('已生成改编稿')">一键改编</button></div>
+          <div class="head-actions"><select id="cs-platform" class="form-input" style="width:130px;height:36px"><option value="zhihu">知乎体</option><option value="xiaohongshu">小红书体</option><option value="wechat">公众号体</option><option value="douyin">短视频脚本</option></select><button class="btn-sm btn-ghost" onclick="NC.loadShortStoryTemplates().then(function(t){ncToast('已加载 '+(Array.isArray(t)?t.length:0)+' 个短故事模板')})">模板</button><button class="btn-sm btn-primary" onclick="NC.adaptContent(NC.currentProjectId, '通用', document.getElementById('cs-original').innerText, document.getElementById('cs-platform').value)">一键改编</button></div>
         </div>
         <div class="layout-2">
           <div class="card" id="cs-original"><div class="card-head"><div class="card-title">原文（星渊纪元 · 第 12 章）</div></div><p style="font-size:13px;line-height:1.8;color:var(--text-2)">纪元的风从裂隙深处涌出，带着旧世界锈蚀的气息。阿言握紧那枚会吟诗的金属核，听见城市在记忆里轻轻叹息。他没有回头——身后坍塌的钟楼，正是母亲最后一次为他哼歌的地方。</p></div>
@@ -725,13 +725,13 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <!-- DISTRIBUTION -->
       <section class="page" data-page="distribution">
         <div class="breadcrumb"><b>NovelCraft</b> › 自媒体中心 › 多平台分发</div>
-        <div class="page-head"><div><h1>多平台分发</h1><p>连接并管理你的内容发布渠道</p></div>        <button class="btn-sm btn-primary" onclick="showToast('已添加平台')">+ 连接平台</button></div>
+        <div class="page-head"><div><h1>多平台分发</h1><p>连接并管理你的内容发布渠道</p></div>        <button class="btn-sm btn-ghost" onclick="NC.registerAccount()">注册账号</button><button class="btn-sm btn-primary" onclick="NC.connectPlatform()">+ 连接平台</button></div>
         <div class="card-grid" id="distribution-grid">
-          <div class="pcard"><div class="pic" style="background:rgba(34,211,238,.12);color:var(--cyan)">知</div><h4>知乎</h4><p>专栏 · 长文深度</p><div class="foot"><span class="badge green"><span class="dot green"></span>已连接</span><button class="btn-sm btn-ghost" onclick="showToast('已发布')">发布</button></div></div>
-          <div class="pcard"><div class="pic" style="background:rgba(251,146,60,.12);color:var(--orange)">红</div><h4>小红书</h4><p>图文 · 种草向</p><div class="foot"><span class="badge green"><span class="dot green"></span>已连接</span><button class="btn-sm btn-ghost" onclick="showToast('已发布')">发布</button></div></div>
-          <div class="pcard"><div class="pic" style="background:rgba(248,113,113,.12);color:var(--red)">公</div><h4>微信公众号</h4><p>图文 · 订阅</p><div class="foot"><span class="badge green"><span class="dot green"></span>已连接</span><button class="btn-sm btn-ghost" onclick="showToast('已发布')">发布</button></div></div>
-          <div class="pcard"><div class="pic" style="background:rgba(99,102,241,.14);color:var(--primary-light)">抖</div><h4>抖音</h4><p>短视频脚本</p><div class="foot"><span class="badge gray"><span class="dot gray"></span>未连接</span><button class="btn-sm btn-ghost" onclick="showToast('跳转到授权')">授权</button></div></div>
-          <div class="pcard"><div class="pic" style="background:rgba(52,211,153,.12);color:var(--green)">B</div><h4>B 站</h4><p>中长视频</p><div class="foot"><span class="badge gray"><span class="dot gray"></span>未连接</span><button class="btn-sm btn-ghost" onclick="showToast('跳转到授权')">授权</button></div></div>
+          <div class="pcard"><div class="pic" style="background:rgba(34,211,238,.12);color:var(--cyan)">知</div><h4>知乎</h4><p>专栏 · 长文深度</p><div class="foot"><span class="badge green"><span class="dot green"></span>已连接</span><button class="btn-sm btn-ghost" onclick="NC.publishTo('zhihu')">发布</button></div></div>
+          <div class="pcard"><div class="pic" style="background:rgba(251,146,60,.12);color:var(--orange)">红</div><h4>小红书</h4><p>图文 · 种草向</p><div class="foot"><span class="badge green"><span class="dot green"></span>已连接</span><button class="btn-sm btn-ghost" onclick="NC.publishTo('xiaohongshu')">发布</button></div></div>
+          <div class="pcard"><div class="pic" style="background:rgba(248,113,113,.12);color:var(--red)">公</div><h4>微信公众号</h4><p>图文 · 订阅</p><div class="foot"><span class="badge green"><span class="dot green"></span>已连接</span><button class="btn-sm btn-ghost" onclick="NC.publishTo('wechat')">发布</button></div></div>
+          <div class="pcard"><div class="pic" style="background:rgba(99,102,241,.14);color:var(--primary-light)">抖</div><h4>抖音</h4><p>短视频脚本</p><div class="foot"><span class="badge gray"><span class="dot gray"></span>未连接</span><button class="btn-sm btn-ghost" onclick="NC.testPlatform('douyin')">授权</button></div></div>
+          <div class="pcard"><div class="pic" style="background:rgba(52,211,153,.12);color:var(--green)">B</div><h4>B 站</h4><p>中长视频</p><div class="foot"><span class="badge gray"><span class="dot gray"></span>未连接</span><button class="btn-sm btn-ghost" onclick="showToast('该平台暂未开放连接')">授权</button></div></div>
           <div class="pcard"><div class="pic" style="background:var(--bg-hover)">＋</div><h4>添加渠道</h4><p>接入更多平台</p><div class="foot"><button class="btn-sm btn-primary" onclick="showToast('已打开市场')" style="width:100%;justify-content:center">浏览</button></div></div>
         </div>
       </section>
@@ -739,7 +739,8 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <!-- KNOWLEDGE -->
       <section class="page" data-page="knowledge">
         <div class="breadcrumb"><b>NovelCraft</b> › 自媒体中心 › 知识库</div>
-        <div class="page-head"><div><h1>知识库</h1><p>沉淀世界观、素材与参考资料</p></div><button class="btn-sm btn-primary" onclick="showToast('已新建文档')">+ 新建</button></div>
+        <div class="page-head"><div><h1>知识库</h1><p>沉淀世界观、素材与参考资料</p></div><button class="btn-sm btn-primary" onclick="document.getElementById('knowledge-file').click()">+ 新建</button></div>
+        <input id="knowledge-file" type="file" style="display:none" onchange="NC.newKnowledge(NC.currentProjectId, this.files[0])">
         <div class="card">
           <div class="table-wrap">
             <table><thead><tr><th>文档</th><th>类型</th><th>关联项目</th><th>更新</th><th></th></tr></thead>
@@ -818,7 +819,7 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
       <!-- WORKFLOW -->
       <section class="page" data-page="workflow">
         <div class="breadcrumb"><b>NovelCraft</b> › 工具服务 › 工作流编排</div>
-        <div class="page-head"><div><h1>工作流编排</h1><p>可视化串联「灵感→创作→审阅→发布」自动化</p></div><button class="btn-sm btn-primary" onclick="showToast('已保存工作流')">保存</button></div>
+        <div class="page-head"><div><h1>工作流编排</h1><p>可视化串联「灵感→创作→审阅→发布」自动化</p></div><button class="btn-sm btn-ghost" onclick="NC.runWorkflow('default', NC.currentProjectId)">运行</button><button class="btn-sm btn-primary" onclick="NC.saveWorkflow('default', NC.currentProjectId)">保存</button></div>
         <div class="card"><div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4v7a2 2 0 0 1-2 2H6"/></svg> 小说日更自动化</div><span class="badge green">● 运行中</span></div>
           <div class="dag" id="workflow-dag">
             <div class="node run"><h5>① 灵感采集</h5><p>热点 + 书库</p></div><div class="arrow">→</div>
@@ -885,9 +886,9 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
           <div class="tab" onclick="switchTab(this,'set-team')">成员</div>
         </div>
         <div id="set-general"><div class="card" style="max-width:640px">
-          <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 全局配置</div><button class="btn-sm btn-primary" onclick="showToast('已保存')">保存</button></div>
+          <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 全局配置</div><button class="btn-sm btn-primary" onclick="NC.saveSetting('workspace_name', document.getElementById('set-general-name').value)">保存</button></div>
           <div id="settings-general-fields"></div>
-          <div class="field"><label>工作台名称</label><input class="form-input" value="寇豆码的个人工作室"></div>
+          <div class="field"><label>工作台名称</label><input id="set-general-name" class="form-input" value="寇豆码的个人工作室"></div>
           <div class="field"><label>默认语言</label><select class="form-input"><option>简体中文</option><option>English</option></select></div>
           <div class="field"><label>主题</label><div class="seg"><button class="on" onclick="setTheme('dark')">暗色</button><button onclick="setTheme('light')">亮色</button></div></div>
           <div class="field"><label>编辑器字体</label><select class="form-input"><option>Noto Serif SC（衬线）</option><option>系统默认</option></select><div class="hint">正文字体仅在编辑器与阅读场景生效</div></div>
@@ -902,9 +903,9 @@ textarea.form-input{height:auto;min-height:90px;padding:12px 14px;resize:vertica
           <div class="field"><label>API Key</label><input class="form-input" type="password" value="sk-************************"></div>
         </div></div>
         <div id="set-budget" style="display:none"><div class="card" style="max-width:640px">
-          <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> 预算设置</div><button class="btn-sm btn-primary" onclick="showToast('已保存')">保存</button></div>
+          <div class="card-head"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> 预算设置</div><button class="btn-sm btn-primary" onclick="NC.saveBudget(NC.currentProjectId, 'monthly', document.getElementById('set-budget-limit').value)">保存</button></div>
           <div id="settings-budget-fields"></div>
-          <div class="field"><label>每月预算上限（元）</label><input class="form-input" value="400"></div>
+          <div class="field"><label>每月预算上限（元）</label><input id="set-budget-limit" class="form-input" value="400"></div>
           <div class="field"><label>预警阈值</label><div class="seg"><button class="on">80%</button><button>90%</button><button>95%</button></div></div>
           <div class="field"><label>超额策略</label><select class="form-input"><option>暂停非必要调用</option><option>仅提醒</option><option>切换至本地模型</option></select></div>
         </div></div>

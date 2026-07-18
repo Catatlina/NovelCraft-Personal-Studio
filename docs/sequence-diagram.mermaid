@@ -1,0 +1,53 @@
+sequenceDiagram
+    actor U as 用户
+    participant F as 前端 (NC + proto.html)
+    participant B as 后端 (FastAPI)
+    participant G as AI网关 (gateway.complete)
+
+    Note over F,B: ① 分布式发布 (distribution · B2)
+    U->>F: 点「发布」
+    F->>B: POST /publish/{platform}
+    B-->>F: 200 {status, post_id}
+    F->>F: toast + 重渲 #distribution-grid
+
+    Note over F,B: ② 生成灵感 (inspiration · B3 · Decision A)
+    U->>F: 在「核心灵感/想法」输入 → 点「生成灵感」
+    F->>B: POST /imitation {project_id, source_text}
+    B->>G: complete(style_imitation)
+    G-->>B: text / style_profile
+    B-->>F: 200 {text, style_profile, similarity, copyright_risk}
+    F->>F: 渲染 #inspiration-results (3 方案卡)
+
+    Note over F,B: ③ 保存通用设置 (settings · B2 · 修复 403)
+    U->>F: 编辑配置 → 点「保存」
+    F->>B: PUT /admin/settings/{key} {value}
+    B->>B: require_admin() 未配 NOVELCRAFT_ADMIN_EMAILS 时放行
+    B-->>F: 200 {key, value}
+    F->>F: toast
+
+    Note over F,B: ④ 审阅·去AI (review · B3 · 修复 500)
+    U->>F: 选章节 → 点「运行去AI」
+    F->>B: POST /contents/{id}/deai
+    B->>B: DeaiPipeline.run() 内部 try/except 不抛
+    B-->>F: 200 {original_score, final_score, layers, final_text}
+    F->>F: 渲染 layers / final_text
+
+    Note over F,B: ⑤ 热点流 (hotspot · 修复挂起)
+    F->>B: GET /hotspots
+    B->>B: fetch_hotspots() 全局 deadline 8s 提前 break
+    B-->>F: ≤8s 返回 200 {hotspots:[], sources}
+    F->>F: 渲染 #hotspot-flow 或空态（不再永久卡死）
+
+    Note over F,B: ⑥ 内容工作室·一键改编 (content-studio · B3 · Decision B)
+    U->>F: 原文(#cs-original)+选平台 → 点「一键改编」
+    F->>B: POST /hotspots/material-suggestions {project_id, topic, content, platform}
+    B->>G: generate_material_suggestions()
+    G-->>B: 改编素材
+    B-->>F: 200 {result}
+    F->>F: 渲染 #cs-adapted
+
+    Note over F,B: ⑦ 注册 (auth · 块4 复用)
+    U->>F: 登录页点「没有账号？注册」
+    F->>B: POST /auth/register {email, password, display_name}
+    B-->>F: 200 {user, access_token}
+    F->>F: 存 token + 进后台
