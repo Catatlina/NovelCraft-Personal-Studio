@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { FlaskConical, Loader2, RefreshCw, AlertTriangle, Play, FileText } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 // lib/api returns the full envelope { code, message, data }; unwrap `.data`.
@@ -185,6 +187,8 @@ export function Prompts({ prompts, projectId }: { prompts: any[]; projectId: str
 
   const results = lab?.results ?? [];
 
+  const listPager = usePagination({ items: list, pageSize: 10, mode: "client" });
+
   return (
     <div>
       {/* Breadcrumb */}
@@ -266,7 +270,7 @@ export function Prompts({ prompts, projectId }: { prompts: any[]; projectId: str
                 </tr>
               </thead>
               <tbody>
-                {list.map((p, i) => {
+                {listPager.pageData.map((p, i) => {
                   const key = p.id ?? `${p.name ?? "p"}-${p.version ?? i}-${i}`;
                   const open = !!expanded[key];
                   const gc = goldenCount(p.golden_cases);
@@ -320,6 +324,14 @@ export function Prompts({ prompts, projectId }: { prompts: any[]; projectId: str
                 })}
               </tbody>
             </table>
+            <Pagination
+              page={listPager.page}
+              pageSize={listPager.pageSize}
+              total={list.length}
+              onPageChange={listPager.setPage}
+              onPageSizeChange={listPager.setPageSize}
+              pageSizeOptions={[10, 20, 50, 100]}
+            />
           </div>
         )}
         <p style={{ fontSize: 11, color: "var(--text-3)", margin: "12px 0 0" }}>

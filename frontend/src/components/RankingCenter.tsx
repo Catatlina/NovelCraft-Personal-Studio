@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string; capture_status?: string; user_action_required?: boolean; ocr_required?: boolean };
@@ -323,6 +325,13 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     return <span className="badge green">成功</span>;
   };
 
+  const sourcesPager = usePagination({ items: sources, pageSize: 10, mode: "client" });
+  const snapshotsPager = usePagination({ items: snapshots, pageSize: 10, mode: "client" });
+  const topicsView = topicTab === "bookmarked" ? bookmarkedTopics : topics;
+  const topicsPager = usePagination({ items: topicsView, pageSize: 10, mode: "client" });
+  const openItems = openSnapshotId ? (snapshotDetails[openSnapshotId]?.items || []) : [];
+  const snapshotItemsPager = usePagination({ items: openItems, pageSize: 10, mode: "client" });
+
   return <div style={{ display: "grid", gap: 20 }}>
     {/* ── Page head ── */}
     <div className="page-head">
@@ -367,7 +376,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         <span className="card-sub">{sources.length} 个平台</span>
       </div>
       <div className="grid grid-3">
-        {sources.map(source => {
+        {sourcesPager.pageData.map(source => {
           const healthLabel = source.last_error ? "异常" : source.last_success_at ? "健康" : "未采集";
           const healthBadge = source.last_error ? "red" : source.last_success_at ? "green" : "gray";
           return <div className="card" key={source.source_key} style={{ padding: 16 }}>
@@ -392,6 +401,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
             </button>
           </div>;
         })}
+        <Pagination
+          page={sourcesPager.page}
+          pageSize={sourcesPager.pageSize}
+          total={sources.length}
+          onPageChange={sourcesPager.setPage}
+          onPageSizeChange={sourcesPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
       </div>
 
       {/* ── Import section ── */}
@@ -499,7 +516,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                 </td>
               </tr>
             ) : (
-              snapshots.map(snapshot => <React.Fragment key={snapshot.id}>
+              snapshotsPager.pageData.map(snapshot => <React.Fragment key={snapshot.id}>
                 <tr>
                   <td>{snapshot.display_name}</td>
                   <td>{statusBadge(snapshot.status, snapshot.capture_status)}</td>
@@ -569,9 +586,9 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                         <small style={{ color: "var(--text-2)" }}>正在加载榜单详情…</small>
                       ) : (
                         <div>
-                          <strong style={{ fontSize: 14 }}>榜单前 10 条</strong>
+                          <strong style={{ fontSize: 14 }}>榜单条目</strong>
                           <ol style={{ margin: "10px 0 0", paddingLeft: 24, fontSize: 13 }}>
-                            {(snapshotDetails[snapshot.id]?.items || []).slice(0, 10).map(item => {
+                            {snapshotItemsPager.pageData.map(item => {
                               const collector = item.collector || item.metrics?.collector || "未记录";
                               const confidence = item.confidence ?? item.metrics?.confidence;
                               const evidence = item.evidence || item.metrics?.evidence;
@@ -585,6 +602,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                               </li>;
                             })}
                           </ol>
+                          <Pagination
+                            page={snapshotItemsPager.page}
+                            pageSize={snapshotItemsPager.pageSize}
+                            total={openItems.length}
+                            onPageChange={snapshotItemsPager.setPage}
+                            onPageSizeChange={snapshotItemsPager.setPageSize}
+                            pageSizeOptions={[10, 20, 50, 100]}
+                          />
                           {snapshotDetails[snapshot.id] && snapshotDetails[snapshot.id].items.length === 0 && (
                             <small style={{ color: "var(--text-2)" }}>该快照没有榜单条目</small>
                           )}
@@ -612,6 +637,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
             )}
           </tbody>
         </table>
+        <Pagination
+          page={snapshotsPager.page}
+          pageSize={snapshotsPager.pageSize}
+          total={snapshots.length}
+          onPageChange={snapshotsPager.setPage}
+          onPageSizeChange={snapshotsPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
       </div>
     </div>
 
@@ -777,7 +810,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       </div>
 
       <div className="grid grid-3">
-        {(topicTab === "bookmarked" ? bookmarkedTopics : topics).map(topic => {
+        {topicsPager.pageData.map(topic => {
           const isBookmarked = (topic as any).meta?.bookmarked || false;
           return (
             <div className="card" key={topic.id} style={{ padding: 16 }}>
@@ -840,6 +873,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
             <p>暂无选题。请先扫描榜单并生成分析。</p>
           </div>
         )}
+        <Pagination
+          page={topicsPager.page}
+          pageSize={topicsPager.pageSize}
+          total={topicsView.length}
+          onPageChange={topicsPager.setPage}
+          onPageSizeChange={topicsPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
       </div>
     </div>
   </div>;

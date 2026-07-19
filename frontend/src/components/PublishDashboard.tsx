@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 export function PublishDashboard() {
   const [platforms] = useState(["wechat","toutiao","xiaohongshu","zhihu","medium","substack","twitter","wordpress","royalroad","kdp"]);
@@ -20,6 +22,10 @@ export function PublishDashboard() {
   const [feedback, setFeedback] = useState<any>(null);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
+
+  const recordsPager = usePagination({ items: records, pageSize: 10, mode: "client" });
+  const membersPager = usePagination({ items: members, pageSize: 10, mode: "client" });
+  const logsPager = usePagination({ items: logs, pageSize: 10, mode: "client" });
 
   useEffect(() => {
     api("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
@@ -273,7 +279,7 @@ export function PublishDashboard() {
             <div className="table-wrap">
               <table><thead><tr><th>平台</th><th>模式</th><th>状态</th><th>时间</th></tr></thead>
               <tbody>
-                {records.slice(0,20).map((r:any)=><tr key={r.id}>
+                {recordsPager.pageData.map((r:any)=><tr key={r.id}>
                   <td>{r.platform}</td><td>{r.mode}</td>
                   <td>
                     <span className={`badge ${r.status==="published"?"green":"orange"}`}>{r.status}</span>
@@ -281,6 +287,14 @@ export function PublishDashboard() {
                   <td className="cell-sub">{r.created_at?.slice(0,16)}</td>
                 </tr>)}
               </tbody></table>
+              <Pagination
+                page={recordsPager.page}
+                pageSize={recordsPager.pageSize}
+                total={records.length}
+                onPageChange={recordsPager.setPage}
+                onPageSizeChange={recordsPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
             </div>
           </div>
         )}
@@ -292,7 +306,15 @@ export function PublishDashboard() {
             </div>
             <div className="table-wrap" style={{marginBottom:20}}>
               <table><thead><tr><th>邮箱</th><th>角色</th><th>加入时间</th></tr></thead>
-              <tbody>{members.map((m:any,i:number)=><tr key={i}><td>{m.email}</td><td>{m.role}</td><td className="cell-sub">{m.created_at?.slice(0,16)}</td></tr>)}</tbody></table>
+              <tbody>{membersPager.pageData.map((m:any,i:number)=><tr key={i}><td>{m.email}</td><td>{m.role}</td><td className="cell-sub">{m.created_at?.slice(0,16)}</td></tr>)}</tbody></table>
+              <Pagination
+                page={membersPager.page}
+                pageSize={membersPager.pageSize}
+                total={members.length}
+                onPageChange={membersPager.setPage}
+                onPageSizeChange={membersPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
             </div>
 
             <h3 style={{fontSize:15,fontWeight:600,marginBottom:12}}>邀请成员</h3>
@@ -314,7 +336,15 @@ export function PublishDashboard() {
             <h3 style={{fontSize:15,fontWeight:600,margin:"20px 0 12px"}}>操作日志</h3>
             <div className="table-wrap">
               <table><thead><tr><th>用户</th><th>操作</th><th>目标</th><th>时间</th></tr></thead>
-              <tbody>{logs.slice(0,20).map((l:any,i:number)=><tr key={i}><td>{l.email}</td><td>{l.action}</td><td className="cell-sub">{l.target}</td><td className="cell-sub">{l.created_at?.slice(0,16)}</td></tr>)}</tbody></table>
+              <tbody>{logsPager.pageData.map((l:any,i:number)=><tr key={i}><td>{l.email}</td><td>{l.action}</td><td className="cell-sub">{l.target}</td>                  <td className="cell-sub">{l.created_at?.slice(0,16)}</td></tr>)}</tbody></table>
+              <Pagination
+                page={logsPager.page}
+                pageSize={logsPager.pageSize}
+                total={logs.length}
+                onPageChange={logsPager.setPage}
+                onPageSizeChange={logsPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
             </div>
           </div>
         )}

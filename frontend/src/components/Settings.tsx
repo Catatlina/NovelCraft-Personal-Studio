@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap, Users, Upload, Download, Database } from "lucide-react";
 import { api, getApiKey, getApiUrl, getModel, setApiKey, setApiUrl, setModel } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string,unknown>; fallback_json: any[] };
@@ -46,6 +48,13 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [editSetting, setEditSetting] = useState<{key:string;value:string;description:string}|null>(null);
   const [msg, setMsg] = useState("");
   const [stats, setStats] = useState<{ ai_calls: number; contents: number; db_size: string } | null>(null);
+
+  const settingsPager = usePagination({ items: settings, pageSize: 10, mode: "client" });
+  const budgetsPager = usePagination({ items: budgets, pageSize: 10, mode: "client" });
+  const promptsPager = usePagination({ items: prompts, pageSize: 10, mode: "client" });
+  const connectionsPager = usePagination({ items: connections, pageSize: 10, mode: "client" });
+  const providersPager = usePagination({ items: providers, pageSize: 10, mode: "client" });
+  const routesPager = usePagination({ items: routes, pageSize: 10, mode: "client" });
 
   // Load saved API config on mount
   useEffect(() => {
@@ -265,7 +274,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {settings.map((s:AppSetting) => (
+                  {settingsPager.pageData.map((s:AppSetting) => (
                     <tr key={s.key} style={{borderBottom:"1px solid var(--border)"}}>
                       <td style={{padding:"10px 12px", fontSize:13, fontWeight:600}}>{s.key}</td>
                       <td style={{padding:"10px 12px", fontSize:12, color:"var(--text-2)", maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{s.value}</td>
@@ -286,6 +295,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   ))}
                 </tbody>
               </table>
+              <Pagination
+                page={settingsPager.page}
+                pageSize={settingsPager.pageSize}
+                total={settings.length}
+                onPageChange={settingsPager.setPage}
+                onPageSizeChange={settingsPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
 
               {editSetting && (
                 <div style={{marginTop:16, padding:16, background:"var(--bg-hover)", borderRadius:"var(--r-md)", border:"1px solid var(--border)"}}>
@@ -380,7 +397,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {providers.map(p=>(
+                  {providersPager.pageData.map(p=>(
                     <tr key={p.name} style={{borderBottom:"1px solid var(--border)"}}>
                       <td style={{padding:"10px 12px", fontWeight:600}}>{p.name}</td>
                       <td style={{padding:"10px 12px"}}>{p.key_configured ? "✅ 已配置" : "⚠️ 未配置"}</td>
@@ -390,6 +407,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   ))}
                 </tbody>
               </table>
+              <Pagination
+                page={providersPager.page}
+                pageSize={providersPager.pageSize}
+                total={providers.length}
+                onPageChange={providersPager.setPage}
+                onPageSizeChange={providersPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
             </section>
 
             {/* 模型路由 */}
@@ -405,7 +430,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {routes.map(r=>(
+                  {routesPager.pageData.map(r=>(
                     <tr key={r.id} style={{borderBottom:"1px solid var(--border)"}}>
                       <td style={{padding:"10px 12px", fontSize:13}}>{r.task_type}</td>
                       <td style={{padding:"10px 12px"}}>{r.provider}</td>
@@ -427,6 +452,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   ))}
                 </tbody>
               </table>
+              <Pagination
+                page={routesPager.page}
+                pageSize={routesPager.pageSize}
+                total={routes.length}
+                onPageChange={routesPager.setPage}
+                onPageSizeChange={routesPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
 
               {editRoute && (
                 <div style={{marginTop:16, padding:16, background:"var(--bg-hover)", borderRadius:"var(--r-md)", border:"1px solid var(--border)"}}>
@@ -451,7 +484,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
             {/* Prompts */}
             <section>
-              <h3 style={{fontSize:15, fontWeight:600, marginBottom:12}}>Prompts（前30条）</h3>
+              <h3 style={{fontSize:15, fontWeight:600, marginBottom:12}}>Prompts</h3>
               <table style={{width:"100%", borderCollapse:"collapse"}}>
                 <thead>
                   <tr style={{borderBottom:"1px solid var(--border)"}}>
@@ -462,7 +495,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {prompts.slice(0,30).map(p=>(
+                  {promptsPager.pageData.map(p=>(
                     <tr key={p.id} style={{borderBottom:"1px solid var(--border)"}}>
                       <td style={{padding:"10px 12px", fontSize:13}}>{p.name}</td>
                       <td style={{padding:"10px 12px"}}>{p.version}</td>
@@ -471,6 +504,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                     </tr>
                   ))}
                 </tbody>
+                <Pagination
+                  page={promptsPager.page}
+                  pageSize={promptsPager.pageSize}
+                  total={prompts.length}
+                  onPageChange={promptsPager.setPage}
+                  onPageSizeChange={promptsPager.setPageSize}
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
               </table>
             </section>
           </div>
@@ -494,7 +535,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {budgets.map(b=>(
+                  {budgetsPager.pageData.map(b=>(
                     <tr key={b.id} style={{borderBottom:"1px solid var(--border)"}}>
                       <td style={{padding:"10px 12px", fontSize:12}}>{b.project_id?.slice(0,8)}</td>
                       <td style={{padding:"10px 12px"}}>{b.scope}</td>
@@ -517,6 +558,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   ))}
                 </tbody>
               </table>
+              <Pagination
+                page={budgetsPager.page}
+                pageSize={budgetsPager.pageSize}
+                total={budgets.length}
+                onPageChange={budgetsPager.setPage}
+                onPageSizeChange={budgetsPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
 
               {editBudget && (
                 <div style={{marginTop:16, padding:16, background:"var(--bg-hover)", borderRadius:"var(--r-md)", border:"1px solid var(--border)"}}>
@@ -598,7 +647,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {connections.map(item => (
+                  {connectionsPager.pageData.map(item => (
                     <tr key={item.id} style={{borderBottom:"1px solid var(--border)"}}>
                       <td style={{padding:"10px 12px"}}>{item.display_name}</td>
                       <td style={{padding:"10px 12px"}}>{item.account_name}</td>
@@ -612,6 +661,14 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                   ))}
                 </tbody>
               </table>
+              <Pagination
+                page={connectionsPager.page}
+                pageSize={connectionsPager.pageSize}
+                total={connections.length}
+                onPageChange={connectionsPager.setPage}
+                onPageSizeChange={connectionsPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
               {!connections.length && <p style={{fontSize:12, color:"var(--text-3)", marginTop:8}}>暂无平台连接。</p>}
             </section>
           </div>

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Terminal, Activity } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type AgentStatus = { name: string; status: string; task_count: number; last_run: string };
 
 export function AgentConsole() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
+  const agentsPager = usePagination({ items: agents, pageSize: 10, mode: "client" });
 
   const load = () => {
     api<{ data: AgentStatus[] }>("/api/v1/agents/status")
@@ -23,7 +26,7 @@ export function AgentConsole() {
       <table style={{ width: "100%", fontSize: 13 }}>
         <thead><tr><th>Agent</th><th>状态</th><th>任务数</th><th>最近运行</th></tr></thead>
         <tbody>
-          {agents.map(a => (
+          {agentsPager.pageData.map(a => (
             <tr key={a.name}>
               <td style={{ fontWeight: 600 }}>{a.name}</td>
               <td>
@@ -37,6 +40,14 @@ export function AgentConsole() {
           ))}
         </tbody>
       </table>
+      <Pagination
+        page={agentsPager.page}
+        pageSize={agentsPager.pageSize}
+        total={agents.length}
+        onPageChange={agentsPager.setPage}
+        onPageSizeChange={agentsPager.setPageSize}
+        pageSizeOptions={[10, 20, 50, 100]}
+      />
       {!agents.length && <div className="empty"><p>暂无 Agent 运行记录 — 启动一次生成工作流后此处显示真实节点统计。</p></div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button className="btn-sm" onClick={load}><Activity size={12} /> 刷新</button>

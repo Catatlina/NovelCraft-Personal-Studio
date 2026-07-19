@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { BarChart3, Loader2, RefreshCw, AlertTriangle, TrendingUp } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 // Backend envelope shape: { code, message, data } — lib/api returns the full
@@ -177,6 +179,11 @@ export function Overview() {
     data.top_posts.length === 0 &&
     data.roi_by_platform.length === 0;
 
+  const topPosts = data?.top_posts ?? [];
+  const topicSuggestions = data?.topic_suggestions ?? [];
+  const topPostsPager = usePagination({ items: topPosts, pageSize: 10, mode: "client" });
+  const topicSuggestionsPager = usePagination({ items: topicSuggestions, pageSize: 10, mode: "client" });
+
   return (
     <div>
       {/* Breadcrumb */}
@@ -341,30 +348,40 @@ export function Overview() {
                     <p>暂无内容数据</p>
                   </div>
                 ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>标题</th>
-                        <th>平台</th>
-                        <th>阅读</th>
-                        <th>点赞</th>
-                        <th>收益</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.top_posts.map((p) => (
-                        <tr key={p.post_id}>
-                          <td>
-                            <b>{p.title || "（无标题）"}</b>
-                          </td>
-                          <td>{platformLabel(p.platform)}</td>
-                          <td>{fmtInt(p.reads)}</td>
-                          <td>{fmtInt(p.likes)}</td>
-                          <td>{fmtMoney(p.revenue)}</td>
+                  <>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>标题</th>
+                          <th>平台</th>
+                          <th>阅读</th>
+                          <th>点赞</th>
+                          <th>收益</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {topPostsPager.pageData.map((p) => (
+                          <tr key={p.post_id}>
+                            <td>
+                              <b>{p.title || "（无标题）"}</b>
+                            </td>
+                            <td>{platformLabel(p.platform)}</td>
+                            <td>{fmtInt(p.reads)}</td>
+                            <td>{fmtInt(p.likes)}</td>
+                            <td>{fmtMoney(p.revenue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <Pagination
+                      page={topPostsPager.page}
+                      pageSize={topPostsPager.pageSize}
+                      total={topPosts.length}
+                      onPageChange={topPostsPager.setPage}
+                      onPageSizeChange={topPostsPager.setPageSize}
+                      pageSizeOptions={[10, 20, 50, 100]}
+                    />
+                  </>
                 )}
               </div>
             </div>
@@ -384,22 +401,32 @@ export function Overview() {
                 <p>暂无选题建议</p>
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {data.topic_suggestions.map((s, i) => (
-                  <div
-                    key={s.source_post_id ?? `s-${i}`}
-                    className="ticket"
-                    style={{ margin: 0 }}
-                  >
-                    <h5>{s.suggestion}</h5>
-                    <div className="meta">
-                      {s.source_title && <span className="badge gray">{s.source_title}</span>}
-                      {s.platform && <span className="badge cyan">{platformLabel(s.platform)}</span>}
-                      {typeof s.reads === "number" && <span>{fmtInt(s.reads)} 阅读</span>}
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {topicSuggestionsPager.pageData.map((s, i) => (
+                    <div
+                      key={s.source_post_id ?? `s-${i}`}
+                      className="ticket"
+                      style={{ margin: 0 }}
+                    >
+                      <h5>{s.suggestion}</h5>
+                      <div className="meta">
+                        {s.source_title && <span className="badge gray">{s.source_title}</span>}
+                        {s.platform && <span className="badge cyan">{platformLabel(s.platform)}</span>}
+                        {typeof s.reads === "number" && <span>{fmtInt(s.reads)} 阅读</span>}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+                <Pagination
+                  page={topicSuggestionsPager.page}
+                  pageSize={topicSuggestionsPager.pageSize}
+                  total={topicSuggestions.length}
+                  onPageChange={topicSuggestionsPager.setPage}
+                  onPageSizeChange={topicSuggestionsPager.setPageSize}
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
+              </>
             )}
           </div>
         </>

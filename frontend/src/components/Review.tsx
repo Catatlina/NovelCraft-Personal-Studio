@@ -1,6 +1,8 @@
 import React from "react";
 import { ReviewRadar } from "./ReviewRadar";
 import { CharacterCard, OutlineTree } from "./CharacterOutline";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type Content = { id: string; title: string; meta: Record<string, unknown> };
 type ReviewPayload = {
@@ -84,6 +86,11 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
   const issues = review?.issues || review?.weaknesses || [];
   const strengths = review?.strengths || [];
   const continuity = review?.final_continuity_audit?.continuity;
+
+  // Paginate the read-only data lists so long reviews stay scannable.
+  const charactersPager = usePagination({ items: characters, pageSize: 10, mode: "client" });
+  const timelinePager = usePagination({ items: timeline, pageSize: 10, mode: "client" });
+  const arcsPager = usePagination({ items: arcs, pageSize: 10, mode: "client" });
 
   return (
     <div>
@@ -211,9 +218,17 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
             <div className="card-title">人物卡</div>
             <span className="badge cyan">{characters.length}</span>
           </div>
-          {characters.map((c, i) => (
+          {charactersPager.pageData.map((c, i) => (
             <CharacterCard key={i} char={c} />
           ))}
+          <Pagination
+            page={charactersPager.page}
+            pageSize={charactersPager.pageSize}
+            total={characters.length}
+            onPageChange={charactersPager.setPage}
+            onPageSizeChange={charactersPager.setPageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+          />
         </div>
       )}
 
@@ -224,12 +239,20 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
             <div className="card-title">时间线</div>
             <span className="badge cyan">{timeline.length} 项</span>
           </div>
-          {timeline.map((e: any, i: number) => (
+          {timelinePager.pageData.map((e: any, i: number) => (
             <div key={i} style={{ display: "flex", gap: 8, padding: "4px 0", fontSize: 13, borderBottom: "1px solid var(--border)" }}>
               <span style={{ color: "var(--text-3)", minWidth: 60 }}>第{e.chapter_seq}章</span>
               <span>{e.event}</span>
             </div>
           ))}
+          <Pagination
+            page={timelinePager.page}
+            pageSize={timelinePager.pageSize}
+            total={timeline.length}
+            onPageChange={timelinePager.setPage}
+            onPageSizeChange={timelinePager.setPageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+          />
         </div>
       )}
 
@@ -239,13 +262,21 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
           <div className="card-head">
             <div className="card-title">人物弧线</div>
           </div>
-          {arcs.map((a: any, i: number) => (
+          {arcsPager.pageData.map((a: any, i: number) => (
             <div key={i} style={{ padding: "4px 0", fontSize: 13 }}>
               <strong>{a.character}</strong>
               <span style={{ color: "var(--text-3)", marginLeft: 8 }}>{a.stage}</span>
               <span style={{ marginLeft: 8 }}>{a.goal}</span>
             </div>
           ))}
+          <Pagination
+            page={arcsPager.page}
+            pageSize={arcsPager.pageSize}
+            total={arcs.length}
+            onPageChange={arcsPager.setPage}
+            onPageSizeChange={arcsPager.setPageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+          />
         </div>
       )}
 

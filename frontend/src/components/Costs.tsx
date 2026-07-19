@@ -1,4 +1,6 @@
 import React from "react";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type AiCall = { id: string; provider: string; model: string; task_type: string; prompt_tokens: number; completion_tokens: number; cost_cny: number; latency_ms: number };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
@@ -11,6 +13,10 @@ export function Costs({ aiCalls, budgets, routes }: {
   const safeBudgets = Array.isArray(budgets) ? budgets : [];
   const safeRoutes = Array.isArray(routes) ? routes : [];
   const total = safeCalls.reduce((s, c) => s + Number(c.cost_cny), 0);
+
+  const callsPager = usePagination({ items: safeCalls, pageSize: 10, mode: "client" });
+  const budgetsPager = usePagination({ items: safeBudgets, pageSize: 10, mode: "client" });
+  const routesPager = usePagination({ items: safeRoutes, pageSize: 10, mode: "client" });
 
   return (
     <div className="layout-2">
@@ -27,7 +33,7 @@ export function Costs({ aiCalls, budgets, routes }: {
           <table>
             <thead><tr><th>任务</th><th>模型</th><th>Tokens</th><th>成本</th><th>延迟</th></tr></thead>
             <tbody>
-              {safeCalls.map(c => (
+              {callsPager.pageData.map(c => (
                 <tr key={c.id}>
                   <td>{c.task_type}</td>
                   <td>{c.provider}/{c.model}</td>
@@ -38,13 +44,21 @@ export function Costs({ aiCalls, budgets, routes }: {
               ))}
             </tbody>
           </table>
+          <Pagination
+            page={callsPager.page}
+            pageSize={callsPager.pageSize}
+            total={safeCalls.length}
+            onPageChange={callsPager.setPage}
+            onPageSizeChange={callsPager.setPageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+          />
         </div>
       </div>
       <div className="card" style={{display:"flex",flexDirection:"column",gap:14}}>
         <div className="card-head">
           <div className="card-title">预算</div>
         </div>
-        {safeBudgets.length > 0 ? safeBudgets.map(b => (
+        {safeBudgets.length > 0 ? budgetsPager.pageData.map(b => (
           <div key={b.id}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
               <span>{b.scope}</span>
@@ -57,10 +71,18 @@ export function Costs({ aiCalls, budgets, routes }: {
             <p>暂无预算数据</p>
           </div>
         )}
+        <Pagination
+          page={budgetsPager.page}
+          pageSize={budgetsPager.pageSize}
+          total={safeBudgets.length}
+          onPageChange={budgetsPager.setPage}
+          onPageSizeChange={budgetsPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
         <div className="card-head" style={{marginTop:4}}>
           <div className="card-title">模型路由</div>
         </div>
-        {safeRoutes.length > 0 ? safeRoutes.slice(0,10).map(r => (
+        {safeRoutes.length > 0 ? routesPager.pageData.map(r => (
           <div key={r.id} className="card" style={{padding:12}}>
             <span className="badge gray" style={{display:"block",width:"fit-content",marginBottom:6}}>{r.task_type}</span>
             <strong style={{fontSize:13}}>{r.provider}/{r.model}</strong>
@@ -70,6 +92,14 @@ export function Costs({ aiCalls, budgets, routes }: {
             <p>暂无路由配置</p>
           </div>
         )}
+        <Pagination
+          page={routesPager.page}
+          pageSize={routesPager.pageSize}
+          total={safeRoutes.length}
+          onPageChange={routesPager.setPage}
+          onPageSizeChange={routesPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
       </div>
     </div>
   );

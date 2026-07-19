@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import {
   TrendingUp, Zap, Target, Plus, BookOpen, Trash2, Edit3,
-  RefreshCw, Eye, X, ChevronLeft, ChevronRight, Star, FileText,
+  RefreshCw, Eye, X, Star, FileText,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
 
 type HotspotItem = {
@@ -65,8 +67,6 @@ const ALL_PLATFORMS = [
   { key: "bilibili", name: "B站" },
 ];
 
-const PAGE_SIZE = 12;
-
 export function HotspotDashboard() {
   // Tab state
   const [tab, setTab] = useState<"hotspots" | "overview" | "library">("hotspots");
@@ -80,9 +80,7 @@ export function HotspotDashboard() {
   const [generatedKeys, setGeneratedKeys] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ message: string; actionLabel?: string; onAction?: () => void } | null>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
+  const [hotspotTotal, setHotspotTotal] = useState(0);
 
   // Overview state
   const [overview, setOverview] = useState<OverviewData | null>(null);
@@ -90,11 +88,13 @@ export function HotspotDashboard() {
 
   // Article library state
   const [articles, setArticles] = useState<ArticleItem[]>([]);
-  const [articlePage, setArticlePage] = useState(1);
-  const [articleTotalPages, setArticleTotalPages] = useState(1);
+  const [articleTotal, setArticleTotal] = useState(0);
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleDetail, setArticleDetail] = useState<ArticleDetail | null>(null);
   const [editArticle, setEditArticle] = useState<{ id: string; title: string; body: string } | null>(null);
+
+  const hotspotPager = usePagination({ total: hotspotTotal, pageSize: 10, mode: "server" });
+  const articlePager = usePagination({ total: articleTotal, pageSize: 10, mode: "server" });
 
   // ── Hotspot loading ──────────────────────────────────────────
   const loadHotspots = async () => {
@@ -102,11 +102,10 @@ export function HotspotDashboard() {
     setError("");
     try {
       const platformsParam = selectedPlatforms.length ? selectedPlatforms.join(",") : "";
-      const result = await api(`/api/v1/hotspots/paginated?platforms=${platformsParam}&page=${page}&page_size=${PAGE_SIZE}`);
+      const result = await api(`/api/v1/hotspots/paginated?platforms=${platformsParam}&page=${hotspotPager.page}&page_size=${hotspotPager.pageSize}`);
       const data = result.data || {};
       setHotspots(data.items || []);
-      setTotalPages(data.total_pages || 1);
-      setTotalItems(data.total || 0);
+      setHotspotTotal(data.total || 0);
     } catch (caught) {
       setError(`热点获取失败：${String(caught)}`);
     } finally {
@@ -116,7 +115,7 @@ export function HotspotDashboard() {
 
   useEffect(() => {
     void loadHotspots();
-  }, [page, selectedPlatforms]);
+  }, [hotspotPager.page, hotspotPager.pageSize, selectedPlatforms]);
 
   // ── Overview loading ─────────────────────────────────────────
   const loadOverview = async () => {
@@ -143,10 +142,10 @@ export function HotspotDashboard() {
   const loadArticles = async () => {
     setArticleLoading(true);
     try {
-      const result = await api(`/api/v1/articles?page=${articlePage}&page_size=${PAGE_SIZE}`);
+      const result = await api(`/api/v1/articles?page=${articlePager.page}&page_size=${articlePager.pageSize}`);
       const data = result.data || {};
       setArticles(data.articles || []);
-      setArticleTotalPages(data.total_pages || 1);
+      setArticleTotal(data.total || 0);
     } catch (caught) {
       setError(`文库加载失败：${String(caught)}`);
     } finally {
@@ -158,7 +157,7 @@ export function HotspotDashboard() {
     if (tab === "library") {
       void loadArticles();
     }
-  }, [tab, articlePage]);
+  }, [tab, articlePager.page, articlePager.pageSize]);
 
   // ── One-click generate ───────────────────────────────────────
   const generate = async (h: HotspotItem) => {
@@ -243,7 +242,7 @@ export function HotspotDashboard() {
     setSelectedPlatforms(prev =>
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     );
-    setPage(1);
+    hotspotPager.setPage(1);
   };
 
   // ── Trend badge color ────────────────────────────────────────
@@ -382,7 +381,7 @@ export function HotspotDashboard() {
               <button
                 className="tab"
                 style={{ color: "var(--red)" }}
-                onClick={() => { setSelectedPlatforms([]); setPage(1); }}
+                onClick={() => { setSelectedPlatforms([]); hotspotPager.setPage(1); }}
               >
                 清除筛选
               </button>
@@ -459,26 +458,16 @@ export function HotspotDashboard() {
           )}
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "center", padding: "12px 0" }}>
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage(p => p - 1)}
-                className="icon-btn"
-                style={{ opacity: page <= 1 ? 0.4 : 1 }}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span style={{ fontSize: 13, color: "var(--text-2)" }}>{page} / {totalPages}（共 {totalItems} 条）</span>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage(p => p + 1)}
-                className="icon-btn"
-                style={{ opacity: page >= totalPages ? 0.4 : 1 }}
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
+          {hotspotTotal > 0 && (
+            <Pagination
+              mode="server"
+              page={hotspotPager.page}
+              pageSize={hotspotPager.pageSize}
+              total={hotspotTotal}
+              onPageChange={hotspotPager.setPage}
+              onPageSizeChange={hotspotPager.setPageSize}
+              pageSizeOptions={[10, 20, 50]}
+            />
           )}
         </>
       )}
@@ -717,27 +706,15 @@ export function HotspotDashboard() {
               )}
 
               {/* Article pagination */}
-              {articleTotalPages > 1 && (
-                <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "center", padding: "12px 0" }}>
-                  <button
-                    disabled={articlePage <= 1}
-                    onClick={() => setArticlePage(p => p - 1)}
-                    className="icon-btn"
-                    style={{ opacity: articlePage <= 1 ? 0.4 : 1 }}
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <span style={{ fontSize: 13, color: "var(--text-2)" }}>{articlePage} / {articleTotalPages}</span>
-                  <button
-                    disabled={articlePage >= articleTotalPages}
-                    onClick={() => setArticlePage(p => p + 1)}
-                    className="icon-btn"
-                    style={{ opacity: articlePage >= articleTotalPages ? 0.4 : 1 }}
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              )}
+              <Pagination
+                mode="server"
+                page={articlePager.page}
+                pageSize={articlePager.pageSize}
+                total={articleTotal}
+                onPageChange={articlePager.setPage}
+                onPageSizeChange={articlePager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
             </>
           )}
         </>

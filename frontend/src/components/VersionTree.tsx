@@ -1,11 +1,14 @@
 import React from "react";
 import { GitBranch, RotateCcw } from "lucide-react";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type Version = { id: string; label: string; created_at: string; snapshot: any };
 
 export function VersionTree({ contentId, versions, onRestore }: {
   contentId: string; versions: Version[]; onRestore: (id: string) => void;
 }) {
+  const versionsPager = usePagination({ items: versions, pageSize: 10, mode: "client" });
   return (
     <div className="card" style={{ fontSize: 13 }}>
       <div className="card-head">
@@ -19,7 +22,7 @@ export function VersionTree({ contentId, versions, onRestore }: {
           <p style={{ color: "var(--text-2)", fontSize: 13 }}>暂无版本历史</p>
         </div>
       )}
-      {versions.map((v, i) => (
+      {versionsPager.pageData.map((v, i) => (
         <div key={v.id} style={{
           display: "flex", alignItems: "center", gap: 8, padding: "6px 0",
           borderBottom: "1px solid var(--border)",
@@ -34,6 +37,15 @@ export function VersionTree({ contentId, versions, onRestore }: {
           </button>
         </div>
       ))}
+
+      <Pagination
+        page={versionsPager.page}
+        pageSize={versionsPager.pageSize}
+        total={versions.length}
+        onPageChange={versionsPager.setPage}
+        onPageSizeChange={versionsPager.setPageSize}
+        pageSizeOptions={[10, 20, 50, 100]}
+      />
     </div>
   );
 }

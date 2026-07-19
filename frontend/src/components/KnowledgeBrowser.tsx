@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Search, BookOpen, FileText } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type KnowledgeItem = {
   id: string; kind: string; title: string; body: string;
@@ -19,6 +21,8 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
     const r = await api<{ data: KnowledgeItem[] }>(`/api/v1/knowledge/search?${params}`, { method: "POST" });
     setResults(r.data || []);
   }
+
+  const resultsPager = usePagination({ items: results, pageSize: 10, mode: "client" });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -46,7 +50,7 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
-        {results.map(item => (
+        {resultsPager.pageData.map(item => (
           <div key={item.id} className="card" style={{ fontSize: 13, padding: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ fontWeight: 600 }}>{item.title?.slice(0, 60)}</span>
@@ -61,6 +65,15 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
           </div>
         ))}
       </div>
+
+      <Pagination
+        page={resultsPager.page}
+        pageSize={resultsPager.pageSize}
+        total={results.length}
+        onPageChange={resultsPager.setPage}
+        onPageSizeChange={resultsPager.setPageSize}
+        pageSizeOptions={[10, 20, 50, 100]}
+      />
 
       {results.length === 0 && query && (
         <div className="empty">

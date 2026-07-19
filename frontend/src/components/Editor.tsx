@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Save, RotateCcw, Wand2, Sparkles, Bot, RefreshCcw, Send } from "lucide-react";
 import { RichEditor } from "./RichEditor";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
@@ -91,6 +93,11 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     }));
   }, [chapters]);
 
+  // Paginate the outline / version / offline-result lists.
+  const chapterTreePager = usePagination({ items: chapterTree, pageSize: 10, mode: "client" });
+  const versionsPager = usePagination({ items: versions, pageSize: 10, mode: "client" });
+  const offlineResultsPager = usePagination({ items: offlineAiResults ?? [], pageSize: 10, mode: "client" });
+
   // ── Word count ──
   const wordCount = useMemo(() => {
     const text = editorText.replace(/<[^>]*>/g, "");
@@ -175,7 +182,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             章节目录
           </div>
           {chapterTree.length > 0 ? (
-            chapterTree.map(ch => (
+            chapterTreePager.pageData.map(ch => (
               <div
                 key={ch.id}
                 className={`outline-item${chapter?.id === ch.id ? " active" : ""}`}
@@ -191,6 +198,14 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               暂无章节
             </div>
           )}
+          <Pagination
+            page={chapterTreePager.page}
+            pageSize={chapterTreePager.pageSize}
+            total={chapterTree.length}
+            onPageChange={chapterTreePager.setPage}
+            onPageSizeChange={chapterTreePager.setPageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+          />
 
           {/* Chapter selector dropdown (compact, for large lists) */}
           {chapters.length > 0 && (
@@ -298,24 +313,40 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             版本历史
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {versions.map(v => (
+            {versionsPager.pageData.map(v => (
               <button key={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
                 <RotateCcw size={12} /> {v.label}
                 <small style={{ color: "var(--text-3)", marginLeft: 4 }}>{new Date(v.created_at).toLocaleString()}</small>
               </button>
             ))}
           </div>
+          <Pagination
+            page={versionsPager.page}
+            pageSize={versionsPager.pageSize}
+            total={versions.length}
+            onPageChange={versionsPager.setPage}
+            onPageSizeChange={versionsPager.setPageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+          />
           {offlineAiResults?.length ? (
             <>
               <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>离线 AI 结果</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {offlineAiResults?.map(result => (
+                {offlineResultsPager.pageData.map(result => (
                   <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
                     应用 AI 结果
                     <small style={{ color: "var(--text-3)", marginLeft: 4, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.text.slice(0, 36)}…</small>
                   </button>
                 ))}
               </div>
+              <Pagination
+                page={offlineResultsPager.page}
+                pageSize={offlineResultsPager.pageSize}
+                total={offlineAiResults?.length ?? 0}
+                onPageChange={offlineResultsPager.setPage}
+                onPageSizeChange={offlineResultsPager.setPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+              />
             </>
           ) : null}
         </div>

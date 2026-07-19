@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { usePagination } from "../hooks/usePagination";
+import { Pagination } from "./ui";
 import { Search, BookOpen, ArrowLeft, Trash2 } from "lucide-react";
 
 type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
@@ -61,11 +63,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sortBy, setSortBy] = useState<"created" | "updated" | "title" | "chapters">("created");
-  const [page, setPage] = useState(0);
   // V2.0: Delete functionality
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
-  const PAGE_SIZE = 10;
   const pollers = useRef<Record<string, number>>({});
 
   const loadBookState = async (book: Book) => {
@@ -259,8 +259,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     if (sortBy === "chapters") return (b.chapter_count || completions[b.id]?.total_chapters || 0) - (a.chapter_count || completions[a.id]?.total_chapters || 0);
     return new Date(b.created_at || "").getTime() - new Date(a.created_at || "").getTime();
   });
-  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const bookPager = usePagination({ items: filtered, pageSize: 10, mode: "client" });
 
   if (detail) {
     const book = detail.book;
@@ -364,9 +363,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     {/* NC-LIB-002: Search + filter + sort toolbar */}
     <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
       <div className="search-box" style={{ flex: 1, maxWidth: 400 }}>
-        <Search size={14} /><input placeholder="搜索书名或简介…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} />
+        <Search size={14} /><input placeholder="搜索书名或简介…" value={search} onChange={e => { setSearch(e.target.value); bookPager.setPage(1); }} />
       </div>
-      <select className="form-input" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0); }} style={{ width: 120, height: 38 }}>
+      <select className="form-input" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); bookPager.setPage(1); }} style={{ width: 120, height: 38 }}>
         <option value="">全部状态</option>
         <option value="draft">📄 draft</option>
         <option value="planning">📋 planning</option>
@@ -385,10 +384,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       <h3>书库为空</h3>
       <p>可以从扫榜中心或灵感入口创建小说，开始你的创作之旅。</p>
     </div> : <>
-      <div className="grid grid-3">{paged.map((book, index) => {
+      <div className="grid grid-3">{bookPager.pageData.map((book, index) => {
         const batch = batches[book.id];
         const completion = completions[book.id];
-        const rank = page * PAGE_SIZE + index + 1;
+        const rank = (bookPager.page - 1) * bookPager.pageSize + index + 1;
         const badgeClass = book.status === "draft" ? "gray" : book.status === "planning" ? "cyan" : book.status === "generated" ? "purple" : book.status === "completed" ? "green" : "gray";
         return <div className="card" key={book.id}>
           <div className="card-head">
@@ -451,11 +450,15 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         </div>;
       })}</div>
       {/* NC-LIB-002: Pagination */}
-      {totalPages > 1 && <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 20 }}>
-        <button className="btn-ghost" disabled={page === 0} onClick={() => setPage(p => p - 1)}>上一页</button>
-        <span style={{ fontSize: 13, color: "var(--text-2)" }}>{page + 1} / {totalPages} (共 {filtered.length} 本)</span>
-        <button className="btn-ghost" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页</button>
-      </div>}
+      <Pagination
+        mode="client"
+        page={bookPager.page}
+        pageSize={bookPager.pageSize}
+        total={filtered.length}
+        onPageChange={bookPager.setPage}
+        onPageSizeChange={bookPager.setPageSize}
+        pageSizeOptions={[10, 20, 50, 100]}
+      />
     </>}
     {loading && <p style={{ color: "var(--text-3)", textAlign: "center", padding: 20 }}>正在加载书库…</p>}
     {/* V2.0: Delete confirmation modal */}

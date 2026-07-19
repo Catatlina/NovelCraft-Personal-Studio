@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Puzzle, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Download, Power, Ban } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 // lib/api returns the full envelope { code, message, data }; unwrap `.data`.
@@ -102,6 +104,9 @@ export function Plugins() {
   const unavailable = !!data && data.status === "unavailable";
   const showCatalog = !!data && data.status === "ok";
 
+  const skills = data?.skills ?? [];
+  const skillsPager = usePagination({ items: skills, pageSize: 10, mode: "client" });
+
   return (
     <div>
       {/* Breadcrumb */}
@@ -182,14 +187,15 @@ export function Plugins() {
               <p>当前技能源没有返回可安装的技能。</p>
             </div>
           ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-                gap: 16,
-              }}
-            >
-              {data!.skills.map((s) => (
+            <>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                  gap: 16,
+                }}
+              >
+              {skillsPager.pageData.map((s) => (
                 <div className="card" key={s.name} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <div
@@ -251,6 +257,15 @@ export function Plugins() {
                 </div>
               ))}
             </div>
+            <Pagination
+              page={skillsPager.page}
+              pageSize={skillsPager.pageSize}
+              total={skills.length}
+              onPageChange={skillsPager.setPage}
+              onPageSizeChange={skillsPager.setPageSize}
+              pageSizeOptions={[10, 20, 50, 100]}
+            />
+          </> 
           )}
         </>
       )}

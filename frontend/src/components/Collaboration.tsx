@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from "react";
 import { UserPlus, Shield, Trash2, Activity } from "lucide-react";
 import { api } from "../lib/api";
+import { Pagination } from "./ui";
+import { usePagination } from "../hooks/usePagination";
 
 type Member = { id?: string; email: string; role: string; created_at?: string };
 type Log = { id: string; action: string; detail: string; created_at: string };
@@ -16,6 +18,9 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
     api<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`).then(d => setMembers(d.data || []));
     api<{ data: Log[] }>(`/api/v1/collaboration/logs?project_id=${projectId}`).then(d => setLogs(d.data || []));
   }, [projectId]);
+
+  const membersPager = usePagination({ items: members, pageSize: 10, mode: "client" });
+  const logsPager = usePagination({ items: logs, pageSize: 10, mode: "client" });
 
   async function invite() {
     if (!inviteEmail) return;
@@ -43,7 +48,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         </div>
         <table style={{ width: "100%", fontSize: 13, marginTop: 8 }}>
           <tbody>
-            {members.map(m => (
+            {membersPager.pageData.map(m => (
               <tr key={m.id || m.email}>
                 <td style={{ fontWeight: 600 }}>{roleIcon(m.role)} {m.email}</td>
                 <td><span className="badge gray">{m.role}</span></td>
@@ -52,6 +57,14 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={membersPager.page}
+          pageSize={membersPager.pageSize}
+          total={members.length}
+          onPageChange={membersPager.setPage}
+          onPageSizeChange={membersPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
       </div>
 
       <div className="card">
@@ -60,13 +73,21 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
         </div>
         {logs.length === 0 ? (
           <div className="empty"><p>暂无操作日志</p></div>
-        ) : logs.slice(0, 20).map(l => (
+        ) : logsPager.pageData.map(l => (
           <div key={l.id} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
             <strong>{l.action}</strong>
             <span style={{ marginLeft: 8, color: "var(--text-2)" }}>{l.detail}</span>
             <small style={{ float: "right", color: "var(--text-3)" }}>{new Date(l.created_at).toLocaleString()}</small>
           </div>
         ))}
+        <Pagination
+          page={logsPager.page}
+          pageSize={logsPager.pageSize}
+          total={logs.length}
+          onPageChange={logsPager.setPage}
+          onPageSizeChange={logsPager.setPageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+        />
       </div>
     </div>
   );
