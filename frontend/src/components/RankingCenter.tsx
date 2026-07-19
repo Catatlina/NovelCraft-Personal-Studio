@@ -852,8 +852,8 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
               const ids = (topicTab === "bookmarked" ? bookmarkedTopics : topics).map(t => t.id);
               if (ids.length) setPendingDelete({ kind: "batch", ids });
             }}
-            className="btn-sm"
-            style={{ background: "transparent", border: "1px solid var(--red)", color: "var(--red)", display: "flex", alignItems: "center", gap: 4 }}
+            className="btn-sm btn-danger"
+            style={{ display: "flex", alignItems: "center", gap: 4 }}
           >
             <span>🗑</span> 全部删除
           </button>
@@ -880,13 +880,11 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                     {isBookmarked ? "⭐" : "☆"}
                   </button>
                   <button
+                    className="btn-sm btn-danger"
                     disabled={busy === `delete-topic:${topic.id}`}
                     onClick={() => setPendingDelete({ kind: "topic", topic })}
                     title="删除选题"
-                    style={{
-                      background: "transparent", border: "1px solid var(--border)",
-                      borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontSize: 12, color: "var(--red)",
-                    }}
+                    style={{ borderRadius: 4, padding: "2px 6px", fontSize: 12 }}
                   >
                     🗑
                   </button>

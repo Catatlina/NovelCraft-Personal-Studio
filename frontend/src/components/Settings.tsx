@@ -340,7 +340,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                       const f=e.target.files?.[0]; if(!f)return;
                       const form = new FormData(); form.append("file", f);
                       await api(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
-                      alert("导入成功");
+                      setMsg("导入成功");
                     }}
                     style={{fontSize:13}}
                   />
@@ -349,7 +349,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                 <div style={{display:"flex", alignItems:"flex-end"}}>
                   <button
                     onClick={async()=>{
-                      if (!projectId) { alert("请先选择项目"); return; }
+                      if (!projectId) { setMsg("请先选择项目"); return; }
                       const r=await api(`/api/v1/knowledge?project_id=${projectId}`);
                       const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
                       const a=document.createElement("a");a.href=URL.createObjectURL(blob);
@@ -656,7 +656,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                       <td style={{padding:"10px 12px", fontSize:12, color:"var(--text-2)"}}>{item.configured_fields.join(", ") || "—"}</td>
                       <td style={{padding:"10px 12px", display:"flex", gap:6}}>
                         <button onClick={()=>testConnection(item.platform)} style={{fontSize:12, padding:"4px 10px", borderRadius:"var(--r-sm)", border:"1px solid var(--border)", background:"var(--bg-hover)", color:"var(--text-2)", cursor:"pointer"}}>检测</button>
-                        <button onClick={()=>setDeleteConnId(item.id)} style={{fontSize:12, padding:"4px 10px", borderRadius:"var(--r-sm)", border:"1px solid var(--border)", background:"var(--bg-hover)", color:"var(--red)", cursor:"pointer"}}><X size={12}/>删除</button>
+                        <button className="btn-sm btn-danger" onClick={()=>setDeleteConnId(item.id)}><X size={12}/>删除</button>
                       </td>
                     </tr>
                   ))}

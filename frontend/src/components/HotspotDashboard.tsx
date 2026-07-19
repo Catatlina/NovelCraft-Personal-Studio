@@ -266,10 +266,10 @@ export function HotspotDashboard() {
 
   // ── Hotness bar ──────────────────────────────────────────────
   const hotnessColor = (val: number) => {
-    if (val >= 80) return "#ff5252";
-    if (val >= 60) return "#ff9100";
-    if (val >= 40) return "#ffc107";
-    return "#00e5ff";
+    if (val >= 80) return "var(--red)";
+    if (val >= 60) return "var(--orange)";
+    if (val >= 40) return "var(--yellow)";
+    return "var(--cyan)";
   };
 
   const statusBadge = (status: string) => {
@@ -678,7 +678,7 @@ export function HotspotDashboard() {
                               <button onClick={() => startEdit(a)} className="btn-ghost" title="编辑" style={{ padding: "4px 8px", color: "var(--yellow)" }}>
                                 <Edit3 size={14} />
                               </button>
-                              <button onClick={() => setPendingDeleteArticle({ id: a.id, title: a.title })} className="btn-ghost" title="删除" style={{ padding: "4px 8px", color: "var(--red)" }}>
+                              <button onClick={() => setPendingDeleteArticle({ id: a.id, title: a.title })} className="btn-sm btn-danger" title="删除" style={{ padding: "4px 8px" }}>
                                 <Trash2 size={14} />
                               </button>
                             </div>

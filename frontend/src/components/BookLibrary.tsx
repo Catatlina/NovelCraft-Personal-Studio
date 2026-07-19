@@ -268,14 +268,14 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       chapter_outlines: book.meta?.chapter_outlines,
     });
     return <section className="panel book-detail">
-      <button onClick={() => setDetail(null)}><ArrowLeft size={14} />返回书库</button>
+      <button className="btn-ghost" onClick={() => setDetail(null)}><ArrowLeft size={14} />返回书库</button>
       {notice && <div className="muted" role="status">{notice}</div>}
       <div className="book-detail-head">
         <div>
           <h2>{book.title}</h2>
           <p className="muted">{detail.genre} · 创建于 {new Date(book.created_at).toLocaleString()} · {detail.total_words || 0} 字</p>
         </div>
-        <button className="primary" onClick={() => void onOpen(book.id)}><BookOpen size={14} />进入编辑</button>
+        <button className="btn-sm btn-primary" style={{ width: "auto" }} onClick={() => void onOpen(book.id)}><BookOpen size={14} />进入编辑</button>
       </div>
       <div className="book-detail-grid">
         <section>
@@ -307,13 +307,13 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <div className="chapter-list">
           {detail.chapters.map(ch => <div key={ch.id}>
             <div className="chapter-review-row">
-              <button onClick={() => void onOpen(book.id)}>
+              <button className="btn-ghost" onClick={() => void onOpen(book.id)}>
                 第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}
                 <small>{ch.status}{ch.meta?.review_score ? ` · AI分 ${Math.round(ch.meta.review_score)}` : ""}</small>
               </button>
               <div className="chapter-review-actions">
-                {ch.status !== "reviewed" && <button disabled={busy === ch.id} className="primary" onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
-                {ch.status !== "reviewed" && <button disabled={busy === ch.id} onClick={() => {
+                {ch.status !== "reviewed" && <button className="btn-sm btn-primary" style={{ width: "auto" }} disabled={busy === ch.id} onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
+                {ch.status !== "reviewed" && <button className="btn-ghost" disabled={busy === ch.id} onClick={() => {
                   setRejectingChapterId(ch.id);
                   setRejectReason("质量不达标，请增强场景冲突、生活质感、人物连续性和章末钩子，重写后正文不得低于3000字。");
                 }}>拒绝重写</button>}
@@ -326,8 +326,8 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
                 onChange={event => setRejectReason(event.target.value)} />
               <small>{rejectReason.trim().length}/2000 字</small>
               <div className="row-actions">
-                <button onClick={() => { setRejectingChapterId(""); setRejectReason(""); }}>取消</button>
-                <button className="primary" disabled={busy === ch.id || !rejectReason.trim()}
+                <button className="btn-ghost" onClick={() => { setRejectingChapterId(""); setRejectReason(""); }}>取消</button>
+                <button className="btn-sm btn-primary" style={{ width: "auto" }} disabled={busy === ch.id || !rejectReason.trim()}
                   onClick={() => void manualReviewChapter(ch, "reject", rejectReason)}>
                   {busy === ch.id ? "提交中…" : "确认拒绝并重写"}
                 </button>
@@ -353,7 +353,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
             className="form-input" style={{ width: 64, height: 34, padding: "0 8px" }} />
         </label>
-        {selectedBooks.size > 0 && <button className="btn-sm" style={{ background: "var(--red)", color: "var(--brand-foreground)" }} disabled={busy === "batch"} onClick={() => setPendingDelete({ kind: "batch" })}>
+        {selectedBooks.size > 0 && <button className="btn-sm btn-danger" disabled={busy === "batch"} onClick={() => setPendingDelete({ kind: "batch" })}>
           <Trash2 size={14} />批量删除 ({selectedBooks.size})
         </button>}
       </div>
@@ -428,7 +428,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入目录</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
-            <button className="btn-sm" style={{ background: "var(--danger-bg)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => setPendingDelete({ kind: "book", book })} title="删除此书及全部章节">
+            <button className="btn-sm btn-danger" disabled={busy === book.id} onClick={() => setPendingDelete({ kind: "book", book })} title="删除此书及全部章节">
               <Trash2 size={14} />
             </button>
           </div>

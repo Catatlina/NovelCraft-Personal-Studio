@@ -50,7 +50,7 @@ export function AgentConsole() {
       />
       {!agents.length && <EmptyState title="暂无 Agent 运行记录" description="启动一次生成工作流后此处显示真实节点统计。" />}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button className="btn-sm" onClick={load}><Activity size={12} /> 刷新</button>
+        <button className="btn-ghost" onClick={load}><Activity size={12} /> 刷新</button>
       </div>
     </div>
   );
