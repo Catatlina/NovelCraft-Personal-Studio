@@ -18,7 +18,7 @@
   padding: 0;
 }
 
-html, body {
+html, body, #root {
   height: 100%;
 }
 
@@ -322,6 +322,9 @@ a {
   flex: 1;
   display: flex;
   min-height: 0;
+  height: 100vh;       /* bounded viewport-height container (proto.css chain) */
+  height: 100dvh;      /* dynamic viewport unit for mobile address bars */
+  overflow: hidden;    /* inner panels (.sidebar/.content) own their scroll */
 }
 
 /* --- Sidebar --- */

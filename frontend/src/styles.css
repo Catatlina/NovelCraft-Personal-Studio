@@ -1,57 +1,18 @@
-/* NovelCraft Design System v1 — Dark-native with light variant */
-:root {
-  color-scheme: dark;
-  /* Brand — indigo */
-  --brand-50: #1a1c2e;
-  --brand-500: #5b66db;
-  --brand-600: #444fcb;
-  /* Neutral — dark */
-  --bg-base: #0a0a14;
-  --bg-surface: #13141f;
-  --bg-elevated: #1a1c2e;
-  --bg-hover: #1e2033;
-  --border-subtle: #1e2036;
-  --border-strong: #2a2d45;
-  --text-primary: #e8eaf0;
-  --text-secondary: #8b8fa8;
-  --text-muted: #555970;
-  /* Semantic */
-  --success: #31b572;
-  --warning: #f2a93b;
-  --danger: #de4b5e;
-  --info: #5b9cf5;
-  /* Spacing (4px base) */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
-  /* Radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-full: 9999px;
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  /* Font */
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-  font-size: 15px;
-  line-height: 1.5;
-}
+/* NovelCraft components stylesheet
+   ---------------------------------------------------------------
+   THEME TOKENS ARE OWNED BY design/tokens.css (doc12) — the single
+   source of truth for dark & light. This file intentionally does
+   NOT re-define any theme color with a hardcoded value, otherwise
+   the :root block would override the doc12 cascade and break theme
+   switching. The only thing here is a tiny bridge for the one
+   legacy class-level token name (--bg-surface) that doc12/compat
+   do not define, mapped onto the doc12 token so the component
+   classes below stay fully theme-aware (no naked hex). */
 
-[data-theme="light"] {
-  color-scheme: light;
-  --bg-base: #f8f9fc;
-  --bg-surface: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-hover: #f0f1f5;
-  --border-subtle: #e2e4ea;
-  --border-strong: #c5c8d2;
-  --text-primary: #1a1d2e;
-  --text-secondary: #5a5e72;
-  --text-muted: #8e92a5;
+:root {
+  /* Legacy names → doc12 tokens (resolve per active theme, no naked hex). */
+  --bg-surface: var(--bg-subtle);
+  --radius: var(--radius-md);
 }
 
 * { box-sizing: border-box; margin: 0; }
