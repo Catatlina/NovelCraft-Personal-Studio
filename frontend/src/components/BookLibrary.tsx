@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { usePagination } from "../hooks/usePagination";
-import { Pagination } from "./ui";
+import { Pagination, ConfirmDialog, Spinner, EmptyState } from "./ui";
 import { Search, BookOpen, ArrowLeft, Trash2 } from "lucide-react";
 
 type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
@@ -64,7 +64,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [statusFilter, setStatusFilter] = useState("");
   const [sortBy, setSortBy] = useState<"created" | "updated" | "title" | "chapters">("created");
   // V2.0: Delete functionality
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ kind: "book"; book: Book } | { kind: "batch" } | null>(null);
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
   const pollers = useRef<Record<string, number>>({});
 
@@ -205,7 +205,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       setBooks(prev => prev.filter(b => b.id !== book.id));
       setSelectedBooks(prev => { const next = new Set(prev); next.delete(book.id); return next; });
     } catch (caught) { setNotice(`删除失败：${String(caught)}`); }
-    finally { setBusy(""); setDeleteConfirm(null); }
+    finally { setBusy(""); setPendingDelete(null); }
   };
 
   const batchDelete = async () => {
@@ -353,7 +353,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
             className="form-input" style={{ width: 64, height: 34, padding: "0 8px" }} />
         </label>
-        {selectedBooks.size > 0 && <button className="btn-sm" style={{ background: "var(--red)", color: "var(--brand-foreground)" }} disabled={busy === "batch"} onClick={() => void batchDelete()}>
+        {selectedBooks.size > 0 && <button className="btn-sm" style={{ background: "var(--red)", color: "var(--brand-foreground)" }} disabled={busy === "batch"} onClick={() => setPendingDelete({ kind: "batch" })}>
           <Trash2 size={14} />批量删除 ({selectedBooks.size})
         </button>}
       </div>
@@ -379,11 +379,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <option value="chapters">按章节数</option>
       </select>
     </div>
-    {!loading && !books.length && !error ? <div className="empty">
-      <div className="empty-ic"><BookOpen size={26} /></div>
-      <h3>书库为空</h3>
-      <p>可以从扫榜中心或灵感入口创建小说，开始你的创作之旅。</p>
-    </div> : <>
+    {!loading && !books.length && !error ? <EmptyState icon={<BookOpen size={26} />} title="书库为空" description="可以从扫榜中心或灵感入口创建小说，开始你的创作之旅。" /> : <>
       <div className="grid grid-3">{bookPager.pageData.map((book, index) => {
         const batch = batches[book.id];
         const completion = completions[book.id];
@@ -432,7 +428,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入目录</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
-            <button className="btn-sm" style={{ background: "var(--danger-bg)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => setDeleteConfirm(book.id)} title="删除此书及全部章节">
+            <button className="btn-sm" style={{ background: "var(--danger-bg)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => setPendingDelete({ kind: "book", book })} title="删除此书及全部章节">
               <Trash2 size={14} />
             </button>
           </div>
@@ -460,21 +456,27 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         pageSizeOptions={[10, 20, 50, 100]}
       />
     </>}
-    {loading && <p style={{ color: "var(--text-3)", textAlign: "center", padding: 20 }}>正在加载书库…</p>}
-    {/* V2.0: Delete confirmation modal */}
-    {deleteConfirm && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
-      onClick={() => setDeleteConfirm(null)}>
-      <div className="card" onClick={e => e.stopPropagation()} style={{ maxWidth: 400, width: "90%", padding: 24 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>确认删除</h3>
-        <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 16 }}>确定删除《{books.find(b => b.id === deleteConfirm)?.title || "未知"}》？此操作将同时删除该书所有章节和知识条目，不可撤销。</p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button className="btn-ghost" onClick={() => setDeleteConfirm(null)}>取消</button>
-          <button className="btn-sm" style={{ background: "var(--red)", color: "var(--brand-foreground)" }} disabled={busy === deleteConfirm}
-            onClick={() => { const book = books.find(b => b.id === deleteConfirm); if (book) deleteBook(book); }}>
-            {busy === deleteConfirm ? "删除中…" : "确认删除"}
-          </button>
-        </div>
+    {loading && (
+      <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+        <Spinner label="正在加载书库…" />
       </div>
-    </div>}
+    )}
+    <ConfirmDialog
+      open={pendingDelete !== null}
+      title="删除书籍"
+      message={
+        pendingDelete?.kind === "book"
+          ? `确定删除《${pendingDelete.book.title}》？此操作将同时删除该书所有章节和知识条目，不可撤销。`
+          : `确定批量删除选中的 ${selectedBooks.size} 本书？此操作不可撤销。`
+      }
+      confirmText="确认删除"
+      cancelText="取消"
+      danger
+      onConfirm={() => {
+        if (pendingDelete?.kind === "book") void deleteBook(pendingDelete.book);
+        else void batchDelete();
+      }}
+      onCancel={() => setPendingDelete(null)}
+    />
   </section>;
 }

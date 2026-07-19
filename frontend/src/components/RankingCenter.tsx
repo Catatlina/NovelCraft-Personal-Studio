@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, api } from "../lib/api";
-import { Pagination, Accordion } from "./ui";
+import { Pagination, Accordion, ConfirmDialog, EmptyState } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import { NovelAnalysisReport } from "./NovelAnalysisReport";
 
@@ -65,6 +65,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [importFileName, setImportFileName] = useState("");
   const [topicTab, setTopicTab] = useState<"all" | "bookmarked">("all");
   const [scanWarning, setScanWarning] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ kind: "topic"; topic: Topic } | { kind: "batch"; ids: string[] } | null>(null);
   const [analysisMode, setAnalysisMode] = useState<"single" | "multi">("single");
   const [multiAnalysisResult, setMultiAnalysisResult] = useState<any>(null);
   const [multiAnalysisLoading, setMultiAnalysisLoading] = useState(false);
@@ -286,7 +287,6 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   }
 
   async function deleteTopic(topic: Topic) {
-    if (!confirm(`确定删除选题「${topic.title}」？`)) return;
     setBusy(`delete-topic:${topic.id}`); setMessage("");
     try {
       await api(`/api/v1/ranking/topics/${topic.id}`, { method: "DELETE" });
@@ -296,10 +296,8 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     finally { setBusy(""); }
   }
 
-  async function batchDeleteAll() {
-    const ids = (topicTab === "bookmarked" ? bookmarkedTopics : topics).map(t => t.id);
+  async function batchDeleteAll(ids: string[]) {
     if (!ids.length) return;
-    if (!confirm(`确定删除全部 ${ids.length} 个选题？此操作不可撤销。`)) return;
     setBusy("batch-delete"); setMessage("");
     try {
       await api("/api/v1/ranking/topics/batch-delete", { method: "POST", body: JSON.stringify({ ids }) });
@@ -519,9 +517,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
             {snapshots.length === 0 ? (
               <tr>
                 <td colSpan={5}>
-                  <div className="empty" style={{ border: "none", padding: 30 }}>
-                    <p>暂无快照记录，请先扫描榜单源或导入榜单文件。</p>
-                  </div>
+                  <EmptyState title="暂无快照记录" description="请先扫描榜单源或导入榜单文件。" />
                 </td>
               </tr>
             ) : (
@@ -852,7 +848,10 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         {((topicTab === "all" && topics.length > 0) || (topicTab === "bookmarked" && bookmarkedTopics.length > 0)) && (
           <button
             disabled={busy === "batch-delete"}
-            onClick={() => void batchDeleteAll()}
+            onClick={() => {
+              const ids = (topicTab === "bookmarked" ? bookmarkedTopics : topics).map(t => t.id);
+              if (ids.length) setPendingDelete({ kind: "batch", ids });
+            }}
             className="btn-sm"
             style={{ background: "transparent", border: "1px solid var(--red)", color: "var(--red)", display: "flex", alignItems: "center", gap: 4 }}
           >
@@ -882,7 +881,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                   </button>
                   <button
                     disabled={busy === `delete-topic:${topic.id}`}
-                    onClick={() => void deleteTopic(topic)}
+                    onClick={() => setPendingDelete({ kind: "topic", topic })}
                     title="删除选题"
                     style={{
                       background: "transparent", border: "1px solid var(--border)",
@@ -916,13 +915,13 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
         {/* Empty states */}
         {topicTab === "bookmarked" && !bookmarkedTopics.length && (
-          <div className="empty" style={{ gridColumn: "1 / -1" }}>
-            <p>备选池为空。点击 ☆ 将选题加入备选池。</p>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <EmptyState title="备选池为空" description="点击 ☆ 将选题加入备选池。" />
           </div>
         )}
         {topicTab === "all" && !topics.length && (
-          <div className="empty" style={{ gridColumn: "1 / -1" }}>
-            <p>暂无选题。请先扫描榜单并生成分析。</p>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <EmptyState title="暂无选题" description="请先扫描榜单并生成分析。" />
           </div>
         )}
         <Pagination
@@ -934,6 +933,25 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           pageSizeOptions={[10, 20, 50, 100]}
         />
       </div>
+    <ConfirmDialog
+      open={pendingDelete !== null}
+      title={pendingDelete?.kind === "batch" ? "批量删除选题" : "删除选题"}
+      message={
+        pendingDelete?.kind === "batch"
+          ? `确定删除全部 ${pendingDelete.ids.length} 个选题？此操作不可撤销。`
+          : pendingDelete?.kind === "topic"
+            ? `确定删除选题「${pendingDelete.topic.title}」？此操作不可撤销。`
+            : ""
+      }
+      confirmText="确认删除"
+      cancelText="取消"
+      danger
+      onConfirm={() => {
+        if (pendingDelete?.kind === "topic") void deleteTopic(pendingDelete.topic);
+        else if (pendingDelete?.kind === "batch") void batchDeleteAll(pendingDelete.ids);
+      }}
+      onCancel={() => setPendingDelete(null)}
+    />
     </div>
   </div>;
 }

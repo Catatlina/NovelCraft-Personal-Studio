@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Terminal, Activity } from "lucide-react";
 import { api } from "../lib/api";
-import { Pagination } from "./ui";
+import { Pagination, EmptyState } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
 type AgentStatus = { name: string; status: string; task_count: number; last_run: string };
@@ -48,7 +48,7 @@ export function AgentConsole() {
         onPageSizeChange={agentsPager.setPageSize}
         pageSizeOptions={[10, 20, 50, 100]}
       />
-      {!agents.length && <div className="empty"><p>暂无 Agent 运行记录 — 启动一次生成工作流后此处显示真实节点统计。</p></div>}
+      {!agents.length && <EmptyState title="暂无 Agent 运行记录" description="启动一次生成工作流后此处显示真实节点统计。" />}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button className="btn-sm" onClick={load}><Activity size={12} /> 刷新</button>
       </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap, Users, Upload, Download, Database } from "lucide-react";
 import { api, getApiKey, getApiUrl, getModel, setApiKey, setApiUrl, setModel } from "../lib/api";
-import { Pagination } from "./ui";
+import { Pagination, ConfirmDialog } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
@@ -48,6 +48,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [editSetting, setEditSetting] = useState<{key:string;value:string;description:string}|null>(null);
   const [msg, setMsg] = useState("");
   const [stats, setStats] = useState<{ ai_calls: number; contents: number; db_size: string } | null>(null);
+  const [deleteConnId, setDeleteConnId] = useState<string | null>(null);
 
   const settingsPager = usePagination({ items: settings, pageSize: 10, mode: "client" });
   const budgetsPager = usePagination({ items: budgets, pageSize: 10, mode: "client" });
@@ -655,7 +656,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                       <td style={{padding:"10px 12px", fontSize:12, color:"var(--text-2)"}}>{item.configured_fields.join(", ") || "—"}</td>
                       <td style={{padding:"10px 12px", display:"flex", gap:6}}>
                         <button onClick={()=>testConnection(item.platform)} style={{fontSize:12, padding:"4px 10px", borderRadius:"var(--r-sm)", border:"1px solid var(--border)", background:"var(--bg-hover)", color:"var(--text-2)", cursor:"pointer"}}>检测</button>
-                        <button onClick={()=>deleteConnection(item.id)} style={{fontSize:12, padding:"4px 10px", borderRadius:"var(--r-sm)", border:"1px solid var(--border)", background:"var(--bg-hover)", color:"var(--red)", cursor:"pointer"}}><X size={12}/>删除</button>
+                        <button onClick={()=>setDeleteConnId(item.id)} style={{fontSize:12, padding:"4px 10px", borderRadius:"var(--r-sm)", border:"1px solid var(--border)", background:"var(--bg-hover)", color:"var(--red)", cursor:"pointer"}}><X size={12}/>删除</button>
                       </td>
                     </tr>
                   ))}
@@ -711,6 +712,16 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
           </div>
         )}
 
+      <ConfirmDialog
+        open={deleteConnId !== null}
+        title="删除平台连接"
+        message={deleteConnId ? `确定删除平台连接「${connections.find(c => c.id === deleteConnId)?.display_name || "未知"}」？此操作不可撤销。` : ""}
+        confirmText="确认删除"
+        cancelText="取消"
+        danger
+        onConfirm={() => { if (deleteConnId) void deleteConnection(deleteConnId); }}
+        onCancel={() => setDeleteConnId(null)}
+      />
       </div>
     </div>
   );

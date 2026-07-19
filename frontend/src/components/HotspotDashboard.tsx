@@ -4,7 +4,7 @@ import {
   RefreshCw, Eye, X, Star, FileText,
 } from "lucide-react";
 import { api } from "../lib/api";
-import { Pagination, Accordion } from "./ui";
+import { Pagination, Accordion, ConfirmDialog, Spinner, EmptyState } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
 
@@ -92,6 +92,7 @@ export function HotspotDashboard() {
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleDetail, setArticleDetail] = useState<ArticleDetail | null>(null);
   const [editArticle, setEditArticle] = useState<{ id: string; title: string; body: string } | null>(null);
+  const [pendingDeleteArticle, setPendingDeleteArticle] = useState<{ id: string; title: string } | null>(null);
 
   const hotspotPager = usePagination({ total: hotspotTotal, pageSize: 10, mode: "server" });
   const articlePager = usePagination({ total: articleTotal, pageSize: 10, mode: "server" });
@@ -208,7 +209,6 @@ export function HotspotDashboard() {
   };
 
   const deleteArticle = async (id: string, title: string) => {
-    if (!confirm(`确定删除《${title}》？此操作不可撤销。`)) return;
     try {
       await api(`/api/v1/articles/${id}`, { method: "DELETE" });
       setNotice(`✅ 已删除《${title}》`);
@@ -390,21 +390,11 @@ export function HotspotDashboard() {
 
           {/* Hotspot cards as activity/cards */}
           {loading ? (
-            <div className="empty">
-              <div className="empty-ic">
-                <RefreshCw size={24} style={{ animation: "spin 1s linear infinite" }} />
-              </div>
-              <h3>正在加载热点</h3>
-              <p>正在从各平台抓取最新热点数据…</p>
+            <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+              <Spinner label="正在从各平台抓取最新热点数据…" />
             </div>
           ) : hotspots.length === 0 ? (
-            <div className="empty">
-              <div className="empty-ic">
-                <Zap size={24} />
-              </div>
-              <h3>暂无热点数据</h3>
-              <p>当前筛选条件下没有热点内容，请尝试切换平台或刷新。</p>
-            </div>
+            <EmptyState icon={<Zap size={26} />} title="暂无热点数据" description="当前筛选条件下没有热点内容，请尝试切换平台或刷新。" />
           ) : (
             <div className="card-grid">
               {hotspots.map((h, i) => {
@@ -490,12 +480,8 @@ export function HotspotDashboard() {
       {tab === "overview" && (
         <>
           {overviewLoading ? (
-            <div className="empty">
-              <div className="empty-ic">
-                <RefreshCw size={24} style={{ animation: "spin 1s linear infinite" }} />
-              </div>
-              <h3>AI 分析中</h3>
-              <p>正在生成热点总览与选题推荐…</p>
+            <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+              <Spinner label="正在生成热点总览与选题推荐…" />
             </div>
           ) : overview ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -603,13 +589,7 @@ export function HotspotDashboard() {
               </div>
             </div>
           ) : (
-            <div className="empty">
-              <div className="empty-ic">
-                <FileText size={24} />
-              </div>
-              <h3>暂无总览数据</h3>
-              <p>请刷新热点后重试。</p>
-            </div>
+            <EmptyState icon={<FileText size={26} />} title="暂无总览数据" description="请刷新热点后重试。" />
           )}
         </>
       )}
@@ -662,20 +642,11 @@ export function HotspotDashboard() {
           ) : (
             <>
               {articleLoading ? (
-                <div className="empty">
-                  <div className="empty-ic">
-                    <RefreshCw size={24} style={{ animation: "spin 1s linear infinite" }} />
-                  </div>
-                  <h3>加载中</h3>
+                <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+                  <Spinner label="加载中" />
                 </div>
               ) : articles.length === 0 ? (
-                <div className="empty">
-                  <div className="empty-ic">
-                    <BookOpen size={24} />
-                  </div>
-                  <h3>文库为空</h3>
-                  <p>从今日热点生成文章后在此查看。</p>
-                </div>
+                <EmptyState icon={<BookOpen size={26} />} title="文库为空" description="从今日热点生成文章后在此查看。" />
               ) : (
                 <div className="table-wrap">
                   <table>
@@ -707,7 +678,7 @@ export function HotspotDashboard() {
                               <button onClick={() => startEdit(a)} className="btn-ghost" title="编辑" style={{ padding: "4px 8px", color: "var(--yellow)" }}>
                                 <Edit3 size={14} />
                               </button>
-                              <button onClick={() => void deleteArticle(a.id, a.title)} className="btn-ghost" title="删除" style={{ padding: "4px 8px", color: "var(--red)" }}>
+                              <button onClick={() => setPendingDeleteArticle({ id: a.id, title: a.title })} className="btn-ghost" title="删除" style={{ padding: "4px 8px", color: "var(--red)" }}>
                                 <Trash2 size={14} />
                               </button>
                             </div>
@@ -733,6 +704,16 @@ export function HotspotDashboard() {
           )}
         </>
       )}
+      <ConfirmDialog
+        open={pendingDeleteArticle !== null}
+        title="删除文章草稿"
+        message={pendingDeleteArticle ? `确定删除《${pendingDeleteArticle.title}》？此操作不可撤销。` : ""}
+        confirmText="确认删除"
+        cancelText="取消"
+        danger
+        onConfirm={() => { if (pendingDeleteArticle) void deleteArticle(pendingDeleteArticle.id, pendingDeleteArticle.title); }}
+        onCancel={() => setPendingDeleteArticle(null)}
+      />
     </div>
   );
 }
