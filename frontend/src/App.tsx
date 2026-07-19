@@ -25,6 +25,7 @@ import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } fro
 import { DashboardV2 } from "./components/DashboardV2";
 import { Overview } from "./components/Overview";
 import { Plugins } from "./components/Plugins";
+import { Prompts } from "./components/Prompts";
 import { ThemeProvider } from "./components/ThemeProvider";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
@@ -509,12 +510,7 @@ export default function App() {
       {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} /></React.Suspense>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
-      {tab === "prompts" && (
-        <div className="panel"><h2>Prompt 库</h2>
-        <table><thead><tr><th>名称</th><th>版本</th><th>模型</th></tr></thead>
-        <tbody>{prompts.map((p: any) => <tr key={p.id}><td>{p.name}</td><td>{p.version}</td><td>{p.model}</td></tr>)}</tbody></table>
-        </div>
-      )}
+      {tab === "prompts" && <Prompts prompts={prompts} projectId={project?.id || ""} />}
       {tab === "dag" && <DagEditor projectId={project?.id || ""} novelId={novel?.id || ""} />}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
       {tab === "studio" && <Studio />}
