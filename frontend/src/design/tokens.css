@@ -1,0 +1,147 @@
+/* ==========================================================================
+   design/tokens.css — NovelCraft Design System (single source of truth: doc12)
+   Dual-theme tokens, switched by <html data-theme="dark|light">.
+   New code MUST use these tokens; legacy stylesheets are aliased via compat.css.
+   ========================================================================== */
+
+/* ---------- DARK (default) ---------- */
+:root,
+[data-theme="dark"] {
+  /* Brand / Accent (low-saturation indigo) */
+  --brand-50: #EEF0FE;
+  --brand-100: #D9DEF9;
+  --brand-300: #838DEB;
+  --brand-500: #5B66DB;   /* primary / primary button */
+  --brand-600: #444FCB;   /* primary pressed */
+  --brand-700: #373FA8;   /* deep emphasis */
+  --brand-foreground: #FFFFFF;
+
+  /* Neutral */
+  --bg-base: #14161C;     /* page background */
+  --bg-subtle: #1C1F26;   /* secondary surface / card */
+  --bg-muted: #252932;    /* weak surface / hover */
+  --bg-elevated: #2C313B; /* popover / floating bar */
+  --border-subtle: #363C47;
+  --border-strong: #49515F;
+
+  /* Text */
+  --text-primary: #E8EAF0;
+  --text-secondary: #A6ABBA;
+  --text-muted: #797F8E;
+
+  /* Semantic */
+  --success: #31B572;
+  --success-bg: #163A28;
+  --warning: #F2A93B;
+  --warning-bg: #3D2E12;
+  --danger: #DE4B5E;
+  --danger-bg: #3F1820;
+  --info: #2E9BD6;
+  --info-bg: #143545;
+
+  /* Type scale (root 14px, Linear-compact) */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 19px;
+  --text-xl: 23px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+  --line-xs: 16px;
+  --line-base: 21px;
+  --line-md: 24px;
+  --line-lg: 28px;
+  --line-xl: 32px;
+  --line-2xl: 36px;
+  --line-3xl: 42px;
+
+  /* Spacing (4px base) */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radius */
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* Shadow / Elevation */
+  --shadow-xs: 0 1px 0 hsl(0 0% 0% / 0.3);
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.4);
+  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.45);
+  --shadow-lg: 0 12px 32px hsl(0 0% 0% / 0.55);
+  --shadow-focus: 0 0 0 2px var(--brand-500);
+
+  /* z-index */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-floating: 100;
+  --z-overlay: 200;
+  --z-modal: 300;
+  --z-popover: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+
+  /* Motion */
+  --dur-instant: 0ms;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0.35, 1);
+
+  /* Typography */
+  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-read: Georgia, "Noto Serif SC", "Songti SC", serif;
+  --editor-text: 16px;
+}
+
+/* ---------- LIGHT (variant) ---------- */
+[data-theme="light"] {
+  --brand-50: #F1F3FE;
+  --brand-100: #DCE2FB;
+  --brand-300: #7884E0;
+  --brand-500: #4F5BD6;
+  --brand-600: #3E48C2;
+  --brand-700: #313A9E;
+  --brand-foreground: #FFFFFF;
+
+  --bg-base: #FFFFFF;
+  --bg-subtle: #F6F7F9;
+  --bg-muted: #EDEFF2;
+  --bg-elevated: #FFFFFF;
+  --border-subtle: #E0E3E8;
+  --border-strong: #C2C7D0;
+
+  --text-primary: #1E2230;
+  --text-secondary: #595F70;
+  --text-muted: #868D9C;
+
+  --success: #2C9C62;
+  --success-bg: #E1F5EA;
+  --warning: #D98E1F;
+  --warning-bg: #FBEEDB;
+  --danger: #CC3B4E;
+  --danger-bg: #FBE3E7;
+  --info: #1878B8;
+  --info-bg: #E0EFFA;
+
+  --shadow-xs: 0 1px 2px hsl(225 30% 20% / 0.06);
+  --shadow-sm: 0 1px 3px hsl(225 30% 20% / 0.08);
+  --shadow-md: 0 4px 12px hsl(225 30% 20% / 0.10);
+  --shadow-lg: 0 12px 32px hsl(225 30% 20% / 0.14);
+  --shadow-focus: 0 0 0 2px var(--brand-500);
+}

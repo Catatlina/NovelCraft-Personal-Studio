@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Search, Bell, Sun, Moon, LogOut, ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
 import '../styles/proto.css';
+import { useTheme } from "./ThemeProvider";
 
 type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
 
@@ -31,13 +32,9 @@ export function Layout({ tab, setTab, title, children }: {
   runStatus?: string; children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [dark, setDark] = useState(true);
+  const { theme, setTheme } = useTheme();
 
-  const toggleTheme = () => {
-    const next = !dark;
-    setDark(next);
-    document.documentElement.setAttribute('data-theme', next ? 'dark' : 'light');
-  };
+  const toggleTheme = () => setTheme(theme === "dark" ? "light" : "dark");
 
   const isActive = (t: Tab) => tab === t;
 
@@ -117,8 +114,8 @@ export function Layout({ tab, setTab, title, children }: {
         {/* Bottom */}
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={toggleTheme} title="切换主题">
-            {dark ? <Sun size={17} /> : <Moon size={17} />}
-            <span className="label">{dark ? '暗色' : '亮色'}</span>
+            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            <span className="label">{theme === "dark" ? "暗色" : "亮色"}</span>
           </button>
           <button className="nav-item" title="退出" onClick={() => {
             sessionStorage.removeItem('nc_token');

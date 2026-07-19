@@ -1,0 +1,35 @@
+sequenceDiagram
+    actor U as 用户
+    participant L as LoginPage
+    participant A as App
+    participant API as lib/api (后端 /api/v1)
+    participant B as 后端 Workflow
+
+    U->>L: 登录(email,pwd)
+    L->>API: POST /auth/login
+    API-->>L: {access_token}
+    L->>A: onLogin(token)
+    A->>API: GET /projects
+    API-->>A: {items:[project]}
+    A->>API: GET /runs/latest?project_id=
+    API-->>A: Run(novel_id)
+    A->>API: GET /contents/{novel_id}
+    API-->>A: Content(novel)
+
+    U->>A: 灵感创作 → 启动 Bootstrap
+    A->>API: POST /projects/{pid}/novels {idea,genre,style,target_words}
+    API-->>A: Content(novel)
+    A->>API: POST /novels/{nid}/bootstrap
+    API-->>A: {run_id, events_url}
+    A->>B: SSE /runs/{run_id}/events
+    B-->>A: node_waiting_human(选名)
+    U->>A: confirm 书名
+    A->>API: POST /runs/{rid}/nodes/n2/confirm {selected_title}
+    B-->>A: run_done(succeeded)
+    A->>API: GET /contents/{novel_id}
+    API-->>A: 第一章
+    A->>U: 编辑器展示正文
+    U->>A: AI 改写选区
+    A->>API: POST /contents/{cid}/ai/rewrite {selection}
+    API-->>A: {result_body}
+    A->>U: 替换正文 + 写入 versions(ai_edit)

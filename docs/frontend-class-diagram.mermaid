@@ -1,0 +1,55 @@
+classDiagram
+    class App {
+      +tab: Tab
+      +token: string
+      +project / novel / chapter / run
+      +refreshRun() + startBootstrap() + saveChapter() + runEditorOp()
+      +loadVersions() + restoreVersion()
+    }
+    class ApiClient {
+      +api~T~(path): T   %% 解包 envelope.data
+      +listApi~T~(path): T[]  %% 归一 {items}
+      +apiStream(path, onDelta)
+      +ApiError
+    }
+    class ThemeProvider {
+      +useTheme(): {theme, toggle}
+      +data-theme 持久化 nc-theme
+    }
+    class DesignTokens {
+      <<css>> tokens.css
+      +--brand-500 / --bg-base / --text-primary ...
+    }
+    class Content {
+      +id +project_id +parent_id +type +title
+      +body: TiptapDoc +meta +status +versions
+    }
+    class Run {
+      +id +project_id +novel_id +status
+      +nodes: RunNode[]
+    }
+    class RunNode {
+      +node_key +kind +agent +status +output
+    }
+    class Version {
+      +version_no +reason +author_id
+    }
+    class KnowledgeItem {
+      +id +kind +title +body +similarity
+    }
+    class AiCall {
+      +id +provider +model +cost_cny +latency_ms
+    }
+    class offlineCache {
+      +cacheGet/Set/Delete + enqueueMutation + replay
+    }
+    App --> ApiClient
+    App --> ThemeProvider
+    ThemeProvider ..> DesignTokens
+    ApiClient ..> Content
+    ApiClient ..> Run
+    Run "1" *-- "n" RunNode
+    Content "1" *-- "n" Version
+    App --> offlineCache
+    ApiClient ..> KnowledgeItem
+    ApiClient ..> AiCall

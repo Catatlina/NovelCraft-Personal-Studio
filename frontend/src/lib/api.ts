@@ -102,6 +102,23 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
   return payload;
 }
 
+/**
+ * Normalize a list endpoint. Works whether the backend returns a bare array
+ * or an envelope like `{ items: [...] }` / `{ data: [...] }` / `{ list: [...] }`.
+ * `api<T>()` already unwraps the envelope's `data` field once, so the resolved
+ * value is usually the array directly; this helper is defensive for either shape.
+ */
+export async function listApi<T = any>(path: string, init?: RequestInit): Promise<T[]> {
+  const data = await api<unknown>(path, init);
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    const arr = record.items ?? record.data ?? record.list;
+    if (Array.isArray(arr)) return arr as T[];
+  }
+  return [];
+}
+
 /** SSE streaming request — same auth headers as api(); onDelta fires per text
  *  chunk; resolves with the full text from the terminal {done,text} frame. */
 export async function apiStream(

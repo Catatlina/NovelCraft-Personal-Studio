@@ -189,8 +189,10 @@ export default function App() {
   useEffect(() => { if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls); }, [run?.id, run?.status]);
   useEffect(() => {
     if (!project) return;
-    api<{ data: Budget[] }>(`/api/v1/admin/budgets?project_id=${project.id}`).then(response => setBudgets(response.data || []));
-    api<{ data: ModelRoute[] }>("/api/v1/admin/model-routes").then(response => setRoutes(response.data || []));
+    // NOTE: api<T>() already unwraps the envelope once, so the resolved value
+    // is the bare array. The previous `response.data` was always undefined.
+    api<Budget[] | { data?: Budget[] }>(`/api/v1/admin/budgets?project_id=${project.id}`).then(r => setBudgets(Array.isArray(r) ? r : (r.data ?? [])));
+    api<ModelRoute[] | { data?: ModelRoute[] }>("/api/v1/admin/model-routes").then(r => setRoutes(Array.isArray(r) ? r : (r.data ?? [])));
   }, [project?.id, run?.status]);
 
   useEffect(() => {

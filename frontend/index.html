@@ -1,6 +1,13 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong theme (FOUC).
+      // Mirrors ThemeProvider's init logic so the very first frame is correct.
+      document.documentElement.dataset.theme =
+        localStorage.getItem('nc-theme') ||
+        (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#5b66db" />
