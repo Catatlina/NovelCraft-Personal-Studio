@@ -1602,3 +1602,420 @@ textarea.form-input {
     scroll-behavior: auto !important;
   }
 }
+
+/* ============ UI LIBRARY (Wave A — tokens.css-driven) ============ */
+/* Shared, reusable primitives. Every value resolves through doc12 tokens in
+   tokens.css; the only bare color is the modal scrim rgba, which is a
+   functional overlay (explicitly permitted). */
+
+/* --- Glass surface --- */
+.glass {
+  background: var(--bg-elevated);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+@supports not ((backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px))) {
+  .glass {
+    background: var(--bg-elevated);
+  }
+}
+
+/* --- Danger button (structure mirrors .btn-primary) --- */
+.btn-danger {
+  width: 100%;
+  height: 46px;
+  background: var(--danger);
+  color: var(--brand-foreground);
+  font-weight: 600;
+  font-size: 15px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.btn-danger:hover {
+  background: var(--danger-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.btn-danger:active {
+  background: var(--danger-active);
+  transform: translateY(0);
+}
+.btn-danger:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.btn-danger.btn-sm {
+  width: auto;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+/* --- Pagination --- */
+.pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 4px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.pagination-info {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pagination-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pagination-size select {
+  height: 32px;
+  padding: 0 8px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.pagination-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.pagination-jump input {
+  width: 56px;
+  height: 32px;
+  padding: 0 8px;
+  text-align: center;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+}
+.pagination-jump input:focus,
+.pagination-size select:focus {
+  outline: none;
+  border-color: var(--brand-500);
+  box-shadow: var(--shadow-focus);
+}
+.pagination-btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  transition: background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+  cursor: pointer;
+}
+.pagination-btn:hover:not(:disabled) {
+  background: var(--bg-muted);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.pagination-btn.active {
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+  color: var(--brand-foreground);
+}
+.pagination-btn:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+/* --- Accordion --- */
+.accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.accordion-item {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.accordion-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  text-align: left;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  background: none;
+  transition: background var(--dur-base) var(--ease-out);
+  cursor: pointer;
+}
+.accordion-header:hover {
+  background: var(--bg-muted);
+}
+.accordion-header .chevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.accordion-item.open .accordion-header .chevron {
+  transform: rotate(180deg);
+}
+.accordion-body {
+  padding: 0 16px 16px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.accordion-body.collapsed {
+  display: none;
+}
+
+/* --- Modal / Confirm dialog --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, .55);
+  animation: fadeUp var(--dur-base) var(--ease-out) both;
+}
+.confirm-dialog {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  animation: fadeUp var(--dur-base) var(--ease-out) both;
+}
+.confirm-dialog .cd-title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.confirm-dialog.danger .cd-title {
+  color: var(--danger);
+}
+.confirm-dialog .cd-message {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.confirm-dialog .cd-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+.confirm-dialog .cd-btn {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-family: var(--font-ui);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+.confirm-dialog .cd-btn-cancel {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+.confirm-dialog .cd-btn-cancel:hover {
+  background: var(--border-subtle);
+}
+.confirm-dialog .cd-btn-confirm {
+  background: var(--brand-500);
+  color: var(--brand-foreground);
+  border: 1px solid var(--brand-500);
+}
+.confirm-dialog .cd-btn-confirm:hover {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+}
+.confirm-dialog.danger .cd-btn-confirm {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.confirm-dialog.danger .cd-btn-confirm:hover {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+/* --- Empty state action slot --- */
+.empty-action {
+  margin-top: 4px;
+}
+
+/* --- Spinner / Skeleton --- */
+.spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.spinner-ring {
+  border-radius: var(--radius-full);
+  border-style: solid;
+  border-color: var(--border-strong);
+  border-top-color: var(--brand-500);
+  animation: spin var(--dur-slow) linear infinite;
+}
+.spinner.sm .spinner-ring {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+.spinner.md .spinner-ring {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+.spinner.lg .spinner-ring {
+  width: 36px;
+  height: 36px;
+  border-width: 4px;
+}
+.spinner-label {
+  white-space: nowrap;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.skeleton {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-subtle) 37%, var(--bg-muted) 63%);
+  background-size: 400% 100%;
+  animation: shimmer var(--dur-slow) ease infinite;
+}
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+/* --- Step timeline --- */
+.step-timeline {
+  display: flex;
+  flex-direction: column;
+}
+.step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 4px 0;
+}
+.step-dot {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  transition: background var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+.step-dot svg {
+  width: 16px;
+  height: 16px;
+}
+.step.done .step-dot {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--brand-foreground);
+}
+.step.active .step-dot {
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+  color: var(--brand-foreground);
+  animation: pulse 1.6s var(--ease-standard) infinite;
+}
+.step.waiting .step-dot {
+  background: var(--bg-subtle);
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-500) 40%, transparent); }
+  70% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--brand-500) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-500) 0%, transparent); }
+}
+.step-body {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 12px;
+}
+.step-label {
+  width: 100%;
+  text-align: left;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.step.waiting .step-label {
+  color: var(--text-muted);
+}
+.step-detail {
+  margin-top: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* --- Fade-up utility (reuses the existing @keyframes fadeUp) --- */
+.fade-up {
+  animation: fadeUp var(--dur-base) var(--ease-out) both;
+}

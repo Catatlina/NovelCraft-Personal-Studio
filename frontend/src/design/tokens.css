@@ -36,6 +36,8 @@
   --warning-bg: #3D2E12;
   --danger: #DE4B5E;
   --danger-bg: #3F1820;
+  --danger-hover: #C73E50;
+  --danger-active: #B23545;
   --info: #2E9BD6;
   --info-bg: #143545;
 
@@ -136,6 +138,8 @@
   --warning-bg: #FBEEDB;
   --danger: #CC3B4E;
   --danger-bg: #FBE3E7;
+  --danger-hover: #B5333F;
+  --danger-active: #A32D39;
   --info: #1878B8;
   --info-bg: #E0EFFA;
 
