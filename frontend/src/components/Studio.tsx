@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { BookOpen, Database, TrendingUp, Play, Loader2, CopyCheck } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 export function Studio() {
   const [tab, setTab] = useState<"short"|"knowledge"|"hotspot"|"imitation">("short");
@@ -107,7 +106,7 @@ export function Studio() {
 
       <div className="card">
         {msg && (
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",borderRadius:"var(--r-sm)",marginBottom:12,fontSize:13,background:"rgba(52,211,153,.14)",color:"var(--green)"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",borderRadius:"var(--r-sm)",marginBottom:12,fontSize:13,background:"var(--success-bg)",color:"var(--green)"}}>
             <span>{msg}</span>
             <button onClick={()=>setMsg("")} style={{border:"none",background:"none",color:"var(--green)",fontSize:18,lineHeight:1,cursor:"pointer"}}>×</button>
           </div>

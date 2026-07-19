@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { Search, Bell, Sun, Moon, LogOut, ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
-import '../styles/proto.css';
 import { useTheme } from "./ThemeProvider";
 
 type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";

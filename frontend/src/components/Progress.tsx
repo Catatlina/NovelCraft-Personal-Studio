@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { ApiError, api } from "../lib/api";
-import "../styles/proto.css";
 
 type RunNode = { node_key: string; kind: string; agent: string | null; title: string; status: string; output?: Record<string, unknown>; error?: string | null; attempt?: number; started_at?: string | null; finished_at?: string | null };
 type Run = { id: string; nodes: RunNode[]; context: Record<string, unknown> };

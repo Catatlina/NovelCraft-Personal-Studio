@@ -354,7 +354,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             onChange={event => setBatchCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
             className="form-input" style={{ width: 64, height: 34, padding: "0 8px" }} />
         </label>
-        {selectedBooks.size > 0 && <button className="btn-sm" style={{ background: "var(--red)", color: "#fff" }} disabled={busy === "batch"} onClick={() => void batchDelete()}>
+        {selectedBooks.size > 0 && <button className="btn-sm" style={{ background: "var(--red)", color: "var(--brand-foreground)" }} disabled={busy === "batch"} onClick={() => void batchDelete()}>
           <Trash2 size={14} />批量删除 ({selectedBooks.size})
         </button>}
       </div>
@@ -427,13 +427,13 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => void continueOne(book)}>续写一章</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => void startBatch(book)}>批量生成</button>
             {batch && ["pending", "running"].includes(batch.status) &&
-              <button className="btn-sm" style={{ background: "rgba(248,113,113,.14)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => void cancelBatch(book, batch)}>取消批次</button>}
+              <button className="btn-sm" style={{ background: "var(--danger-bg)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => void cancelBatch(book, batch)}>取消批次</button>}
             {batch && batch.status === "failed" &&
-              <button className="btn-sm" style={{ background: "rgba(251,146,60,.14)", color: "var(--orange)" }} disabled={busy === book.id} onClick={() => void resumeBatch(book, batch)}>恢复批次</button>}
+              <button className="btn-sm" style={{ background: "var(--warning-bg)", color: "var(--orange)" }} disabled={busy === book.id} onClick={() => void resumeBatch(book, batch)}>恢复批次</button>}
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => { setImportBookId(importBookId === book.id ? "" : book.id); setDirectoryText(""); }}>导入目录</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "txt")}>导出TXT</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id || !completion?.exportable} title={!completion?.exportable ? "至少生成或导入一章后才能导出" : undefined} onClick={() => void exportBook(book, "markdown")}>导出MD</button>
-            <button className="btn-sm" style={{ background: "rgba(248,113,113,.14)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => setDeleteConfirm(book.id)} title="删除此书及全部章节">
+            <button className="btn-sm" style={{ background: "var(--danger-bg)", color: "var(--red)" }} disabled={busy === book.id} onClick={() => setDeleteConfirm(book.id)} title="删除此书及全部章节">
               <Trash2 size={14} />
             </button>
           </div>
@@ -466,7 +466,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 16 }}>确定删除《{books.find(b => b.id === deleteConfirm)?.title || "未知"}》？此操作将同时删除该书所有章节和知识条目，不可撤销。</p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button className="btn-ghost" onClick={() => setDeleteConfirm(null)}>取消</button>
-          <button className="btn-sm" style={{ background: "var(--red)", color: "#fff" }} disabled={busy === deleteConfirm}
+          <button className="btn-sm" style={{ background: "var(--red)", color: "var(--brand-foreground)" }} disabled={busy === deleteConfirm}
             onClick={() => { const book = books.find(b => b.id === deleteConfirm); if (book) deleteBook(book); }}>
             {busy === deleteConfirm ? "删除中…" : "确认删除"}
           </button>

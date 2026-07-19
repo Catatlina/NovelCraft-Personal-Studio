@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ArrowRight, Save, Settings, User, Zap, GitBranch, Plus, X, Play } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 type WFNode = { key: string; kind: "agent"|"human"|"tool"|"branch"; agent?: string; title: string; task?: string };
 const NODE_COLORS: Record<string, string> = { agent: "var(--primary)", human: "var(--orange)", tool: "var(--cyan)", branch: "var(--green)" };
@@ -137,7 +136,7 @@ export function DagEditor({ projectId = "", novelId = "" }: { projectId?: string
             <button className="btn-sm btn-ghost" onClick={executeWorkflow} title="执行工作流（需后端 worker 支持）">
               <Play size={14} />执行
             </button>
-            <button className="btn-sm" style={{ background: "var(--primary)", color: "#fff" }} onClick={saveWorkflow}>
+            <button className="btn-sm" style={{ background: "var(--primary)", color: "var(--brand-foreground)" }} onClick={saveWorkflow}>
               <Save size={14} />保存{saveMsg && <small style={{marginLeft:4}}>{saveMsg}</small>}
             </button>
           </div>
@@ -160,7 +159,7 @@ export function DagEditor({ projectId = "", novelId = "" }: { projectId?: string
                   borderRadius: "var(--r-md)", textAlign: "left",
                 }}
               >
-                <span style={{ width: 32, height: 32, borderRadius: 6, background: NODE_COLORS[node.kind], color: "#fff", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                <span style={{ width: 32, height: 32, borderRadius: 6, background: NODE_COLORS[node.kind], color: "var(--brand-foreground)", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
                   {node.kind === "agent" ? <Zap size={14} /> : node.kind === "human" ? <User size={14} /> : <Settings size={14} />}
                 </span>
                 <div style={{ flex: 1 }}>

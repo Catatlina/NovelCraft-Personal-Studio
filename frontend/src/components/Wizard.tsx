@@ -50,8 +50,8 @@ export function Wizard({ idea, setIdea, genre, setGenre, style, setStyle, target
           display: "flex", alignItems: "center", gap: 8,
           padding: "12px 16px", marginBottom: 20,
           borderRadius: "var(--r-sm)",
-          background: "rgba(251,191,36,.1)",
-          border: "1px solid rgba(251,191,36,.3)",
+          background: "var(--warning-bg)",
+          border: "1px solid var(--warning)",
           color: "var(--yellow)", fontSize: 13
         }}>
           <AlertTriangle size={16} style={{ flexShrink: 0 }} />

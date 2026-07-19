@@ -1,7 +1,6 @@
 import React from "react";
 import { ReviewRadar } from "./ReviewRadar";
 import { CharacterCard, OutlineTree } from "./CharacterOutline";
-import "../styles/proto.css";
 
 type Content = { id: string; title: string; meta: Record<string, unknown> };
 type ReviewPayload = {

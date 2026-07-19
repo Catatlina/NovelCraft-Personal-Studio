@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Search } from "lucide-react";
-import "../styles/proto.css";
 
 type Command = { id: string; label: string; action: () => void };
 

@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from "react";
 import { UserPlus, Shield, Trash2, Activity } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 type Member = { id?: string; email: string; role: string; created_at?: string };
 type Log = { id: string; action: string; detail: string; created_at: string };

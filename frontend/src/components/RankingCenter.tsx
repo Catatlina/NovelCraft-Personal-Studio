@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, api } from "../lib/api";
-import "../styles/proto.css";
 
 type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string; capture_status?: string; user_action_required?: boolean; ocr_required?: boolean };
@@ -590,7 +589,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                             <small style={{ color: "var(--text-2)" }}>该快照没有榜单条目</small>
                           )}
                           {snapshotDetails[snapshot.id]?.latest_analysis && (
-                            <div className="card" style={{ marginTop: 14, padding: 16, background: "var(--primary-dim)", borderColor: "rgba(99,102,241,.2)" }}>
+                            <div className="card" style={{ marginTop: 14, padding: 16, background: "var(--primary-dim)", borderColor: "var(--border-strong)" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                                 <strong style={{ fontSize: 14 }}>AI 市场分析</strong>
                                 <span className="badge purple">{snapshotDetails[snapshot.id].latest_analysis?.analysis_mode}</span>
@@ -630,7 +629,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       <div style={{ display: "grid", gap: 16 }}>
 
         {/* Summary card */}
-        <div className="card" style={{ padding: 16, background: "var(--primary-dim)", borderColor: "rgba(99,102,241,.2)" }}>
+        <div className="card" style={{ padding: 16, background: "var(--primary-dim)", borderColor: "var(--border-strong)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <strong style={{ fontSize: 15 }}>聚合分析摘要</strong>
             <span className="badge purple">{multiAnalysisResult.status || "unknown"}</span>
@@ -724,7 +723,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
             <summary style={{ padding: "10px 16px", borderRadius: "var(--r-sm)", background: "var(--bg-hover)", fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
               🔥 热度图数据（点击展开）
             </summary>
-            <pre style={{ fontSize: 12, color: "var(--text-3)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", padding: 12, background: "rgba(0,0,0,0.2)", borderRadius: "var(--r-sm)" }}>
+            <pre style={{ fontSize: 12, color: "var(--text-3)", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", padding: 12, background: "var(--bg-muted)", borderRadius: "var(--r-sm)" }}>
               {JSON.stringify(multiAnalysisResult.heatmap, null, 2)}
             </pre>
           </details>
@@ -758,7 +757,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       </div>
 
       {scanWarning && (
-        <div style={{ padding: "8px 12px", borderRadius: "var(--r-sm)", background: "rgba(251,146,60,.12)", color: "var(--orange)", fontSize: 12, marginBottom: 12 }}>
+        <div style={{ padding: "8px 12px", borderRadius: "var(--r-sm)", background: "var(--warning-bg)", color: "var(--orange)", fontSize: 12, marginBottom: 12 }}>
           ⚠️ 新一轮扫描后，非备选选题将被清空。建议将心仪选题加入⭐备选池。
         </div>
       )}

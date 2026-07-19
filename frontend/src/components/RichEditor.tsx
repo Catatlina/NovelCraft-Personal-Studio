@@ -8,7 +8,6 @@ import {
   Moon, Sun, Eye, EyeOff, Type, Gauge
 } from "lucide-react";
 import "../styles/novel-prose.css";
-import "../styles/proto.css";
 
 type Props = {
   value: string;

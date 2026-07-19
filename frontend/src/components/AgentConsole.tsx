@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Terminal, Activity } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 type AgentStatus = { name: string; status: string; task_count: number; last_run: string };
 

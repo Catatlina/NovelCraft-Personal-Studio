@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { BarChart3, Loader2, RefreshCw, AlertTriangle, TrendingUp } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 // Backend envelope shape: { code, message, data } — lib/api returns the full
@@ -109,7 +108,7 @@ function Banner({
         borderRadius: "var(--r-md)",
         marginBottom: 16,
         border: `1px solid ${isError ? "var(--red)" : "var(--border-subtle)"}`,
-        background: isError ? "rgba(248,113,113,.08)" : "var(--bg-base)",
+        background: isError ? "var(--danger-bg)" : "var(--bg-base)",
         color: isError ? "var(--red)" : "var(--text-2)",
         fontSize: 13,
       }}

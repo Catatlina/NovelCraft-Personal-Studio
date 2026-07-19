@@ -11,7 +11,6 @@ import {
   FileText,
   Bell,
 } from "lucide-react";
-import "../styles/proto.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,7 +92,7 @@ const QUICK_ACTIONS: QAction[] = [
     title: "扫榜选书",
     description: "榜单热点分析，智能选题",
     accent: "var(--cyan)",
-    accentBg: "rgba(34,211,238,.12)",
+    accentBg: "var(--info-bg)",
   },
   {
     id: "hotspot",
@@ -102,7 +101,7 @@ const QUICK_ACTIONS: QAction[] = [
     title: "热点追踪",
     description: "实时热点捕获与灵感",
     accent: "var(--orange)",
-    accentBg: "rgba(251,146,60,.12)",
+    accentBg: "var(--warning-bg)",
   },
   {
     id: "library",
@@ -111,7 +110,7 @@ const QUICK_ACTIONS: QAction[] = [
     title: "书库管理",
     description: "统一管理所有作品",
     accent: "var(--green)",
-    accentBg: "rgba(52,211,153,.12)",
+    accentBg: "var(--success-bg)",
   },
   {
     id: "editor",
@@ -129,7 +128,7 @@ const QUICK_ACTIONS: QAction[] = [
     title: "审阅",
     description: "批注、协作与版本对比",
     accent: "var(--cyan)",
-    accentBg: "rgba(34,211,238,.12)",
+    accentBg: "var(--info-bg)",
   },
 ];
 

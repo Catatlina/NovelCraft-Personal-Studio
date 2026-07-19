@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 export function PublishDashboard() {
   const [platforms] = useState(["wechat","toutiao","xiaohongshu","zhihu","medium","substack","twitter","wordpress","royalroad","kdp"]);
@@ -136,7 +135,7 @@ export function PublishDashboard() {
             </div>
             <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"8px 0 14px"}}>
               {platforms.map(p=>(
-                <label key={p} style={{display:"flex",alignItems:"center",gap:4,fontSize:13,padding:"4px 10px",border:"1px solid var(--border)",borderRadius:6,background:selected.includes(p)?"var(--primary)":"transparent",color:selected.includes(p)?"#fff":"var(--text-2)",cursor:"pointer",transition:"all .15s"}}>
+                <label key={p} style={{display:"flex",alignItems:"center",gap:4,fontSize:13,padding:"4px 10px",border:"1px solid var(--border)",borderRadius:6,background:selected.includes(p)?"var(--primary)":"transparent",color:selected.includes(p)?"var(--brand-foreground)":"var(--text-2)",cursor:"pointer",transition:"all .15s"}}>
                   <input type="checkbox" checked={selected.includes(p)} onChange={()=>setSelected(prev=>prev.includes(p)?prev.filter(x=>x!==p):[...prev,p])} style={{display:"none"}}/>
                   {p}
                 </label>
@@ -151,10 +150,10 @@ export function PublishDashboard() {
               </button>
             </div>
             {sensitiveResult && (sensitiveResult.passed
-              ? <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--green)",background:"rgba(52,211,153,.12)"}}>
+              ? <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--green)",background:"var(--success-bg)"}}>
                   <span className="dot green" style={{display:"inline-block",marginRight:6}}/>敏感词检查通过
                 </div>
-              : <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--red)",background:"rgba(248,113,113,.12)"}}>
+              : <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--red)",background:"var(--danger-bg)"}}>
                   检测到敏感词：{sensitiveResult.blocked_words.join("、")}
                 </div>)}
             {result && <pre style={{fontSize:11,marginTop:12,padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap"}}>{JSON.stringify(result,null,2)}</pre>}
@@ -247,7 +246,7 @@ export function PublishDashboard() {
                   AI 深度反哺建议
                 </button>
                 {feedbackError && (
-                  <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--red)",background:"rgba(248,113,113,.12)"}}>{feedbackError}</div>
+                  <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--red)",background:"var(--danger-bg)"}}>{feedbackError}</div>
                 )}
                 {feedback?.status === "no_data" && (
                   <div className="cell-sub" style={{marginTop:8}}>{feedback.message}</div>

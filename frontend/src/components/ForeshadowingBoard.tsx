@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Lightbulb, CheckCircle } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 type Foreshadowing = {
   id: string; content: string; status: string;

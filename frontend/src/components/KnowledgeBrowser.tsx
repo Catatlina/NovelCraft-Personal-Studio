@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Search, BookOpen, FileText } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 type KnowledgeItem = {
   id: string; kind: string; title: string; body: string;

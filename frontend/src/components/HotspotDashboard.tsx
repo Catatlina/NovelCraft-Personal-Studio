@@ -4,7 +4,6 @@ import {
   RefreshCw, Eye, X, ChevronLeft, ChevronRight, Star, FileText,
 } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 import "../styles/novel-prose.css";
 
 type HotspotItem = {
@@ -299,7 +298,7 @@ export function HotspotDashboard() {
             disabled={loading}
             onClick={() => { void loadHotspots(); }}
             style={{
-              background: "var(--primary)", color: "#fff",
+              background: "var(--primary)", color: "var(--brand-foreground)",
               display: "flex", alignItems: "center", gap: 6,
             }}
           >
@@ -323,12 +322,12 @@ export function HotspotDashboard() {
 
       {/* ── Notices ────────────────────────────────────────────── */}
       {error && (
-        <div className="card" style={{ borderColor: "rgba(248,113,113,.25)", padding: 12 }}>
+        <div className="card" style={{ borderColor: "var(--border-strong)", padding: 12 }}>
           <span style={{ color: "var(--red)", fontSize: 13 }}>{error}</span>
         </div>
       )}
       {notice && (
-        <div className="card" style={{ borderColor: "rgba(52,211,153,.25)", padding: 12 }}>
+        <div className="card" style={{ borderColor: "var(--border-strong)", padding: 12 }}>
           <span style={{ color: "var(--green)", fontSize: 13 }}>{notice}</span>
         </div>
       )}
@@ -350,7 +349,7 @@ export function HotspotDashboard() {
             <button
               onClick={toast.onAction}
               className="btn-sm"
-              style={{ background: "var(--primary)", color: "#fff" }}
+              style={{ background: "var(--primary)", color: "var(--brand-foreground)" }}
             >
               {toast.actionLabel}
             </button>
@@ -445,8 +444,8 @@ export function HotspotDashboard() {
                       className="btn-sm"
                       style={{
                         background: generated
-                          ? "rgba(52,211,153,.14)" : "var(--primary)",
-                        color: generated ? "var(--green)" : "#fff",
+                          ? "var(--success-bg)" : "var(--primary)",
+                        color: generated ? "var(--green)" : "var(--brand-foreground)",
                         opacity: busy ? 0.6 : 1,
                         justifyContent: "center",
                       }}
@@ -591,7 +590,7 @@ export function HotspotDashboard() {
                           if (h) void generate(h);
                         }}
                         className="btn-sm"
-                        style={{ background: "var(--primary)", color: "#fff", justifyContent: "center" }}
+                        style={{ background: "var(--primary)", color: "var(--brand-foreground)", justifyContent: "center" }}
                       >
                         <Plus size={12} /> 一键生成
                       </button>
@@ -649,7 +648,7 @@ export function HotspotDashboard() {
                 />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={saveEdit} className="btn-sm" style={{ background: "var(--primary)", color: "#fff" }}>
+                <button onClick={saveEdit} className="btn-sm" style={{ background: "var(--primary)", color: "var(--brand-foreground)" }}>
                   保存
                 </button>
                 <button onClick={() => setEditArticle(null)} className="btn-ghost">

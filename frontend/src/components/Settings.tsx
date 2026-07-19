@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap, Users, Upload, Download, Database } from "lucide-react";
 import { api, getApiKey, getApiUrl, getModel, setApiKey, setApiUrl, setModel } from "../lib/api";
-import '../styles/proto.css';
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string,unknown>; fallback_json: any[] };
@@ -141,7 +140,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   }
 
   return (
-    <div style={{display:"grid", gridTemplateColumns:"200px 1fr", gap:0, minHeight:480, background:"var(--bg-elev)", borderRadius:"var(--r-lg)", border:"1px solid var(--border)", overflow:"hidden"}}>
+    <div className="settings-shell">
 
       {/* ── Left sidebar tab navigation ── */}
       <div style={{display:"flex", flexDirection:"column", borderRight:"1px solid var(--border)", padding:"12px 8px", gap:2}}>
@@ -172,7 +171,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         {/* Toast message */}
         {msg && (
           <div style={{
-            background:"#1a3a28", color:"var(--green)", border:"1px solid var(--green)",
+            background:"var(--success-bg)", color:"var(--green)", border:"1px solid var(--green)",
             borderRadius:"var(--r-sm)", padding:"10px 14px", marginBottom:16,
             display:"flex", alignItems:"center", justifyContent:"space-between", fontSize:13
           }}>

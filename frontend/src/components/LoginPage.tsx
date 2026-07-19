@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { Sparkles, Mail, Lock, Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
-import "../styles/proto.css";
 import { api } from "../lib/api";
 
 type Props = { onLogin: (token: string, email: string) => void };

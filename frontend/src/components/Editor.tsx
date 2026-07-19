@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Save, RotateCcw, Wand2, Sparkles, Bot, RefreshCcw, Send } from "lucide-react";
 import { RichEditor } from "./RichEditor";
-import "../styles/proto.css";
 import "../styles/novel-prose.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
@@ -153,9 +152,9 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         <div className="card" style={{ marginBottom: 12 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--orange)", marginBottom: 12 }}>离线版本冲突</h2>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <label style={{ fontSize: 12, color: "var(--text-2)" }}>本地稿<textarea className="form-input" value={localConflictText} readOnly rows={8} style={{ marginTop: 4, background: "rgba(0,0,0,.25)", fontSize: 12 }} /></label>
-            <label style={{ fontSize: 12, color: "var(--text-2)" }}>服务器稿<textarea className="form-input" value={serverText} readOnly rows={8} style={{ marginTop: 4, background: "rgba(0,0,0,.25)", fontSize: 12 }} /></label>
-            <label style={{ fontSize: 12, color: "var(--text-2)" }}>合并稿<textarea className="form-input" value={mergeText} onChange={event => setMergeText(event.target.value)} rows={8} style={{ marginTop: 4, background: "rgba(0,0,0,.25)", fontSize: 12 }} /></label>
+            <label style={{ fontSize: 12, color: "var(--text-2)" }}>本地稿<textarea className="form-input" value={localConflictText} readOnly rows={8} style={{ marginTop: 4, background: "var(--bg-muted)", fontSize: 12 }} /></label>
+            <label style={{ fontSize: 12, color: "var(--text-2)" }}>服务器稿<textarea className="form-input" value={serverText} readOnly rows={8} style={{ marginTop: 4, background: "var(--bg-muted)", fontSize: 12 }} /></label>
+            <label style={{ fontSize: 12, color: "var(--text-2)" }}>合并稿<textarea className="form-input" value={mergeText} onChange={event => setMergeText(event.target.value)} rows={8} style={{ marginTop: 4, background: "var(--bg-muted)", fontSize: 12 }} /></label>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="btn-sm btn-ghost" onClick={() => { setEditorText(localConflictText); setConflictDismissed(true); }}>采用本地稿</button>
@@ -326,7 +325,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
       {isFullscreen && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 200,
-          background: "var(--bg, #0a0a14)", padding: 16,
+          background: "var(--bg)", padding: 16,
           display: "flex", flexDirection: "column"
         }}>
           <RichEditor

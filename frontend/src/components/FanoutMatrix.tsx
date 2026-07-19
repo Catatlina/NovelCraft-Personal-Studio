@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Send, CheckCircle } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 const PLATFORMS = [
   { key: "wechat", name: "微信公众号" },

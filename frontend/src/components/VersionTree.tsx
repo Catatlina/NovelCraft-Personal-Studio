@@ -1,6 +1,5 @@
 import React from "react";
 import { GitBranch, RotateCcw } from "lucide-react";
-import "../styles/proto.css";
 
 type Version = { id: string; label: string; created_at: string; snapshot: any };
 

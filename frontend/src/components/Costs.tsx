@@ -1,5 +1,4 @@
 import React from "react";
-import "../styles/proto.css";
 
 type AiCall = { id: string; provider: string; model: string; task_type: string; prompt_tokens: number; completion_tokens: number; cost_cny: number; latency_ms: number };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };

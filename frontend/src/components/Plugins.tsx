@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Puzzle, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Download, Power, Ban } from "lucide-react";
 import { api } from "../lib/api";
-import "../styles/proto.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 // lib/api returns the full envelope { code, message, data }; unwrap `.data`.
@@ -49,7 +48,7 @@ function Banner({
         borderRadius: "var(--r-md)",
         marginBottom: 16,
         border: `1px solid ${isError ? "var(--red)" : "var(--border-subtle)"}`,
-        background: isError ? "rgba(248,113,113,.08)" : "var(--bg-base)",
+        background: isError ? "var(--danger-bg)" : "var(--bg-base)",
         color: isError ? "var(--red)" : "var(--text-2)",
         fontSize: 13,
       }}
