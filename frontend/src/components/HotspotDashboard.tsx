@@ -4,7 +4,7 @@ import {
   RefreshCw, Eye, X, Star, FileText,
 } from "lucide-react";
 import { api } from "../lib/api";
-import { Pagination } from "./ui";
+import { Pagination, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
 
@@ -422,7 +422,6 @@ export function HotspotDashboard() {
                       </span>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-3)" }}>
-                      <span className="badge cyan">{h.source_name || h.source}</span>
                       <span>{h.category}</span>
                     </div>
                     {/* Hotness bar */}
@@ -437,6 +436,21 @@ export function HotspotDashboard() {
                         {h.hotness}
                       </span>
                     </div>
+                    <Accordion items={[{
+                      key: `hs-detail-${cardKey}`,
+                      title: "查看来源详情",
+                      defaultOpen: false,
+                      content: (
+                        <div style={{ fontSize: 12, lineHeight: 1.9, color: "var(--text-2)" }}>
+                          <div>平台：{h.source_name || h.source}</div>
+                          {h.url ? (
+                            <div>来源链接：<a href={h.url} target="_blank" rel="noreferrer" style={{ color: "var(--primary-light)" }}>{h.url}</a></div>
+                          ) : null}
+                          {h.fetched_at ? <div>发布时间：{new Date(h.fetched_at).toLocaleString()}</div> : null}
+                          <div>热度指数：{h.hotness}</div>
+                        </div>
+                      ),
+                    }]} />
                     <button
                       disabled={busy}
                       onClick={() => void generate(h)}

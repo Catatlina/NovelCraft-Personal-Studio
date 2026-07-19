@@ -1,10 +1,12 @@
 import React from "react";
+import { FileText } from "lucide-react";
 import { ReviewRadar } from "./ReviewRadar";
 import { CharacterCard, OutlineTree } from "./CharacterOutline";
 import { Pagination } from "./ui";
+import { NovelAnalysisReport } from "./NovelAnalysisReport";
 import { usePagination } from "../hooks/usePagination";
 
-type Content = { id: string; title: string; meta: Record<string, unknown> };
+type Content = { id: string; title: string; type?: string; status?: string; meta: Record<string, unknown> };
 type ReviewPayload = {
   score?: number;
   self_score?: number;
@@ -87,6 +89,103 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
   const strengths = review?.strengths || [];
   const continuity = review?.final_continuity_audit?.continuity;
 
+  // ── Build NovelAnalysisReport sections from EXISTING review data ──
+  // Only data we actually possess is passed; missing sections fall back to
+  // the "暂无数据" placeholder inside NovelAnalysisReport (no fabrication).
+  const metaAny = meta as Record<string, unknown>;
+
+  const basicInfoNode: React.ReactNode = (
+    <div style={{ fontSize: 13, lineHeight: 1.9, color: "var(--text-2)" }}>
+      <div><b>书名：</b>{chapter?.title || "未命名作品"}</div>
+      <div><b>类型：</b>{chapter?.type || "—"}</div>
+      <div><b>状态：</b>{chapter?.status || "—"}</div>
+      {metaAny.genre ? <div><b>题材：</b>{String(metaAny.genre)}</div> : null}
+      {metaAny.premise ? <div><b>核心设定：</b>{String(metaAny.premise)}</div> : null}
+      {metaAny.idea ? <div><b>创作灵感：</b>{String(metaAny.idea)}</div> : null}
+      {hasScoreEvidence ? <div><b>综合评分：</b>{Math.round(totalScore)}</div> : null}
+    </div>
+  );
+
+  const hitReasonNode: React.ReactNode | undefined = (() => {
+    const reasons: React.ReactNode[] = [];
+    strengths.forEach((s, i) => reasons.push(<span key={`st-${i}`} className="badge purple">{s}</span>));
+    if (Array.isArray(metaAny.differentiators)) {
+      (metaAny.differentiators as unknown[]).forEach((d, i) => reasons.push(<span key={`df-${i}`} className="badge cyan">{String(d)}</span>));
+    }
+    if (Array.isArray(metaAny.market_evidence)) {
+      (metaAny.market_evidence as unknown[]).forEach((e, i) => reasons.push(<span key={`me-${i}`} className="badge gray">{String(e)}</span>));
+    }
+    if (!reasons.length) return undefined;
+    return <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{reasons}</div>;
+  })();
+
+  const goldenThreeNode: React.ReactNode | undefined = (() => {
+    const outline = metaAny.outline || metaAny.chapter_outlines;
+    if (Array.isArray(outline) && outline.length) return <OutlineTree nodes={outline as any[]} />;
+    return undefined;
+  })();
+
+  const characterAnalysisNode: React.ReactNode | undefined = (() => {
+    if (!characters?.length) return undefined;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {characters.map((c: any, i: number) => (
+          <div key={i} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+            <strong>{c.name || c.character || `角色 ${i + 1}`}</strong>
+            {c.role ? <span style={{ color: "var(--text-3)", marginLeft: 8 }}>{c.role}</span> : null}
+            {c.description ? <div style={{ color: "var(--text-2)", marginTop: 4 }}>{c.description}</div> : null}
+          </div>
+        ))}
+        {arcs?.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <strong style={{ fontSize: 13 }}>人物弧线</strong>
+            {arcs.map((a: any, i: number) => (
+              <div key={i} style={{ fontSize: 13, padding: "4px 0" }}>
+                <strong>{a.character}</strong>
+                {a.stage ? <span style={{ color: "var(--text-3)", marginLeft: 8 }}>{a.stage}</span> : null}
+                {a.goal ? <span style={{ marginLeft: 8 }}>{a.goal}</span> : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  })();
+
+  const worldviewNode: React.ReactNode | undefined = (() => {
+    const world = metaAny.worldview || metaAny.world_building || metaAny.world_setting;
+    if (world) return <div style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text-2)" }}>{String(world)}</div>;
+    return undefined;
+  })();
+
+  const styleAnalysisNode: React.ReactNode | undefined = (() => {
+    if (!dims.length) return undefined;
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {dims.map((d, i) => (
+          <span key={i} className={`badge ${scoreBadgeColor(d.score)}`}>{d.name} {d.score}</span>
+        ))}
+      </div>
+    );
+  })();
+
+  const readerAnalysisNode: React.ReactNode | undefined = (() => {
+    const reader = metaAny.target_audience || metaAny.audience;
+    if (reader) return <div style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text-2)" }}>{String(reader)}</div>;
+    return undefined;
+  })();
+
+  const aiSuggestionNode: React.ReactNode | undefined = (() => {
+    const suggestions: React.ReactNode[] = [];
+    issues.forEach((s, i) => suggestions.push(<span key={`is-${i}`} className="badge orange">{s}</span>));
+    if (continuity?.gaps && Array.isArray(continuity.gaps)) {
+      (continuity.gaps as unknown[]).forEach((g, i) =>
+        suggestions.push(<span key={`gp-${i}`} className="badge orange">{typeof g === "string" ? g : JSON.stringify(g)}</span>));
+    }
+    if (!suggestions.length) return undefined;
+    return <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{suggestions}</div>;
+  })();
+
   // Paginate the read-only data lists so long reviews stay scannable.
   const charactersPager = usePagination({ items: characters, pageSize: 10, mode: "client" });
   const timelinePager = usePagination({ items: timeline, pageSize: 10, mode: "client" });
@@ -138,6 +237,25 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
             <p>本章没有可验证的七维评分记录。请在编辑器执行改写、润色或整章重写，或等待生成工作流完成自动审查。</p>
           </div>
         )}
+      </div>
+
+      {/* ── Consolidated novel analysis report (8-section Accordion) ── */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-head">
+          <div className="card-title">
+            <FileText size={18} /> 小说分析报告
+          </div>
+        </div>
+        <NovelAnalysisReport
+          basicInfo={basicInfoNode}
+          hitReason={hitReasonNode}
+          goldenThree={goldenThreeNode}
+          characterAnalysis={characterAnalysisNode}
+          worldview={worldviewNode}
+          styleAnalysis={styleAnalysisNode}
+          readerAnalysis={readerAnalysisNode}
+          aiSuggestion={aiSuggestionNode}
+        />
       </div>
 
       {/* ── Dimensions detail (consistency checks) ── */}

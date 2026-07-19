@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, api } from "../lib/api";
-import { Pagination } from "./ui";
+import { Pagination, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
+import { NovelAnalysisReport } from "./NovelAnalysisReport";
 
 type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string; capture_status?: string; user_action_required?: boolean; ocr_required?: boolean };
@@ -380,17 +381,25 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           const healthLabel = source.last_error ? "异常" : source.last_success_at ? "健康" : "未采集";
           const healthBadge = source.last_error ? "red" : source.last_success_at ? "green" : "gray";
           return <div className="card" key={source.source_key} style={{ padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}>{source.display_name}</strong>
-              <span className={`badge ${healthBadge}`}>{healthLabel}</span>
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.6 }}>
-              <div>{source.last_success_at ? `最近成功：${new Date(source.last_success_at).toLocaleString()}` : "最近成功：暂无"}</div>
-              {source.capture_status && <div>采集状态：{source.capture_status}</div>}
-              {source.user_action_required && <div style={{ color: "var(--red)" }}>需要用户在浏览器完成验证后重新采集</div>}
-              {source.ocr_required && <div>该来源需要截图/OCR 采集</div>}
-              {source.last_error && <div style={{ color: "var(--red)" }}>{source.last_error}</div>}
-            </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                <strong style={{ fontSize: 14 }}>{source.display_name}</strong>
+                <span className={`badge ${healthBadge}`}>{healthLabel}</span>
+              </div>
+            <Accordion items={[{
+              key: `source-detail-${source.source_key}`,
+              title: "查看来源详情",
+              defaultOpen: false,
+              content: (
+                <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.8, padding: "2px 0" }}>
+                  <div>数据来源：{source.source_key}</div>
+                  <div>采集时间：{source.last_success_at ? new Date(source.last_success_at).toLocaleString() : "暂无"}</div>
+                  {source.capture_status && <div>采集状态：{source.capture_status}</div>}
+                  {source.user_action_required && <div style={{ color: "var(--red)" }}>需要用户在浏览器完成验证后重新采集</div>}
+                  {source.ocr_required && <div>该来源需要截图 / OCR 采集</div>}
+                  {source.last_error && <div style={{ color: "var(--red)" }}>错误信息：{source.last_error}</div>}
+                </div>
+              ),
+            }]} />
             <button
               className="btn-sm btn-primary"
               style={{ marginTop: 10, width: "100%" }}
@@ -660,6 +669,49 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         </span>
       </div>
       <div style={{ display: "grid", gap: 16 }}>
+
+        {/* ── 8-section novel analysis report (reuses existing multi-analysis data) ── */}
+        <div className="card" style={{ padding: 16, background: "var(--primary-dim)", borderColor: "var(--border-strong)" }}>
+          <div className="card-head" style={{ marginBottom: 10 }}>
+            <div className="card-title"><span>📑</span> 聚合分析报告</div>
+          </div>
+          <NovelAnalysisReport
+            basicInfo={((): React.ReactNode => {
+              const lines: React.ReactNode[] = [];
+              if (multiAnalysisResult.summary) lines.push(<div key="s"><b>分析摘要：</b>{multiAnalysisResult.summary}</div>);
+              if (multiAnalysisResult.total_books !== undefined) lines.push(<div key="t"><b>分析书籍：</b>{multiAnalysisResult.total_books} 本</div>);
+              if (multiAnalysisResult.platform_breakdown) lines.push(<div key="p"><b>平台分布：</b>{Object.entries(multiAnalysisResult.platform_breakdown as Record<string, number>).map(([p, c]) => `${p}：${c}本`).join("，")}</div>);
+              if (Array.isArray(multiAnalysisResult.top_genres) && multiAnalysisResult.top_genres.length) lines.push(<div key="g"><b>热门题材：</b>{multiAnalysisResult.top_genres.map((g: any) => typeof g === "string" ? g : `${g.genre || g.name}`).join("、")}</div>);
+              lines.push(<div key="l"><b>通过层级：</b>{multiAnalysisResult.succeeded_layers || 0}/{multiAnalysisResult.total_layers || 0}</div>);
+              return <div style={{ fontSize: 13, lineHeight: 1.9, color: "var(--text-2)" }}>{lines}</div>;
+            })()}
+            hitReason={((): React.ReactNode | undefined => {
+              const items: React.ReactNode[] = [];
+              if (Array.isArray(multiAnalysisResult.common_selling_points)) {
+                multiAnalysisResult.common_selling_points.forEach((sp: any, i: number) =>
+                  items.push(<li key={`sp-${i}`}>{typeof sp === "string" ? sp : `${sp.point || sp.name}${sp.platforms ? ` [${sp.platforms.join(", ")}]` : ""}`}</li>));
+              }
+              if (Array.isArray(multiAnalysisResult.market_signals)) {
+                multiAnalysisResult.market_signals.forEach((s: any, i: number) =>
+                  items.push(<li key={`ms-${i}`}>{typeof s === "string" ? s : `${s.signal || s.name}${s.evidence ? ` — ${s.evidence}` : ""}`}</li>));
+              }
+              if (!items.length) return undefined;
+              return <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.8, color: "var(--text-2)" }}>{items}</ul>;
+            })()}
+            readerAnalysis={((): React.ReactNode | undefined => {
+              const audience = multiAnalysisResult.audience;
+              if (audience && (audience.primary || (audience.needs && audience.needs.length))) {
+                return (
+                  <div style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text-2)" }}>
+                    {audience.primary && <div><b>核心受众：</b>{audience.primary}</div>}
+                    {audience.needs && audience.needs.length ? <div><b>需求：</b>{audience.needs.join("、")}</div> : null}
+                  </div>
+                );
+              }
+              return undefined;
+            })()}
+          />
+        </div>
 
         {/* Summary card */}
         <div className="card" style={{ padding: 16, background: "var(--primary-dim)", borderColor: "var(--border-strong)" }}>
