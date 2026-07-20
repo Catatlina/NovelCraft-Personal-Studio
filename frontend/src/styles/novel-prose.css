@@ -1,0 +1,16 @@
+/* Novel prose styles — advanced typography for novel reading/editing */
+.novel-prose {
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--text-primary, #e2e8f0);
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.novel-prose h1, .novel-prose h2, .novel-prose h3 { font-weight: 700; margin: 1.5em 0 0.5em; }
+.novel-prose h1 { font-size: 1.8em; }
+.novel-prose h2 { font-size: 1.4em; }
+.novel-prose h3 { font-size: 1.1em; }
+.novel-prose p { margin: 0.8em 0; text-indent: 2em; }
+.novel-prose p:first-of-type { text-indent: 0; }

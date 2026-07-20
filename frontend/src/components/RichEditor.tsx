@@ -8,10 +8,24 @@ type Props = {
   value: string;
   onChange: (v: string) => void;
   onSelection?: (s: string) => void;
+  selection?: string;
   onAiOp?: (op: string) => void;
+  aiReview?: any;
+  deaiResult?: any;
+  deaiLoading?: boolean;
+  deai?: (t: string) => void;
+  autoSavedAt?: string;
+  dirty?: boolean;
+  hideAiPanel?: boolean;
+  isFocusMode?: boolean;
+  isFullscreen?: boolean;
+  isNightMode?: boolean;
+  onToggleFocusMode?: () => void;
+  onToggleFullscreen?: () => void;
+  onToggleNightMode?: () => void;
 };
 
-export function RichEditor({ value, onChange, onSelection, onAiOp }: Props) {
+export function RichEditor({ value, onChange, onSelection, selection, onAiOp, aiReview, deaiResult, deaiLoading, deai, autoSavedAt, dirty, hideAiPanel, isFocusMode, isFullscreen, isNightMode, onToggleFocusMode, onToggleFullscreen, onToggleNightMode }: Props) {
   const [showAiBar, setShowAiBar] = useState(false);
   const [barPos, setBarPos] = useState({ x: 0, y: 0 });
 
