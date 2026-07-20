@@ -11,21 +11,41 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import settings
-from .core.circuit_breaker import circuit_breaker, record_failure, record_success
+from .core.circuit_breaker import (
+    circuit_breaker,
+    record_failure,
+    record_success,
+    acquire_provider_token,
+)
+from .core.retry import with_provider_retry
 from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
+from .core.billing import get_active_subscription, monthly_window
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
 
 # Context variable for per-request API key (set by middleware from X-Api-Key header)
 _request_api_key: ContextVar[str | None] = ContextVar("request_api_key", default=None)
 _request_api_base_url: ContextVar[str | None] = ContextVar("request_api_base_url", default=None)
 _request_model: ContextVar[str | None] = ContextVar("request_model", default=None)
+_request_user_id: ContextVar[str | None] = ContextVar("request_user_id", default=None)
 
 
 # Default model when no route exists. Must be a model that actually exists on
 # the DeepSeek API — a fictional name here fails every unrouted task at call time.
-MODEL = "deepseek-chat"
+MODEL = "deepseek-v4-pro"
 PROVIDER = "deepseek"
+
+LONG_FORM_TASKS = {
+    "gen_chapter1",
+    "gen_next_chapter",
+    "write_chapter_draft",
+    "write_polish",
+    "final_humanize",
+    "editor_continue",
+    "editor_rewrite",
+    "editor_expand",
+    "style_imitation",
+}
 
 
 class BudgetExceeded(RuntimeError):
@@ -38,6 +58,18 @@ class ProviderError(RuntimeError):
 
 class OutputValidationError(ProviderError):
     """Raised when a provider response is JSON but violates the task contract."""
+
+
+class ProviderRateLimitError(RuntimeError):
+    """Raised on an HTTP 429 from a provider; triggers the rate-limit backoff (P1-T1).
+
+    Carries an optional ``retry_after`` (seconds) parsed from the Retry-After
+    header so callers / the envelope can surface a precise backoff hint.
+    """
+
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class _StrictOutput(BaseModel):
@@ -123,7 +155,24 @@ class _PlanIdeaOutput(_LenientOutput):
     idea_expanded: str = Field(min_length=20)
     core_hook: str = Field(min_length=5)
     target_audience: str = Field(min_length=2)
-    title_candidates: list[str] = Field(min_length=3, max_length=8)
+    title_candidates: list[str] = Field(min_length=3, max_length=10)
+    creative_bible: str = Field(min_length=300)
+    source_facts: list[str] = Field(min_length=3, max_length=30)
+    design_additions: list[str] = Field(default_factory=list, max_length=20)
+    forbidden_changes: list[str] = Field(min_length=3, max_length=20)
+    downstream_deliverables: list[str] = Field(min_length=1, max_length=20)
+
+
+class _PlanFidelityAuditOutput(_LenientOutput):
+    passed: bool
+    score: float = Field(ge=0, le=100)
+    matched_requirements: list[str] = Field(min_length=3)
+    contradictions: list[str] = Field(default_factory=list)
+    omissions: list[str] = Field(default_factory=list)
+
+
+class _RegenerateTitlesOutput(_LenientOutput):
+    title_candidates: list[str] = Field(min_length=3, max_length=10)
 
 
 class _PlanMarketFitOutput(_LenientOutput):
@@ -213,13 +262,35 @@ class _WriteFactReconcileOutput(_LenientOutput):
     reconciliation: dict[str, Any]
 
 
+class _ConsistencyDimension(_LenientOutput):
+    status: str = Field(pattern=r"^(pass|warning|fail)$")
+    issues: list[Any] = Field(default_factory=list)
+
+
+class _FinalConsistencyDimensions(_LenientOutput):
+    source_fidelity: _ConsistencyDimension
+    characters: _ConsistencyDimension
+    locations: _ConsistencyDimension
+    timeline: _ConsistencyDimension
+    objects: _ConsistencyDimension
+    settings: _ConsistencyDimension
+    foreshadowing: _ConsistencyDimension
+
+
 class _FinalConsistencyCheckOutput(_LenientOutput):
-    checks: dict[str, Any]
-    overall_status: str = Field(min_length=2)
+    checks: _FinalConsistencyDimensions
+    overall_status: str = Field(pattern=r"^(pass|warning|fail)$")
+    warning_count: int = Field(ge=0)
+
+
+class _ContinuityAuditBody(_LenientOutput):
+    status: str = Field(pattern=r"^(continuous|warning|broken)$")
+    gaps: list[Any] = Field(default_factory=list)
+    narrative_flow: str = Field(min_length=2)
 
 
 class _FinalContinuityAuditOutput(_LenientOutput):
-    continuity: dict[str, Any]
+    continuity: _ContinuityAuditBody
 
 
 class _FinalHumanizeOutput(_LenientOutput):
@@ -270,6 +341,54 @@ class _MaterialSuggestionsOutput(_LenientOutput):
     recommended_tags: list[str] = Field(default_factory=list)
 
 
+class _TopicSuggestionItem(_LenientOutput):
+    suggestion: str = Field(min_length=2)
+    rationale: str = ""
+    based_on: list[str] = Field(default_factory=list)
+
+
+class _PerformanceFeedbackOutput(_LenientOutput):
+    topic_suggestions: list[_TopicSuggestionItem] = Field(min_length=1)
+    writing_advice: list[str] = Field(default_factory=list)
+
+
+class _TranslateSegmentOutput(_LenientOutput):
+    translated: str = Field(min_length=1)
+
+
+class _CulturalLocalizeOutput(_LenientOutput):
+    localized: str = Field(min_length=1)
+    notes: list[str] = Field(default_factory=list)
+
+
+class _LocalizeNamesOutput(_LenientOutput):
+    name_map: dict[str, str] = Field(default_factory=dict)
+
+
+class _TextOutput(_StrictOutput):
+    """Editor operations must never turn an empty provider payload into success."""
+
+    text: str = Field(min_length=1)
+
+
+class _DeaiLayerOutput(_LenientOutput):
+    """De-AI pipeline layers: text + optional change log."""
+    text: str = Field(min_length=1)
+    changes: list[str] = Field(default_factory=list)
+
+
+class _DeaiScoreOutput(_LenientOutput):
+    """De-AI scoring result."""
+    score: int = Field(ge=0, le=100)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class _StyleImitationOutput(_LenientOutput):
+    title: str = Field(min_length=2)
+    style_profile: dict[str, Any]
+    text: str = Field(min_length=800)
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -283,6 +402,8 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "review_rhythm": _RhythmOutput,
     # V2 four-stage bootstrap (18 agent nodes)
     "plan_idea": _PlanIdeaOutput,
+    "audit_plan_fidelity": _PlanFidelityAuditOutput,
+    "regenerate_titles": _RegenerateTitlesOutput,
     "plan_market_fit": _PlanMarketFitOutput,
     "plan_story_pattern": _PlanStoryPatternOutput,
     "plan_core_gameplay": _PlanCoreGameplayOutput,
@@ -306,6 +427,26 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "hm_title_variants": _TitleVariantsOutput,
     "gen_video_script": _VideoScriptOutput,
     "hm_material_suggestions": _MaterialSuggestionsOutput,
+    "performance_feedback": _PerformanceFeedbackOutput,
+    "translate_segment": _TranslateSegmentOutput,
+    "cultural_localize": _CulturalLocalizeOutput,
+    "localize_names": _LocalizeNamesOutput,
+    "editor_polish": _TextOutput,
+    "editor_rewrite": _TextOutput,
+    "editor_continue": _TextOutput,
+    "editor_expand": _TextOutput,
+    "editor_condense": _TextOutput,
+    "editor_deai": _TextOutput,
+    # ── De-AI 7-layer pipeline ──
+    "deai_detect": _DeaiLayerOutput,
+    "deai_colloquialize": _DeaiLayerOutput,
+    "deai_rhythm": _DeaiLayerOutput,
+    "deai_character": _DeaiLayerOutput,
+    "deai_context": _DeaiLayerOutput,
+    "deai_deduplicate": _DeaiLayerOutput,
+    "deai_polish": _DeaiLayerOutput,
+    "deai_score": _DeaiScoreOutput,
+    "style_imitation": _StyleImitationOutput,
 }
 
 
@@ -320,6 +461,9 @@ def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
     payload = {key: value for key, value in output.items() if key != "_meta"}
     try:
         validated = model.model_validate(payload).model_dump()
+        if task_type.startswith("editor_") or task_type == "style_imitation":
+            if not str(validated.get("text") or "").strip():
+                raise OutputValidationError(f"provider returned empty text for {task_type}")
         if metadata is not None:
             validated["_meta"] = metadata
         return validated
@@ -327,11 +471,51 @@ def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
         raise OutputValidationError(f"provider output schema mismatch for {task_type}: {exc}") from exc
 
 
+def _execute_provider_call(
+    provider: str, task_type: str, prompt_text: str, model: str, params: dict,
+    project_id: str | None = None,
+) -> tuple[dict[str, Any], int, int, str, str]:
+    """Execute one real provider call and normalise its return tuple.
+
+    Raises ``ProviderError`` / ``ProviderRateLimitError`` on transport / 429 / 5xx
+    failures (these are retried by the caller's ``with_provider_retry``), and
+    ``OutputValidationError`` only for malformed JSON (handled as a schema
+    concern by the caller).
+
+    P2-T9 / Q5: before calling, the per-provider / per-scope circuit breaker and
+    token bucket are checked. ``scope`` is the ``project_id`` so a single
+    tenant's 429 storm no longer fuses the whole site, and the token bucket caps
+    outbound rate to protect DeepSeek during fan-out.
+    """
+    scope = project_id or "global"
+    if not circuit_breaker(provider, scope=scope):
+        raise ProviderError(
+            f"{provider} circuit breaker open — too many failures (scope={scope})"
+        )
+    if not acquire_provider_token(provider, scope=scope):
+        raise ProviderRateLimitError(
+            f"{provider} provider token bucket exhausted (scope={scope})"
+        )
+    if provider == "deepseek":
+        model_ = _request_model.get() or model or settings.deepseek_model
+        output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
+        record_success("deepseek", scope=scope)
+        return output, prompt_tokens, completion_tokens, "deepseek", model_
+    if provider in ("claude", "openai", "gemini"):
+        output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
+            provider, model or "", prompt_text, params
+        )
+        record_success(provider, scope=scope)
+        return output, prompt_tokens, completion_tokens, provider_name, model_name
+    raise ProviderError(f"unsupported real provider: {provider}")
+
+
 def _complete_impl(
     *,
     run_id: str | None,
     node_key: str | None,
     project_id: str,
+    user_id: str | None = None,
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
@@ -349,7 +533,7 @@ def _complete_impl(
     start = time.perf_counter()
     prompt_text, provider, model, params = _load_prompt_and_route(prompt_name, task_type, variables)
     estimated_cost = _estimate_cost(variables, {"prompt": prompt_text})
-    _assert_budget(project_id, "bootstrap", estimated_cost)
+    _assert_budget(user_id, project_id, "bootstrap", estimated_cost)
 
     prompt_tokens, completion_tokens = 0, 0  # default
     provider_name = model_name = ""
@@ -359,29 +543,31 @@ def _complete_impl(
     # are non-deterministic, so a malformed structured payload is retried
     # (FR-C3-07, <=2 retries) before it is surfaced as a failure.
     MAX_SCHEMA_ATTEMPTS = 3
+    # Transport / 429 failures are retried by with_provider_retry. The circuit
+    # breaker records a failure ONLY after every retry is exhausted
+    # (on_final_failure), so transient provider blips do not trip the breaker.
+    # Schema-contract violations (OutputValidationError) are NOT transport errors
+    # and are retried separately by the loop below (no_retry_exc re-raises them).
     for schema_attempt in range(MAX_SCHEMA_ATTEMPTS):
         prompt_tokens, completion_tokens = 0, 0
-        if provider == "deepseek":
-            if not circuit_breaker("deepseek"):
-                raise ProviderError("deepseek circuit breaker open — too many failures")
-            try:
-                model_ = _request_model.get() or model or settings.deepseek_model
-                output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
-                record_success("deepseek")
-                provider_name = "deepseek"
-                model_name = model_
-            except ProviderError:
-                record_failure("deepseek")
+        try:
+            output, prompt_tokens, completion_tokens, provider_name, model_name = with_provider_retry(
+                rate_limit_exc=(ProviderRateLimitError,),
+                transport_exc=(ProviderError,),
+                no_retry_exc=(OutputValidationError,),
+                on_final_failure=lambda exc: record_failure(
+                    provider, scope=project_id or "global"
+                ),
+            )(_execute_provider_call)(
+                provider, task_type, prompt_text, model, params, project_id=project_id
+            )
+        except OutputValidationError:
+            # Schema-contract violation (non-JSON / malformed structured output)
+            # is a model-sample failure, not a transport outage — retry with a
+            # fresh real completion under the same contract.
+            if schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
                 raise
-        elif provider in ("claude", "openai", "gemini"):
-            try:
-                output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
-                    provider, model or "", prompt_text, params
-                )
-            except Exception as exc:
-                raise ProviderError(f"provider {provider} failed for {task_type}: {exc}") from exc
-        else:
-            raise ProviderError(f"unsupported real provider: {provider}")
+            continue
 
         try:
             output = validate_task_output(task_type, output)
@@ -405,8 +591,8 @@ def _complete_impl(
             INSERT INTO ai_calls (
                 id, run_id, node_key, provider, model, prompt_name, task_type,
                 input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
-                client_mutation_id, project_id
-            ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s)
+                client_mutation_id, project_id, user_id
+            ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s, %s)
             ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
             DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model,
                 prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
@@ -432,16 +618,8 @@ def _complete_impl(
                 "succeeded",
                 client_mutation_id,
                 project_id,
+                user_id,
             ),
-        )
-        conn.execute(
-            """
-            INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
-            VALUES (%s, %s, 'bootstrap', 2.0, %s)
-            ON CONFLICT(project_id, scope)
-            DO UPDATE SET spent_cny = budgets.spent_cny + excluded.spent_cny, updated_at = CURRENT_TIMESTAMP
-            """,
-            (new_id("bdg"), project_id, cost_cny),
         )
         conn.commit()
     finally:
@@ -457,20 +635,23 @@ def complete(
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
+    user_id: str | None = None,
     client_mutation_id: str | None = None,
 ) -> dict[str, Any]:
     """Execute an AI call and keep both successful and failed attempts in the ledger."""
+    user_id = user_id or _request_user_id.get()
     started = time.perf_counter()
     try:
         return _complete_impl(
             run_id=run_id, node_key=node_key, project_id=project_id,
             task_type=task_type, prompt_name=prompt_name, variables=variables,
-            client_mutation_id=client_mutation_id,
+            user_id=user_id, client_mutation_id=client_mutation_id,
         )
     except Exception as exc:
         _record_failed_call(
             run_id=run_id, node_key=node_key, project_id=project_id, task_type=task_type,
-            prompt_name=prompt_name, variables=variables, client_mutation_id=client_mutation_id,
+            prompt_name=prompt_name, variables=variables, user_id=user_id,
+            client_mutation_id=client_mutation_id,
             started=started, error=exc,
         )
         raise
@@ -478,7 +659,8 @@ def complete(
 
 def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id: str,
                         task_type: str, prompt_name: str, variables: dict[str, Any],
-                        client_mutation_id: str | None, started: float, error: Exception) -> None:
+                        user_id: str | None = None, client_mutation_id: str | None,
+                        started: float, error: Exception) -> None:
     conn = None
     try:
         route = _load_route(task_type) or {}
@@ -492,14 +674,14 @@ def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id:
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
                    input, output, prompt_tokens, completion_tokens, cost_cny,
-                   latency_ms, status, error, client_mutation_id, project_id
-               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s)
+                   latency_ms, status, error, client_mutation_id, project_id, user_id
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s,%s)
                ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
                DO NOTHING""",
             (new_id("call"), run_id, node_key, provider, model, prompt_name, task_type,
              encode({"variables": variables}), encode({}),
              int((time.perf_counter() - started) * 1000), str(error)[:2000],
-             client_mutation_id, project_id),
+             client_mutation_id, project_id, user_id),
         )
         conn.commit()
     except Exception:
@@ -567,18 +749,42 @@ def _load_prompt_and_route(
     return prompt_text, provider, model, params
 
 
-def _assert_budget(project_id: str, scope: str, estimated_cost: float) -> None:
+def _assert_budget(user_id: str | None, project_id: str, scope: str, estimated_cost: float) -> None:
+    """Enforce the user's plan-derived monthly cost budget.
+
+    The limit is sourced from the user's active plan (plans.monthly_budget_cny)
+    instead of the previously hardcoded 2.0 CNY per-project 'bootstrap' budget.
+    When no user context is available (e.g. background workers), fall back to the
+    configured default and aggregate spend by project_id. Spend is the sum of
+    ai_calls.cost_cny for the current natural month.
+    """
+    limit = float(settings.default_monthly_budget_cny)
+    if user_id:
+        try:
+            sub = get_active_subscription(user_id)
+            limit = float(sub.get("monthly_budget_cny") or settings.default_monthly_budget_cny)
+        except Exception:
+            limit = float(settings.default_monthly_budget_cny)
+    start, end = monthly_window()
     conn = connect()
-    budget = row_to_dict(
-        conn.execute(
-            "SELECT * FROM budgets WHERE project_id = %s AND scope = %s",
-            (project_id, scope),
-        ).fetchone()
-    )
-    conn.close()
-    if budget and float(budget["spent_cny"]) + estimated_cost > float(budget["limit_cny"]):
-        alert_budget(project_id, "bootstrap", float(budget["spent_cny"]), float(budget["limit_cny"]))
-        raise BudgetExceeded(f"{scope} budget exceeded")
+    try:
+        agg = row_to_dict(conn.execute(
+            """
+            SELECT COALESCE(SUM(cost_cny), 0)::float AS spent
+            FROM ai_calls
+            WHERE created_at >= %s AND created_at < %s
+              AND (user_id = %s OR (user_id IS NULL AND project_id = %s))
+            """,
+            (start, end, user_id, project_id),
+        ).fetchone())
+    finally:
+        conn.close()
+    spent = float(agg.get("spent") or 0)
+    if spent + estimated_cost > limit:
+        alert_budget(project_id, scope, spent, limit)
+        raise BudgetExceeded(
+            f"{scope} monthly budget exceeded: {spent:.4f}/{limit:.2f} CNY"
+        )
 
 
 def _estimate_cost(variables: dict[str, Any], output_hint: dict[str, Any]) -> float:
@@ -613,15 +819,26 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     api_key = _request_api_key.get() or settings.deepseek_api_key
     if not api_key:
         raise ProviderError("DEEPSEEK_API_KEY is not configured")
+    max_tokens = params.get("max_tokens")
+    if max_tokens is None and task_type in LONG_FORM_TASKS:
+        # Long-form fiction nodes must be able to return 3000+ Chinese
+        # characters inside a JSON payload. Relying on provider defaults makes
+        # the prompt say "write long" while the API may still truncate output.
+        max_tokens = 8192
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "你是 NovelCraft 的结构化创作 Agent。只输出 JSON。"},
+            {"role": "system", "content": "你是 NovelCraft 的职业网文创作 Agent。只输出合法 JSON；正文必须是可直接连载发布的小说叙事，不写说明文、计划书或创作建议。"},
             {"role": "user", "content": prompt},
         ],
         "response_format": {"type": "json_object"},
         "temperature": params.get("temperature", 0.7),
     }
+    if max_tokens is not None:
+        try:
+            body["max_tokens"] = max(1024, min(int(max_tokens), 8192))
+        except (TypeError, ValueError):
+            body["max_tokens"] = 8192
     from .core.url_security import validate_ai_base_url
     base_url = validate_ai_base_url(_request_api_base_url.get() or settings.deepseek_base_url)
     request = urllib.request.Request(
@@ -636,6 +853,16 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     try:
         with urllib.request.urlopen(request, timeout=settings.request_timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # HTTP 429 -> dedicated rate-limit error so the rate-limit backoff applies.
+        if exc.code == 429:
+            raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            retry_after = int(raw_retry_after) if (raw_retry_after and str(raw_retry_after).isdigit()) else None
+            raise ProviderRateLimitError(
+                f"deepseek rate limited (429): {exc}", retry_after=retry_after
+            ) from exc
+        alert_provider_error(task_type, f"deepseek http {exc.code}")
+        raise ProviderError(f"deepseek http error {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         alert_provider_error(task_type, str(exc))
         raise ProviderError(f"deepseek request failed: {exc}") from exc
@@ -645,7 +872,7 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ProviderError(f"deepseek returned non-json for {task_type}") from exc
+        raise OutputValidationError(f"deepseek returned non-json for {task_type}") from exc
     return parsed, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 
@@ -710,6 +937,7 @@ def _deepseek_stream(prompt: str, model: str, params: dict[str, Any], usage_out:
 def _complete_stream_impl(
     *,
     project_id: str,
+    user_id: str | None = None,
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
@@ -737,22 +965,25 @@ def _complete_stream_impl(
     prompt_text, provider, model, params = _load_prompt_and_route(
         prompt_name, task_type, variables, include_contract=False
     )
-    _assert_budget(project_id, "bootstrap", _estimate_cost(variables, {"prompt": prompt_text}))
+    _assert_budget(user_id, project_id, "bootstrap", _estimate_cost(variables, {"prompt": prompt_text}))
 
     chunks: list[str] = []
     usage: dict[str, int] = {}
     if provider == "deepseek":
-        if not circuit_breaker("deepseek"):
+        scope = project_id or "global"
+        if not circuit_breaker("deepseek", scope=scope):
             raise ProviderError("deepseek circuit breaker open — too many failures")
+        if not acquire_provider_token("deepseek", scope=scope):
+            raise ProviderRateLimitError("deepseek provider token bucket exhausted")
         model_name = _request_model.get() or model or settings.deepseek_model
         provider_name = "deepseek"
         try:
             for delta in _deepseek_stream(prompt_text, model_name, params, usage):
                 chunks.append(delta)
                 yield delta
-            record_success("deepseek")
+            record_success("deepseek", scope=scope)
         except ProviderError:
-            record_failure("deepseek")
+            record_failure("deepseek", scope=scope)
             raise
     else:
         # Other providers use different auth/protocol implementations in the
@@ -761,6 +992,8 @@ def _complete_stream_impl(
         raise ProviderError(f"streaming is not supported for provider: {provider}")
 
     full_text = "".join(chunks)
+    if not full_text.strip():
+        raise OutputValidationError(f"provider returned empty streamed text for {task_type}")
     prompt_tokens = int(usage.get("prompt_tokens", 0)) or max(1, len(prompt_text) // 4)
     completion_tokens = int(usage.get("completion_tokens", 0)) or max(1, len(full_text) // 4)
     latency_ms = int((time.perf_counter() - start) * 1000)
@@ -772,8 +1005,8 @@ def _complete_stream_impl(
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
                    input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
-                   client_mutation_id, project_id
-               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   client_mutation_id, project_id, user_id
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
                DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model,
                    prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
@@ -786,7 +1019,7 @@ def _complete_stream_impl(
              encode({"text": full_text}),
              prompt_tokens, completion_tokens,
              _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens), latency_ms,
-             "succeeded", client_mutation_id, project_id),
+             "succeeded", client_mutation_id, project_id, user_id),
         )
         conn.commit()
     finally:
@@ -795,19 +1028,21 @@ def _complete_stream_impl(
 
 def complete_stream(
     *, project_id: str, task_type: str, prompt_name: str,
-    variables: dict[str, Any], client_mutation_id: str | None = None,
+    variables: dict[str, Any], user_id: str | None = None,
+    client_mutation_id: str | None = None,
 ):
     """Public streaming wrapper with the same failed-call ledger contract as complete()."""
+    user_id = user_id or _request_user_id.get()
     started = time.perf_counter()
     try:
         yield from _complete_stream_impl(
-            project_id=project_id, task_type=task_type, prompt_name=prompt_name,
+            project_id=project_id, user_id=user_id, task_type=task_type, prompt_name=prompt_name,
             variables=variables, client_mutation_id=client_mutation_id,
         )
     except Exception as exc:
         _record_failed_call(
             run_id=None, node_key=None, project_id=project_id, task_type=task_type,
             prompt_name=prompt_name, variables={**variables, "stream": True},
-            client_mutation_id=client_mutation_id, started=started, error=exc,
+            user_id=user_id, client_mutation_id=client_mutation_id, started=started, error=exc,
         )
         raise

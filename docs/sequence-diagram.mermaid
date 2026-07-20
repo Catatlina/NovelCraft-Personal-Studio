@@ -1,0 +1,54 @@
+sequenceDiagram
+    autonumber
+    actor U as 前端
+    participant EP as main.ai_edit
+    participant AZ as authz.require_project_member
+    participant SEC as security.get_current_user
+    participant GW as gateway.complete
+    participant RT as retry.with_provider_retry
+    participant PV as DeepSeek Provider
+    participant BL as billing.get_active_subscription
+    participant EH as main 全局 ExceptionHandler
+    participant CB as circuit_breaker
+
+    U->>EP: POST /contents/{id}/ai/{op}
+    EP->>AZ: Depends(require_project_member())
+    AZ->>SEC: get_current_user(Bearer)
+    SEC-->>AZ: user dict
+    AZ->>AZ: 查 project_members（project_id 来自 path/query）
+    alt 非成员/角色不足
+        AZ-->>EH: raise HTTPException(403)
+        EH-->>U: 403 {code:FORBIDDEN,message,...}
+    else 成员
+        AZ-->>EP: ProjectContext(user, project_id)
+    end
+    EP->>GW: complete(project_id, task_type=editor_*, ...)
+    GW->>BL: _assert_budget → get_active_subscription().monthly_budget_cny
+    alt 超额
+        BL-->>EH: raise BudgetExceeded
+        EH-->>U: 402 {code:BUDGET_EXCEEDED, data:{plan,spent,limit}}
+    else 预算 OK
+        GW->>RT: 包裹的 provider 调用
+        loop 最多 max_retries=3（重试中不 record_failure）
+            RT->>PV: POST /chat/completions
+            alt 429
+                PV-->>RT: HTTP 429
+                RT->>RT: ProviderRateLimitError，退避 base=1s factor=2 cap=30s
+            else 超时/网络错误
+                PV-->>RT: TimeoutError/URLError
+                RT->>RT: ProviderError，退避 base=0.5s cap=10s
+            else 成功
+                PV-->>RT: JSON output
+            end
+        end
+        alt 最终耗尽
+            RT-->>CB: record_failure("deepseek")（仅一次）
+            RT-->>EH: raise ProviderRateLimitError / ProviderError
+            EH-->>U: 429 / 502 {code:PROVIDER_*,message}
+        else 成功
+            RT-->>CB: record_success("deepseek")
+            GW-->>EP: output dict（gateway 记 ai_calls 账本）
+        end
+    end
+    EP->>EP: 写 version 分支（仅 success 后）
+    EP-->>U: 200 ok({code:0,message:"ok",data:output})

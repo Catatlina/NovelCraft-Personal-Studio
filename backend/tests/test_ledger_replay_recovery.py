@@ -13,7 +13,7 @@ import uuid
 import pytest
 
 from app.db import connect, encode, new_id
-from app.gateway import complete, ProviderError
+from app.gateway import complete, OutputValidationError, ProviderError
 
 
 def _seed_project() -> str:
@@ -88,3 +88,34 @@ def test_failed_call_then_successful_retry_same_mutation_id(monkeypatch):
                       client_mutation_id=mutation)
     assert replay.get("text") == out.get("text")
     assert len(_mutation_rows(pid, mutation)) == 1
+
+
+def test_non_json_structured_response_is_resampled(monkeypatch):
+    pid = _seed_project()
+    mutation = f"schema-resample:{uuid.uuid4().hex}"
+    _seed_deepseek_route("regenerate_titles")
+    attempts = 0
+
+    def provider(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OutputValidationError("deepseek returned non-json for regenerate_titles")
+        return ({"title_candidates": ["《甲》", "《乙》", "《丙》"]}, 10, 20)
+
+    monkeypatch.setattr("app.gateway.circuit_breaker", lambda _provider: True)
+    monkeypatch.setattr("app.gateway.record_failure", lambda _provider: None)
+    monkeypatch.setattr("app.gateway.record_success", lambda _provider: None)
+    monkeypatch.setattr("app.gateway._deepseek_complete", provider)
+
+    output = complete(
+        run_id=None,
+        node_key="human_confirm_title",
+        project_id=pid,
+        task_type="regenerate_titles",
+        prompt_name="bootstrap.regenerate_titles",
+        variables={"idea": "测试创意", "title_candidates": []},
+        client_mutation_id=mutation,
+    )
+    assert attempts == 2
+    assert len(output["title_candidates"]) == 3

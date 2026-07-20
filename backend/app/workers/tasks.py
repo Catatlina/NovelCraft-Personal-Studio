@@ -16,6 +16,7 @@ Features:
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
 from functools import wraps
@@ -24,6 +25,10 @@ from typing import Any
 from app.db import connect, encode, new_id, row_to_dict
 from app.gateway import (BudgetExceeded, OutputValidationError, ProviderError, complete,
                          validate_task_output, _request_api_key, _request_api_base_url, _request_model)
+from app.core.context_budget import cap_context_tokens
+from app.core.byok import resolve_byok_key, stash_byok_key
+from app.core.concurrency import acquire_ai_slot, release_ai_slot
+from app.services.novel_export import extract_body_text
 
 from .celery_app import celery_app
 
@@ -63,9 +68,9 @@ BOOTSTRAP_STAGES = {
     "finalization": {
         "label": "最终化阶段",
         "nodes": [
-            ("final_consistency_check", "agent", "Reviewer",  "六维一致性检查",    "final_consistency_check"),
-            ("final_continuity_audit",  "agent", "Reviewer",  "连续性审计",        "final_continuity_audit"),
             ("final_humanize",          "agent", "Writer",    "去AI味人文化",      "final_humanize"),
+            ("final_consistency_check", "agent", "Reviewer",  "七维一致性检查",    "final_consistency_check"),
+            ("final_continuity_audit",  "agent", "Reviewer",  "连续性审计",        "final_continuity_audit"),
         ],
     },
 }
@@ -93,6 +98,7 @@ NODE_STAGE["human_confirm_title"] = "human"
 
 # Default budget per chapter (all 5 writing nodes combined)
 DEFAULT_CHAPTER_BUDGET_CNY = 0.50
+MIN_CHAPTER_CHARS = 1500
 
 # Per-node budget allocation (planning ≈ blueprint < writing < finalization)
 NODE_BUDGET_MULTIPLIERS: dict[str, float] = {
@@ -116,6 +122,123 @@ NODE_BUDGET_MULTIPLIERS: dict[str, float] = {
 
 def _chapter_idempotency_key(novel_id: str, chapter_seq: int) -> str:
     return f"novel:{novel_id}:chapter:{chapter_seq}:bootstrap:v2"
+
+
+_NON_NARRATIVE_MARKERS = (
+    "本章将深入探讨",
+    "在润色过程中",
+    "首先需要明确章节",
+    "目标读者",
+    "逻辑结构",
+    "提升阅读流畅性",
+    "删除冗余表述",
+    "替换模糊词汇",
+    "去AI味是",
+    "具体改动可以",
+    "输出JSON",
+    "处理后的完整正文",
+    "本文将",
+)
+
+
+def _chapter_paragraphs_from_text(text: str) -> list[str]:
+    return [line.strip() for line in str(text or "").replace("\r\n", "\n").split("\n") if line.strip()]
+
+
+def _chapter_doc_from_paragraphs(paragraphs: list[str]) -> dict[str, Any]:
+    return {"type": "doc", "content": [{"type": "paragraph", "text": p} for p in paragraphs]}
+
+
+def _looks_like_non_narrative_text(text: str) -> bool:
+    compact = str(text or "")
+    hits = sum(1 for marker in _NON_NARRATIVE_MARKERS if marker in compact)
+    return hits >= 2
+
+
+def _assert_story_revision_quality(
+    *,
+    task_type: str,
+    before_text: str,
+    after_paragraphs: list[str],
+    min_ratio: float = 0.65,
+) -> None:
+    after_text = "\n".join(after_paragraphs).strip()
+    before_chars = len(str(before_text or "").strip())
+    after_chars = len(after_text)
+    before_paragraph_count = len(_chapter_paragraphs_from_text(before_text))
+    if not after_text:
+        raise OutputValidationError(f"{task_type} returned empty chapter text")
+    if _looks_like_non_narrative_text(after_text):
+        raise OutputValidationError(f"{task_type} returned non-narrative instructional text")
+    if before_chars >= 200 and after_chars < int(before_chars * min_ratio):
+        raise OutputValidationError(
+            f"{task_type} shortened chapter too much: {after_chars}/{before_chars} chars"
+        )
+    if before_paragraph_count >= 6 and len(after_paragraphs) < before_paragraph_count - 2:
+        raise OutputValidationError(
+            f"{task_type} dropped too many paragraphs: {len(after_paragraphs)}/{before_paragraph_count}"
+        )
+
+
+def _assert_min_chapter_length(task_type: str, text: str) -> None:
+    from app.services.text_metrics import count_content_chars
+    chars = count_content_chars(text)
+    if chars < MIN_CHAPTER_CHARS:
+        raise OutputValidationError(f"{task_type} chapter too short: {chars}/{MIN_CHAPTER_CHARS} chars")
+
+
+def _draft_length_feedback(output: dict) -> str:
+    """Return a concrete retry instruction when a draft misses the hard length gate."""
+    chapter = output.get("chapter") if isinstance(output, dict) else None
+    body = chapter.get("body", []) if isinstance(chapter, dict) else []
+    text = "\n".join(
+        part if isinstance(part, str) else str(part.get("text", ""))
+        for part in body if isinstance(part, (str, dict))
+    )
+    try:
+        _assert_min_chapter_length("write_chapter_draft", text)
+    except OutputValidationError as exc:
+        return str(exc)
+    return ""
+
+
+def _quality_evidence_payload(output: dict, self_review: dict | None = None) -> dict:
+    """Build the durable seven-dimension provenance stored on a chapter."""
+    score_by_status = {"pass": 90, "warning": 65, "fail": 35}
+    checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
+    dimensions = {
+        name: score_by_status.get(str(check.get("status", "")), 0)
+        for name, check in checks.items() if isinstance(check, dict)
+    }
+    self_review = self_review if isinstance(self_review, dict) else {}
+    score = self_review.get("self_score")
+    if score is None and dimensions:
+        score = sum(dimensions.values()) / len(dimensions)
+    issues = [str(item) for item in self_review.get("weaknesses", []) if str(item).strip()]
+    return {
+        "score": float(score or 0),
+        "dimensions": dimensions,
+        "issues": issues,
+        "source": "write_self_review+final_consistency_check",
+    }
+
+
+def _chapter_outline_for_seq(context: dict, chapter_seq: int) -> dict:
+    """Select exactly one outline so prose never consumes later chapters."""
+    outlines = context.get("chapter_outlines") or []
+    if not isinstance(outlines, list):
+        return {}
+    for outline in outlines:
+        if not isinstance(outline, dict):
+            continue
+        try:
+            if int(outline.get("seq") or 0) == chapter_seq:
+                return outline
+        except (TypeError, ValueError):
+            continue
+    if 0 < chapter_seq <= len(outlines) and isinstance(outlines[chapter_seq - 1], dict):
+        return outlines[chapter_seq - 1]
+    return {}
 # ── Isolated request context decorator ──────────────────────────────────────
 
 def _isolated_request_context(fn):
@@ -285,9 +408,9 @@ def _track_budget(run_id, node_key, cost_cny):
             from app.config import settings
             db.execute(
                 "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s,%s,'bootstrap',%s,%s)",
-                (new_id("bdg"), project_id, settings.bootstrap_budget_cny, spent),
+                (new_id("bdg"), project_id, settings.default_monthly_budget_cny, spent),
             )
-            limit = float(settings.bootstrap_budget_cny)
+            limit = float(settings.default_monthly_budget_cny)
         else:
             limit = float(budget["limit_cny"])
             db.execute(
@@ -336,6 +459,29 @@ def _resume_from_checkpoint(run_id: str) -> str | None:
     if isinstance(details, dict):
         return details.get("node")
     return None
+
+
+def _attach_user_context(novel_id: str) -> None:
+    """Best-effort: attribute a worker process's AI calls to the novel owner.
+
+    Worker tasks run outside the HTTP request lifecycle, so the request-scoped
+    ``_request_user_id`` ContextVar is unset. Without this, ``ai_calls.user_id``
+    stays NULL for generated chapters and the user's token bill undercounts. We
+    resolve the owner from the novel and set the ContextVar for the task's run.
+    """
+    try:
+        from app.gateway import _request_user_id
+        db = connect()
+        try:
+            owner = db.execute(
+                "SELECT owner_id FROM contents WHERE id = %s", (novel_id,)
+            ).fetchone()
+        finally:
+            db.close()
+        if owner and owner.get("owner_id"):
+            _request_user_id.set(owner["owner_id"])
+    except Exception:
+        pass
 # ═══════════════════════════════════════════════════════════════════════════
 # Core bootstrap execution
 # ═══════════════════════════════════════════════════════════════════════════
@@ -343,7 +489,8 @@ def _resume_from_checkpoint(run_id: str) -> str | None:
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
 @_isolated_request_context
 def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
-                       api_key: str = "", api_url: str = "", model: str = "") -> dict:
+                       api_key: str = "", api_url: str = "", model: str = "",
+                       api_key_ref: str = "") -> dict:
     """Execute the 4-stage bootstrap workflow with context management, budget
     tracking, event ledger, and checkpoint support.
 
@@ -355,13 +502,23 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
 
     The workflow can resume from any failed node via checkpoint.
     """
-    # Set context vars for this worker process
+    # Set context vars for this worker process. P2-T3 / Q5: the BYOK key arrives
+    # as a short-lived reference (never plaintext in the Celery broker) and is
+    # resolved here; a legacy plaintext ``api_key`` is still honoured.
+    api_key = resolve_byok_key(api_key_ref, api_key)
     if api_key:
         _request_api_key.set(api_key)
     if api_url:
         _request_api_base_url.set(api_url)
     if model:
         _request_model.set(model)
+
+    # Attribute AI calls to the novel owner for per-user metering/billing.
+    _run_lookup = connect()
+    _run_row = _run_lookup.execute("SELECT novel_id FROM workflow_runs WHERE id = %s", (run_id,)).fetchone()
+    _run_lookup.close()
+    if _run_row and _run_row.get("novel_id"):
+        _attach_user_context(_run_row["novel_id"])
 
     # Determine start index in flattened node list
     try:
@@ -428,6 +585,73 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
 
         # ── Human node ──────────────────────────────────────────────────
         if kind == "human":
+            run_context = run["context"] if isinstance(run["context"], dict) else {}
+            if (run_context.get("auto_confirm_title") or run_context.get("title_locked")) and node_key == "human_confirm_title":
+                title_candidates = run_context.get("title_candidates") or []
+                selected_title = (
+                    str(run_context.get("selected_title") or "").strip()
+                    if run_context.get("title_locked")
+                    else (str(title_candidates[0]).strip() if title_candidates else "")
+                )
+                if not selected_title:
+                    conn.execute(
+                        """UPDATE run_nodes
+                           SET status = 'failed',
+                               started_at = COALESCE(started_at, now()),
+                               finished_at = now(),
+                               error = %s
+                           WHERE run_id = %s AND node_key = %s""",
+                        ("missing title candidates for auto confirm", run_id, node_key),
+                    )
+                    conn.execute(
+                        "UPDATE workflow_runs SET status = 'failed', current_node_key = %s, updated_at = now() WHERE id = %s",
+                        (node_key, run_id),
+                    )
+                    conn.commit()
+                    conn.close()
+                    _record_bootstrap_event(
+                        run_id,
+                        "human.rejected",
+                        node_key=node_key,
+                        payload={"reason": "missing_title_candidates"},
+                    )
+                    return {"status": "error", "detail": "missing title candidates for auto confirm"}
+                run_context["selected_title"] = selected_title
+                conn.execute(
+                    """UPDATE contents
+                       SET title = %s,
+                           meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{selected_title}', to_jsonb(%s::text), true),
+                           updated_at = now()
+                       WHERE id = %s""",
+                    (selected_title, selected_title, run["novel_id"]),
+                )
+                conn.execute(
+                    """UPDATE run_nodes
+                       SET status = 'succeeded',
+                           started_at = COALESCE(started_at, now()),
+                           finished_at = now(),
+                           output = %s
+                       WHERE run_id = %s AND node_key = %s""",
+                    (encode({"selected_title": selected_title, "source": "locked_title" if run_context.get("title_locked") else "auto_confirm"}), run_id, node_key),
+                )
+                conn.execute(
+                    """UPDATE workflow_runs
+                       SET status = 'pending',
+                           current_node_key = 'blueprint_volume_plan',
+                           context = %s,
+                           updated_at = now()
+                       WHERE id = %s""",
+                    (encode(run_context), run_id),
+                )
+                conn.commit()
+                conn.close()
+                _record_bootstrap_event(
+                    run_id,
+                    "human.confirmed",
+                    node_key=node_key,
+                    payload={"selected_title": selected_title, "action": "auto_confirmed"},
+                )
+                continue
             conn.execute(
                 "UPDATE run_nodes SET status = 'waiting_human', started_at = COALESCE(started_at, now()) WHERE run_id = %s AND node_key = %s",
                 (run_id, node_key),
@@ -479,6 +703,19 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             context_window = _write_before_search(novel_id, chapter_seq, window_size=100)
             run_context["_context_window"] = context_window
             run_context["_chapter_seq"] = chapter_seq
+            run_context["_chapter_outline"] = _chapter_outline_for_seq(run_context, chapter_seq)
+            # P2-T2 / Q9: cap the unbounded writing context (prior-chapter window +
+            # planning text blobs) to a token budget, mirroring ContextAssembler's
+            # 5400-token cap so a million-word outline cannot blow the prompt cost
+            # or get silently truncated.
+            for _field in ("_context_window", "_characters_text", "_worldview_text", "_chapter_outline"):
+                _val = run_context.get(_field)
+                if _val is None:
+                    continue
+                run_context[_field] = (
+                    cap_context_tokens(_val, 5400) if isinstance(_val, str)
+                    else cap_context_tokens(str(_val), 5400)
+                )
             # Chapter idempotency: check if chapter already exists
             idem_key = _chapter_idempotency_key(novel_id, chapter_seq)
             conn = connect()
@@ -500,19 +737,100 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             run_context = _enrich_finalization_context(run_context, novel_id)
 
         # ── Execute AI call ─────────────────────────────────────────────
-        client_mutation_id = f"bootstrap:{run_id}:{node_key}:v2"
+        # Idempotent within one claimed node attempt, but a deliberate retry
+        # must obtain a fresh provider result instead of replaying the output
+        # that caused the previous attempt to fail (or that depended on stale
+        # upstream planning context).
+        node_attempt = int(node.get("attempt") or 0) + 1
+        client_mutation_id = f"bootstrap:{run_id}:{node_key}:attempt-v1:{node_attempt}"
 
         try:
-            output = complete(
-                run_id=run_id,
-                node_key=node_key,
-                project_id=project_id,
-                task_type=task_type or "",
-                prompt_name=f"bootstrap.{task_type}" if task_type else "",
-                variables=run_context,
-                client_mutation_id=client_mutation_id,
-            )
-            output = validate_task_output(task_type or "", output)
+            if task_type == "plan_idea":
+                # A planning model is not allowed to grade its own fidelity.
+                # Run an independent, recorded AI audit against the raw user
+                # request and feed any concrete defects into a fresh sample.
+                # The node cannot advance to title selection until the audit has
+                # zero contradictions and omissions.
+                fidelity_feedback: list[str] = []
+                output = {}
+                fidelity_cycle = int(node.get("attempt") or 0) + 1
+                for fidelity_attempt in range(1, 4):
+                    plan_variables = {
+                        **run_context,
+                        "fidelity_feedback": "；".join(fidelity_feedback),
+                    }
+                    output = complete(
+                        run_id=run_id,
+                        node_key=node_key,
+                        project_id=project_id,
+                        task_type=task_type,
+                        prompt_name="bootstrap.plan_idea",
+                        variables=plan_variables,
+                        client_mutation_id=(
+                            f"bootstrap:{run_id}:{node_key}:fidelity-v2:cycle:{fidelity_cycle}:plan:{fidelity_attempt}"
+                        ),
+                    )
+                    output = validate_task_output(task_type, output)
+                    audit = complete(
+                        run_id=run_id,
+                        node_key=node_key,
+                        project_id=project_id,
+                        task_type="audit_plan_fidelity",
+                        prompt_name="bootstrap.audit_plan_fidelity",
+                        variables={
+                            "idea": run_context.get("idea", ""),
+                            "plan_output": json.dumps(output, ensure_ascii=False),
+                        },
+                        client_mutation_id=(
+                            f"bootstrap:{run_id}:{node_key}:fidelity-v2:cycle:{fidelity_cycle}:audit:{fidelity_attempt}"
+                        ),
+                    )
+                    audit = validate_task_output("audit_plan_fidelity", audit)
+                    contradictions = [str(item).strip() for item in audit.get("contradictions", []) if str(item).strip()]
+                    omissions = [str(item).strip() for item in audit.get("omissions", []) if str(item).strip()]
+                    passed = (
+                        audit.get("passed") is True
+                        and float(audit.get("score") or 0) == 100
+                        and not contradictions
+                        and not omissions
+                    )
+                    if passed:
+                        output["plan_fidelity_audit"] = audit
+                        break
+                    fidelity_feedback = contradictions + omissions
+                else:
+                    raise OutputValidationError(
+                        "plan fidelity audit rejected output after 3 real revisions: "
+                        + "；".join(fidelity_feedback[:8])
+                    )
+            else:
+                length_feedback = ""
+                quality_attempts = 3 if task_type == "write_chapter_draft" else 1
+                for quality_attempt in range(1, quality_attempts + 1):
+                    variables = {**run_context, "length_retry_feedback": length_feedback}
+                    output = complete(
+                        run_id=run_id,
+                        node_key=node_key,
+                        project_id=project_id,
+                        task_type=task_type or "",
+                        prompt_name=f"bootstrap.{task_type}" if task_type else "",
+                        variables=variables,
+                        client_mutation_id=(
+                            f"{client_mutation_id}:quality:{quality_attempt}"
+                            if quality_attempts > 1 else client_mutation_id
+                        ),
+                    )
+                    output = validate_task_output(task_type or "", output)
+                    if task_type != "write_chapter_draft":
+                        break
+                    length_feedback = _draft_length_feedback(output)
+                    if not length_feedback:
+                        break
+                else:
+                    raise OutputValidationError(
+                        f"write_chapter_draft failed length gate after {quality_attempts} real generations: "
+                        f"{length_feedback}"
+                    )
         except BudgetExceeded:
             _mark_node(run_id, node_key, "pending_budget", "budget exceeded")
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
@@ -524,12 +842,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                     payload={"reason": "invalid_output"})
             return {"status": "invalid_output", "node_key": node_key}
         except ProviderError as exc:
-            # AI provider failures are terminal for this run: no mock, no silent
-            # fallback, and no "pending" state that can be mistaken for success.
-            _mark_node(run_id, node_key, "failed", f"provider error: {exc}"[:500])
-            _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
+            # Provider failures are retryable through Celery (max_retries=3).
+            # The gateway already exhausted its internal backoff before
+            # re-raising, so we let the whole run retry rather than failing it
+            # silently. Once Celery exhausts its retries this becomes terminal.
+            _mark_node(run_id, node_key, "pending_provider", f"provider error: {exc}"[:500])
+            _record_bootstrap_event(run_id, "node.retrying", node_key=node_key,
                                     payload={"reason": "provider_error", "detail": str(exc)[:200]})
-            return {"status": "failed", "node_key": node_key, "reason": str(exc)}
+            raise self.retry(exc=exc, countdown=5)
         except Exception as exc:
             _mark_node(run_id, node_key, "failed", str(exc))
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
@@ -540,7 +860,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         budget_info = _estimate_node_cost(run_id, node_key, output)
         _track_budget(run_id, node_key, budget_info.get("cost_cny", 0))
 
-        _persist_output(run_id, node_key, task_type or "", output, novel_id, project_id)
+        try:
+            _persist_output(run_id, node_key, task_type or "", output, novel_id, project_id)
+        except OutputValidationError as exc:
+            _mark_node(run_id, node_key, "failed", str(exc))
+            _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
+                                    payload={"reason": "invalid_persisted_output", "detail": str(exc)[:200]})
+            return {"status": "invalid_output", "node_key": node_key}
 
         _record_bootstrap_event(run_id, "node.completed", node_key=node_key,
                                 payload={"budget": budget_info})
@@ -569,6 +895,18 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
     celery_app.backend.set(f"run:{run_id}:status", final_status)
     _record_bootstrap_event(run_id, "run.completed", payload={"status": final_status})
     return {"status": final_status}
+
+
+@celery_app.task(name="app.core.billing.reset_monthly_usage")
+def monthly_usage_reset() -> dict[str, Any]:
+    """Celery wrapper for the monthly usage reset (P1-T2).
+
+    The heavy lifting lives in ``app.core.billing.reset_monthly_usage`` so it
+    stays testable without a Celery runtime. Registered under the canonical
+    name so the beat schedule can reference ``app.core.billing.reset_monthly_usage``.
+    """
+    from app.core.billing import reset_monthly_usage
+    return reset_monthly_usage()
 # ═══════════════════════════════════════════════════════════════════════════
 # Context enrichment helpers
 # ═══════════════════════════════════════════════════════════════════════════
@@ -604,6 +942,8 @@ def _enrich_blueprint_context(context: dict, novel_id: str) -> dict:
 def _enrich_finalization_context(context: dict, novel_id: str) -> dict:
     """Enrich context for finalization with full chapter body + entity states."""
     enriched = dict(context)
+    chapter_seq = int(context.get("_chapter_seq") or 1)
+    enriched["_chapter_outline"] = _chapter_outline_for_seq(context, chapter_seq)
     # Get chapter body text
     chapter_id = context.get("chapter_id", "")
     if chapter_id:
@@ -612,7 +952,7 @@ def _enrich_finalization_context(context: dict, novel_id: str) -> dict:
         db.close()
         if ch:
             body = ch.get("body", "")
-            enriched["_chapter_body"] = str(body)[:8000]
+            enriched["_chapter_body"] = extract_body_text(body)[:12000]
 
     # Get entity snapshot
     reconc_res = _write_after_reconcile(novel_id, chapter_id or "",
@@ -657,11 +997,12 @@ def _estimate_node_cost(run_id: str, node_key: str, output: dict) -> dict:
 
 def create_run(project_id: str, novel_id: str,
                api_key: str = "", api_url: str = "", model: str = "",
-               selected_title: str = "", idempotency_key: str | None = None) -> str:
-    """Create a workflow run and its nodes in the database with the 4-stage architecture.
+               selected_title: str = "", idempotency_key: str | None = None,
+               auto_confirm_title: bool = False) -> str:
+    """Create a workflow run through the complete planning-to-audit pipeline.
 
-    If selected_title is provided, skips planning stage + human confirm
-    and starts directly at blueprint.
+    A preselected title locks only the title gate. It never bypasses source
+    decomposition, creative-bible planning, or quality controls.
     """
     db = connect()
     if idempotency_key:
@@ -684,9 +1025,11 @@ def create_run(project_id: str, novel_id: str,
         raise ValueError("novel not found")
 
     meta = novel["meta"] if isinstance(novel["meta"], dict) else {}
-    context = {"novel_id": novel_id, "idea": meta.get("idea", ""), **meta}
+    context = {"novel_id": novel_id, "idea": meta.get("idea", ""), "suggested_title": "", **meta}
     if selected_title:
-        context["selected_title"] = selected_title
+        context["suggested_title"] = selected_title
+    if auto_confirm_title:
+        context["auto_confirm_title"] = True
 
     run_id = new_id()
     db.execute(
@@ -704,30 +1047,16 @@ def create_run(project_id: str, novel_id: str,
         )
 
     start_key = "plan_idea"
-    if selected_title:
-        # Skip planning + human confirm: mark all planning nodes + human as succeeded
-        planning_nodes = [n[0] for n in BOOTSTRAP_NODES if NODE_STAGE.get(n[0]) == "planning"]
-        for pn_key in planning_nodes:
-            db.execute(
-                """UPDATE run_nodes SET status='succeeded', output=%s, finished_at=now()
-                   WHERE run_id=%s AND node_key=%s""",
-                (encode({"source": "ranking_topic"}), run_id, pn_key),
-            )
-        db.execute(
-            """UPDATE run_nodes SET status='succeeded', output=%s, finished_at=now()
-               WHERE run_id=%s AND node_key=%s""",
-            (encode({"selected_title": selected_title, "source": "ranking_topic"}), run_id, "human_confirm_title"),
-        )
-        db.execute("UPDATE workflow_runs SET current_node_key='blueprint_volume_plan', context=%s WHERE id=%s",
-                   (encode(context), run_id))
-        start_key = "blueprint_volume_plan"
 
     db.commit()
     db.close()
 
     # Record ledger event
     _record_bootstrap_event(run_id, "run.created", node_key=start_key,
-                            payload={"selected_title": selected_title if selected_title else None})
+                            payload={
+                                "selected_title": selected_title if selected_title else None,
+                                "auto_confirm_title": bool(auto_confirm_title),
+                            })
 
     dispatch_bootstrap_run(run_id, start_key, api_key, api_url, model)
     return run_id
@@ -735,7 +1064,8 @@ def dispatch_bootstrap_run(run_id: str, start_key: str, api_key: str = "",
                            api_url: str = "", model: str = "") -> None:
     """Dispatch or redrive one committed run, persisting broker failures."""
     try:
-        execute_bootstrap.delay(run_id, start_key, api_key, api_url, model)
+        execute_bootstrap.delay(run_id, start_key, "", api_url, model,
+                                 api_key_ref=stash_byok_key(api_key))
     except Exception as exc:
         db = connect()
         db.execute("""UPDATE workflow_runs SET status='dispatch_failed', dispatch_attempts=dispatch_attempts+1,
@@ -771,7 +1101,8 @@ def confirm_human(run_id: str, selected_title: str,
 
     _record_bootstrap_event(run_id, "human.confirmed", node_key="human_confirm_title",
                             payload={"selected_title": selected_title})
-    execute_bootstrap.delay(run_id, "blueprint_volume_plan", api_key, api_url, model)
+    execute_bootstrap.delay(run_id, "blueprint_volume_plan", "", api_url, model,
+                             api_key_ref=stash_byok_key(api_key))
 # ═══════════════════════════════════════════════════════════════════════════
 # Node marking + output persistence
 # ═══════════════════════════════════════════════════════════════════════════
@@ -815,6 +1146,40 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
 
     if task_type == "plan_idea":
         context["idea_expanded"] = output.get("idea_expanded", output.get("idea", ""))
+        creative_bible = str(output.get("creative_bible") or "").strip()
+        if creative_bible:
+            meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (_novel_id,)).fetchone()
+            if meta_row:
+                m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
+                m["creative_bible"] = creative_bible
+                m["core_hook"] = output.get("core_hook", "")
+                m["target_audience"] = output.get("target_audience", "")
+                m["source_facts"] = output.get("source_facts", [])
+                m["design_additions"] = output.get("design_additions", [])
+                m["forbidden_changes"] = output.get("forbidden_changes", [])
+                m["planning_module"] = "creative_bible_v2"
+                db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
+            knowledge_id = new_id()
+            generation_key = f"run:{run_id}:node:{node_key}:creative-bible:v1"
+            stored = db.execute(
+                """INSERT INTO knowledge_items
+                   (id, project_id, content_id, kind, title, body, meta, generation_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (content_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+                   DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
+                   RETURNING id""",
+                (
+                    knowledge_id,
+                    _project_id,
+                    _novel_id,
+                    "creative_bible",
+                    "创作圣经",
+                    creative_bible,
+                    encode({"source_node": node_key, "core_hook": output.get("core_hook", "")}),
+                    generation_key,
+                ),
+            ).fetchone()
+            knowledge_ids_to_reindex.append(stored["id"] if stored else knowledge_id)
     elif task_type == "plan_market_fit":
         context["market_fit"] = output
     elif task_type == "plan_story_pattern":
@@ -881,6 +1246,12 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                                knowledge_ids_to_reindex)
     elif task_type == "write_self_review":
         context["self_review"] = output
+        cid = context.get("chapter_id", "")
+        if cid:
+            db.execute(
+                "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                (encode({"self_review": output, "review_score": output.get("self_score")}), cid),
+            )
     elif task_type == "write_polish":
         _persist_chapter_polish(db, node_key, output, context, run_id)
     elif task_type == "write_length_check":
@@ -889,12 +1260,84 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
         _persist_fact_reconcile(db, node_key, output, context, _novel_id, run_id)
     elif task_type in ("final_consistency_check", "final_continuity_audit", "final_humanize"):
         context[task_type] = output
+        if task_type == "final_consistency_check":
+            checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
+            failed_checks = {
+                name: check for name, check in checks.items()
+                if not isinstance(check, dict)
+                or check.get("status") != "pass"
+                or bool(check.get("issues"))
+            }
+            if output.get("overall_status") != "pass" or failed_checks:
+                cid = context.get("chapter_id", "")
+                if cid:
+                    db.execute(
+                        "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+                        (encode({"quality_gate": {"status": "failed", "checks": checks}}), cid),
+                    )
+                db.commit()
+                db.close()
+                raise OutputValidationError(
+                    "final consistency gate rejected chapter: " + ", ".join(failed_checks.keys())
+                )
+            cid = context.get("chapter_id", "")
+            if cid:
+                db.execute(
+                    "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                    (encode({
+                        "final_consistency_check": output,
+                        "review_7dim": _quality_evidence_payload(output, context.get("self_review")),
+                    }), cid),
+                )
+        if task_type == "final_continuity_audit":
+            continuity = output.get("continuity") if isinstance(output.get("continuity"), dict) else {}
+            if continuity.get("status") != "continuous" or bool(continuity.get("gaps")):
+                cid = context.get("chapter_id", "")
+                if cid:
+                    db.execute(
+                        "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+                        (encode({"continuity_gate": {"status": "failed", "audit": continuity}}), cid),
+                    )
+                db.commit()
+                db.close()
+                raise OutputValidationError("final continuity gate rejected chapter")
+            cid = context.get("chapter_id", "")
+            if cid:
+                db.execute(
+                    "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
+                    (encode({"final_continuity_audit": output}), cid),
+                )
         if task_type == "final_humanize":
-            # Apply humanized text to chapter if available
             cid = context.get("chapter_id", "")
             if cid and output.get("humanized_text"):
-                db.execute("UPDATE contents SET body = body || %s, updated_at = now() WHERE id = %s",
-                           (encode({"humanized": True, "humanized_at": datetime.now(timezone.utc).isoformat()}), cid))
+                current = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
+                before_text = extract_body_text(current["body"] if current else "")
+                paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
+                try:
+                    _assert_story_revision_quality(
+                        task_type=task_type,
+                        before_text=before_text,
+                        after_paragraphs=paragraphs,
+                        min_ratio=0.80,
+                    )
+                    _assert_min_chapter_length(task_type, "\n".join(paragraphs))
+                except OutputValidationError:
+                    db.close()
+                    raise
+                from app.services.text_metrics import count_content_chars
+                db.execute(
+                    "UPDATE contents SET body = %s, meta = meta || %s, updated_at = now() WHERE id = %s",
+                    (
+                        encode(_chapter_doc_from_paragraphs(paragraphs)),
+                        encode({
+                            "humanized": True,
+                            "humanized_at": datetime.now(timezone.utc).isoformat(),
+                            "word_count": count_content_chars("\n".join(paragraphs)),
+                        }),
+                        cid,
+                    ),
+                )
+                context["chapter_text"] = "\n".join(paragraphs)
 
     # ── Common persist ──────────────────────────────────────────────────
     db.execute(
@@ -925,18 +1368,26 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
     chapter = output.get("chapter", {})
     body = {"type": "doc", "content": [{"type": "paragraph", "text": t} for t in chapter.get("body", [])]}
     chapter_text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter.get("body", []))
+    if _looks_like_non_narrative_text(chapter_text):
+        db.close()
+        raise OutputValidationError("write_chapter_draft returned non-narrative instructional text")
+    try:
+        _assert_min_chapter_length("write_chapter_draft", chapter_text)
+    except OutputValidationError:
+        db.close()
+        raise
     chapter_seq = int(context.get("_chapter_seq", 1))
     chapter_meta = {"seq": chapter_seq, "word_count": count_content_chars(chapter_text)}
     cid = new_id()
     generation_key = _chapter_idempotency_key(novel_id, chapter_seq)
     stored = db.execute(
-        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (project_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
-           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
+           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, seq=EXCLUDED.seq, updated_at=now()
            RETURNING id""",
         (cid, project_id, novel_id, "chapter", chapter.get("title", f"第一章"),
-         encode(body), encode(chapter_meta), "reviewed", generation_key),
+         encode(body), encode(chapter_meta), "pending_review", generation_key, chapter_seq),
     ).fetchone()
     cid = stored["id"] if stored else cid
     context["chapter_id"] = cid
@@ -957,12 +1408,26 @@ def _persist_chapter_polish(db, node_key: str, output: dict, context: dict, run_
         return
     polished = output.get("polished", output.get("chapter", output))
     if isinstance(polished, dict) and polished.get("body"):
-        polished_body = {"type": "doc", "content": [{"type": "paragraph", "text": t}
-                                                     for t in polished.get("body", [])]}
+        current = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
+        before_text = extract_body_text(current["body"] if current else "")
+        polished_paragraphs = [
+            str(t if isinstance(t, str) else t.get("text", "")).strip()
+            for t in polished.get("body", [])
+            if str(t if isinstance(t, str) else t.get("text", "")).strip()
+        ]
+        try:
+            _assert_story_revision_quality(
+                task_type="write_polish",
+                before_text=before_text or context.get("chapter_text", ""),
+                after_paragraphs=polished_paragraphs,
+            )
+            _assert_min_chapter_length("write_polish", "\n".join(polished_paragraphs))
+        except OutputValidationError:
+            db.close()
+            raise
+        polished_body = _chapter_doc_from_paragraphs(polished_paragraphs)
         db.execute("UPDATE contents SET body = %s, updated_at = now() WHERE id = %s", (encode(polished_body), cid))
-        context["chapter_text"] = "\n".join(
-            t if isinstance(t, str) else t.get("text", "") for t in polished.get("body", [])
-        )
+        context["chapter_text"] = "\n".join(polished_paragraphs)
 def _persist_fact_reconcile(db, node_key: str, output: dict, context: dict,
                             novel_id: str, run_id: str) -> None:
     """Reconcile chapter facts against entity states."""
@@ -1017,29 +1482,77 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 # Chapter generation (M2 — unchanged from original)
 # ══════════════════════════════════════════════════════════════════════════
 
-@celery_app.task(bind=True, max_retries=2)
+@celery_app.task(bind=True, max_retries=4)
 @_isolated_request_context
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
                            api_key: str = "", api_url: str = "", model: str = "",
-                           batch_id: str = "", batch_ordinal: int = 0) -> dict:
-    """M2: Generate the next chapter using context assembler (with distributed lock)."""
+                           batch_id: str = "", batch_ordinal: int = 0,
+                           api_key_ref: str = "") -> dict:
+    """M2: Generate the next chapter using context assembler (with distributed lock).
+
+    P2 hardening:
+      * The BYOK key arrives as a short-lived ``api_key_ref`` (never plaintext in
+        the broker) and is resolved here via ``resolve_byok_key``.
+      * A global AI semaphore (P2-T5 / Q11) caps concurrent provider calls so a
+        50-chapter batch / auto-serial burst cannot overwhelm DeepSeek.
+      * If the per-novel lock is held (another slot of the same novel is still
+        generating), a *batch* slot is re-queued (P2-T4 / Q10) instead of
+        crashing the whole batch.
+    """
     from app.gateway import _request_api_key, _request_api_base_url, _request_model
     from .lock import acquire_lock, release_lock
 
+    api_key = resolve_byok_key(api_key_ref, api_key)
     if api_key:
         _request_api_key.set(api_key)
     if api_url:
         _request_api_base_url.set(api_url)
     if model:
         _request_model.set(model)
+    # Attribute generated chapters to the novel owner for per-user metering.
+    _attach_user_context(novel_id)
+
+    # P2-T5 / Q11: respect the global AI concurrency limit (fail-open on Redis
+    # outage). Brief polling before falling back to a bounded Celery retry.
+    acquired = False
+    for _ in range(6):
+        if acquire_ai_slot(timeout=5):
+            acquired = True
+            break
+        time.sleep(1)
+    if not acquired:
+        raise self.retry(exc=RuntimeError("global AI concurrency limit reached"), countdown=3)
 
     lock_key = f"lock:novel:{novel_id}:gen_chapter"
     if not acquire_lock(lock_key):
+        release_ai_slot()
+        # Another generation holds the per-novel lock. Re-queue batch slots so a
+        # transient conflict never fails the whole batch (P2-T4 / Q10).
+        if batch_id and batch_ordinal:
+            gen_next_chapter_task.apply_async(
+                (novel_id, project_id, "", api_url, model, batch_id, batch_ordinal),
+                {"api_key_ref": api_key_ref},
+                countdown=3,
+            )
+            return {"status": "requeued", "batch_id": batch_id, "ordinal": batch_ordinal}
         return {"status": "skipped", "reason": "another generation in progress"}
     try:
-        return _generate_next_chapter_unlocked(novel_id, project_id, batch_id, batch_ordinal)
+        result = _generate_next_chapter_unlocked(novel_id, project_id, batch_id, batch_ordinal)
     finally:
         release_lock(lock_key)
+        release_ai_slot()
+
+    # Batch progress + finalization are driven from here so fan-out slots advance
+    # the batch independently of the (now non-blocking) orchestrator, preserving
+    # idempotency and resume semantics (P2-T5 / Q11).
+    if batch_id:
+        db = connect()
+        try:
+            _recount_batch_progress(db, batch_id)
+            _maybe_finalize_batch(db, batch_id)
+        finally:
+            db.close()
+    return result
 def _batch_generation_key(batch_id: str, ordinal: int) -> str:
     return f"batch:{batch_id}:slot:{ordinal}:v1"
 def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
@@ -1082,7 +1595,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
                     "reused": True}
     # Find last chapter seq
     last = db.execute(
-        "SELECT COALESCE(MAX((meta->>'seq')::int), 0) as seq FROM contents WHERE parent_id = %s AND type='chapter'",
+        "SELECT COALESCE(MAX(seq), MAX((meta->>'seq')::int), 0) as seq FROM contents WHERE parent_id = %s AND type='chapter'",
         (novel_id,),
     ).fetchone()
     next_seq = (last["seq"] if last else 0) + 1
@@ -1116,18 +1629,21 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
     db = connect()
     from app.services.text_metrics import count_content_chars
     text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter["body"])
+    _assert_min_chapter_length("gen_next_chapter", text)
     chapter_meta = {"seq": next_seq, "word_count": count_content_chars(text)}
     if batch_id and batch_ordinal:
         chapter_meta.update({"batch_id": batch_id, "batch_ordinal": batch_ordinal,
                              "ordinal": batch_ordinal, "quality_status": "draft_pending_review"})
     stored = db.execute(
-        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq, batch_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (project_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
-           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, updated_at=now()
+           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, seq=EXCLUDED.seq,
+                         batch_id=EXCLUDED.batch_id, updated_at=now()
            RETURNING id""",
         (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"),
-         encode(body), encode(chapter_meta), "pending_review", generation_key),
+         encode(body), encode(chapter_meta), "pending_review", generation_key,
+         next_seq, batch_id or None),
     ).fetchone()
     cid = stored["id"] if stored else cid
     db.execute(
@@ -1187,6 +1703,11 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
     current_body = list(paragraphs)
     for attempt in range(max_rewrites + 1):
         current_text = "\n".join(current_body)
+        length_issue = ""
+        try:
+            _assert_min_chapter_length("chapter_review", current_text)
+        except OutputValidationError as exc:
+            length_issue = str(exc)
         review = complete(
             run_id=None, node_key=None, project_id=project_id,
             task_type="review_7dim", prompt_name="bootstrap.review_7dim",
@@ -1196,6 +1717,9 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         )
         score = float(review["score"])
         issues = list(review.get("issues", []))
+        if length_issue:
+            score = min(score, threshold - 1)
+            issues.append(length_issue)
         review_key = f"{generation_key}:review-record:{attempt}:v1"
         db = connect()
         db.execute(
@@ -1205,14 +1729,14 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                DO UPDATE SET score=EXCLUDED.score,dimensions=EXCLUDED.dimensions,issues=EXCLUDED.issues""",
             (new_id(), chapter_id, score, encode(review["dimensions"]), encode(issues), review_key),
         )
-        status = "reviewed" if score >= threshold else "pending_review"
+        status = "pending_review"
         db.execute("""UPDATE contents SET status=%s,meta=meta || %s,updated_at=now() WHERE id=%s""",
                    (status, encode({"review_score": score, "review_issues": issues,
                                     "review_attempts": attempt + 1,
-                                    "quality_status": "accepted" if score >= threshold else "draft_pending_review"}), chapter_id))
+                                    "quality_status": "ai_review_passed" if score >= threshold else "draft_pending_review"}), chapter_id))
         db.commit(); db.close()
         if score >= threshold:
-            return {"accepted": True, "review_status": "reviewed", "final_score": score,
+            return {"accepted": False, "review_status": "pending_review", "final_score": score,
                     "rewrite_attempts": attempt, "title": current_title, "body": current_body}
         if attempt == max_rewrites:
             db = connect()
@@ -1231,6 +1755,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         )["chapter"]
         current_title = rewritten["title"]
         current_body = list(rewritten["body"])
+        _assert_min_chapter_length("chapter_rewrite", "\n".join(current_body))
         rewritten_doc = {"type": "doc", "content": [{"type": "paragraph", "text": text}
                                                          for text in current_body]}
         from app.services.text_metrics import count_content_chars
@@ -1256,6 +1781,104 @@ def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
              + [{"type": "foreshadow_due", "content": f.get("content", ""), "foreshadow_id": f.get("id")}
                 for f in overdue])
     return {"status": "flagged" if risks else "clean", "risks": risks, "checked_at": checked_at}
+
+
+@celery_app.task(bind=True, max_retries=1)
+@_isolated_request_context
+def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
+                            api_key: str = "", api_url: str = "", model: str = "",
+                            api_key_ref: str = "") -> dict:
+    """Regenerate one rejected chapter in place.
+
+    This is the manual-review path: rejecting a chapter must not create the next
+    chapter by accident. It rewrites the same content row and leaves it
+    ``pending_review`` for another human decision.
+    """
+    # P2-T3 / Q5: resolve the BYOK key from its ref (legacy plaintext still honoured).
+    api_key = resolve_byok_key(api_key_ref, api_key)
+    if api_key:
+        _request_api_key.set(api_key)
+    if api_url:
+        _request_api_base_url.set(api_url)
+    if model:
+        _request_model.set(model)
+    from app.services.novel_export import extract_body_text
+    from app.services.text_metrics import count_content_chars
+
+    db = connect()
+    chapter = db.execute("SELECT * FROM contents WHERE id=%s AND type='chapter' AND is_deleted=FALSE", (chapter_id,)).fetchone()
+    if not chapter:
+        db.close()
+        return {"status": "error", "message": "chapter not found"}
+    novel = db.execute("SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE", (chapter["parent_id"],)).fetchone()
+    if not novel:
+        db.close()
+        return {"status": "error", "message": "novel not found"}
+    chapter_meta = chapter["meta"] if isinstance(chapter.get("meta"), dict) else {}
+    seq = int(chapter.get("seq") or chapter_meta.get("seq") or 1)
+    current_text = extract_body_text(chapter.get("body", ""))
+    project_id = chapter["project_id"]
+    novel_id = chapter["parent_id"]
+    db.close()
+
+    output = complete(
+        run_id=None,
+        node_key=None,
+        project_id=project_id,
+        task_type="gen_next_chapter",
+        prompt_name="narrative.gen_next_chapter",
+        variables={
+            "rewrite": True,
+            "manual_review_rejected": True,
+            "chapter_seq": seq,
+            "current_title": chapter["title"],
+            "current_body": current_text,
+            "review_feedback": [reason or "人工审核拒绝：请重写本章，保留章节序号，强化冲突、叙事和可读性。"],
+            "context": f"小说：《{novel['title']}》\n章节序号：第{seq}章\n拒绝原因：{reason}",
+        },
+        client_mutation_id=f"manual-review:{chapter_id}:regenerate:{int(time.time())}:v1",
+    )
+    rewritten = output["chapter"]
+    paragraphs = [str(p).strip() for p in rewritten.get("body", []) if str(p).strip()]
+    text = "\n".join(paragraphs)
+    if _looks_like_non_narrative_text(text):
+        db = connect()
+        db.execute(
+            "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+            (encode({"manual_review": {"status": "regenerate_failed", "reason": "non_narrative_output"}}), chapter_id),
+        )
+        db.commit(); db.close()
+        raise OutputValidationError("manual regeneration returned non-narrative text")
+    _assert_min_chapter_length("manual_regeneration", text)
+
+    db = connect()
+    previous_snapshot = {"title": chapter["title"], "body": chapter["body"], "meta": chapter_meta}
+    db.execute(
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason) VALUES (%s,'content',%s,'before_manual_regenerate',%s,%s)",
+        (new_id("ver"), chapter_id, encode(previous_snapshot), reason[:500]),
+    )
+    meta_patch = {
+        "word_count": count_content_chars(text),
+        "manual_review": {
+            "status": "regenerated",
+            "reason": reason,
+            "regenerated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "quality_status": "draft_pending_review",
+    }
+    db.execute(
+        """UPDATE contents
+           SET title=%s, body=%s, status='pending_review', meta=meta || %s, updated_at=now()
+           WHERE id=%s""",
+        (
+            rewritten.get("title") or chapter["title"],
+            encode(_chapter_doc_from_paragraphs(paragraphs)),
+            encode(meta_patch),
+            chapter_id,
+        ),
+    )
+    db.commit(); db.close()
+    return {"status": "pending_review", "chapter_id": chapter_id, "title": rewritten.get("title") or chapter["title"], "seq": seq}
 def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str = "",
                     model: str = "") -> dict:
     """Run or resume one stable batch slot."""
@@ -1293,7 +1916,7 @@ def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str =
 def _recount_batch_progress(db, batch_id: str) -> dict | None:
     """Rebuild counters from distinct persisted slots; never blindly trust increments."""
     cursor = db.execute("""SELECT status,meta FROM contents WHERE type='chapter'
-                           AND meta->>'batch_id'=%s AND is_deleted=FALSE""", (batch_id,))
+                           AND (batch_id = %s OR meta->>'batch_id' = %s) AND is_deleted=FALSE""", (batch_id, batch_id))
     if not hasattr(cursor, "fetchall"):
         return None
     rows = cursor.fetchall()
@@ -1307,7 +1930,9 @@ def _recount_batch_progress(db, batch_id: str) -> dict | None:
             by_ordinal[ordinal] = meta.get("quality_status") or row.get("status")
     generated = len(by_ordinal)
     accepted = sum(status in {"accepted", "reviewed"} for status in by_ordinal.values())
-    needs_review = sum(status in {"needs_review", "needs_rewrite"} for status in by_ordinal.values())
+    # A generated draft has not completed AI/manual review yet and must not
+    # inflate reviewed/completed counters.
+    needs_review = sum(status in {"needs_review", "needs_rewrite", "pending_review", "ai_review_passed"} for status in by_ordinal.values())
     reviewed = accepted + needs_review
     terminal = reviewed
     db.execute("""UPDATE generation_batches SET generated_count=%s,reviewed_count=%s,
@@ -1323,6 +1948,32 @@ def _increment_batch_progress_legacy(db, batch_id: str, accepted: bool) -> None:
                    reviewed_count=reviewed_count+1,accepted_count=accepted_count+%s,
                    needs_review_count=needs_review_count+%s,updated_at=now() WHERE id=%s""",
                (1 if accepted else 0, 0 if accepted else 1, batch_id))
+
+
+def _maybe_finalize_batch(db, batch_id: str) -> None:
+    """Finalize a batch once every requested ordinal has been generated.
+
+    Idempotent: safe to call after every slot. Recounts already updated
+    ``completed_count`` / ``needs_review_count`` in the prior
+    ``_recount_batch_progress`` call, so we just decide the terminal state.
+    Mirrors the previous all-serial finalization semantics.
+    """
+    batch = db.execute("SELECT * FROM generation_batches WHERE id=%s", (batch_id,)).fetchone()
+    if not batch:
+        return
+    requested = int(batch.get("requested_count", 0) or 0)
+    completed = int(batch.get("completed_count", 0) or 0)
+    if completed < requested:
+        return  # not all slots generated yet
+    had_needs_review = int(batch.get("needs_review_count", 0) or 0) > 0
+    final_status = "needs_review" if had_needs_review else "succeeded"
+    db.execute(
+        """UPDATE generation_batches SET status=%s, quality_status=%s, current_ordinal=NULL, updated_at=now()
+           WHERE id=%s""",
+        (final_status, "needs_review" if had_needs_review else "verified", batch_id),
+    )
+
+
 @celery_app.task(bind=True, max_retries=1)
 def batch_generate_chapters_task(
     self,
@@ -1331,7 +1982,12 @@ def batch_generate_chapters_task(
     api_url: str = "",
     model: str = "",
 ) -> dict:
-    """Generate a persisted batch, observing cancellation and resuming from completed_count."""
+    """Fan out a persisted batch: dispatch one ``gen_next_chapter_task`` per
+    pending ordinal (P2-T5 / Q11). The per-novel lock inside that task keeps
+    chapters of the same novel serialized, while the global AI semaphore caps
+    total concurrency across all batches. Progress / finalization are driven by
+    ``gen_next_chapter_task`` itself, preserving idempotency and resume.
+    """
     db = connect()
     batch = db.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
     if not batch:
@@ -1339,74 +1995,67 @@ def batch_generate_chapters_task(
         return {"status": "error", "message": "batch not found"}
     db.execute("UPDATE generation_batches SET status = 'running', error = NULL, updated_at = now() WHERE id = %s", (batch_id,))
     db.commit()
-    db.close()
 
-    start_ordinal = batch.get("completed_count", 0) + 1
-    had_needs_review = False
+    start_ordinal = int(batch.get("completed_count", 0) or 0) + 1
+    requested = int(batch.get("requested_count", 0) or 0)
+    project_id = batch["project_id"]
+    novel_id = batch["novel_id"]
+    dispatched = 0
     try:
-        for ordinal in range(start_ordinal, batch["requested_count"] + 1):
-            db = connect()
-            db.execute("UPDATE generation_batches SET current_ordinal=%s,updated_at=now() WHERE id=%s",
-                       (ordinal, batch_id))
-            db.commit(); db.close()
-            db = connect()
-            state = db.execute("SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
-            db.close()
+        for ordinal in range(start_ordinal, requested + 1):
+            state = db.execute(
+                "SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)
+            ).fetchone()
             if not state or state["cancel_requested"]:
+                db.commit(); db.close()
                 return {"status": "cancelled", "batch_id": batch_id}
-            result = _run_batch_slot(batch, ordinal, api_key, api_url, model)
-            if result.get("status") == "skipped":
-                raise RuntimeError(result.get("reason", "chapter generation skipped"))
-            accepted = result.get("accepted", True)
-            had_needs_review = had_needs_review or not accepted
-            db = connect()
-            counts = _recount_batch_progress(db, batch_id)
-            if counts is None:
-                _increment_batch_progress_legacy(db, batch_id, accepted)
-            db.commit()
-            db.close()
+            # Idempotency: skip ordinals already generated (resume / re-dispatch).
+            existing = db.execute(
+                """SELECT 1 FROM contents WHERE project_id=%s AND parent_id=%s
+                   AND generation_key=%s AND type='chapter' AND is_deleted=FALSE""",
+                (project_id, novel_id, _batch_generation_key(batch_id, ordinal)),
+            ).fetchone()
+            if existing:
+                continue
+            # The BYOK key travels as a ref only — never the plaintext broker payload.
+            gen_next_chapter_task.delay(
+                novel_id, project_id, "", api_url, model,
+                batch_id, ordinal, api_key_ref=api_key_ref,
+            )
+            dispatched += 1
     except BudgetExceeded as exc:
-        db = connect()
-        db.execute(
-            "UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
-            (str(exc), batch_id),
-        )
-        db.commit()
-        db.close()
+        db.execute("UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
+                   (str(exc), batch_id))
+        db.commit(); db.close()
         from app.core.alerts import send_alert
         send_alert(f"批次 {batch_id} 因预算不足失败：{exc}", "warning")
         return {"status": "failed", "batch_id": batch_id, "reason": str(exc)}
     except ProviderError as exc:
-        db = connect()
-        db.execute(
-            "UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
-            (str(exc), batch_id),
-        )
-        db.commit()
-        db.close()
+        db.execute("UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
+                   (str(exc), batch_id))
+        db.commit(); db.close()
         from app.core.alerts import send_alert
         send_alert(f"批次 {batch_id} 因 AI provider 失败：{exc}", "warning")
         return {"status": "failed", "batch_id": batch_id, "reason": str(exc)}
     except Exception as exc:
-        db = connect()
-        db.execute(
-            "UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
-            (str(exc), batch_id),
-        )
-        db.commit()
-        db.close()
+        db.execute("UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
+                   (str(exc), batch_id))
+        db.commit(); db.close()
         from app.core.alerts import send_alert
         send_alert(f"批次 {batch_id} 失败：{exc}", "error")
         raise
 
-    db = connect()
-    final_status = "needs_review" if had_needs_review else "succeeded"
-    db.execute("""UPDATE generation_batches SET status=%s,quality_status=%s,current_ordinal=NULL,updated_at=now()
-                  WHERE id=%s""",
-               (final_status, "needs_review" if had_needs_review else "verified", batch_id))
-    db.commit()
     db.close()
-    return {"status": final_status, "batch_id": batch_id, "completed_count": batch["requested_count"]}
+    # If nothing new was dispatched (everything already done), make sure the
+    # final state is consistent.
+    if dispatched == 0:
+        db = connect()
+        try:
+            _recount_batch_progress(db, batch_id)
+            _maybe_finalize_batch(db, batch_id)
+        finally:
+            db.close()
+    return {"status": "running", "batch_id": batch_id, "dispatched": dispatched}
 @celery_app.task
 def expand_outline_task(novel_id: str, project_id: str) -> dict:
     """M2: Expand volume outline into chapter-level outlines."""
@@ -1440,17 +2089,40 @@ def expand_outline_task(novel_id: str, project_id: str) -> dict:
     return {"chapters": len(chapters), "sample": chapters[:3]}
 @celery_app.task
 def auto_serial_check() -> dict:
-    """M2 beat: check for novels with auto-serial enabled and generate next chapter."""
+    """M2 beat: generate the next chapter for novels with auto-serial enabled.
+
+    P2-T5 / Q11: throttle the burst. On a整点 beat tick the whole fleet could
+    fire at once, so we (a) cap dispatches per tick and (b) shard the fleet by
+    novel-id hash so only a rotating slice is considered each minute.
+    """
+    import hashlib
+    import os
+
+    max_per_tick = int(os.getenv("AUTO_SERIAL_MAX_PER_TICK", "5"))
+    shards = int(os.getenv("AUTO_SERIAL_SHARDS", "4"))
+    tick = int(time.time() // 60)  # rotates each minute
+
     db = connect()
     novels = db.execute(
-        "SELECT id, project_id FROM contents WHERE type='novel' AND meta->>'auto_serial' = 'true' AND is_deleted = FALSE"
+        """SELECT id, project_id FROM contents
+           WHERE type='novel'
+             AND (auto_serial IS TRUE OR meta->>'auto_serial' = 'true')
+             AND is_deleted = FALSE"""
     ).fetchall()
     db.close()
     results = []
+    dispatched = 0
     for novel in novels:
+        if dispatched >= max_per_tick:
+            break
+        if shards > 1:
+            digest = hashlib.md5(novel["id"].encode("utf-8")).hexdigest()
+            if int(digest, 16) % shards != tick % shards:
+                continue
         try:
             gen_next_chapter_task.delay(novel["id"], novel["project_id"])
             results.append({"novel_id": novel["id"], "status": "dispatched"})
+            dispatched += 1
         except Exception as e:
             results.append({"novel_id": novel["id"], "status": f"error: {e}"})
     return {"checked": len(novels), "results": results}

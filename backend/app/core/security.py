@@ -193,20 +193,15 @@ def get_current_user(
 
 
 def require_project_role(project_id: str, roles: list[str] | None = None):
-    """Factory: FastAPI dependency that checks project membership + optional role.
-    
-    Blocks non-members (None → 403, not bypass).
+    """Deprecated: thin backward-compatible wrapper delegating to ``authz``.
+
+    The canonical project-membership check now lives in
+    ``app.core.authz.require_project_membership`` (and the ``require_*_dep``
+    FastAPI dependency factories). This factory is kept only so any external or
+    test importer keeps working; new code should use ``authz`` directly.
     """
     async def checker(user: dict = Depends(get_current_user)):
-        db = connect()
-        member = db.execute(
-            "SELECT * FROM project_members WHERE project_id = %s AND user_id = %s",
-            (project_id, user["id"]),
-        ).fetchone()
-        db.close()
-        if member is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not a project member")
-        if roles and member["role"] not in roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="insufficient permissions")
+        from app.core.authz import require_project_membership
+        require_project_membership(project_id, user, set(roles) if roles else None)
         return user
     return checker

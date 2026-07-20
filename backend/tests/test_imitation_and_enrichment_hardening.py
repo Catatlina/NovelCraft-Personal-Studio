@@ -49,6 +49,7 @@ def test_imitation_endpoint_blocks_high_similarity_before_persist(monkeypatch):
     )
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "IMITATION_SIMILARITY_BLOCKED"
+    assert "版权" in response.json()["detail"]["copyright_warning"]
 
     db = connect()
     count = db.execute(
@@ -57,6 +58,42 @@ def test_imitation_endpoint_blocks_high_similarity_before_persist(monkeypatch):
     ).fetchone()["c"]
     db.close()
     assert count == 0
+
+
+def test_imitation_endpoint_returns_copyright_warning_and_persists_risk(monkeypatch):
+    from app.api.v1 import imitation
+    from app.db import connect
+
+    client, headers, project_id = _auth_project()
+    source = "风从旧城的钟楼穿过，带着铁锈和潮湿的味道。主角沿着潮湿石阶向下，听见远处机器像心脏一样震动。" * 12
+    generated = "新城边缘的天桥下，雨水把霓虹揉成碎片。少年握着失灵的录音笔，听见地下管道传来像潮汐一样的低鸣。" * 8
+
+    monkeypatch.setattr(
+        imitation,
+        "complete",
+        lambda **_kwargs: {"title": "低相似原创样稿", "style_profile": {"tone": "冷峻"}, "text": generated},
+    )
+
+    response = client.post(
+        "/api/v1/imitation",
+        headers=headers,
+        json={"project_id": project_id, "source_text": source, "instruction": "仿写"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["similarity"]["verdict"] in {"pass", "warning"}
+    assert data["copyright_risk"] in {"low", "manual_review"}
+    assert "版权" in data["copyright_warning"]
+
+    db = connect()
+    row = db.execute(
+        "SELECT meta FROM contents WHERE project_id=%s AND type='imitation_sample' ORDER BY created_at DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    db.close()
+    assert row["meta"]["copyright_risk"] == data["copyright_risk"]
+    assert row["meta"]["copyright_warning"] == data["copyright_warning"]
 
 
 def test_narrative_enrichment_provider_errors_are_not_silenced(monkeypatch):

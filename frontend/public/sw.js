@@ -1,6 +1,6 @@
 /* eslint-disable */
 // PWA Service Worker — offline cache
-const CACHE = "novelcraft-v2";
+const CACHE = "novelcraft-v3";
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/","/index.html"])));
   self.skipWaiting();

@@ -12,6 +12,46 @@ from app.db import connect, new_id, encode
 
 PUBLISH_STATES = ["draft", "scheduled", "submitted", "published", "failed", "retrying", "retracted"]
 
+# NC-PUB-001 / P1-T7: required connection fields per platform.
+# Each platform maps to a list of alternative-groups; within a group ANY one key
+# present (non-empty) satisfies it. A platform absent from the spec requires no
+# stored credentials (e.g. zhihu/baijia publish via title+body only).
+PLATFORM_CREDENTIAL_SPECS: dict[str, list[list[str]]] = {
+    "wechat": [["app_id"], ["app_secret"]],
+    "toutiao": [["token", "access_token"]],
+    "substack": [["token", "api_key"]],
+    "x": [["token", "bearer_token", "access_token"]],
+    "xiaohongshu": [["images"]],
+}
+
+
+def validate_publish_credentials(platform: str, credentials: dict) -> list[str]:
+    """Return a list of human-readable missing requirements (empty = OK)."""
+    spec = PLATFORM_CREDENTIAL_SPECS.get(platform)
+    if not spec:
+        return []
+    missing: list[str] = []
+    present = {k: str(v).strip() for k, v in (credentials or {}).items()}
+    for group in spec:
+        if not any(present.get(k) for k in group):
+            missing.append("/".join(group))
+    return missing
+
+
+def record_publish_attempt(content_id: str, platform: str, status: str,
+                            meta: dict | None = None) -> dict:
+    """P1-T7: persist a publish attempt (success/failed) for status reflow/query."""
+    rid = new_id()
+    db = connect()
+    db.execute(
+        "INSERT INTO publish_records (id, content_id, platform, status, mode, meta) "
+        "VALUES (%s,%s,%s,%s,'manual',%s)",
+        (rid, content_id or None, platform, status, encode(meta or {})),
+    )
+    db.commit()
+    db.close()
+    return {"record_id": rid, "status": status}
+
 
 # ===== NC-PUB-001: Publish state machine + account authorization =====
 # Accounts live in platform_accounts with Fernet-encrypted credentials
@@ -294,14 +334,78 @@ def generate_roi_report(project_ids: list[str] | None = None) -> dict:
     return {"roi_by_platform": sorted(roi, key=lambda x: x["revenue"], reverse=True)}
 
 
-def generate_topic_suggestions_from_data(project_ids: list[str] | None = None) -> list[str]:
-    """NC-PUB-003: Derive topic suggestions from successful published content."""
+def generate_topic_suggestions_from_data(project_ids: list[str] | None = None) -> list[dict]:
+    """NC-PUB-003: Derive topic suggestions from successful published content.
+    Every suggestion is traceable to the source post that produced it."""
     db = connect()
     top = db.execute(
-        "SELECT title FROM published_posts WHERE project_id = ANY(%s::uuid[]) "
+        "SELECT id, title, platform, COALESCE((meta->>'reads')::int, 0) AS reads "
+        "FROM published_posts WHERE project_id = ANY(%s::uuid[]) "
         "AND COALESCE((meta->>'reads')::int, 0) > 100 "
         "ORDER BY (meta->>'reads')::int DESC LIMIT 5", (project_ids or [],)
     ).fetchall()
     db.close()
-    suggestions = [f"「{t['title']}」表现优异 → 继续深耕此领域" for t in top if t["title"]]
-    return suggestions or ["暂无足够数据，建议从热点选题中心开始"]
+    suggestions = [{
+        "suggestion": f"「{t['title']}」表现优异 → 继续深耕此领域",
+        "source_post_id": str(t["id"]), "source_title": t["title"],
+        "platform": t["platform"], "reads": int(t["reads"]),
+    } for t in top if t["title"]]
+    return suggestions or [{"suggestion": "暂无足够数据，建议从热点选题中心开始",
+                            "source_post_id": None, "source_title": None, "platform": None, "reads": 0}]
+
+
+# 指标口径 — the single source of truth the dashboard and reports reference.
+METRICS_GLOSSARY = {
+    "reads": "平台回流的阅读数（published_posts.meta.reads，来源为真实采集/人工录入）",
+    "likes": "点赞数（meta.likes）",
+    "shares": "转发/分享数（meta.shares）",
+    "revenue": "收益（meta.revenue，单位为 meta.currency，默认 CNY）",
+    "rpm": "每千次阅读收益 = revenue / max(reads,1) × 1000",
+    "posts": "回流数据覆盖的已发布内容条数",
+}
+
+
+def build_performance_dashboard(project_ids: list[str] | None = None) -> dict:
+    """NC-PUB-003: 效果看板数据 — 汇总统计 + 平台 ROI + 可追溯选题建议 + 指标口径。"""
+    db = connect()
+    top_posts = db.execute(
+        "SELECT id, title, platform, COALESCE((meta->>'reads')::int,0) AS reads, "
+        "COALESCE((meta->>'likes')::int,0) AS likes, COALESCE((meta->>'revenue')::float,0) AS revenue "
+        "FROM published_posts WHERE project_id = ANY(%s::uuid[]) "
+        "ORDER BY COALESCE((meta->>'reads')::int,0) DESC LIMIT 10", (project_ids or [],)
+    ).fetchall()
+    db.close()
+    return {
+        "metrics_glossary": METRICS_GLOSSARY,
+        "totals": aggregate_platform_stats(project_ids=project_ids),
+        "roi_by_platform": generate_roi_report(project_ids=project_ids)["roi_by_platform"],
+        "top_posts": [{"post_id": str(p["id"]), "title": p["title"], "platform": p["platform"],
+                       "reads": int(p["reads"]), "likes": int(p["likes"]),
+                       "revenue": round(float(p["revenue"]), 2)} for p in top_posts],
+        "topic_suggestions": generate_topic_suggestions_from_data(project_ids=project_ids),
+    }
+
+
+def performance_feedback(project_id: str, project_ids: list[str] | None = None) -> dict:
+    """NC-PUB-003: 真实 AI 反哺 — 把真实回流数据交给网关，产出选题与写作建议。
+    每条建议绑定 based_on 源数据（post id 列表），Provider 失败显式抛错。"""
+    from app.gateway import complete
+
+    dashboard = build_performance_dashboard(project_ids=project_ids)
+    if not dashboard["top_posts"]:
+        return {"status": "no_data", "message": "没有回流数据，无法生成反哺建议",
+                "topic_suggestions": [], "writing_advice": []}
+    data_digest = json.dumps({
+        "totals": dashboard["totals"],
+        "roi_by_platform": dashboard["roi_by_platform"][:8],
+        "top_posts": dashboard["top_posts"],
+    }, ensure_ascii=False)
+    output = complete(
+        run_id=None, node_key=None, project_id=project_id,
+        task_type="performance_feedback", prompt_name="publish.performance_feedback",
+        variables={"performance_data": data_digest[:6000]},
+    )
+    valid_ids = {p["post_id"] for p in dashboard["top_posts"]}
+    for item in output.get("topic_suggestions", []):
+        item["based_on"] = [pid for pid in item.get("based_on", []) if pid in valid_ids]
+    return {"status": "ok", "source_posts": sorted(valid_ids), **output}

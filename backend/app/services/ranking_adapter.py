@@ -4,17 +4,49 @@ Based on proven open-source approaches:
   - 番茄: Qbook approach — fetch __INITIAL_STATE__ for rank_version, then call public API
   - 起点: Qbook approach — mobile page HTML parsing + __INITIAL_STATE__
   - 纵横: regex HTML parsing (existing)
+
+Expanded coverage (M5):
+  - 番茄: full leaderboard coverage (主榜/新书榜/分类榜/etc), pagination, retry, concurrency
+  - 起点: multi-page pagination → 100+ books
+  - 纵横: multi-page pagination → 100+ books
 """
 
 import hashlib
 import unicodedata
 import re, json, urllib.request, urllib.error
+import time as _time_module
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-# HTTP proxy — route through China IP to bypass geo-blocks
-_PROXY_URL = __import__("os").getenv("RANKING_PROXY_URL", "")
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Configurable env vars
+# ---------------------------------------------------------------------------
+_os = __import__("os")
+_PROXY_URL = _os.getenv("RANKING_PROXY_URL", "")
+_RANKING_FANQIE_COUNT = int(_os.getenv("RANKING_FANQIE_COUNT", "100"))
+# Validate: must be one of 50/100/200/500/1000
+_VALID_COUNTS = {50, 100, 200, 500, 1000}
+if _RANKING_FANQIE_COUNT not in _VALID_COUNTS:
+    _RANKING_FANQIE_COUNT = 100
+
+_RANKING_QIDIAN_COUNT = int(_os.getenv("RANKING_QIDIAN_COUNT", "200"))
+_RANKING_ZONGHENG_COUNT = int(_os.getenv("RANKING_ZONGHENG_COUNT", "200"))
+
+# Retry config
+_RETRY_MAX = 3
+_RETRY_BACKOFF = 2.0  # seconds
+
+# Proxy handler (lazy init)
 _proxy_handler = None
+
+# SSL context for Chinese sites (cert issues from non-China IPs)
+_SSL_CTX = __import__("ssl").create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = __import__("ssl").CERT_NONE
 
 
 def _get_opener():
@@ -42,18 +74,27 @@ def _urlopen(req, timeout=15, use_proxy=False):
     return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX)
 
 
+def _retry_call(fn, *args, max_retries=_RETRY_MAX, backoff=_RETRY_BACKOFF, **kwargs):
+    """Call fn with retry logic: up to max_retries attempts with exponential backoff."""
+    last_err: Exception = RuntimeError("_retry_call: no attempts made")
+    for attempt in range(1, max_retries + 1):
+        try:
+            result = fn(*args, **kwargs)
+            return result
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                _time_module.sleep(backoff * (2 ** (attempt - 1)))
+    raise last_err
+
+
 # ============================================================
 # Source 1: 番茄小说 — Public API via rank_version from page
 # ============================================================
 
-_FANQIE_META_CACHE: dict | None = None
+_FANQIE_META_CACHE: Optional[dict] = None
 _FANQIE_META_TS: float = 0
 _FANQIE_META_TTL = 3600  # 1 hour
-
-# SSL context for Chinese sites (cert issues from non-China IPs)
-_SSL_CTX = __import__("ssl").create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode = __import__("ssl").CERT_NONE
 
 
 def _decrypt_pua(text: str) -> str:
@@ -66,10 +107,14 @@ def _decrypt_pua(text: str) -> str:
 
 
 def _fanqie_meta() -> dict:
-    """Fetch fanqie rank page to extract rank_version and categories."""
+    """Fetch fanqie rank page to extract rank_version and categories.
+
+    Returns dict with keys:
+      - rank_version: str
+      - categories: dict like {"male": [{id, name}, ...], "female": [...]}
+    """
     global _FANQIE_META_CACHE, _FANQIE_META_TS
-    import time as _time
-    now = _time.time()
+    now = _time_module.time()
     if _FANQIE_META_CACHE and (now - _FANQIE_META_TS) < _FANQIE_META_TTL:
         return _FANQIE_META_CACHE
 
@@ -128,7 +173,7 @@ def _fanqie_api_call(category_id: str, gender: str = "1", rank_mold: str = "2",
     }
     try:
         req = urllib.request.Request(api_url, headers=headers)
-        with _urlopen(req, timeout=15) as resp:
+        with _retry_call(_urlopen, req, timeout=15) as resp:
             data = json.loads(resp.read())
         if data.get("code") != 0:
             return []
@@ -137,65 +182,258 @@ def _fanqie_api_call(category_id: str, gender: str = "1", rank_mold: str = "2",
         return []
 
 
-def fetch_fanqie_ranking(category: str = "read", gender: str = "") -> list[dict]:
-    """Fetch 番茄小说 ranking.
+def _build_category_targets(meta: dict, leaderboard: str) -> list[tuple[str, str, str]]:
+    """Build list of (category_id, category_name, gender) tuples for a leaderboard.
 
-    category: 'read' (在读榜) or 'new' (新书榜)
-    gender: 'male' / 'female' / '' (默认男频+女频各取前5分类)
+    leaderboard values:
+      - 'all' / 'main' / 'hotsales' / 'recommend' / 'monthly' / 'weekly' / 'daily' / 'completed' / 'category':
+          All categories, both genders, rankMold=2 (阅读榜)
+      - 'newbook': All categories, both genders, rankMold=1 (新书榜)
+      - 'male' / 'female': gender-specific, rankMold=2
     """
-    mold_map = {"read": "2", "new": "1"}
     gender_map = {"male": "1", "female": "0"}
-    rank_mold = mold_map.get(category, "2")
-
-    meta = _fanqie_meta()
     categories = meta.get("categories", {})
     if not categories:
-        return [{"source": "fanqie", "degraded": True,
-                 "error": "Fanqie rank page unreachable — check network"}]
+        return [("261", "都市日常", "1")]  # fallback
 
     targets = []
-    if gender in ("male", "female"):
-        g = gender_map[gender]
-        for cat in categories.get(gender, []):
-            targets.append((cat["id"], cat["name"], g))
+    if leaderboard in ("male",):
+        for cat in categories.get("male", []):
+            targets.append((cat["id"], cat["name"], "1"))
+    elif leaderboard in ("female",):
+        for cat in categories.get("female", []):
+            targets.append((cat["id"], cat["name"], "0"))
     else:
-        # Default: ALL categories (both genders)
-        for gk in ["male", "female"]:
-            g = gender_map[gk]
+        # All leaderboards: both genders, all categories
+        for gk, gv in [("male", "1"), ("female", "0")]:
             for cat in categories.get(gk, []):
-                targets.append((cat["id"], cat["name"], g))
+                targets.append((cat["id"], cat["name"], gv))
 
     if not targets:
         targets = [("261", "都市日常", "1")]
+    return targets
 
+
+# Leaderboard type → rankMold mapping
+_FANQIE_MOLD_MAP = {
+    "newbook": "1",  # 新书榜
+    "all": "2", "main": "2", "hotsales": "2", "recommend": "2",
+    "monthly": "2", "weekly": "2", "daily": "2", "completed": "2",
+    "category": "2", "male": "2", "female": "2",
+}
+
+# Leaderboard labels
+_FANQIE_LABELS = {
+    "all": "全站榜", "main": "主榜", "newbook": "新书榜",
+    "hotsales": "热销榜", "completed": "完结榜", "recommend": "推荐榜",
+    "monthly": "月榜", "weekly": "周榜", "daily": "日榜",
+    "category": "分类榜", "male": "男频榜", "female": "女频榜",
+}
+
+
+def _parse_fanqie_item(item: dict, cat_name: str, rank: int) -> Optional[dict]:
+    """Parse a single fanqie API item into a normalized dict. Returns None if invalid."""
+    book_id = str(item.get("book_id", item.get("bookId", "")))
+    if not book_id:
+        return None
+    title = _decrypt_pua(str(item.get("bookName", item.get("book_name", ""))))
+    author = _decrypt_pua(str(item.get("author", item.get("author_name", ""))))
+    if not title:
+        return None
+    creation_status = item.get("creationStatus", "")
+    return {
+        "rank": rank,
+        "title": title,
+        "author": author,
+        "category": cat_name,
+        "source": "fanqie",
+        "source_book_id": book_id,
+        "url": f"https://fanqienovel.com/page/{book_id}",
+        "read_count": item.get("read_count", item.get("readCount", 0)),
+        "word_count": item.get("wordNumber", item.get("word_count", 0)),
+        "leaderboard": f"分类榜-{cat_name}",
+        "creation_status": str(creation_status),
+    }
+
+
+def _make_dedup_key(title: str, author: str) -> str:
+    """Create a dedup key from title+author (NFKC normalized)."""
+    t = unicodedata.normalize("NFKC", re.sub(r"\s+", " ", title).strip())
+    a = unicodedata.normalize("NFKC", re.sub(r"\s+", " ", author).strip())
+    return hashlib.sha256(f"{t.casefold()}|{a.casefold()}".encode("utf-8")).hexdigest()
+
+
+def _fetch_fanqie_one_category(cat_id: str, cat_name: str, gender: str,
+                                rank_mold: str, max_count: int) -> list[dict]:
+    """Fetch all pages for a single fanqie category. Returns up to max_count items."""
     results = []
+    limit = 30  # API max per page
+    pages = max(1, (max_count + limit - 1) // limit)  # ceiling division
     seen = set()
-    for cat_id, cat_name, g in targets:
-        for offset in range(0, 30, 10):
-            items = _fanqie_api_call(cat_id, g, rank_mold, offset, 10)
-            for item in items:
-                book_id = str(item.get("book_id", item.get("bookId", "")))
-                if not book_id or book_id in seen:
-                    continue
-                seen.add(book_id)
-                results.append({
-                    "rank": len(results) + 1,
-                    "title": _decrypt_pua(str(item.get("bookName", item.get("book_name", "")))),
-                    "author": _decrypt_pua(str(item.get("author", item.get("author_name", "")))),
-                    "category": cat_name,
-                    "source": "fanqie",
-                    "source_book_id": book_id,
-                    "url": f"https://fanqienovel.com/page/{book_id}",
-                    "read_count": item.get("read_count", item.get("readCount", 0)),
-                    "word_count": item.get("wordCount", item.get("word_count", 0)),
-                })
-            if len(items) < 10:
-                break
-
-    if not results:
-        return [{"source": "fanqie", "degraded": True,
-                 "error": "Fanqie API returned no results"}]
+    for offset_idx in range(pages):
+        offset = offset_idx * limit
+        items = _fanqie_api_call(cat_id, gender, rank_mold, offset, limit)
+        for item in items:
+            book_id = str(item.get("book_id", item.get("bookId", "")))
+            if not book_id or book_id in seen:
+                continue
+            seen.add(book_id)
+            parsed = _parse_fanqie_item(item, cat_name, len(results) + 1)
+            if parsed:
+                results.append(parsed)
+        if len(items) < limit:
+            break  # no more pages
     return results
+
+
+def _fetch_fanqie_rank_list(rv: str, max_count: int = 10) -> list[dict]:
+    """Fetch the real default leaderboard from /api/rank/list (跨分类综合排行)."""
+    try:
+        u = f"https://fanqienovel.com/api/rank/list?app_id=2503&rank_version={rv}&rank_type=peak&offset=0&limit={max_count}"
+        req = urllib.request.Request(u, headers={
+            "Accept": "application/json", "Referer": "https://fanqienovel.com/rank",
+            "User-Agent": "Mozilla/5.0"})
+        with _retry_call(_urlopen, req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        items = []
+        for b in data.get("data", {}).get("list", []):
+            bid = str(b.get("bookId", ""))
+            if not bid: continue
+            title = _decrypt_pua(str(b.get("bookName", "")))
+            if not title: continue
+            items.append({
+                "rank": len(items) + 1, "title": title,
+                "author": _decrypt_pua(str(b.get("author", ""))),
+                "source": "fanqie", "source_book_id": bid,
+                "url": f"https://fanqienovel.com/page/{bid}",
+                "leaderboard": "巅峰榜",
+            })
+        return items
+    except Exception:
+        return []
+
+
+def _fetch_fanqie_via_browser() -> list[dict]:
+    """Use Playwright to scrape the rendered rank page for full leaderboard data.
+    Fallback when /api/rank/list only returns 7 books."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return []
+
+    results: list[dict] = []
+    rank_urls = [
+        ("https://fanqienovel.com/rank/all", "巅峰榜"),
+        ("https://fanqienovel.com/rank/hotsales", "热销榜"),
+        ("https://fanqienovel.com/rank/newbook", "新书榜"),
+        ("https://fanqienovel.com/rank/read", "阅读榜"),
+    ]
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+            seen = set()
+
+            for url, label in rank_urls:
+                try:
+                    page = context.new_page()
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(2000)  # Wait for JS render
+
+                    # Extract book cards — tomato uses a[href*='/page/'] for book links
+                    anchors = page.locator("a[href*='/page/']").all()
+                    for a in anchors[:30]:  # Max 30 per leaderboard
+                        try:
+                            title = (a.get_attribute("title") or a.inner_text()).strip()
+                            href = a.get_attribute("href") or ""
+                        except Exception:
+                            continue
+                        if not title or len(title) < 2 or len(title) > 40:
+                            continue
+                        # Skip non-book links
+                        if any(w in title for w in ["排行榜", "更多", "全部", "分类"]):
+                            continue
+                        dk = hashlib.sha256(title.encode()).hexdigest()
+                        if dk in seen:
+                            continue
+                        seen.add(dk)
+                        bid = href.rsplit("/", 1)[-1] if "/page/" in href else ""
+                        results.append({
+                            "rank": len(results) + 1,
+                            "title": title,
+                            "author": "",
+                            "source": "fanqie",
+                            "source_book_id": bid,
+                            "url": f"https://fanqienovel.com{href}" if href.startswith("/") else href,
+                            "leaderboard": label,
+                        })
+                    page.close()
+                except Exception:
+                    pass
+
+            browser.close()
+    except Exception:
+        pass
+
+    return results
+
+
+def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = None) -> list[dict]:
+    """Fetch 番茄小说: 巅峰榜API + 全分类排名.
+
+    Data sources:
+    1. /api/rank/list — real cross-category default leaderboard (~7-10 books)
+    2. /api/rank/category/list — per-category rankings (37 cats × both genders)
+    """
+    target = max_count or _RANKING_FANQIE_COUNT
+    meta = _fanqie_meta()
+    rv = meta.get("rank_version", "")
+    if not rv:
+        return [{"source": "fanqie", "degraded": True,
+                 "error": "Fanqie unreachable"}]
+
+    all_results: list[dict] = []
+    seen: set[str] = set()
+
+    # Phase 1: Real leaderboard API + browser scraping
+    for item in _fetch_fanqie_rank_list(rv):
+        dk = _make_dedup_key(item["title"], item["author"])
+        if dk not in seen:
+            seen.add(dk)
+            all_results.append(item)
+
+    # Phase 1b: Browser scraping (Playwright) — optional, skipped if unavailable
+    try:
+        browser_items = _fetch_fanqie_via_browser()
+    except Exception:
+        browser_items = []
+    for item in browser_items:
+        dk = _make_dedup_key(item["title"], item["author"])
+        if dk not in seen:
+            seen.add(dk)
+            all_results.append(item)
+
+    # Phase 2: Category rankings (3 per category, ~37×2×3 = ~222 books)
+    targets = _build_category_targets(meta, leaderboard)
+    per_cat = max(2, target // len(targets))
+    rank_mold = _FANQIE_MOLD_MAP.get(leaderboard, "2")
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {}
+        for cid, cname, g in targets:
+            futs[ex.submit(_fetch_fanqie_one_category, cid, cname, g, rank_mold, per_cat)] = cname
+        for fut in as_completed(futs):
+            for item in fut.result() or []:
+                dk = _make_dedup_key(item["title"], item["author"])
+                if dk not in seen:
+                    seen.add(dk)
+                    item["rank"] = len(all_results) + 1
+                    all_results.append(item)
+
+    return all_results if all_results else [{"source": "fanqie", "degraded": True, "error": "No results"}]
 
 
 # ============================================================
@@ -217,106 +455,561 @@ _QIDIAN_LABELS = {
     "recommend": "推荐榜", "monthly": "月票榜", "collect": "收藏榜", "fans": "粉丝榜",
 }
 
+_QIDIAN_PAGE_SIZE = 20  # qidian mobile returns ~20 per page
 
-def fetch_qidian_ranking(rank_type: str = "hotsales") -> list[dict]:
-    """Fetch 起点中文网 ranking.
-    rank_type: 'hotsales'/'monthly'/'newbook'/'finished'/'recommend'/'collect'/'fans'
-    Requires China IP proxy (set RANKING_PROXY_URL).
-    """
+
+def _fetch_qidian_one_page(rank_type: str, page: int) -> list[dict]:
+    """Fetch a single page of qidian ranking. Returns list of normalized book dicts."""
     label = _QIDIAN_LABELS.get(rank_type, rank_type)
-    url = _QIDIAN_MOBILE_URLS.get(rank_type, _QIDIAN_MOBILE_URLS["hotsales"])
+    base_url = _QIDIAN_MOBILE_URLS.get(rank_type, _QIDIAN_MOBILE_URLS["hotsales"])
+    if page > 1:
+        url = f"{base_url}?pageNum={page}"
+    else:
+        url = base_url
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
         "Accept-Language": "zh-CN,zh;q=0.9",
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with _urlopen(req, timeout=15, use_proxy=True) as resp:
+        with _retry_call(_urlopen, req, timeout=15, use_proxy=True) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        return [{"source": "qidian", "degraded": True,
-                 "error": f"Qidian unreachable: {e}"}]
+    except Exception:
+        return []
 
-    # Extract JSON from <script> tag: {"pageContext":{..."records":[...]}}
+    # Extract JSON from <script> tag: {"pageContext":{...\"records\":[...]}}
     scripts = re.findall(
         r'<script[^>]*>\s*(\{.*?"records"\s*:\s*\[.*?\})\s*</script>',
         html, re.DOTALL,
     )
-    if scripts:
-        try:
-            data = __import__("json").JSONDecoder().raw_decode(scripts[0])[0]
-            records = (
-                data.get("pageContext", {})
-                .get("pageProps", {})
-                .get("pageData", {})
-                .get("records", [])
-            )
-        except Exception:
-            records = []
+    if not scripts:
+        return []
 
-        if records:
-            results = []
-            for r in records:
-                if not isinstance(r, dict):
-                    continue
-                bid = str(r.get("bid", r.get("bookId", "")))
-                if not bid:
-                    continue
-                results.append({
-                    "rank": int(r.get("rankNum", len(results) + 1)),
-                    "title": str(r.get("bName", r.get("bookName", ""))),
-                    "author": str(r.get("bAuth", r.get("authorName", ""))),
-                    "intro": str(r.get("desc", ""))[:300],
-                    "word_count": str(r.get("cnt", "")),
-                    "category": f"{r.get('cat', '')}|{r.get('subCat', '')}",
-                    "rank_count": str(r.get("rankCnt", "")),
-                    "source": "qidian",
-                    "source_book_id": bid,
-                    "url": f"https://m.qidian.com/book/{bid}/",
-                })
-            return results
+    try:
+        data = __import__("json").JSONDecoder().raw_decode(scripts[0])[0]
+        records = (
+            data.get("pageContext", {})
+            .get("pageProps", {})
+            .get("pageData", {})
+            .get("records", [])
+        )
+    except Exception:
+        return []
 
-    return [{"source": "qidian", "degraded": True,
-             "error": "Qidian page script JSON not found"}]
-
+    results = []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        bid = str(r.get("bid", r.get("bookId", "")))
+        if not bid:
+            continue
+        results.append({
+            "rank": int(r.get("rankNum", len(results) + 1)),
+            "title": str(r.get("bName", r.get("bookName", ""))),
+            "author": str(r.get("bAuth", r.get("authorName", ""))),
+            "intro": str(r.get("desc", ""))[:300],
+            "word_count": str(r.get("cnt", "")),
+            "category": f"{r.get('cat', '')}|{r.get('subCat', '')}",
+            "rank_count": str(r.get("rankCnt", "")),
+            "source": "qidian",
+            "source_book_id": bid,
+            "url": f"https://m.qidian.com/book/{bid}/",
+            "leaderboard": label,
+        })
+    return results
 
 
+def fetch_qidian_ranking(rank_type: str = "all",
+                         max_count: Optional[int] = None) -> list[dict]:
+    """Fetch 起点中文网: all 7 rank types combined (140+ books).
 
-# Source 3: 纵横中文网 — HTML regex
+    Since pagination doesn't work (same page returned for all params),
+    we combine all 7 rank types for enough unique books.
+    """
+    target = max_count or _RANKING_QIDIAN_COUNT
+    if rank_type == "all":
+        # Fetch all types, dedup across them
+        all_types = list(_QIDIAN_LABELS.keys())
+        all_results: list[dict] = []
+        seen: set[str] = set()
+        for rt in all_types:
+            for item in _fetch_qidian_one_page(rt, 1):
+                dk = _make_dedup_key(item["title"], item["author"])
+                if dk not in seen:
+                    seen.add(dk)
+                    item["rank"] = len(all_results) + 1
+                    all_results.append(item)
+        return all_results[:target] if all_results else [{"source": "qidian", "degraded": True, "error": "No results from any rank type"}]
+
+    # Single rank type
+    label = _QIDIAN_LABELS.get(rank_type, rank_type)
+    all_results: list[dict] = []
+    seen_dedup: set[str] = set()
+    for page in range(1, 11):
+        page_items = _fetch_qidian_one_page(rank_type, page)
+        if not page_items:
+            break
+        for item in page_items:
+            dk = _make_dedup_key(item["title"], item["author"])
+            if dk in seen_dedup:
+                continue
+            seen_dedup.add(dk)
+            item["rank"] = len(all_results) + 1
+            item["leaderboard"] = label
+            all_results.append(item)
+        if len(page_items) < _QIDIAN_PAGE_SIZE:
+            break  # last page
+
+    all_results = all_results[:target]
+    if not all_results:
+        return [{"source": "qidian", "degraded": True,
+                 "error": "Qidian page script JSON not found"}]
+    return all_results
+
+
+# ============================================================
+# Source 3: 纵横中文网 — HTML regex with pagination
 # ============================================================
 
-def fetch_zongheng_ranking() -> list[dict]:
-    """Fetch 纵横中文网排行榜 via HTML parsing."""
+_ZONGHENG_PAGE_SIZE = 30  # approximate per page
+
+
+def _fetch_zongheng_one_page(page: int = 1) -> list[dict]:
+    """Fetch one page of 纵横中文网 rankings."""
     url = "https://www.zongheng.com/rank"
+    if page > 1:
+        url = f"{url}?page={page}"
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _retry_call(_urlopen, req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    results = []
+    # Extract book blocks with id, title, url, and author
+    # Each book entry is a div with class zh-modules-rank-book containing data-id
+    book_blocks = re.findall(
+        r'<div[^>]*data-id="(?P<id>\d+)"[^>]*class="[^"]*zh-modules-rank-book[^"]*"[^>]*>'
+        r'(.*?)'
+        r'(?=<div[^>]*data-id="\d+"[^>]*class="[^"]*zh-modules-rank-book|$)',
+        html, re.DOTALL,
+    )
+
+    seen = set()
+    for book_id, block_html in book_blocks:
+        if book_id in seen:
+            continue
+        seen.add(book_id)
+
+        # Extract title and URL
+        title_match = re.search(
+            r'<a[^>]*title="([^"]*)"[^>]*href="([^"]*)"[^>]*class="[^"]*global-hover[^"]*"[^>]*>\s*\1\s*</a>',
+            block_html,
+        )
+        if not title_match:
+            # Try alternative pattern
+            title_match = re.search(
+                r'<a[^>]*title="([^"]*)"[^>]*href="([^"]*)"[^>]*>',
+                block_html,
+            )
+
+        title = title_match.group(1).strip() if title_match else ""
+        href = title_match.group(2) if title_match else ""
+
+        # Extract author
+        author = ""
+        author_match = re.search(
+            r'<a[^>]*href="[^"]*userInfo[^"]*"[^>]*class="[^"]*global-hover[^"]*"[^>]*>([^<]+)</a>',
+            block_html,
+        )
+        if author_match:
+            author = author_match.group(1).strip()
+
+        if title:
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": author,
+                "source": "zongheng",
+                "source_book_id": book_id,
+                "url": urljoin(url, href),
+            })
+
+    return results
+
+
+def fetch_zongheng_ranking(max_count: Optional[int] = None) -> list[dict]:
+    """Fetch 纵横中文网排行榜 via HTML parsing with pagination.
+
+    Args:
+        max_count: Max books to collect (default: RANKING_ZONGHENG_COUNT env var, 100).
+
+    Fetches multiple pages to reach target count (100+ books).
+    """
+    target = max_count or _RANKING_ZONGHENG_COUNT
+    pages_needed = max(1, (target + _ZONGHENG_PAGE_SIZE - 1) // _ZONGHENG_PAGE_SIZE)
+    pages_needed = min(pages_needed, 10)  # cap
+
+    all_results: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_dedup: set[str] = set()
+
+    for page in range(1, pages_needed + 1):
+        page_items = _fetch_zongheng_one_page(page)
+        if not page_items:
+            break
+        for item in page_items:
+            dk = _make_dedup_key(item["title"], item["author"])
+            if dk in seen_dedup:
+                continue
+            seen_dedup.add(dk)
+            item["rank"] = len(all_results) + 1
+            item["leaderboard"] = "纵横榜"
+            all_results.append(item)
+        if len(page_items) < _ZONGHENG_PAGE_SIZE * 0.5:
+            break  # likely last page
+
+    all_results = all_results[:target]
+    if not all_results:
+        return [{"source": "zongheng", "error": "No results from zongheng", "degraded": True}]
+    return all_results
+
+
+# ============================================================
+# Source 4: SF轻小说 — HTML scraping via regex
+# ============================================================
+
+def fetch_sfacg_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch SF轻小说排行榜 via HTML scraping.
+
+    Scrapes https://book.sfacg.com/rank/ for book rankings.
+    Book links follow pattern: /Novel/{book_id}/
+    """
+    url = "https://book.sfacg.com/rank/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
     try:
         req = urllib.request.Request(url, headers=headers)
         with _urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-        results = []
-        matches = re.findall(
-            r'<div data-id="(?P<id>\d+)" class="zh-modules-rank-book[^>]*>.*?'
-            r'<p class="book-rank--title-text[^>]*>\s*<a title="(?P<title>[^"]+)" '
-            r'href="(?P<url>[^"]+)"',
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # Find all book links: <a href="http://book.sfacg.com/Novel/{id}/" ...>title</a>
+        book_links = re.findall(
+            r'<a[^>]*href="(https?://book\.sfacg\.com/Novel/(\d+)/?)[^"]*"[^>]*>([^<]{2,100})</a>',
+            html,
+        )
+        for href, book_id, title in book_links:
+            title = title.strip()
+            if not title or title in seen:
+                continue
+            # Filter out non-book links
+            if any(w in title for w in ["排行榜", "更多", "全部", "下一页", "首页"]):
+                continue
+            seen.add(title)
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "sfacg",
+                "source_book_id": book_id,
+                "url": href,
+                "leaderboard": "SF轻小说榜",
+            })
+            if len(results) >= max_count:
+                break
+    except Exception:
+        pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 5: QQ阅读 — HTML scraping via regex
+# ============================================================
+
+def fetch_qqread_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch QQ阅读排行榜 via HTML scraping.
+
+    Scrapes the rank page using regex to extract book links with titles.
+    """
+    url = "https://book.qq.com/rank.html"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://book.qq.com/",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # Strategy 1: Look for window.__INITIAL_STATE__ or similar JSON
+        json_matches = re.findall(
+            r'window\.__(?:INITIAL_STATE__|DATA__|PREFETCH_DATA__)\s*=\s*({.*?});\s*(?:</script>|window\.)',
             html, re.DOTALL,
         )
-        seen = set()
-        for book_id, title, href in matches:
-            if book_id in seen:
+        for json_str in json_matches:
+            try:
+                data = json.loads(json_str.replace("undefined", "null"))
+                # Try common paths for book lists
+                for path in ["rankList", "rank.list", "data.list", "data.rankList", "list"]:
+                    books = data
+                    for part in path.split("."):
+                        books = books.get(part, {}) if isinstance(books, dict) else {}
+                    if isinstance(books, list) and books:
+                        for item in books:
+                            if not isinstance(item, dict):
+                                continue
+                            title = str(item.get("title", item.get("bookName", item.get("name", "")))).strip()
+                            if not title or title in seen:
+                                continue
+                            seen.add(title)
+                            book_id = str(item.get("bookId", item.get("book_id", item.get("id", ""))))
+                            results.append({
+                                "rank": len(results) + 1,
+                                "title": title,
+                                "author": str(item.get("author", item.get("authorName", ""))).strip(),
+                                "source": "qqread",
+                                "source_book_id": book_id,
+                                "url": f"https://book.qq.com/book-detail/{book_id}" if book_id else "",
+                                "leaderboard": "QQ阅读榜",
+                            })
+                        if results:
+                            return results[:max_count]
+            except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
                 continue
-            seen.add(book_id)
-            results.append({
-                "rank": len(results) + 1, "title": title.strip(), "author": "",
-                "source": "zongheng", "source_book_id": book_id,
-                "url": urljoin(url, href),
-            })
-            if len(results) >= 20:
+    except Exception:
+        pass
+
+    try:
+        # Strategy 2: Regex scrape book links
+        # Match common book detail link patterns
+        link_patterns = [
+            r'<a[^>]*href="([^"]*(?:book-detail|/book/|/detail/)\d+[^"]*)"[^>]*title="([^"]{2,100})"',
+            r'<a[^>]*href="[^"]*book-detail/(\d+)[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]{2,100})</span>',
+            r'<h3[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>([^<]{2,100})</a>',
+        ]
+        for pattern in link_patterns:
+            matches = re.findall(pattern, html)
+            for href, title in matches:
+                title = title.strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                bid_match = re.search(r'(\d{5,})', href)
+                book_id = bid_match.group(1) if bid_match else ""
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "qqread",
+                    "source_book_id": book_id,
+                    "url": href if href.startswith("http") else f"https://book.qq.com{href}",
+                    "leaderboard": "QQ阅读榜",
+                })
+                if len(results) >= max_count:
+                    break
+            if results:
                 break
-        if not results:
-            raise ValueError("Zongheng parser produced no items (schema drift)")
-        return results
-    except Exception as e:
-        return [{"source": "zongheng", "error": str(e), "degraded": True}]
+    except Exception:
+        pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 6: 潇湘书院 — HTML scraping via regex
+# ============================================================
+
+def fetch_xxsy_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch 潇湘书院排行榜 via HTML scraping.
+
+    Scrapes https://www.xxsy.net/rank for book rankings.
+    Book links follow pattern: /book/{book_id}
+    """
+    url = "https://www.xxsy.net/rank"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # Find all book links: <a href="/book/{book_id}" ...>title</a>
+        book_links = re.findall(
+            r'<a[^>]*href="(/book/(\d+))"[^>]*>([^<]{2,100})</a>',
+            html,
+        )
+        for href, book_id, title in book_links:
+            title = title.strip()
+            if not title or title in seen:
+                continue
+            # Filter out non-book links
+            if any(w in title for w in ["排行榜", "更多", "全部", "下一页", "首页", "登录", "注册"]):
+                continue
+            seen.add(title)
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "xxsy",
+                "source_book_id": book_id,
+                "url": f"https://www.xxsy.net{href}",
+                "leaderboard": "潇湘书院榜",
+            })
+            if len(results) >= max_count:
+                break
+    except Exception:
+        pass
+
+    return results[:max_count]
+
+
+# ============================================================
+# Source 7: 晋江文学城 — HTML scraping via regex
+# ============================================================
+
+def fetch_jjwxc_ranking(max_count: int = 50) -> list[dict]:
+    """Fetch 晋江文学城排行榜 via HTML scraping.
+
+    Scrapes https://www.jjwxc.net/bookbase.php for book rankings.
+    晋江 uses gb2312/gbk encoding.
+    """
+    url = "https://www.jjwxc.net/bookbase.php"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with _urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+            # 晋江 uses gbk/gb2312 encoding
+            html = None
+            for enc in ["gbk", "gb2312", "gb18030", "utf-8"]:
+                try:
+                    html = raw.decode(enc)
+                    if "晋江" in html or "book" in html.lower():
+                        break
+                except Exception:
+                    continue
+            if html is None:
+                html = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    if not html:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        # 晋江 bookbase uses table rows with links like <a href="onebook.php?novelid=123">
+        book_links = re.findall(
+            r'<a[^>]*href="(onebook\.php\?novelid=(\d+))"[^>]*>([^<]{2,200})</a>',
+            html,
+        )
+        for href, book_id, title in book_links:
+            title = title.strip()
+            # Filter out non-book links
+            if not title or len(title) < 2 or len(title) > 80:
+                continue
+            if any(w in title for w in ["排行榜", "更多", "下一页", "首页", "末页"]):
+                continue
+            if title in seen:
+                continue
+            seen.add(title)
+            results.append({
+                "rank": len(results) + 1,
+                "title": title,
+                "author": "",
+                "source": "jjwxc",
+                "source_book_id": book_id,
+                "url": f"https://www.jjwxc.net/{href}",
+                "leaderboard": "晋江书库榜",
+            })
+            if len(results) >= max_count:
+                break
+    except Exception:
+        pass
+
+    # Also try the rank page
+    if len(results) < 20:
+        try:
+            rank_url = "https://www.jjwxc.net/bookbase.php?fw0=0&fbsj0=0&ycx0=0&xx0=0&mainview0=0&sd0=0&lx0=0&fg0=0&sortType=3&isfinish=0&collectiontypes=ors&page=1"
+            req2 = urllib.request.Request(rank_url, headers=headers)
+            with _urlopen(req2, timeout=15) as resp2:
+                raw2 = resp2.read()
+                html2 = None
+                for enc in ["gbk", "gb2312", "gb18030", "utf-8"]:
+                    try:
+                        html2 = raw2.decode(enc)
+                        break
+                    except Exception:
+                        continue
+                if html2 is None:
+                    html2 = raw2.decode("utf-8", errors="replace")
+            book_links2 = re.findall(
+                r'<a[^>]*href="(onebook\.php\?novelid=(\d+))"[^>]*>([^<]{2,200})</a>',
+                html2,
+            )
+            for href, book_id, title in book_links2:
+                title = title.strip()
+                if not title or len(title) < 2 or len(title) > 80 or title in seen:
+                    continue
+                if any(w in title for w in ["排行榜", "更多", "下一页", "首页", "末页"]):
+                    continue
+                seen.add(title)
+                results.append({
+                    "rank": len(results) + 1,
+                    "title": title,
+                    "author": "",
+                    "source": "jjwxc",
+                    "source_book_id": book_id,
+                    "url": f"https://www.jjwxc.net/{href}",
+                    "leaderboard": "晋江书库榜",
+                })
+                if len(results) >= max_count:
+                    break
+        except Exception:
+            pass
+
+    return results[:max_count]
 
 
 # ============================================================
@@ -327,20 +1020,28 @@ RANKING_FETCHERS = {
     "fanqie": fetch_fanqie_ranking,
     "qidian": fetch_qidian_ranking,
     "zongheng": fetch_zongheng_ranking,
+    "sfacg": fetch_sfacg_ranking,
+    "qqread": fetch_qqread_ranking,
+    "xxsy": fetch_xxsy_ranking,
+    "jjwxc": fetch_jjwxc_ranking,
 }
 
 
 def collect_all_rankings() -> dict:
-    """Collect from all available sources."""
+    """Collect from all available sources with expanded coverage."""
     return {
-        "fanqie": fetch_fanqie_ranking(),
+        "fanqie": fetch_fanqie_ranking("all"),
         "qidian": fetch_qidian_ranking("monthly"),
         "zongheng": fetch_zongheng_ranking(),
+        "sfacg": fetch_sfacg_ranking(),
+        "qqread": fetch_qqread_ranking(),
+        "xxsy": fetch_xxsy_ranking(),
+        "jjwxc": fetch_jjwxc_ranking(),
     }
 
 
 def normalize_ranking_items(source: str, items: list[dict],
-                            fetched_at: datetime | None = None) -> list[dict]:
+                            fetched_at: Optional[datetime] = None) -> list[dict]:
     """Normalize and deduplicate one source response."""
     normalized: list[dict] = []
     seen: set[str] = set()
@@ -392,3 +1093,67 @@ def normalize_ranking_items(source: str, items: list[dict],
         if previous is None or item["rank_no"] < previous["rank_no"]:
             best_by_key[dedupe_key] = item
     return sorted(best_by_key.values(), key=lambda x: x["rank_no"])
+
+
+# ---------------------------------------------------------------------------
+# P1-T11: cross-platform metric normalization
+# Each source scrapes slightly different field names (readers/read_count,
+# wordCount/word_count, status/creation_status). We collapse them into one
+# comparable schema and derive an engagement index (0-100, log-scaled) so a
+# 番茄 title and a 起点 title can be ranked on the same axis.
+# ---------------------------------------------------------------------------
+UNIFIED_METRIC_SCHEMA = {
+    "readers": "int — 阅读/追读数（readers / read_count 归一）",
+    "word_count": "int — 字数（word_count / wordCount 归一）",
+    "completion_status": "str — 连载/完结状态",
+    "engagement_index": "float 0-100 — 跨平台可比的参与度指数（log 缩放读者数）",
+}
+
+
+def _to_int(value) -> int:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    digits = re.sub(r"[^\d]", "", str(value))
+    return int(digits) if digits else 0
+
+
+def normalize_item_metrics(raw_metrics: dict | None) -> dict:
+    """P1-T11: map a source's heterogeneous ``metrics`` into UNIFIED_METRIC_SCHEMA."""
+    m = raw_metrics or {}
+    readers = _to_int(m.get("readers", m.get("read_count", 0)))
+    word_count = _to_int(m.get("word_count", m.get("wordCount", 0)))
+    status = str(m.get("status", m.get("creation_status", m.get("completion_status", "")))).strip()
+    # log-scaled engagement index: 0 readers -> 0; 10k -> ~52; 1M -> ~80; 100M -> 100
+    if readers > 0:
+        import math
+        engagement_index = round(min(100.0, 12.0 + 10.0 * math.log10(readers)), 2)
+    else:
+        engagement_index = 0.0
+    return {
+        "readers": readers,
+        "word_count": word_count,
+        "completion_status": status,
+        "engagement_index": engagement_index,
+    }
+
+
+def compute_market_trend(db, project_id: str, source_id: str, current_avg: float | None) -> dict:
+    """P1-T11: compare this snapshot's avg market_score with the previous succeeded
+    analysis for the same project+source; return {prev_avg, delta, direction}."""
+    if current_avg is None:
+        return {"prev_avg": None, "delta": None, "direction": "unknown"}
+    prev = db.execute(
+        """SELECT AVG(tc.market_score) AS avg_score FROM market_analyses ma
+           JOIN ranking_snapshots rs ON rs.id = ma.snapshot_id
+           JOIN topic_candidates tc ON tc.analysis_id = ma.id
+           WHERE ma.status='succeeded' AND rs.project_id=%s AND rs.source_id=%s""",
+        (project_id, source_id),
+    ).fetchone()
+    prev_avg = float(prev["avg_score"]) if prev and prev["avg_score"] is not None else None
+    if prev_avg is None:
+        return {"prev_avg": None, "delta": None, "direction": "new"}
+    delta = round(current_avg - prev_avg, 2)
+    direction = "up" if delta > 0 else ("down" if delta < 0 else "flat")
+    return {"prev_avg": prev_avg, "delta": delta, "direction": direction}

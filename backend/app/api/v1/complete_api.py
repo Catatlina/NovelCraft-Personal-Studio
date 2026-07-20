@@ -6,61 +6,20 @@ from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 import os
 import re
+import logging
+logger = logging.getLogger(__name__)
 from app.core.security import get_current_user
+from app.core.errors import public_message
 from app.db import connect
+from app.core.authz import (
+    ok,
+    require_content_member,
+    require_member,
+    require_novel_member,
+    require_project_member,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["complete"])
-
-def ok(data): return {"code": 0, "message": "ok", "data": data}
-
-
-def require_member(db, project_id: str, user: dict, write: bool = False) -> None:
-    row = db.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    if not row:
-        raise HTTPException(403, "not a project member")
-    if write and row["role"] not in {"owner", "editor"}:
-        raise HTTPException(403, "insufficient permissions")
-
-
-def require_novel_member(novel_id: str, user: dict, write: bool = False) -> None:
-    """Resolve a novel to its project and enforce membership before any access."""
-    db = connect()
-    try:
-        novel = db.execute(
-            "SELECT project_id FROM contents WHERE id = %s AND type = 'novel'", (novel_id,)
-        ).fetchone()
-        if not novel:
-            raise HTTPException(404, "novel not found")
-        require_member(db, novel["project_id"], user, write=write)
-    finally:
-        db.close()
-
-
-def require_project_member(project_id: str, user: dict, write: bool = False) -> None:
-    if not project_id or not project_id.strip():
-        raise HTTPException(422, "project_id is required")
-    db = connect()
-    try:
-        require_member(db, project_id, user, write=write)
-    finally:
-        db.close()
-
-
-def require_content_member(content_id: str, user: dict, write: bool = False) -> str:
-    db = connect()
-    try:
-        content = db.execute(
-            "SELECT project_id FROM contents WHERE id=%s AND is_deleted=FALSE", (content_id,)
-        ).fetchone()
-        if not content:
-            raise HTTPException(404, "content not found")
-        require_member(db, content["project_id"], user, write=write)
-        return str(content["project_id"])
-    finally:
-        db.close()
 
 
 def user_project_ids(user: dict) -> list[str]:
@@ -91,30 +50,50 @@ def test_provider(provider: str, project_id: str, model: str = "",
 
 
 @router.post("/publish/{platform}")
-def publish_to_platform(platform: str, title: str, body: str, credentials: dict = {}, user: dict = Depends(get_current_user)):
+def publish_to_platform(platform: str, title: str, body: str, credentials: dict = {},
+                       content_id: str = "", user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import (_publish_wechat, _publish_toutiao, _publish_xiaohongshu,
                                                      _publish_zhihu, _publish_baijia, _publish_substack, _publish_x)
+    from app.services.publish_hub import (get_platform_credentials, validate_publish_credentials,
+                                           record_publish_attempt)
     adapters = {
         "wechat": _publish_wechat, "toutiao": _publish_toutiao, "xiaohongshu": _publish_xiaohongshu,
         "zhihu": _publish_zhihu, "baijia": _publish_baijia, "substack": _publish_substack, "x": _publish_x,
     }
     fn = adapters.get(platform)
     if not fn: raise HTTPException(404, f"unknown platform: {platform}")
-    from app.services.publish_hub import get_platform_credentials
+
+    # P1-T7: strong connection/credential check BEFORE any publish attempt.
     stored_credentials = get_platform_credentials(user["id"], platform) or {}
     merged = {**stored_credentials, **(credentials or {})}
-    if platform == "wechat":
-        result = fn(title, body, app_id=merged.get("app_id", ""), app_secret=merged.get("app_secret", ""))
-    elif platform == "toutiao":
-        result = fn(title, body, token=merged.get("token") or merged.get("access_token", ""))
-    elif platform == "substack":
-        result = fn(title, body, token=merged.get("token") or merged.get("api_key", ""))
-    elif platform == "x":
-        result = fn(title, body, token=merged.get("token") or merged.get("bearer_token") or merged.get("access_token", ""))
-    elif platform == "xiaohongshu":
-        result = fn(title, body, images=merged.get("images", []))
-    else:
-        result = fn(title, body)
+    missing = validate_publish_credentials(platform, merged)
+    if missing:
+        raise HTTPException(422, {
+            "code": "PUBLISH_CREDENTIALS_MISSING",
+            "message": f"发布到 {platform} 缺少必需的平台凭据/连接：{', '.join(missing)}",
+            "missing": missing,
+        })
+
+    try:
+        if platform == "wechat":
+            result = fn(title, body, app_id=merged.get("app_id", ""), app_secret=merged.get("app_secret", ""))
+        elif platform == "toutiao":
+            result = fn(title, body, token=merged.get("token") or merged.get("access_token", ""))
+        elif platform == "substack":
+            result = fn(title, body, token=merged.get("token") or merged.get("api_key", ""))
+        elif platform == "x":
+            result = fn(title, body, token=merged.get("token") or merged.get("bearer_token") or merged.get("access_token", ""))
+        elif platform == "xiaohongshu":
+            result = fn(title, body, images=merged.get("images", []))
+        else:
+            result = fn(title, body)
+    except Exception as exc:  # never silently fail — record + surface as envelope
+        record_publish_attempt(content_id, platform, "failed", {"error": str(exc)[:500]})
+        logger.warning("publish_to_platform failed: %s", exc)
+        raise HTTPException(502, {"code": "PUBLISH_FAILED",
+                                  "message": f"发布到 {platform} 失败，请检查平台凭据或稍后重试",
+                                  "detail": public_message(exc, "发布服务返回异常")}) from exc
+
     # Reflect the adapter's honest status in the response message
     adapter_status = result.get("status", "unknown")
     adapter_mode = result.get("mode", "")
@@ -126,7 +105,22 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
         msg = "draft — content saved as draft, manual review required"
     else:
         msg = adapter_status
-    return {"code": 0, "message": msg, "data": result}
+
+    # P1-T7: record final status for reflow/query (no silent success/failure).
+    if result.get("error") or adapter_status == "failed":
+        rec_status = "failed"
+    elif adapter_status in ("submitted", "exported"):
+        rec_status = "submitted"
+    elif adapter_status == "published":
+        rec_status = "published"
+    elif adapter_status == "draft":
+        rec_status = "draft"
+    else:
+        rec_status = "submitted"
+    attempt = record_publish_attempt(content_id, platform, rec_status,
+                                     {"adapter_status": adapter_status, "mode": adapter_mode})
+    return ok({**result, "publish_record_id": attempt["record_id"], "publish_status": rec_status},
+              message=msg)
 
 
 @router.post("/review/multi-round")
@@ -208,6 +202,43 @@ def get_novel_completion_endpoint(novel_id: str, user: dict = Depends(get_curren
     from app.services.novel_export import get_novel_completion_status
     require_novel_member(novel_id, user)
     return ok(get_novel_completion_status(novel_id))
+
+
+@router.post("/novels/{novel_id}/completion")
+def generate_novel_continuation(novel_id: str, user: dict = Depends(get_current_user), payload: dict | None = None):
+    """Generate continuation (mode=continue) or polish (mode=polish) text for a novel's latest chapter."""
+    require_novel_member(novel_id, user)
+    db = connect()
+    try:
+        row = db.execute(
+            "SELECT project_id, body FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE ORDER BY created_at DESC LIMIT 1",
+            (novel_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return ok({"text": "", "warning": "no chapter found"})
+    project_id = row["project_id"]
+    body = row["body"]
+    if isinstance(body, dict):
+        paragraphs = body.get("content", [])
+        text = "\n\n".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in paragraphs)
+    elif isinstance(body, list):
+        text = "\n\n".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in body)
+    else:
+        text = str(body or "")
+    mode = (payload or {}).get("mode", "continue")
+    prompt_name = "novel.continuation" if mode == "continue" else "novel.polish"
+    try:
+        from app.gateway import complete
+        out = complete(run_id=None, node_key=None, project_id=project_id,
+                       task_type="novel_continuation", prompt_name=prompt_name,
+                       variables={"text": text[:4000]})
+        gen = str(out.get("text") or out.get("sample") or "")
+    except Exception as exc:
+        logger.warning("novel continuation failed: %s", exc)
+        return ok({"text": "", "warning": f"generation failed: {exc}"})
+    return ok({"text": gen})
 
 
 # --- NC-FUS: BrowserAct + insprira fusion ---
@@ -327,7 +358,73 @@ def get_topic_suggestions_from_performance(user: dict = Depends(get_current_user
     return ok(generate_topic_suggestions_from_data(project_ids=user_project_ids(user)))
 
 
-# --- NC-SEA-001~003: Overseas markets, translation, publishing ---
+@router.get("/analytics/dashboard")
+def get_performance_dashboard(user: dict = Depends(get_current_user)):
+    """NC-PUB-003: 效果看板 — 指标口径 + 汇总 + 平台 ROI + Top 内容 + 可追溯选题建议。"""
+    from app.services.publish_hub import build_performance_dashboard
+    return ok(build_performance_dashboard(project_ids=user_project_ids(user)))
+
+
+@router.get("/analytics/usage")
+def get_usage(scope: str = "user", project_id: str = "", user: dict = Depends(get_current_user)):
+    """P0-T4: AI cost / token usage.
+
+    - ``scope=user``    -> current-month usage for the authenticated user
+                           (projects owned, words generated, cost, calls).
+    - ``scope=project``  -> cumulative AI usage for a project the user belongs to.
+    """
+    from app.core.billing import get_subscription_usage
+    from app.db import row_to_dict
+
+    if scope == "project":
+        if not project_id or not project_id.strip():
+            raise HTTPException(422, "project_id is required when scope=project")
+        require_project_member(project_id, user)
+        db = connect()
+        try:
+            agg = row_to_dict(db.execute(
+                """
+                SELECT COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
+                       COALESCE(SUM(cost_cny), 0)::float AS cost_cny,
+                       COUNT(*) AS calls
+                FROM ai_calls WHERE project_id = %s
+                """,
+                (project_id,),
+            ).fetchone())
+        finally:
+            db.close()
+        return ok({
+            "scope": "project",
+            "project_id": project_id,
+            "prompt_tokens": int(agg["prompt_tokens"] or 0),
+            "completion_tokens": int(agg["completion_tokens"] or 0),
+            "words_used": int(agg["completion_tokens"] or 0),
+            "cost_used": float(agg["cost_cny"] or 0),
+            "calls": int(agg["calls"] or 0),
+        })
+    usage = get_subscription_usage(user["id"])
+    return ok({"scope": "user", **usage})
+
+
+class PerformanceFeedbackRequest(BaseModel):
+    project_id: str
+
+
+@router.post("/analytics/feedback")
+def get_performance_feedback(payload: PerformanceFeedbackRequest, user: dict = Depends(get_current_user)):
+    """NC-PUB-003: 真实 AI 反哺建议，绑定源数据 post_id 可追溯；Provider 失败显式 502。"""
+    from app.gateway import BudgetExceeded, ProviderError
+    from app.services.publish_hub import performance_feedback
+    db = connect()
+    try:
+        require_member(db, payload.project_id, user, write=True)
+    finally:
+        db.close()
+    try:
+        return ok(performance_feedback(payload.project_id, project_ids=user_project_ids(user)))
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": public_message(exc, "AI 服务暂时不可用")}) from exc
 
 @router.get("/markets")
 def get_market_config_endpoint(market: str = "", user: dict = Depends(get_current_user)):
@@ -342,15 +439,26 @@ def check_market_compliance_endpoint(market: str, content: str, user: dict = Dep
 
 
 @router.post("/translate")
-def translate_text_endpoint(text: str, source_lang: str = "zh", target_lang: str = "en", user: dict = Depends(get_current_user)):
+def translate_text_endpoint(text: str, project_id: str, source_lang: str = "zh", target_lang: str = "en",
+                            novel_id: str = "", user: dict = Depends(get_current_user)):
     from app.services.overseas_complete import translate_text
-    return ok(translate_text(text, source_lang, target_lang))
+    from app.gateway import BudgetExceeded, ProviderError
+    require_project_member(project_id, user, write=True)
+    if novel_id:
+        require_novel_member(novel_id, user)
+    try:
+        return ok(translate_text(text, source_lang, target_lang, project_id=project_id, novel_id=novel_id))
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
 
 
 @router.post("/translate/localize")
-def localize_names_endpoint(chinese_name: str, target_market: str, user: dict = Depends(get_current_user)):
+def localize_names_endpoint(chinese_name: str, target_market: str, novel_id: str = "",
+                            user: dict = Depends(get_current_user)):
     from app.services.overseas_complete import localize_names
-    return ok(localize_names(chinese_name, target_market))
+    if novel_id:
+        require_novel_member(novel_id, user)
+    return ok(localize_names(chinese_name, target_market, novel_id=novel_id))
 
 
 @router.post("/revenue/convert")
@@ -362,4 +470,5 @@ def convert_revenue_endpoint(amount: float, from_currency: str, to_currency: str
 @router.post("/overseas/publish")
 def publish_overseas_endpoint(content_id: str, market: str, platform: str, user: dict = Depends(get_current_user)):
     from app.services.overseas_complete import publish_overseas
-    return ok(publish_overseas(content_id, market, platform))
+    project_id = require_content_member(content_id, user, write=True)
+    return ok(publish_overseas(content_id, market, platform, project_id=project_id))

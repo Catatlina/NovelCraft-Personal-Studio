@@ -74,6 +74,27 @@ def test_library_lists_newest_first_and_detail_contains_book_shape():
     assert data["latest_chapter"]["title"] == "第二章"
     assert [chapter["title"] for chapter in data["chapters"]] == ["第一章", "第二章"]
 
+    # V2 bootstrap stores the outline as separate volume/chapter blueprints.
+    # The library detail must expose those fields instead of reporting no outline.
+    volume_plan = [{"number": 1, "title": "启航卷", "start_chapter": 1, "end_chapter": 30}]
+    chapter_outlines = [
+        {"volume": 1, "seq": seq, "title": f"第{seq}章", "outline": f"第{seq}章细纲"}
+        for seq in range(1, 4)
+    ]
+    db = connect()
+    db.execute(
+        "UPDATE contents SET meta=%s WHERE id=%s",
+        (encode({"synopsis": "新书简介", "genre": "科幻", "volume_plan": volume_plan,
+                 "chapter_outlines": chapter_outlines}), new_book_id),
+    )
+    db.commit(); db.close()
+
+    v2_detail = client.get(f"/api/v1/library/books/{new_book_id}", headers=headers)
+    assert v2_detail.status_code == 200
+    v2_outline = v2_detail.json()["data"]["outline"]
+    assert v2_outline["volume_plan"] == volume_plan
+    assert v2_outline["chapter_outlines"] == chapter_outlines
+
 
 def test_library_server_side_search_filter_sort():
     """NC-LIB-002: q/status/sort are applied server-side with whitelisted ORDER BY."""

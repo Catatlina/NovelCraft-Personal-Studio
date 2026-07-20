@@ -142,10 +142,34 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
 
     def complete(**kwargs):
         calls.append(kwargs)
+        if kwargs["task_type"] == "audit_plan_fidelity":
+            return {
+                "passed": True,
+                "score": 100,
+                "matched_requirements": ["主角职业", "核心能力", "追查目标"],
+                "contradictions": [],
+                "omissions": [],
+            }
         return {"idea_expanded": "一位创作者发现自己写下的故事正在现实中逐字发生，必须找出幕后执笔者。",
                 "core_hook": "你写的每一个字都在杀人",
                 "target_audience": "18-35 岁悬疑读者",
-                "title_candidates": ["《甲》", "《乙》", "《丙》"]}
+                "title_candidates": ["《甲》", "《乙》", "《丙》"],
+                "source_facts": ["主角是作者", "文字影响现实", "主角必须追查真相"],
+                "design_additions": [],
+                "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"],
+                "downstream_deliverables": ["生成分卷总纲、章节细纲和第一章正文"],
+                "creative_bible": (
+                    "核心设定：主角写下的故事逐字发生，必须找到幕后执笔者并夺回现实叙事权。"
+                    "开局节奏：第一章通过停电和短信确认异常，第二章寻找旁证，第三章发现现实被修订的痕迹。"
+                    "能力边界：文字只能推动已有因果，不能凭空创造；每次改写都会留下可追踪旁证。"
+                    "长篇路线：求证、保命、结盟、追查执笔会、反制规则、夺回叙事权。"
+                    "人物关系：主角逃避又敏锐，盟友理性但有秘密，反派坚信控制现实是必要牺牲。"
+                    "叙事禁忌：禁止说明书式设定，禁止巧合破局，禁止反派降智。"
+                    "持续校验：检查旁证、代价、人物已知信息、伏笔回收和章节钩子。"
+                    "黄金三章必须完成异常确认、证据闭环和第一次规则反击；中后期每次改写都要付出更高代价，"
+                    "并让主角面对亲人安全、公众真相和自我欲望之间的冲突。故事推进必须依靠调查、验证、"
+                    "选择和代价，不能用作者旁白直接解释全部规则。"
+                )}
 
     monkeypatch.setattr(tasks, "complete", complete)
     monkeypatch.setattr(tasks, "_persist_output", lambda *_args: None)
@@ -162,7 +186,8 @@ def test_bootstrap_complete_uses_stable_node_mutation_id(monkeypatch):
     result = tasks.execute_bootstrap.run("run-1", "plan_idea")
 
     assert result["status"] == "error"
-    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:v2"
+    assert calls[0]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v2:cycle:1:plan:1"
+    assert calls[1]["client_mutation_id"] == "bootstrap:run-1:plan_idea:fidelity-v2:cycle:1:audit:1"
 
 
 def test_gateway_replay_by_mutation_id_returns_existing_output_without_new_writes(monkeypatch):

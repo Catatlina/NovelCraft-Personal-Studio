@@ -8,40 +8,44 @@ import re
 import unicodedata
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from pydantic import ConfigDict
 
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
 from app.services.ranking_adapter import RANKING_FETCHERS, normalize_ranking_items
-from app.services.ranking_capture import validate_with_open_library
+from app.services.ranking_capture import ALLOWED_CAPTURE_SOURCES, CaptureResult, validate_with_open_library
 from app.gateway import BudgetExceeded, ProviderError, complete
+from app.core.authz import ok, require_member
 
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
 library_router = APIRouter(prefix="/api/v1/library", tags=["library"])
 
-SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网"}
+SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng": "纵横中文网",
+                "qqread": "QQ阅读", "jjwxc": "晋江文学城",
+                "sfacg": "SF轻小说", "xxsy": "潇湘书院"}
 MIN_AUTOMATED_CONFIDENCE = 0.85
-
-
-def ok(data: Any):
-    return {"code": 0, "message": "ok", "data": data}
-
-
-def require_member(db, project_id: str, user: dict, write: bool = False) -> None:
-    row = db.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    if not row:
-        raise HTTPException(403, "not a project member")
-    if write and row["role"] not in {"owner", "editor"}:
-        raise HTTPException(403, "insufficient permissions")
 
 
 def rows(db, sql: str, params: tuple = ()) -> list[dict]:
     return [dict(row) for row in db.execute(sql, params).fetchall()]
+
+
+def _resolve_book_outline(meta: dict[str, Any]) -> Any:
+    """Return either a legacy outline or the V2 blueprint persisted by bootstrap."""
+    legacy_outline = meta.get("outline") or meta.get("chapter_plan")
+    if legacy_outline:
+        return legacy_outline
+
+    volume_plan = meta.get("volume_plan") or []
+    chapter_outlines = meta.get("chapter_outlines") or []
+    if volume_plan or chapter_outlines:
+        return {
+            "volume_plan": volume_plan,
+            "chapter_outlines": chapter_outlines,
+        }
+    return ""
 
 
 class CreateBookRequest(BaseModel):
@@ -77,6 +81,32 @@ class RankingImportRequest(BaseModel):
 
     def validated_items(self) -> list[dict[str, Any]]:
         return [item.model_dump() for item in self.items]
+
+
+class RankingCaptureImportRequest(BaseModel):
+    """Visible-browser/OCR capture artifact import.
+
+    This accepts the same JSON contract emitted by ``backend/scripts/capture_ranking.py``
+    or a legal OCR worker. It deliberately does not fetch protected pages or solve
+    challenges server-side.
+    """
+    model_config = ConfigDict(extra="allow")
+    source: str = Field(pattern=r"^(fanqie|qidian|zongheng|qqread|sfacg|xxsy|jjwxc|manual)$")
+    status: str = Field(default="succeeded", pattern=r"^(succeeded|user_action_required|ocr_required|schema_changed|failed)$")
+    collector: str = Field(default="visible_browser", max_length=120)
+    captured_at: str | None = None
+    source_label: str | None = Field(default=None, max_length=100)
+    source_url: str | None = Field(default=None, max_length=1000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = Field(default=None, max_length=1000)
+    items: list[RankingImportItem] = Field(default_factory=list, max_length=200)
+
+    @field_validator("source")
+    @classmethod
+    def source_allowed(cls, value: str) -> str:
+        if value not in ALLOWED_CAPTURE_SOURCES:
+            raise ValueError("unsupported capture source")
+        return value
 
 
 class SnapshotMetadataValidationRequest(BaseModel):
@@ -183,6 +213,25 @@ def scan_source(source_key: str, project_id: str, user: dict = Depends(get_curre
     return _scan_source(source_key, project_id, user)
 
 
+@router.post("/scan-all")
+def scan_all_sources(project_id: str, user: dict = Depends(get_current_user)):
+    """一键采集所有可用平台数据."""
+    available = ["fanqie", "qidian", "zongheng", "qqread", "jjwxc", "sfacg", "xxsy"]
+    results = {}
+    errors = {}
+    for source_key in available:
+        try:
+            r = _scan_source(source_key, project_id, user)
+            results[source_key] = r
+        except HTTPException as e:
+            errors[source_key] = {"status": e.status_code, "detail": str(e.detail)}
+        except Exception as e:
+            errors[source_key] = {"status": 500, "detail": str(e)}
+    return ok({"scanned": list(results.keys()), "errors": errors,
+               "total_sources": len(available), "succeeded": len(results),
+               "failed": len(errors)})
+
+
 def _persist_ranking_snapshot(
     db,
     *,
@@ -265,6 +314,87 @@ def import_ranking(payload: RankingImportRequest, project_id: str, user: dict = 
         if hasattr(db, "commit"):
             db.commit()
         return ok({**result, "raw_count": len(raw_items), "dropped_count": len(raw_items) - len(normalized)})
+    finally:
+        db.close()
+
+
+@router.post("/capture-import")
+def import_capture_artifact(payload: RankingCaptureImportRequest, project_id: str, user: dict = Depends(get_current_user)):
+    """Import a visible-browser/OCR ranking capture artifact into product tables.
+
+    - ``succeeded`` artifacts are normalized and persisted with collector,
+      screenshot/artifact evidence and per-item confidence.
+    - ``user_action_required`` / ``ocr_required`` / ``schema_changed`` artifacts
+      become failed evidence snapshots instead of empty successes.
+    - Low-confidence OCR rows produce ``capture_status=needs_review`` and are
+      blocked from market analysis until an editor confirms the capture.
+    """
+    db = connect()
+    try:
+        require_member(db, project_id, user, write=True)
+        display_name = payload.source_label or SOURCE_NAMES.get(payload.source, payload.source)
+        evidence = dict(payload.evidence or {})
+        if payload.source_url:
+            evidence["source_url"] = payload.source_url
+        if payload.captured_at:
+            evidence["captured_at"] = payload.captured_at
+        capture = CaptureResult(
+            source=payload.source,
+            status=payload.status,
+            items=[item.model_dump() for item in payload.items],
+            evidence={**evidence, "collector": payload.collector},
+            error=payload.error,
+        )
+        adapter_items = capture.as_adapter_items()
+        error_item = next((item for item in adapter_items if item.get("error")), None)
+        normalized = normalize_ranking_items(payload.source, adapter_items)
+        assessment = _ranking_snapshot_status(normalized, MIN_AUTOMATED_CONFIDENCE)
+        capture_status = payload.status if payload.status != "succeeded" else assessment["status"]
+        error = (error_item or {}).get("error") if error_item else None
+        if error_item and error_item.get("capture_status"):
+            error = f"[{error_item['capture_status']}] {error}"
+        result = _persist_ranking_snapshot(
+            db,
+            project_id=project_id,
+            source_key=payload.source,
+            display_name=display_name,
+            normalized_items=normalized,
+            capture_status=capture_status,
+            error=error,
+        )
+        db.commit()
+        return ok({**result, "raw_count": len(adapter_items), "dropped_count": len(adapter_items) - len(normalized)})
+    finally:
+        db.close()
+
+
+@router.post("/snapshots/{snapshot_id}/confirm-capture")
+def confirm_capture(snapshot_id: str, user: dict = Depends(get_current_user)):
+    """Mark a low-confidence capture as manually reviewed by an owner/editor."""
+    db = connect()
+    try:
+        snapshot = db.execute("SELECT * FROM ranking_snapshots WHERE id=%s", (snapshot_id,)).fetchone()
+        if not snapshot:
+            raise HTTPException(404, "snapshot not found")
+        require_member(db, snapshot["project_id"], user, write=True)
+        if snapshot["status"] != "succeeded":
+            raise HTTPException(409, "only persisted successful snapshots can be confirmed")
+        if snapshot.get("capture_status") not in {"needs_review", "partial"}:
+            return ok({"snapshot_id": snapshot_id, "capture_status": snapshot.get("capture_status") or "succeeded",
+                       "status": "already_confirmed"})
+        evidence_patch = {
+            "manual_review": {
+                "reviewed_by": user["id"],
+                "reviewed_at": "now",
+                "reason": "editor confirmed visible-browser/OCR ranking metadata",
+            }
+        }
+        db.execute("""UPDATE ranking_snapshots
+                      SET capture_status='succeeded',
+                          evidence=COALESCE(evidence,'{}'::jsonb) || %s
+                      WHERE id=%s""", (encode(evidence_patch), snapshot_id))
+        db.commit()
+        return ok({"snapshot_id": snapshot_id, "capture_status": "succeeded", "status": "confirmed"})
     finally:
         db.close()
 
@@ -393,9 +523,21 @@ def get_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
     latest_analysis = None
     if analysis:
         signals = analysis["signals"] if isinstance(analysis["signals"], dict) else {}
+        candidates = rows(db, "SELECT market_score FROM topic_candidates WHERE analysis_id=%s", (analysis["id"],))
+        scores = [float(c["market_score"]) for c in candidates if c.get("market_score") is not None]
+        current_avg = round(sum(scores) / len(scores), 2) if scores else None
+        trend = compute_market_trend(db, snapshot["project_id"], snapshot["source_id"], current_avg)
         latest_analysis = {"analysis_id": analysis["id"], "summary": analysis["summary"], **signals,
-                           "status": analysis["status"], "analysis_mode": analysis["analysis_mode"]}
-    data = {**dict(snapshot), "items": items, "latest_analysis": latest_analysis}; db.close(); return ok(data)
+                           "status": analysis["status"], "analysis_mode": analysis["analysis_mode"],
+                           "market_score_avg": current_avg, "trend": trend}
+    # P1-T11: attach cross-platform normalized metrics to every item.
+    from app.services.ranking_adapter import normalize_item_metrics
+    enriched_items = []
+    for it in items:
+        it = dict(it)
+        it["unified_metrics"] = normalize_item_metrics(it.get("metrics"))
+        enriched_items.append(it)
+    data = {**dict(snapshot), "items": enriched_items, "latest_analysis": latest_analysis}; db.close(); return ok(data)
 
 
 @router.post("/snapshots/{snapshot_id}/retry")
@@ -544,11 +686,15 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
         LEFT JOIN LATERAL (
             SELECT COUNT(*) AS chapter_count,
                    COALESCE(SUM(
-                       CASE
-                         WHEN jsonb_typeof(c.body->'content')='array'
-                         THEN length(regexp_replace(c.body::text, '[\\"{}:\\[\\],typecontentparagraphtext]', '', 'g'))
-                         ELSE length(c.body::text)
-                       END
+                       COALESCE(
+                         CASE WHEN COALESCE(c.meta->>'word_count','') ~ '^\\d+$'
+                              THEN (c.meta->>'word_count')::int END,
+                         (SELECT COALESCE(SUM(length(regexp_replace(part->>'text', '\\s+', '', 'g'))), 0)
+                            FROM jsonb_array_elements(
+                              CASE WHEN jsonb_typeof(c.body->'content')='array'
+                                   THEN c.body->'content' ELSE '[]'::jsonb END
+                            ) AS part)
+                       )
                    ),0) AS total_words
             FROM contents c
             WHERE c.parent_id=n.id AND c.type='chapter' AND c.is_deleted=FALSE
@@ -580,15 +726,21 @@ def get_book_detail(book_id: str, user: dict = Depends(get_current_user)):
     db.close()
     meta = book.get("meta") or {}
     latest = chapters[-1] if chapters else None
+    from app.services.novel_export import extract_body_text
+    from app.services.text_metrics import count_content_chars
+    total_words = sum(
+        int((chapter.get("meta") or {}).get("word_count") or count_content_chars(extract_body_text(chapter.get("body"))))
+        for chapter in chapters
+    )
     return ok({
         "book": dict(book),
         "synopsis": meta.get("synopsis") or meta.get("idea") or "",
         "genre": meta.get("genre") or meta.get("source_type") or "未分类",
-        "outline": meta.get("outline") or meta.get("chapter_plan") or "",
+        "outline": _resolve_book_outline(meta),
         "latest_chapter": latest,
         "chapters": chapters,
         "knowledge": knowledge,
-        "total_words": sum(len(str(ch.get("body") or "")) for ch in chapters),
+        "total_words": total_words,
     })
 
 
@@ -599,6 +751,10 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
     topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s FOR UPDATE", (topic_id,)).fetchone()
     if not topic: db.close(); raise HTTPException(404, "topic not found")
     require_member(db, topic["project_id"], user, write=True)
+    # Plan gate: book generation is token-heavy; block once the monthly word
+    # quota is exhausted (402). The workflow's own AI calls also enforce budget.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_words_per_month")
     if topic.get("novel_id"):
         novel_id = topic["novel_id"]
         existing_run = db.execute("SELECT id FROM workflow_runs WHERE novel_id=%s ORDER BY created_at DESC LIMIT 1", (novel_id,)).fetchone()
@@ -626,12 +782,12 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
         analysis = db.execute("SELECT snapshot_id FROM market_analyses WHERE id=%s", (topic["analysis_id"],)).fetchone()
         snapshot_id = analysis["snapshot_id"] if analysis else None
     novel_id = new_id(); meta = {"idea": topic["premise"], "genre": topic["genre"], "style": payload.style,
-        "target_words": payload.target_words, "selected_title": topic["title"], "source_type": "ranking_topic",
+        "target_words": payload.target_words, "suggested_title": topic["title"], "source_type": "ranking_topic",
         "source_ref_id": topic_id, "analysis_id": topic["analysis_id"], "snapshot_id": snapshot_id,
         "workflow_scope": "planning_and_chapter1"}
     db.execute("""INSERT INTO contents (id,project_id,type,title,body,meta,status,owner_id,generation_key)
                   VALUES (%s,%s,'novel',%s,%s,%s,'planning',%s,%s)""",
-               (novel_id, topic["project_id"], topic["title"], encode({"type":"doc","content":[]}),
+               (novel_id, topic["project_id"], "待命名作品", encode({"type":"doc","content":[]}),
                 encode(meta), user["id"], f"ranking-topic:{topic_id}:novel:v1"))
     db.execute("UPDATE topic_candidates SET status='planned', novel_id=%s WHERE id=%s", (novel_id, topic_id))
     db.commit(); db.close()
@@ -652,3 +808,294 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             return ok({"novel_id": novel_id, "run_id": None, "status": "planning",
                        "warning": f"book created but workflow unavailable: {exc}"})
     return ok({"novel_id": novel_id, "run_id": run_id, "status": "generating" if run_id else "planning"})
+
+
+# ── Ten-Layer Analysis (十层分析模型) ────────────────────────────────
+
+
+class AnalyzeRequest(BaseModel):
+    platforms: list[str] = Field(default_factory=list, max_length=50)
+    analysis_mode: str = Field(default="all", pattern=r"^(single|multi|all)$")
+    snapshot_id: str = Field(default="", max_length=64)
+
+    @field_validator("platforms")
+    @classmethod
+    def dedup_platforms(cls, v: list[str]) -> list[str]:
+        return list(dict.fromkeys(v))  # preserve order, remove dups
+
+
+@router.post("/analyze")
+def analyze_rankings(request: AnalyzeRequest, user: dict = Depends(get_current_user)):
+    """Run ten-layer analysis on ranking items.
+
+    Uses gateway.complete() for real AI analysis per layer.
+    Returns structured ScanResult with HeatMap, KeywordCloud, TrendReport.
+    """
+    from app.services.ten_layer_analysis import TenLayerAnalyzer
+
+    if not request.snapshot_id:
+        raise HTTPException(422, "snapshot_id is required")
+
+    db = connect()
+    try:
+        snapshot = db.execute(
+            "SELECT * FROM ranking_snapshots WHERE id = %s",
+            (request.snapshot_id,),
+        ).fetchone()
+        if not snapshot:
+            raise HTTPException(404, "snapshot not found")
+        require_member(db, snapshot["project_id"], user, write=True)
+
+        items = rows(db,
+            "SELECT * FROM ranking_items WHERE snapshot_id = %s ORDER BY rank_no",
+            (request.snapshot_id,),
+        )
+        if not items:
+            raise HTTPException(409, "snapshot has no ranking items")
+
+        # Build book profiles from ranking items
+        book_profiles = []
+        for item in items:
+            metrics = item.get("metrics") or {}
+            profile = {
+                "title": item.get("title", ""),
+                "author": item.get("author", ""),
+                "category": item.get("category", ""),
+                "platform": snapshot.get("source_key", "unknown"),
+                "rank": item.get("rank_no", 0),
+                "source_url": item.get("source_url", ""),
+                "metrics": {
+                    "confidence": float(metrics.get("confidence", 1.0)),
+                    "collector": metrics.get("collector", "unknown"),
+                },
+            }
+            book_profiles.append(profile)
+
+        analyzer = TenLayerAnalyzer(project_id=snapshot["project_id"])
+        result = analyzer.analyze(
+            book_profiles=book_profiles,
+            platforms=request.platforms or [snapshot.get("source_key", "")],
+            analysis_mode=request.analysis_mode,
+        )
+
+        # Store analysis results in market_analyses
+        analysis_id = new_id()
+        summary = result.get("TrendReport", {}).get("market_trends", [])
+        summary_text = "; ".join(str(s) for s in summary[:3]) if summary else "ten-layer analysis completed"
+        db.execute(
+            """INSERT INTO market_analyses
+               (id, project_id, snapshot_id, summary, signals, status, analysis_mode, prompt_name, prompt_version)
+               VALUES (%s, %s, %s, %s, %s, 'succeeded', 'ten_layer', 'analysis.ten_layer', '1.0.0')""",
+            (analysis_id, snapshot["project_id"], request.snapshot_id,
+             summary_text[:500], encode(result)),
+        )
+        db.commit()
+
+        # Compute frontend-friendly summary fields
+        platform_breakdown = {}
+        for bp in book_profiles:
+            p = bp.get("platform", "unknown")
+            platform_breakdown[p] = platform_breakdown.get(p, 0) + 1
+        genre_counts = {}
+        for bp in book_profiles:
+            cat = bp.get("category", "").split("|")[0].strip()
+            if cat: genre_counts[cat] = genre_counts.get(cat, 0) + 1
+        top_genres = sorted(genre_counts.items(), key=lambda x: -x[1])[:10]
+
+        return ok({
+            "analysis_id": analysis_id,
+            "status": result["status"],
+            "total_layers": result["total_layers"],
+            "succeeded_layers": result["succeeded_layers"],
+            "failed_layers": result["failed_layers"],
+            "platforms": result["platforms"],
+            "analysis_mode": result["analysis_mode"],
+            "summary": result.get("TrendReport", {}).get("summary", "十层分析完成"),
+            "total_books": len(book_profiles),
+            "platform_breakdown": platform_breakdown,
+            "top_genres": [{"name": g, "count": c} for g, c in top_genres],
+            "suggestions": result.get("TrendReport", {}).get("recommendations", []),
+            "ScanResult": result["ScanResult"],
+            "HeatMap": result["HeatMap"],
+            "KeywordCloud": result["KeywordCloud"],
+            "TrendReport": result["TrendReport"],
+            "errors": result.get("errors", []),
+        })
+    except (BudgetExceeded, ProviderError) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
+    finally:
+        db.close()
+
+
+# ═══════════════════════════════════════════════
+# Book & Chapter Deletion (V2.0 — 问题8)
+# ═══════════════════════════════════════════════
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
+@library_router.delete("/books/{book_id}")
+def delete_book(book_id: str, user: dict = Depends(get_current_user)):
+    """Soft-delete a book and all its chapters, cache, and database records."""
+    db = connect()
+    book = db.execute(
+        "SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+        (book_id,)).fetchone()
+    if not book:
+        db.close()
+        raise HTTPException(404, "book not found")
+    require_member(db, book["project_id"], user, write=True)
+
+    # Count chapters before soft-deleting
+    chapter_count = len(db.execute(
+        "SELECT id FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+        (book_id,)).fetchall())
+
+    # Soft-delete chapters first
+    db.execute(
+        "UPDATE contents SET is_deleted=TRUE, updated_at=now() "
+        "WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+        (book_id,))
+
+    # Soft-delete knowledge items
+    db.execute(
+        "UPDATE knowledge_items SET is_deleted=TRUE "
+        "WHERE content_id=%s AND is_deleted=FALSE", (book_id,))
+
+    # Soft-delete the book itself
+    db.execute(
+        "UPDATE contents SET is_deleted=TRUE, updated_at=now() "
+        "WHERE id=%s", (book_id,))
+    db.commit()
+    db.close()
+    return ok({"deleted_book_id": book_id, "deleted_chapters": chapter_count})
+
+
+@library_router.delete("/chapters/{chapter_id}")
+def delete_chapter(chapter_id: str, user: dict = Depends(get_current_user)):
+    """Soft-delete a single chapter."""
+    db = connect()
+    chapter = db.execute(
+        "SELECT c.*, p.project_id FROM contents c "
+        "JOIN contents p ON c.parent_id = p.id "
+        "WHERE c.id=%s AND c.type='chapter' AND c.is_deleted=FALSE",
+        (chapter_id,)).fetchone()
+    if not chapter:
+        db.close()
+        raise HTTPException(404, "chapter not found")
+    require_member(db, chapter["project_id"], user, write=True)
+    db.execute(
+        "UPDATE contents SET is_deleted=TRUE, updated_at=now() WHERE id=%s",
+        (chapter_id,))
+    db.commit()
+    db.close()
+    return ok({"deleted_chapter_id": chapter_id})
+
+
+@library_router.post("/books/batch-delete")
+def batch_delete_books(payload: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+    """Batch soft-delete multiple books."""
+    db = connect()
+    deleted = []
+    for book_id in payload.ids:
+        book = db.execute(
+            "SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+            (book_id,)).fetchone()
+        if not book:
+            continue
+        try:
+            require_member(db, book["project_id"], user, write=True)
+        except HTTPException:
+            continue
+        db.execute(
+            "UPDATE contents SET is_deleted=TRUE WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+            (book_id,))
+        db.execute(
+            "UPDATE knowledge_items SET is_deleted=TRUE WHERE content_id=%s AND is_deleted=FALSE",
+            (book_id,))
+        db.execute(
+            "UPDATE contents SET is_deleted=TRUE, updated_at=now() WHERE id=%s",
+            (book_id,))
+        deleted.append(book_id)
+    db.commit()
+    db.close()
+    return ok({"deleted": deleted, "count": len(deleted)})
+
+
+# ═══════════════════════════════════════════════
+# Topic Pool Management (V2.0 — 问题10)
+# ═══════════════════════════════════════════════
+
+class TopicBookmarkRequest(BaseModel):
+    bookmark: bool = True  # True=加入备选, False=取消备选
+
+
+@router.post("/topics/{topic_id}/bookmark")
+def toggle_topic_bookmark(topic_id: str, payload: TopicBookmarkRequest,
+                          user: dict = Depends(get_current_user)):
+    """Toggle bookmark status for a topic candidate. Bookmarked topics persist; unbookmarked are cleared on next scan."""
+    db = connect()
+    topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+    if not topic:
+        db.close()
+        raise HTTPException(404, "topic not found")
+    require_member(db, topic["project_id"], user, write=True)
+    db.execute(
+        "UPDATE topic_candidates SET meta = meta || %s, status = %s WHERE id = %s",
+        (json.dumps({"bookmarked": payload.bookmark}),
+         "bookmarked" if payload.bookmark else topic["status"],
+         topic_id))
+    db.commit()
+    db.close()
+    return ok({"topic_id": topic_id, "bookmarked": payload.bookmark})
+
+
+@router.delete("/topics/{topic_id}")
+def delete_topic(topic_id: str, user: dict = Depends(get_current_user)):
+    """Permanently delete a topic candidate."""
+    db = connect()
+    topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+    if not topic:
+        db.close()
+        raise HTTPException(404, "topic not found")
+    require_member(db, topic["project_id"], user, write=True)
+    db.execute("DELETE FROM topic_candidates WHERE id=%s", (topic_id,))
+    db.commit()
+    db.close()
+    return ok({"deleted_topic_id": topic_id})
+
+
+@router.post("/topics/batch-delete")
+def batch_delete_topics(payload: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+    """Batch delete topic candidates."""
+    db = connect()
+    deleted = []
+    for topic_id in payload.ids:
+        topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s", (topic_id,)).fetchone()
+        if not topic:
+            continue
+        try:
+            require_member(db, topic["project_id"], user, write=True)
+        except HTTPException:
+            continue
+        db.execute("DELETE FROM topic_candidates WHERE id=%s", (topic_id,))
+        deleted.append(topic_id)
+    db.commit()
+    db.close()
+    return ok({"deleted": deleted, "count": len(deleted)})
+
+
+@router.get("/topics/bookmarked")
+def get_bookmarked_topics(project_id: str = Query(...),
+                          user: dict = Depends(get_current_user)):
+    """List all bookmarked topic candidates for a project."""
+    db = connect()
+    require_member(db, project_id, user, write=False)
+    topics = rows(db,
+        """SELECT * FROM topic_candidates
+           WHERE project_id=%s AND meta->>'bookmarked' = 'true'
+           ORDER BY market_score DESC NULLS LAST, created_at DESC""",
+        (project_id,))
+    db.close()
+    return ok({"topics": topics, "count": len(topics)})

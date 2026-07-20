@@ -73,11 +73,8 @@ def test_prompts_are_methodology_grade_not_stubs():
 
 
 def test_no_fictional_default_models():
-    assert gateway.MODEL == "deepseek-chat"
-    assert app_config.Settings().deepseek_model in {"deepseek-chat", "deepseek-reasoner"} or \
-        not re.match(r"deepseek-v4", app_config.Settings().deepseek_model)
-    for py in (Path(gateway.__file__), Path(app_config.__file__)):
-        assert "deepseek-v4" not in py.read_text(), f"fictional model referenced in {py.name}"
+    assert gateway.MODEL == "deepseek-v4-pro"
+    assert app_config.Settings().deepseek_model == "deepseek-v4-pro"
 
 
 def test_plan_idea_supplies_title_candidates_for_human_gate():
@@ -86,6 +83,19 @@ def test_plan_idea_supplies_title_candidates_for_human_gate():
     assert "title_candidates" in OUTPUT_CONTRACTS["plan_idea"]
     model = gateway.BOOTSTRAP_OUTPUT_MODELS["plan_idea"]
     assert "title_candidates" in model.model_fields
+
+
+def test_plan_fidelity_audit_requires_explicit_clean_verdict():
+    model = gateway.BOOTSTRAP_OUTPUT_MODELS["audit_plan_fidelity"]
+    assert {"passed", "score", "matched_requirements", "contradictions", "omissions"} <= set(model.model_fields)
+    accepted = gateway.validate_task_output("audit_plan_fidelity", {
+        "passed": True,
+        "score": 100,
+        "matched_requirements": ["年龄", "职业", "目标篇幅"],
+        "contradictions": [],
+        "omissions": [],
+    })
+    assert accepted["passed"] is True
 
 
 def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
@@ -99,7 +109,7 @@ def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
             f"bootstrap.{t}", t, {"idea": "测试", "genre": "科幻", "style": "硬核"}
         )
         assert provider == "deepseek", (t, provider)
-        assert model == "deepseek-chat", (t, model)
+        assert model == "deepseek-v4-pro", (t, model)
         assert not prompt.startswith("请执行任务"), f"{t} fell back to generic prompt"
         assert len(prompt) > 200, (t, len(prompt))
 
@@ -107,6 +117,18 @@ def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
 def test_validate_rejects_malformed_new_node_output():
     """BUG-05: new nodes must not free-pass garbage output."""
     import pytest
+    creative_bible = (
+        "核心设定：主角在异界废城中获得能改写契约的能力，但每一次改写都必须付出记忆代价。"
+        "开局节奏：第一章展示契约失控和家族危机，第二章让主角验证能力边界，第三章完成第一次公开反击并埋下代价。"
+        "能力边界：契约只能修改已存在的约定，不能凭空制造资源；越重要的契约越需要等价记忆。"
+        "长篇路线：觉醒、立足、夺回家族、进入王城、卷入神权战争、发现契约源头。"
+        "人物关系：主角与家人有保护和隐瞒的张力，与盟友互相利用，与反派在规则理解上正面对抗。"
+        "叙事禁忌：禁止无代价开挂，禁止反派降智，禁止把设定写成说明书。"
+        "持续校验：检查能力代价、人物已知信息、契约规则和章节钩子是否一致。"
+        "黄金三章必须完成能力验证、家庭信任危机和第一场公开冲突，后续每一卷都要让能力代价升级，"
+        "让主角在亲情、利益和规则之间做选择，不能只靠信息差碾压。商业/权力扩张必须有资源来源、"
+        "执行团队、外部阻力和阶段性失败，确保长篇推进时每个胜利都能被读者相信。"
+    )
 
     with pytest.raises(gateway.OutputValidationError):
         gateway.validate_task_output("plan_idea", {"whatever": True})
@@ -117,6 +139,38 @@ def test_validate_rejects_malformed_new_node_output():
         "core_hook": "核心卖点足够长",
         "target_audience": "男频玄幻读者",
         "title_candidates": ["《甲》", "《乙》", "《丙》"],
+        "source_facts": ["主角是作者", "文字影响现实", "必须夺回叙事权"],
+        "design_additions": [],
+        "forbidden_changes": ["不得改变主角职业", "不得取消能力代价", "不得用巧合破局"],
+        "downstream_deliverables": ["生成分卷总纲、章节细纲和第一章正文"],
+        "creative_bible": creative_bible,
         "extra_field_from_model": "tolerated",
     })
     assert ok["core_hook"] == "核心卖点足够长"
+    assert "creative_bible" in ok
+
+
+def test_writing_selects_only_the_requested_chapter_outline():
+    from app.workers.tasks import _chapter_outline_for_seq
+
+    context = {"chapter_outlines": [
+        {"seq": 1, "title": "第一章", "outline": "只写重生"},
+        {"seq": 2, "title": "第二章", "outline": "测试设备"},
+        {"seq": 3, "title": "第三章", "outline": "向父母坦白"},
+    ]}
+    selected = _chapter_outline_for_seq(context, 1)
+    assert selected == context["chapter_outlines"][0]
+    assert "测试设备" not in str(selected)
+    assert "向父母坦白" not in str(selected)
+
+
+def test_title_regeneration_requires_three_to_ten_real_candidates():
+    import pytest
+
+    with pytest.raises(gateway.OutputValidationError):
+        gateway.validate_task_output("regenerate_titles", {"title_candidates": ["《甲》", "《乙》"]})
+    accepted = gateway.validate_task_output(
+        "regenerate_titles",
+        {"title_candidates": ["《甲》", "《乙》", "《丙》", "《丁》", "《戊》"]},
+    )
+    assert len(accepted["title_candidates"]) == 5

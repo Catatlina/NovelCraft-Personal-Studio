@@ -33,27 +33,34 @@ export function FanoutMatrix({ contentId }: { contentId: string }) {
   }
 
   return (
-    <div className="panel">
-      <h3>一稿多平台分发</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8, marginBottom: 12 }}>
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">
+          <Send size={16} />
+          一稿多平台分发
+        </div>
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
         {PLATFORMS.map(p => (
           <label key={p.key} style={{
-            display: "flex", alignItems: "center", gap: 6, padding: 8,
-            border: `1px solid ${selected.includes(p.key) ? "var(--primary)" : "var(--border-subtle)"}`,
-            borderRadius: 6, cursor: "pointer", fontSize: 13,
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 10px",
+            border: `1px solid ${selected.includes(p.key) ? "var(--primary)" : "var(--border)"}`,
+            borderRadius: "var(--r-sm)", cursor: "pointer", fontSize: 13,
+            background: selected.includes(p.key) ? "var(--primary-dim)" : "transparent",
+            transition: "border-color var(--t-fast), background var(--t-fast)",
           }}>
             <input type="checkbox" checked={selected.includes(p.key)}
               onChange={() => setSelected(s => s.includes(p.key) ? s.filter(k => k !== p.key) : [...s, p.key])} />
-            {results[p.key] ? <CheckCircle size={12} style={{ color: "var(--success)" }} /> : null}
+            {results[p.key] ? <CheckCircle size={12} style={{ color: "var(--green)" }} /> : null}
             {p.name}
           </label>
         ))}
       </div>
-      <button className="primary" onClick={runFanout} disabled={busy || !selected.length}>
+      <button className="btn-primary btn-sm" onClick={runFanout} disabled={busy || !selected.length} style={{ width: "auto" }}>
         <Send size={14} /> {busy ? "分发中..." : `分发到 ${selected.length} 个平台`}
       </button>
       {Object.keys(results).length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 13 }}>
+        <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-2)" }}>
           已完成：{Object.entries(results).map(([k, v]) => <span key={k} style={{ marginRight: 8 }}>✅ {k}</span>)}
         </div>
       )}

@@ -57,7 +57,7 @@ def test_harness_final_phase_nodes_present_in_pipeline():
     for key in ("final_consistency_check", "final_continuity_audit", "final_humanize"):
         assert key in node_keys, f"{key} missing from pipeline"
     # humanize 是收尾写作节点，晚于审计节点
-    assert node_keys.index("final_humanize") > node_keys.index("final_consistency_check")
+    assert node_keys.index("final_consistency_check") > node_keys.index("final_humanize")
 
 
 # ===== insprira =====

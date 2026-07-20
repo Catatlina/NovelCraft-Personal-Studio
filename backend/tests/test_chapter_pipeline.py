@@ -37,6 +37,45 @@ def test_gen_next_chapter_provider_output_passes_validation():
     assert len(validated["chapter"]["body"]) >= 3
 
 
+def test_editor_and_imitation_empty_outputs_are_rejected():
+    from app.gateway import OutputValidationError, validate_task_output
+
+    with pytest.raises(OutputValidationError):
+        validate_task_output("editor_rewrite", {"text": "   "})
+    with pytest.raises(OutputValidationError):
+        validate_task_output("style_imitation", {
+            "title": "样稿",
+            "style_profile": {},
+            "text": "过短",
+        })
+
+
+def test_draft_length_feedback_drives_real_retry():
+    from app.workers.tasks import _draft_length_feedback
+
+    assert "chapter too short" in _draft_length_feedback(
+        {"chapter": {"body": ["不足三千字"]}}
+    )
+    assert _draft_length_feedback(
+        {"chapter": {"body": ["足" * 3000]}}
+    ) == ""
+
+
+def test_quality_evidence_payload_keeps_score_dimensions_and_provenance():
+    from app.workers.tasks import _quality_evidence_payload
+
+    payload = _quality_evidence_payload(
+        {"checks": {"characters": {"status": "pass"}, "timeline": {"status": "warning"}}},
+        {"self_score": 84, "weaknesses": ["时间钩子偏弱"]},
+    )
+    assert payload == {
+        "score": 84.0,
+        "dimensions": {"characters": 90, "timeline": 65},
+        "issues": ["时间钩子偏弱"],
+        "source": "write_self_review+final_consistency_check",
+    }
+
+
 # --- idempotent persistence (docs/26: run/node 级生成键 + 数据库唯一索引兜底) --
 
 def test_next_chapter_persistence_uses_stable_generation_key():
@@ -275,3 +314,22 @@ def test_detect_conflicts_runs_against_real_schema(seeded_novel):
     assert len(conflicts) == 1
     assert conflicts[0]["type"] == "entity_location_contradiction"
     assert conflicts[0]["character"] == "林序"
+
+
+def test_version_reason_preserves_long_manual_review_feedback(seeded_novel):
+    from app.db import connect, encode, new_id
+
+    reason = "人工审核：增强场景冲突、生活质感、人物连续性和章末钩子。" * 5
+    db = connect()
+    version_id = new_id("ver")
+    db.execute(
+        """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason)
+           VALUES (%s, 'content', %s, 'before_manual_regenerate', %s, %s)""",
+        (version_id, seeded_novel["chapter_id"], encode({"status": "before"}), reason),
+    )
+    db.commit()
+    stored = db.execute("SELECT reason FROM versions WHERE id=%s", (version_id,)).fetchone()["reason"]
+    db.close()
+
+    assert len(reason) > 50
+    assert stored == reason

@@ -4,6 +4,7 @@ import { Wizard } from "./components/Wizard";
 import { Progress } from "./components/Progress";
 import { Review } from "./components/Review";
 import { Costs } from "./components/Costs";
+import { Billing } from "./components/Billing";
 import { CommandPalette } from "./components/CommandPalette";
 import { DagEditor } from "./components/DagEditor";
 import { Settings } from "./components/Settings";
@@ -22,6 +23,13 @@ import { AgentConsole } from "./components/AgentConsole";
 import { ApiError, api as baseApi, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
+import { Overview } from "./components/Overview";
+import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
+import { Plugins } from "./components/Plugins";
+import { SkillManager } from "./components/SkillManager";
+import { AIChat } from "./components/AIChat";
+import { Prompts } from "./components/Prompts";
+import { ThemeProvider } from "./components/ThemeProvider";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
@@ -33,7 +41,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents";
+type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins" | "skills" | "chat";
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
@@ -53,7 +61,7 @@ function textToDoc(text: string): TipTapDoc {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("ranking");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState(() => sessionStorage.getItem("nc_token") || "");
   const [userEmail, setUserEmail] = useState("");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
@@ -63,6 +71,7 @@ export default function App() {
   const [chapter, setChapter] = useState<Content | null>(null);
   const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
+  const restoringRun = useRef(false);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
@@ -99,10 +108,46 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token || !project || run || restoringRun.current) return;
+    restoringRun.current = true;
+    const savedRunId = localStorage.getItem(`nc_current_run:${project.id}`) || "";
+    const path = savedRunId
+      ? `/api/v1/runs/${savedRunId}`
+      : `/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`;
+    api<Run>(path)
+      .then(restored => {
+        setRun(restored);
+        localStorage.setItem(`nc_current_run:${project.id}`, restored.id);
+        return api<Content>(`/api/v1/contents/${restored.novel_id}`);
+      })
+      .then(content => { setNovel(content); void cacheSet("currentNovel", content); })
+      .catch(async firstError => {
+        if (!savedRunId) {
+          if (!(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
+          return;
+        }
+        localStorage.removeItem(`nc_current_run:${project.id}`);
+        try {
+          const restored = await api<Run>(`/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`);
+          setRun(restored);
+          localStorage.setItem(`nc_current_run:${project.id}`, restored.id);
+          const content = await api<Content>(`/api/v1/contents/${restored.novel_id}`);
+          setNovel(content); void cacheSet("currentNovel", content);
+        } catch {
+          // A project without workflow runs is a valid initial state.
+          if (!(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
+        }
+      })
+      .finally(() => { restoringRun.current = false; });
+  }, [token, project?.id, run?.id]);
+
+  useEffect(() => {
     if (!run) return;
+    // 终态（成功/失败）后停止轮询，避免无限每 2 秒请求 runs/contents
+    if (run.status === "succeeded" || run.status === "failed") return;
     const poll = setInterval(() => { if (run) refreshRun(run.id); }, 2000);
     return () => clearInterval(poll);
-  }, [run?.id]);
+  }, [run?.id, run?.status]);
 
   useEffect(() => {
     if (tab !== "review" || !novel) { setNarrative({ timeline: [], arcs: [] }); return; }
@@ -150,8 +195,10 @@ export default function App() {
   useEffect(() => { if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls); }, [run?.id, run?.status]);
   useEffect(() => {
     if (!project) return;
-    api<{ data: Budget[] }>(`/api/v1/admin/budgets?project_id=${project.id}`).then(response => setBudgets(response.data || []));
-    api<{ data: ModelRoute[] }>("/api/v1/admin/model-routes").then(response => setRoutes(response.data || []));
+    // NOTE: api<T>() already unwraps the envelope once, so the resolved value
+    // is the bare array. The previous `response.data` was always undefined.
+    api<Budget[] | { data?: Budget[] }>(`/api/v1/admin/budgets?project_id=${project.id}`).then(r => setBudgets(Array.isArray(r) ? r : (r.data ?? [])));
+    api<ModelRoute[] | { data?: ModelRoute[] }>("/api/v1/admin/model-routes").then(r => setRoutes(Array.isArray(r) ? r : (r.data ?? [])));
   }, [project?.id, run?.status]);
 
   useEffect(() => {
@@ -167,11 +214,10 @@ export default function App() {
   async function refreshRun(runId: string) {
     const r = await api<Run>(`/api/v1/runs/${runId}`);
     setRun(r);
+    localStorage.setItem(`nc_current_run:${r.project_id}`, r.id);
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
     void cacheSet("currentNovel", n);
-    // 只在用户正在看的进度页且 run 完成时才跳审阅（避免跨书跳转）
-    if (r.status === "succeeded" && tab === "progress") setTab("review");
   }
 
   async function startBootstrap() {
@@ -181,7 +227,7 @@ export default function App() {
       const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, style, target_words: targetWords }) });
       setNovel(c);
       void cacheSet("currentNovel", c);
-      const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: "{}" });
+      const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: JSON.stringify({ auto_confirm_title: false }) });
       setTab("progress");
       await refreshRun(s.run_id);
     } catch (e: any) {
@@ -193,6 +239,15 @@ export default function App() {
   async function confirmTitle(title: string) {
     if (!run) return;
     await api(`/api/v1/runs/${run.id}/nodes/n2/confirm`, { method: "POST", body: JSON.stringify({ selected_title: title }) });
+    await refreshRun(run.id);
+  }
+
+  async function regenerateTitles(feedback: string) {
+    if (!run) return;
+    await api(`/api/v1/runs/${run.id}/titles/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    });
     await refreshRun(run.id);
   }
 
@@ -390,11 +445,15 @@ export default function App() {
     setChapter(r); setEditorText(docToText(r.body)); loadVersions(r.id);
   }
 
-  // V2 runs surface review output via write_self_review; legacy runs used n8 (review_7dim).
-  const review = (run?.nodes.find(n => n.node_key === "write_self_review")?.output
-    ?? run?.nodes.find(n => n.node_key === "n8")?.output) as { score?: number; dimensions?: Record<string, number>; issues?: string[] } | undefined;
+  // V2 runs split quality data across self-review and consistency nodes; legacy runs used n8.
+  const review = ({
+    ...(run?.nodes.find(n => n.node_key === "n8")?.output ?? {}),
+    ...(run?.nodes.find(n => n.node_key === "write_self_review")?.output ?? {}),
+    final_consistency_check: run?.nodes.find(n => n.node_key === "final_consistency_check")?.output,
+    final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
+  }) as any;
 
-  const titles: Record<Tab, string> = { ranking: "扫榜生成小说", library: "统一书库", wizard: "灵感生成（次要入口）", progress: "生成工作流", review: "质量审阅", editor: "章节编辑器", costs: "AI 调用追踪", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点仪表盘", knowledge: "知识库浏览器", fanout: "多平台分发", versions: "版本树", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体控制台" };
+  const titles: Record<Tab, string> = { dashboard: "工作台", overview: "数据概览", workspace: "工作区", ranking: "扫榜选书", library: "书库管理", wizard: "灵感创作", progress: "创作进度", review: "质量审阅", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
@@ -406,6 +465,7 @@ export default function App() {
     { id: "editor", label: "编辑器 → 写章节", action: () => setTab("editor") },
     { id: "review", label: "审阅 → 查看审核", action: () => setTab("review") },
     { id: "costs", label: "成本追踪 → AI 调用", action: () => setTab("costs") },
+    { id: "billing", label: "订阅套餐 → 套餐/用量", action: () => setTab("billing") },
     { id: "prompts", label: "Prompt 管理", action: () => setTab("prompts") },
     { id: "dag", label: "工作流编排 → DAG 编辑器", action: () => setTab("dag") },
     { id: "settings", label: "系统设置 → AI配置/预算", action: () => setTab("settings") },
@@ -443,22 +503,20 @@ export default function App() {
   };
 
   return (
+    <ThemeProvider>
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
       {error && <div className="error">{error}</div>}
+      {tab === "dashboard" && <WorkspaceDashboard onNavigate={setTab} />}
       {tab === "ranking" && project && <RankingCenter projectId={project.id} onBookCreated={async (novelId, runId) => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); if (runId) { setTab("progress"); await refreshRun(runId); } else setTab("library"); }} />}
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
-      {tab === "progress" && <Progress run={run} onConfirm={confirmTitle} />}
-      {tab === "review" && <Review chapter={novel} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
+      {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
+      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} /></React.Suspense>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
-      {tab === "prompts" && (
-        <div className="panel"><h2>Prompt 库</h2>
-        <table><thead><tr><th>名称</th><th>版本</th><th>模型</th></tr></thead>
-        <tbody>{prompts.map((p: any) => <tr key={p.id}><td>{p.name}</td><td>{p.version}</td><td>{p.model}</td></tr>)}</tbody></table>
-        </div>
-      )}
-      {tab === "dag" && <DagEditor projectId={project?.id || ""} />}
+      {tab === "billing" && <Billing />}
+      {tab === "prompts" && <Prompts prompts={prompts} projectId={project?.id || ""} />}
+      {tab === "dag" && <DagEditor projectId={project?.id || ""} novelId={novel?.id || ""} />}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
       {tab === "studio" && <Studio />}
       {tab === "publish" && <PublishDashboard />}
@@ -469,7 +527,13 @@ export default function App() {
       {tab === "foreshadowing" && novel && <ForeshadowingBoard novelId={novel.id} />}
       {tab === "collaboration" && project && <CollaborationPanel projectId={project.id} />}
       {tab === "agents" && <AgentConsole />}
+      {tab === "overview" && <Overview />}
+      {tab === "workspace" && <WorkspaceDashboard onNavigate={setTab} />}
+      {tab === "plugins" && <Plugins />}
+      {tab === "skills" && <SkillManager />}
+      {tab === "chat" && <AIChat />}
       <CommandPalette commands={cmdActions} />
     </Layout>
+    </ThemeProvider>
   );
 }

@@ -77,4 +77,5 @@ def test_methodology_prompts_reference_fused_methods():
     assert "story-long-write" in by_name["bootstrap.write_chapter_draft"]
     assert "story-deslop" in by_name["bootstrap.final_humanize"]
     assert "show-me-the-story" in by_name["bootstrap.write_fact_reconcile"]
-    assert "六维" in by_name["bootstrap.final_consistency_check"]
+    assert "七维" in by_name["bootstrap.final_consistency_check"]
+    assert "source_fidelity" in by_name["bootstrap.final_consistency_check"]

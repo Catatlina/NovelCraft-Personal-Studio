@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.observability import init_sentry
 
@@ -54,6 +55,12 @@ celery_app.conf.update(
         "purge-stale-operational-data": {
             "task": "app.workers.tasks.purge_stale_operational_data",
             "schedule": 86400.0,
+        },
+        "monthly-usage-reset": {
+            # P1-T2: archive the previous calendar month's AI usage + invalidate
+            # caches on the first of every month at 03:15 (Asia/Shanghai).
+            "task": "app.core.billing.reset_monthly_usage",
+            "schedule": crontab(day_of_month=1, hour=3, minute=15),
         },
     },
 )

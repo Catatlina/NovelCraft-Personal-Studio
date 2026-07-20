@@ -8,12 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user
 from app.db import connect, encode, new_id
+from app.core.authz import ok
 
 router = APIRouter(prefix="/api/v1", tags=["batch"])
-
-
-def ok(data):
-    return {"code": 0, "message": "ok", "data": data}
 
 
 # --- C2: Tool/Branch ---

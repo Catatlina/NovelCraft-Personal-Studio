@@ -166,7 +166,16 @@ def init_db() -> None:
         )
         db.execute(
             "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s, %s, %s, %s, %s)",
-            (new_id("bdg"), project_id, "default", 50.0, 0),
+            (new_id("bdg"), project_id, "default", float(settings.default_monthly_budget_cny), 0),
+        )
+        # Give the dev admin a Free subscription so billing queries return a real row.
+        db.execute(
+            """
+            INSERT INTO subscriptions (id, user_id, plan_id, status, started_at, expires_at, auto_renew)
+            SELECT %s, %s, 'plan_free', 'active', now(), NULL, TRUE
+            WHERE NOT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = %s)
+            """,
+            (new_id(), user_id, user_id),
         )
     # Keep project ownership and authorization membership consistent, including
     # databases created by older builds that omitted the owner membership row.
@@ -205,7 +214,10 @@ def init_db() -> None:
             """
             INSERT INTO prompts (id, name, version, model, template, golden_cases)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT(name, version, model) DO NOTHING
+            ON CONFLICT(name, version, model) DO UPDATE
+            SET template = EXCLUDED.template,
+                golden_cases = EXCLUDED.golden_cases,
+                updated_at = now()
             """,
             (new_id("prm"), name, version, model, template, encode(cases)),
         )
@@ -222,9 +234,10 @@ def init_db() -> None:
         "gen_video_script", "fetch_hotspots", "gen_daily_brief",
         "hm_daily_brief", "hm_title_variants", "hm_material_suggestions",
         "translate_segment", "cultural_localize", "ranking_market_analysis", "book_analysis",
+        "performance_feedback", "localize_names",
         # V2 four-stage bootstrap (18 agent nodes) — every node must resolve a
         # real model route or the flagship flow fails at its first node.
-        "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
+        "plan_idea", "audit_plan_fidelity", "regenerate_titles", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
         "plan_world_architecture", "plan_character_system", "plan_conflict_map",
         "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
         "write_chapter_draft", "write_self_review", "write_polish",
@@ -243,12 +256,13 @@ def init_db() -> None:
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT(task_type) DO NOTHING
             """,
-            (new_id(), task_type, "deepseek", "deepseek-chat", encode({"temperature": temperature}), encode([])),
+            (new_id(), task_type, "deepseek", "deepseek-v4-pro", encode({"temperature": temperature}), encode([])),
         )
-    # Heal rows that were seeded while the default pointed at a model that does
-    # not exist on the DeepSeek API (audit BUG-02, 2026-07-13).
+    # Keep DeepSeek routes on the currently verified quality model. Flash is
+    # intentionally not used for long-form writing or acceptance audits.
     db.execute(
-        "UPDATE model_routes SET model = 'deepseek-chat' WHERE provider = 'deepseek' AND model LIKE 'deepseek-v4%%'"
+        "UPDATE model_routes SET model = 'deepseek-v4-pro' "
+        "WHERE provider = 'deepseek' AND model IN ('deepseek-chat','deepseek-reasoner','deepseek-v4-flash')"
     )
     # Seed sensitive word list
     SENSITIVE_WORDS = ["政治敏感", "色情", "暴力恐怖", "赌博", "毒品", "枪支", "诈骗", "传销", "邪教", "违禁内容",

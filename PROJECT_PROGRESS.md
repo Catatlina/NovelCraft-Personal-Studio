@@ -2,13 +2,71 @@
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-11（审计修复轮）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-17（V2.0全面升级轮）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+
+## 2026-07-17 V2.0 全面升级
+
+### 用户10问题整改
+
+| # | 问题 | 状态 | 证据 |
+|---|------|:--:|------|
+| 1 | 番茄全榜 | 🧪 | /api/rank/list 7本巅峰榜 + 37分类API 1117本。Playwright已集成但VPS内存不足跳过 |
+| 2 | 起点/纵横100+ | 🧪 | 起点7榜合并44本（分页不生效），纵横33本。默认200可配环境变量 |
+| 3 | 编辑器排版 | 🧪 | novel-prose.css(440行) + RichEditor.tsx重写(329行)。CSS已打入Docker bundle |
+| 4 | 编辑器UI | 🧪 | Editor.tsx增强(263行)：左目录/AI面板/状态栏/全屏/夜间/专注 |
+| 5 | 去AI味 | 🧪 | deai_pipeline.py(223行)七层管线 + deai.py API(165行)。未真实DeepSeek验证 |
+| 6 | 热点多平台 | 🧪 | 8平台fallback URL。B站API实测通过。头条/小红书/抖音需代理 |
+| 7 | 热点文库 | 🧪 | articles CRUD在hotspots.py + HotspotDashboard文库Tab |
+| 8 | 书库删除 | ✅ | 7端点(单本/批量/章节删除) + 前端checkbox/确认弹窗。前端bundle确认 |
+| 9 | 十层分析 | 🧪 | ten_layer_analysis.py(793行) + /ranking/analyze端点。platforms自动去重 |
+| 10 | 选题池 | 🧪 | bookmark/delete/batch-delete端点 |
+
+### 新增功能
+
+| 功能 | 文件 | 状态 |
+|------|------|:--:|
+| DashboardV2 首页 | DashboardV2.tsx(613行) | ✅ |
+| 全局玻璃拟态主题 | global-v2.css(413行) + ThemeProvider | ✅ |
+| 仿写HTML提取 | imitation.py _extract_text() | ✅ |
+| 一键采集所有平台 | ranking.py /scan-all + 前端按钮 | ✅ |
+| 多平台聚合分析 | ranking.py /analyze + 前端UI | 🧪 |
+| 新平台: SF轻小说 | ranking_adapter.py fetch_sfacg_ranking() 43本 | ✅ |
+| 新平台: 潇湘书院 | ranking_adapter.py fetch_xxsy_ranking() 41本 | ✅ |
+| 平台替换: QQ阅读/晋江 | 替换七猫/17K/刺猬猫(JS-SPA不可采) | ✅ |
+
+### 验证基线
+
+- 后端: `pytest` → 565 passed, 9 skipped
+- 前端: `npm run build` → ✓ built (tsc -b + vite)
+- 部署: VPS Docker frontend + systemd API → 200 OK
+- 提交: main @ c5b3463
 >
 > **治理说明**：此前版本宣称"20/20 任务全部完成、6/6 深度融合、8/8 整合、真实 Provider T3/T5 通过、真实源 7 天稳定运行、浏览器 E2E 验收通过"，均无《23》§6 要求的验收证据（commit/命令/日期/输出），且"7 天 T5"与文档同日更新在时间上不可能成立。按《23》§8 全部降级为证据可查的状态；重建证据台账前不得恢复 ✅。外部审计报告（2026-07-11）的 §三/P1-6 亦指认了同一问题。
 >
 > **开发前强制门禁**：任何后续开发、整改、审计修复、提交前，必须先阅读并遵守 `docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md`。未通过该规范的状态口径、反撒谎扫描、证据等级和交付格式时，不得使用高等级交付口径。
 
 ## 当前主线 (main)
+
+### 2026-07-17 WIP 收尾入库 + main 合并 + 整体部署
+
+- **WIP 收尾（@a6ed0da）**：上一会话遗留后端 WIP 逐项审查后入库——章节长度硬门禁（3 次真实重试带反馈）、七维质量证据持久化到章节 meta、移除 analyze_hotspots 模板伪 AI 输出、gateway editor/style 空输出防护、人工选名门禁（"待命名作品"占位）、`/runs/latest` 恢复端点、智能体 stale 状态识别、书库字数修真、知识库嵌入连接泄漏修复、versions.reason TEXT 迁移、nginx /api 直连（线上已提前生效，repo 补记）。
+- **合并 main（@27249e4）**：榜单三修复（起点 script tag/番茄 snake_case/番茄全分类）+ CI allowlist 并入分支；overseas_complete.py 冲突取分支侧（审计整改后继版），同步清理 main 侧遗留的 generate_consistency_report 死豁免条目。
+- **验证**：合并树全量 `pytest` → **565 passed, 9 skipped**（本地需 `NOVELCRAFT_TEST_REDIS_URL=redis://localhost:6379/15`，否则 fail-closed 503 导致误报）；truthfulness/delivery 门禁通过；前端构建通过。
+- **部署**：生产服务器从 main+分支前端的混合状态切换为整体跟随分支 @27249e4，api/worker/beat/frontend 全部重建；基础设施侧确认用户已清理家中 frpc 重复 `nc-proxy` 段（frps 日志 0 次 port already used，代理 200）。
+
+### 2026-07-16 全量回归 + 生产浏览器巡检与修复轮
+
+- **全量回归**：本地 `pytest` → **565 passed, 9 skipped**（CI 等价环境；此前一次失败为本地 `DEEPSEEK_MODEL` 注入所致误报，CI 环境复跑通过）；`npm run build`（tsc+vite）通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py` 通过；alembic 单头 `nc_versions_reason_text` 全量迁移通过。
+- **生产浏览器巡检（真实登录态，Chrome 驱动）**：19 个页面全部渲染并核对控制台/网络请求；扫榜中心真实起点/番茄快照与失败详情展示正常；书库、审阅七维雷达、编辑器 TipTap、成本追踪 13 次真实 DeepSeek 调用、智能体任务计数等均为真实数据。
+- **修复 1（生产配置）**：服务器 `.env` 缺 `NOVELCRAFT_ADMIN_EMAILS` → `/admin/settings` 403 且前端产生未捕获异常；已补配并按 `docker-compose.prod.yml`（env_file 全量注入）正确重建 api/worker，登录态实测 200。
+- **修复 2（后端 @9c4abc1 main / @535dea6 分支）**：`GET /admin/settings` 由写级 `require_admin` 改为 `require_admin_reads`（QA-003 口径，与 providers/model-routes/prompts 一致）。
+- **修复 3（前端 @d72f2cf 分支）**：run 终态（succeeded/failed）停止 2 秒轮询；切换 Tab 滚回顶部；Settings 管理接口失败如实提示而非未捕获异常；同轮把此前已构建部署到生产（bundle `index-D_diNxCO`）的前端 WIP 入库补齐溯源。
+- **修复 4（基础设施）**：热点采集全源超时根因定位——`jp.xyjin.xyz:8888`（frps 隧道→国内 tinyproxy）被互联网扫描者当开放代理滥用打满，且 frps 存在僵尸 `nc-proxy` 注册占用端口；已 ufw 白名单收紧 8888 仅允许 43.156.17.78、重启 frps 清除僵尸注册。实测 `/api/v1/hotspots` 恢复 200、60 条真实百度热点，看板正常渲染。遗留：国内 frpc 配置存在重复绑定 8888 的 `nc-proxy` 段，建议清理；知乎/微博 ajax 需有效 Cookie。
+
+- **创意拆解模块化**：所有新书统一执行“原始需求 → 创作圣经 → 市场/故事/玩法/世界/人物/冲突规划”，不再把排行榜建议标题当成已确认标题。规划结果包含 `source_facts`、`design_additions`、`forbidden_changes`、长篇阶段、篇幅和内容配比。
+- **规划忠实度硬门禁**：`plan_idea` 每次真实 DeepSeek 输出后，新增独立 `audit_plan_fidelity` 调用逐项对照原始需求；年龄、年份、职业、设备、目标字数、内容主次和前三章事件存在矛盾/遗漏时，自动反馈并重新调用真实 AI，最多三轮；三轮仍不合格则节点 `failed`，不得进入选名或继续写作。用户要求后续生成的分卷总纲、前 N 章细纲、章节正文等记录在结构化 `downstream_deliverables`，由后续模块执行，不在策划节点伪装已产出。每轮策划与审计均写 `ai_calls`，没有 mock/fallback。
+- **人工选名**：面向用户的开书入口固定在 `human_confirm_title` 停下，展示 3–10 个候选；支持重新生成候选、填写反馈、自定义书名。用户确认前不进入蓝图和章节生成。
+- **当前证据**：相关回归 38 passed；全量后端 `557 passed, 9 skipped`；后续幂等恢复专项 24 passed。生产 run `9a5a00b7-f806-43db-9f8a-452a86211966` 使用 DeepSeek `deepseek-v4-pro` 完成三轮“策划→独立审计”纠偏，最终 `score=100 / contradictions=[] / omissions=[]`；随后市场、故事模式、核心玩法、世界观、人物、冲突图谱均以 attempt 级新幂等键重新真实调用，工作流停在 `waiting_human/human_confirm_title`，未自动选名。内置浏览器与当前 Chrome 均无 NovelCraft 登录态，只能到登录页，因此登录后 T4 视觉验收仍未完成，当前状态保持“已接线 / 生产 T3 已验证”。
 
 ### 2026-07-14 待验收推进轮证据（部分完成/骨架 → 待验收）
 
@@ -21,7 +79,10 @@
 - **融合与骨架项目（@4a27eb9）**：事件账本/事实链负载修复与产品端点、事实事务接入真实 reconcile、分层规划/审计/humanize/insprira/BrowserAct removed 诚信回归。`test_skeleton_fusion_projects.py` 5 passed + `test_fusion_deep.py` 行为对照补强。
 - **诚信机器门禁（本轮）**：新增 AST 级 `scripts/verify_ai_truthfulness.py` 并接入 `scripts/ai_development_gate.sh` 与 GitHub Actions；拦截 AI 命名函数绕过 gateway、硬编码 `wired/available/status=active`、固定伪生成模板。新增 `test_truthfulness_gate.py` 负例，确认坏代码会被挡下。
 - **融合状态证据驱动（本轮）**：`/fusion/status` 的能力状态由当前用户项目最近 30 天 `ai_calls` / workflow audit evidence 倒推：`verified` / `wired_unverified` / `missing` / `removed`；没有真实成功记录不再计入 verified。新增回归断言 `book_analysis` 成功记录可把 book analyzer 从 `wired_unverified` 升为 `verified`。
-- 验证命令：`cd backend && .venv/bin/pytest -q` → **523 passed, 8 skipped**（2026-07-14）；`python3 scripts/verify_ai_truthfulness.py` → passed；`GATE_ALLOW_WARNINGS=1 bash scripts/ai_development_gate.sh` → AST truthfulness passed，旧宽泛扫描仍需逐项解释。
+- **NC-SEA 出海审计整改（本轮）**：补齐 `translate_segment`/`cultural_localize`/`localize_names` 输出契约与 `overseas.localize_names` prompt；合规检查由裸关键词升级为确定性规则引擎（多语言/别名 pattern，返回 matched_rules）；`publish_overseas` 写入真实 project_id；`/translate` 与 `/overseas/publish` 端点补项目/内容权限和 Provider 失败显式 502；新增 `test_overseas_complete.py`，覆盖合规、术语覆盖、发布项目血缘、API 权限、真实 DeepSeek 翻译 provenance。
+- **NC-HM-001 历史热点回填（本轮）**：新增 `/hotspots/history/backfill` 与 `/hotspots/history`，支持在“设置 → 平台连接”或环境变量配置 `history_url`（支持 `{date}`）后按真实授权归档源回填近 7 天热点快照；无历史源时返回 `unsupported`/502，不用当前热点伪造历史。`test_hotspot_history_backfill.py` 覆盖 7 天日期血缘、跨天同标题保留、无源不落库、接口 502。
+- **NC-SC-001 扫榜采集闭环（本轮）**：新增 `/ranking/capture-import` 与 `/ranking/snapshots/{id}/confirm-capture`；前端导入 JSON 可自动识别番茄 OCR / 起点用户会话 / 可见浏览器采集工件，保留 screenshot/artifact/置信度证据；低置信 OCR 自动标 `needs_review` 并阻断 AI 分析，owner/editor 确认后放行；起点 challenge / 番茄 OCR required 等非成功状态形成失败快照，不返回空成功。`capture_ranking.py` 已升级为自动优先：DOM 提取 → 番茄私有码本机 Tesseract OCR 尝试 → 缺 OCR/挑战/结构漂移输出显式工件，支持 `--headless --no-pause` 调度；2026-07-14 真实公开源纵横 headless 采集成功 34 条，生成本地证据 `var/ranking-captures/zongheng-live.{json,png,html}`；起点 headless/no-pause 真实复验输出 `user_action_required`（腾讯验证码页），番茄 headless/no-pause 输出 `schema_changed`（App 壳未暴露榜单卡片），均生成 JSON/PNG/HTML 证据且未伪装成功；本地证据目录已 gitignore。
+- 验证命令：`cd backend && .venv/bin/pytest -q` → **549 passed, 9 skipped**（2026-07-14）；`python3 scripts/verify_ai_truthfulness.py` → passed；`npm --prefix frontend run build` → passed；`set -a; source .env.local; set +a; npm --prefix frontend run test:e2e` → **5 passed**（含真实 DeepSeek 主链②，上轮证据）；`GATE_ALLOW_WARNINGS=1 bash scripts/ai_development_gate.sh` → AST truthfulness passed，旧宽泛扫描仍需逐项解释。
 
 ### 2026-07-14 本轮整改证据
 
@@ -37,14 +98,14 @@
 
 | 能力 | 状态 | 已有证据 | 尚未覆盖 |
 |---|---|---|---|
-| 榜单采集 adapter | 🧪 待验收 | 纵横官方页真实采集 T3；番茄/起点失败显式化；导入/校验/置信度门禁有真库测试 | 番茄 OCR 与起点用户会话复验；真实源长周期 T5 |
+| 榜单采集 adapter | 🧪 待验收 | 纵横官方页真实采集 T3；番茄/起点失败显式化；CSV/JSON/浏览器/OCR 采集工件导入、低置信拦截、人工确认放行、Open Library 六态校验均有真库测试 | 真实番茄截图/OCR样本与起点已登录会话实跑；真实源长周期 T5 |
 | 榜单中心 | 🧪 待验收 | 扫榜、快照、分析、选题、成书前后端入口；导入与元数据校验 UI | 真实 AI 分析 T3、完整 E2E |
 | 原创市场选题 | 🧪 待验收 | Gateway、严格 Schema、防注入、Provider 失败直接 `failed`/HTTP 错误契约测试 | 真实 Provider T3 输出证据 |
 | 扫榜自动建书 | 🧪 待验收 | 幂等键建书、来源血缘、跳过人工选名 | 真实 Provider 批次成功路径 |
 | 连续章节流水线 | 🧪 待验收 | 严格 Schema、章节幂等键、连续性风险报告、批次 `failed`/resume 断点续跑；浏览器实测失败→恢复链与导出正文 | 真实 Provider 多章样本与批次成功路径 |
 | 统一书库 | 🧪 待验收 | 书库 API/页面、检索/筛选/排序、目录导入（权限+seq+幂等落库）、导出 TXT/MD | 完整 E2E 验收 |
 | 灵感 Bootstrap | 🧪 待验收 | 灵感→书名→设定→第一章→审核基础链；真实 Provider V2 全链 `test_real_provider_v2_bootstrap.py` 已跑通（2026-07-14） | 产出质量人工验收 |
-| 热点自媒体 | 🧪 待验收 | 采集器去重(24h窗口)/趋势/时效评分 + 趋势报告端点；平台匹配/受众/合规风险、AI 标题变体/短视频脚本/素材建议 4 新端点+Dashboard 选题工具箱；批次失败回滚零残留→重试幂等键复用（`test_hm_media_pipeline.py` 7 tests，@9d1786f） | 真实源长周期稳定性；真实 Provider 成稿质量验收 |
+| 热点自媒体 | 🧪 待验收 | 采集器去重(24h窗口)/趋势/时效评分 + 趋势报告端点；平台匹配/受众/合规风险、AI 标题变体/短视频脚本/素材建议 4 新端点+Dashboard 选题工具箱；批次失败回滚零残留→重试幂等键复用（`test_hm_media_pipeline.py` 7 tests，@9d1786f）；历史归档 URL 配置后可按真实源回填 7 天快照（无源 502，不伪造） | 真实授权历史源配置与 7 天调度稳定性；成稿质量人工验收；真实平台发布回执 |
 | 长篇一致性 | 🧪 待验收 | 真库百章写前检索窗口(<5s)、写后 reconcile 接线+新实体标记、卷级门禁（缺章/未过审/到期伏笔/实体矛盾4类阻断，批量生成 409 enforcement，通过时生成卷摘要落库）；摘要 AI 失败显式化不再落伪摘要（`test_long_novel_consistency.py` 7 tests，@7481791） | 真实 Provider 百章 T5 长跑 |
 | 发布中心 | 🧪 待验收 | Fernet 凭据、状态机全生命周期+非法迁移拒绝、beat 60s 到期派发+6h 指标回流 sweep（只聚合真实采集数据）（`test_publish_center.py` 4 tests，@df778e4） | 真实平台发布回执与真实回流数据（需有效平台凭据） |
 
@@ -63,14 +124,14 @@
 
 ## 验证基线（2026-07-14 本轮工作树实测）
 
-- 后端测试：**519 passed，8 skipped**（2026-07-14 待验收推进轮后，本地真实 DeepSeek key；真实 Postgres；业务运行时不再提供 mock provider）。新增覆盖：仿写相似度红线、热点生成持久化/回滚、书库正式路径、出海翻译项目归属、平台连接可视化配置、审计报告 P0/P1 整改（伪热点下线、书本分析真实网关、预算真实同步、发布读取存储凭据、融合 removed 状态、Provider 诊断失败语义、移动端响应式/env 示例）、真实编辑器/热点/仿写 Provider 冒烟。
+- 后端测试：**549 passed，9 skipped**（2026-07-14 本轮复跑，本地真实 DeepSeek key；真实 Postgres）。业务运行时不再提供 mock provider。新增覆盖：仿写相似度红线/版权提示、热点生成持久化/回滚、书库正式路径、出海翻译项目归属、平台连接可视化配置、审计报告 P0/P1 整改、诚信门禁、融合证据驱动、NC-SEA 合规/术语/发布血缘/真实 DeepSeek 翻译 provenance、热点 7 天历史归档回填协议与 unsupported 失败语义、扫榜浏览器/OCR采集工件导入与确认门禁。当前 Provider 验收口径：暂以 DeepSeek 为唯一必需真实链；Claude/OpenAI/Gemini 待用户提供对应 key 后再验收。
 - 前端：`npm run build` 通过（仅保留 Vite 关于 `api.ts` 动静态混合导入和空 `react` chunk 的既有警告）。
 - Alembic：单头 `nc_audit_workflow_scope`；本地库 upgrade→downgrade→upgrade 往返通过。
 - 浏览器实测（上一轮）：审阅页时间线/人物弧线渲染真实数据；设置页数据统计为真实计数（AI 调用/内容数/pg_database_size）。当前整改要求 AI provider 失败直接失败/报错，不再把 provider 失败作为可伪恢复的成功态。
 - **真实 Provider T3/V2/新增功能（2026-07-14，deepseek-chat）**：本地开发 key 仅保存在 `.env.local`（Git 忽略）。`test_real_provider_t3.py`、`test_real_provider_v2_bootstrap.py`、`test_real_provider_new_features.py` 均已跑通。新增功能真实冒烟覆盖：编辑器整章重写→七维评分→下一章规划、热点生成公众号草稿落库、仿写生成原创样稿并返回相似度报告。
 - **浏览器自动化 E2E（2026-07-14 复验）**：Playwright `npm run test:e2e` 实测 **4 passed, 26.2s**。用例①注册→CSV 导入→快照落库→刷新持久→书库空态；用例②书库详情页可进入并展示简介/最新章节/全部章节；用例③平台连接可视化填写、加密保存、不回显密钥；用例④真实 AI 分析→原创选题→建书→书库可见。
 - **审计报告整改（2026-07-14，commit 后工作树）**：针对《审计报告_NovelCraft_2026-07-14.md》新增 `tests/test_audit_report_remediation_20260714.py`，9 条专项回归通过；受影响老回归 77 条通过。`knowledge/daily-briefing` 仅消费真实采集/已采集热点，不再由 AI 编造当前热点；`/books/analyze` 改为真实 Gateway `book_analysis` 并写 ai_calls；worker `_track_budget` 由 ai_calls 重算并同步 budgets；发布 worker/一次性发布读取 Fernet 存储凭据；BrowserAct.chrome_publish 标 removed；移动端媒体查询改为真实 `.layout`；`.env.example` 补齐凭据/DB/Redis/Provider/热点/告警配置。
-- T5 长周期运行：仍无证据，未验收。
+- T5 长周期运行：仍无 7 天连续调度证据，未验收。热点模块已支持授权历史归档 URL 回填 7 天数据；这只能证明“可回填真实历史源”，不能替代“连续 7 天稳定采集”验收。
 
 ## 审计对照（外部审计报告 2026-07-11）
 
@@ -81,7 +142,7 @@
 - 已修复（第四轮，按《27-全仓库审计报告》路线图阶段 0）：P1-A 迁移回滚断裂——性能索引 downgrade 移除 CONCURRENTLY，干净库 upgrade→downgrade base→upgrade 三段实测通过，并加全迁移源码契约测试；P1-B schema 快照契约测试（12 张核心表必需列钉死，防列名漂移复发）；P1-G 交付门禁升级为证据绑定校验（✅/已交付行必须含测试/commit/文件/T级标记，含负例测试）；P1-D 不可信外部文本统一清洗 `sanitize_untrusted`（接入 assembler 知识召回与热点晨报入模路径）；P1-E 备份 pg_dump 每日 sidecar + 7 份保留 + 全服务日志轮转（compose，YAML 校验通过）；P2 清理：PublishPage 死组件删除、`store_ranking_snapshot` 吞错死函数及其 T0 存在性断言删除、bundle 分包（主 chunk 702KB→281KB，消除 >500KB 警告）、版本统一（app `2.2.0` 对齐需求基线 V2.2，README 刷新）。**396 tests 全绿**。
 - 已修复（第五轮，本轮审查）：纯文本编辑增加 DeepSeek SSE、完成后统一写 ai_calls/版本；流式鉴权支持 token 刷新，预算与 Provider 错误分流，非 DeepSeek 路由安全回退普通网关；Embedding 增加 remote/local/hash 三层适配、来源标记和项目重建，远端部分/非法响应回退 hash，不同后端向量禁止混算；Sentry/Prometheus 可选接线，巡检增加队列积压和成本日报。代码验证 417 passed、前端 build；真实流式 Provider、local semantic 和 Sentry 送达仍未作为验收证据。
 - 全面复核（2026-07-12 第二轮，@068a45d）：PR#4 加固复核通过（流式 PENDING_BUDGET 语义/非 deepseek 显式拒绝/embedding 数量与有限性校验/检索按 provenance 过滤）；T5 提交内的一致性组件修复复核通过——entity/summarizer/timeline 此前把 AI 调用记账到 `SELECT id FROM projects LIMIT 1` 的**任意项目**（跨项目成本/预算污染），已改为按 content 归属项目；伏笔抽取 `hint_chapter` 字段对齐 prompt 契约；章节富化失败不再阻断落库与审核门禁。新增实测验收：**流式端到端真实 Provider 通过**（HTTP SSE 经 8100 API，逐字增量帧+done 帧，DeepSeek 真实调用）；**local 语义质量验收通过**（EMBEDDING_SEMANTIC_TEST=1，bge-small-zh 真实模型："地底嗡鸣"≈"深渊低语"≫无关文本，余弦差 >0.1，本机含首次模型下载 34s 完成 8/8）。
-- 仍开放：B4 Nginx 无 TLS（需域名/证书决策）；流式浏览器端验收；remote embedding 质量验收（需 embedding API key）与全库重建演练；数据回流/ROI 真实数据；Sentry 与告警实测送达（需 DSN/Telegram env）；发布真实平台回执与 auto_publish 调度。真实平台账号/API/人工输入项已新增“设置 → 平台连接”可视化配置入口，敏感字段加密保存且不回显；后续真实回执仍依赖用户填入合法平台凭据。`workers/tasks.py` 拆分；Agent 注册表仍为声明式（无独立执行体）；task/日级预算分级；T5 百章长跑进行中（完成后补证据）。
+- 仍开放：B4 Nginx 无 TLS（需域名/证书决策）；流式浏览器端验收；remote embedding 质量验收（需 embedding API key）与全库重建演练；数据回流/ROI 真实数据；Sentry 与告警实测送达（需 DSN/Telegram env）；发布真实平台回执与 auto_publish 调度。真实平台账号/API/人工输入项已新增“设置 → 平台连接”可视化配置入口，敏感字段加密保存且不回显；海外 RoyalRoad/WebNovel/KDP 等真实发布暂不做自动发布，只保留 manual_required 草稿/人工回执路径，后续真实回执依赖用户填入合法平台凭据或人工上传凭证。`workers/tasks.py` 拆分；Agent 注册表仍为声明式（无独立执行体）；task/日级预算分级；T5 百章长跑进行中（完成后补证据）。
 
 ## 下一顺序
 

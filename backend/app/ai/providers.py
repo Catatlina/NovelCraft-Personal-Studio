@@ -7,6 +7,10 @@ import urllib.request
 from typing import Any
 
 
+# P3-T3: 统一可配的 provider 请求超时（秒）。默认 60s；可通过 PROVIDER_TIMEOUT 调整。
+PROVIDER_TIMEOUT = int(os.getenv("PROVIDER_TIMEOUT", "60"))
+
+
 def _request_overrides() -> tuple[str, str, str]:
     """Per-request BYOK overrides from frontend headers.
 
@@ -46,7 +50,7 @@ def call_claude(prompt: str, model: str = "claude-sonnet-4-20250514", params: di
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=PROVIDER_TIMEOUT) as r:
         payload = json.loads(r.read())
     text = payload["content"][0]["text"]
     usage = payload.get("usage", {})
@@ -76,7 +80,7 @@ def call_openai(prompt: str, model: str = "gpt-4o", params: dict | None = None) 
         method="POST",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=PROVIDER_TIMEOUT) as r:
         payload = json.loads(r.read())
     content = payload["choices"][0]["message"]["content"]
     usage = payload.get("usage", {})
@@ -101,7 +105,7 @@ def call_gemini(prompt: str, model: str = "gemini-2.0-flash", params: dict | Non
         method="POST",
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=PROVIDER_TIMEOUT) as r:
         payload = json.loads(r.read())
     text = payload["candidates"][0]["content"]["parts"][0]["text"]
     usage = payload.get("usageMetadata", {})

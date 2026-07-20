@@ -82,6 +82,9 @@ def test_ranking_book_is_created_in_library_with_complete_source_lineage(monkeyp
     assert meta["source_ref_id"] == "topic-1"
     assert meta["analysis_id"] == "analysis-1"
     assert meta["snapshot_id"] == "snapshot-1"
+    assert meta["suggested_title"] == "雾城修理铺"
+    assert "selected_title" not in meta
+    assert inserted[2] == "待命名作品"
     assert response["data"]["novel_id"] == db.topic["novel_id"]
     assert response["data"]["status"] == "planning"
     assert db.commits == 1
@@ -92,7 +95,7 @@ def test_ranking_planning_nodes_use_gateway_and_have_structured_contracts():
     from app.workers import tasks
 
     expected = {
-        "plan_idea": ("plan_idea", {"idea_expanded", "core_hook", "target_audience", "title_candidates"}),
+        "plan_idea": ("plan_idea", {"idea_expanded", "core_hook", "target_audience", "title_candidates", "creative_bible", "source_facts", "forbidden_changes", "downstream_deliverables"}),
         "plan_world_architecture": ("plan_world_architecture", {"worldview"}),
         "plan_character_system": ("plan_character_system", {"characters"}),
         "blueprint_chapter_outline": ("blueprint_chapter_outline", {"chapter_outlines"}),

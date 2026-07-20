@@ -79,4 +79,4 @@ def test_generated_business_outputs_use_stable_keys_and_conflict_handling():
     # V2 chapters key by stable novel+seq slot, not by run
     assert "novel:{novel_id}:chapter:{chapter_seq}:bootstrap:v2" in source
     assert source.count("ON CONFLICT") >= 3
-    assert 'client_mutation_id = f"bootstrap:{run_id}:{node_key}:v2"' in source
+    assert 'client_mutation_id = f"bootstrap:{run_id}:{node_key}:attempt-v1:{node_attempt}"' in source

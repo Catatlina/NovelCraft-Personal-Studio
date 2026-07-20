@@ -1,10 +1,13 @@
 import json
 import os
 import secrets
+import uuid
 from typing import Any
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
+import psycopg2.pool
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -12,9 +15,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
+from .core.byok import stash_byok_key
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
-from .gateway import BudgetExceeded, ProviderError, complete
+from .gateway import (
+    BudgetExceeded,
+    OutputValidationError,
+    ProviderError,
+    ProviderRateLimitError,
+    complete,
+)
 from .config import settings
+from .core.authz import ensure_project_member, ok
 from .schemas import (
     AiEditRequest,
     AiOperation,
@@ -23,6 +34,7 @@ from .schemas import (
     HumanConfirm,
     NovelCreate,
     ShortStoryCreate,
+    TitleRegenerateRequest,
     VersionRestore,
 )
 from .workers.tasks import confirm_human, create_run
@@ -40,6 +52,12 @@ from .api.v1.batch_endpoints import router as batch_router
 from .api.v1.complete_api import router as complete_router
 from .api.v1.ranking import library_router, router as ranking_router
 from .api.v1.fusion import router as fusion_router
+from .api.v1.deai import router as deai_router
+from .api.v1.billing import router as billing_router
+from .engine import router as engine_router
+from .api.v1.skills import router as skills_router
+from .api.v1.agents import router as agents_router
+from .apps.novel.router import router as novel_app_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -53,10 +71,21 @@ init_sentry("fastapi")
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    # Seed built-in Skills & Agents on startup
+    try:
+        from .platform.skills.manager import SkillManager
+        SkillManager.seed_builtin()
+    except Exception:
+        pass
+    try:
+        from .platform.agents.manager import AgentManager
+        AgentManager.seed_builtin()
+    except Exception:
+        pass
     yield
 
 
-app = FastAPI(title="NovelCraft Personal Studio API", version="2.2.0", lifespan=lifespan)
+app = FastAPI(title="星禾AI工作台 API", version="3.0.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(config_router)
 app.include_router(short_story_router)
@@ -72,8 +101,97 @@ app.include_router(batch_router)
 app.include_router(complete_router)
 app.include_router(ranking_router)
 app.include_router(fusion_router, prefix="/api/v1")
+app.include_router(deai_router)
+app.include_router(billing_router)
+app.include_router(engine_router)
+app.include_router(skills_router)
+app.include_router(agents_router)
+app.include_router(novel_app_router)
 init_metrics(app)
 install_rate_limiter(app)
+
+
+@app.exception_handler(psycopg2.pool.PoolError)
+async def database_pool_exhausted(_request: Request, exc: psycopg2.pool.PoolError):
+    logger.error("database connection pool exhausted: %s", exc)
+    return JSONResponse(status_code=503, content={
+        "code": 503,
+        "message": "database connection pool exhausted",
+        "data": {"retryable": True},
+    })
+
+@app.exception_handler(BudgetExceeded)
+async def handle_budget_exceeded(_request: Request, exc: BudgetExceeded):
+    logger.warning("budget exceeded: %s", exc)
+    return JSONResponse(status_code=402, content={
+        "code": 402,
+        "message": str(exc),
+        "data": {"retryable": False},
+    })
+
+
+@app.exception_handler(ProviderRateLimitError)
+async def handle_provider_rate_limit(_request: Request, exc: ProviderRateLimitError):
+    data: dict[str, Any] = {"retryable": True}
+    if exc.retry_after is not None:
+        data["retry_after"] = exc.retry_after
+    return JSONResponse(status_code=429, content={
+        "code": 429,
+        "message": str(exc) or "请求过于频繁，请稍后重试",
+        "data": data,
+    })
+
+
+@app.exception_handler(OutputValidationError)
+async def handle_output_validation(_request: Request, exc: OutputValidationError):
+    logger.error("provider output invalid: %s", exc)
+    return JSONResponse(status_code=502, content={
+        "code": 502,
+        "message": str(exc),
+        "data": {"code": "PROVIDER_OUTPUT_INVALID", "retryable": False},
+    })
+
+
+@app.exception_handler(ProviderError)
+async def handle_provider_error(_request: Request, exc: ProviderError):
+    logger.error("provider error: %s", exc)
+    return JSONResponse(status_code=502, content={
+        "code": 502,
+        "message": "AI 服务商暂时不可用，请稍后重试",
+        "data": {"retryable": True, "detail": str(exc)},
+    })
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(_request: Request, exc: HTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict):
+        code = detail.get("code", exc.status_code)
+        message = detail.get("message", str(detail))
+        data = {k: v for k, v in detail.items() if k not in ("code", "message")} or None
+    else:
+        code = exc.status_code
+        message = str(detail)
+        data = None
+    return JSONResponse(status_code=exc.status_code, content={
+        "code": code,
+        "message": message,
+        "data": data,
+    })
+
+
+@app.exception_handler(Exception)
+async def handle_unhandled(_request: Request, exc: Exception):
+    # P1-T5: never leak stack traces; return a sanitized 500 with a trace_id.
+    trace_id = uuid.uuid4().hex
+    logger.exception("unhandled exception trace_id=%s", trace_id)
+    return JSONResponse(status_code=500, content={
+        "code": 500,
+        "message": "服务内部错误，请稍后重试",
+        "data": {"trace_id": trace_id},
+    })
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -109,12 +227,25 @@ async def metrics_guard(request: Request, call_next):
             return JSONResponse({"detail": "not found"}, status_code=404)
     return await call_next(request)
 
-# Middleware: capture X-Api-* headers for this request
+# Middleware: capture X-Api-* headers + resolved user for this request
 @app.middleware("http")
 async def capture_api_key(request: Request, call_next):
-    from app.gateway import _request_api_key, _request_api_base_url, _request_model
+    from app.gateway import _request_api_key, _request_api_base_url, _request_model, _request_user_id
     from app.core.url_security import validate_ai_base_url
+    from app.core.security import decode_token_payload
+    from app.core.billing import enforce_quota
     tokens = []
+    # Resolve the authenticated user from the Bearer token (soft-decode; no 401
+    # here — the route dependency enforces auth). The result scopes the AI cost
+    # ledger + plan quota to the real user instead of a shared project budget.
+    auth = request.headers.get("Authorization", "")
+    user_id = None
+    if auth.lower().startswith("bearer "):
+        payload = decode_token_payload(auth[7:].strip(), expected_type="access")
+        if payload:
+            user_id = payload.get("sub")
+    if user_id:
+        tokens.append((_request_user_id, _request_user_id.set(user_id)))
     key = request.headers.get("X-Api-Key")
     if key:
         tokens.append((_request_api_key, _request_api_key.set(key)))
@@ -129,16 +260,26 @@ async def capture_api_key(request: Request, call_next):
         tokens.append((_request_api_base_url, _request_api_base_url.set(base_url)))
     model = request.headers.get("X-Model")
     if model:
+        # Plan gate: a model not in the user's plan is rejected at the boundary.
+        if user_id:
+            try:
+                enforce_quota(user_id, None, "model", model)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={
+                        "code": detail.get("code", "FORBIDDEN"),
+                        "message": detail.get("message", "forbidden"),
+                        "data": {k: v for k, v in detail.items() if k not in ("code", "message")},
+                    },
+                )
         tokens.append((_request_model, _request_model.set(model)))
     try:
         return await call_next(request)
     finally:
         for variable, token in reversed(tokens):
             variable.reset(token)
-
-
-def ok(data: Any = None) -> ApiResponse:
-    return ApiResponse(data=data)
 
 
 def parse_content(row: dict[str, Any]) -> dict[str, Any]:
@@ -162,16 +303,9 @@ class AgentExecuteRequest(BaseModel):
     client_mutation_id: str | None = Field(default=None, max_length=100)
 
 
-def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
-    member = conn.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    if not member:
-        raise HTTPException(status_code=403, detail="not a project member")
-    if roles and member["role"] not in roles:
-        raise HTTPException(status_code=403, detail="insufficient permissions")
-    return dict(member)
+class ChapterReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(approve|reject)$")
+    reason: str = Field(default="", max_length=1000)
 
 
 def load_content_for_user(content_id: str, user: dict, roles: set[str] | None = None) -> tuple[Any, dict]:
@@ -265,6 +399,9 @@ def create_project(payload: ProjectCreate | None = Body(default=None), name: str
     body_name = payload.name.strip() if payload and payload.name and payload.name.strip() else ""
     project_name = body_name or name
     description = payload.description if payload else ""
+    # Plan gate: block project creation once the user's plan project limit is hit.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_projects")
     conn = connect()
     pid = new_id()
     conn.execute(
@@ -290,7 +427,9 @@ def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get
         raise HTTPException(status_code=404, detail="project not found")
     ensure_project_member(conn, project_id, user, {"owner", "editor"})
     novel_id = new_id("cnt")
-    title = payload.idea[:26] + ("..." if len(payload.idea) > 26 else "")
+    # The title is a human gate. Preserve the raw idea in meta and keep the
+    # library label neutral until the user chooses a generated/custom title.
+    title = "待命名作品"
     body = {"type": "doc", "content": []}
     meta = payload.model_dump()
     conn.execute(
@@ -421,16 +560,30 @@ def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends
 
 
 @app.post("/api/v1/novels/{novel_id}/bootstrap")
+class BootstrapNovelRequest(BaseModel):
+    class Config:
+        extra = "allow"
+
+
 @limiter.limit("10/minute")
 async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
     conn.close()
     if novel["type"] != "novel":
         raise HTTPException(status_code=400, detail="content is not a novel")
+    # P2-T10: validate the request body shape (permissive) instead of raw request.json()
+    try:
+        raw = await request.json()
+        if not isinstance(raw, dict):
+            raw = {}
+        BootstrapNovelRequest(**raw)
+    except Exception:
+        raw = {}
     run_id = create_run(novel["project_id"], novel_id,
                         api_key=request.headers.get("X-Api-Key", ""),
                         api_url=request.headers.get("X-Api-Base-Url", ""),
-                        model=request.headers.get("X-Model", ""))
+                        model=request.headers.get("X-Model", ""),
+                        auto_confirm_title=False)
     return ok({"run_id": run_id})
 
 
@@ -444,10 +597,90 @@ async def continue_novel(request: Request, novel_id: str, user: dict = Depends(g
         raise HTTPException(status_code=400, detail="content is not a novel")
     from .workers.tasks import gen_next_chapter_task
     result = gen_next_chapter_task.delay(novel_id, novel["project_id"],
-                                         api_key=request.headers.get("X-Api-Key", ""),
+                                         api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
                                          api_url=request.headers.get("X-Api-Base-Url", ""),
                                          model=request.headers.get("X-Model", ""))
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
+
+
+@app.post("/api/v1/chapters/{chapter_id}/manual-review")
+@limiter.limit("20/minute")
+async def manual_review_chapter(
+    request: Request,
+    chapter_id: str,
+    payload: ChapterReviewRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Human quality gate for generated chapters.
+
+    approve: marks the chapter as reviewed/accepted and therefore usable in the library.
+    reject: marks it needs_rewrite and dispatches an in-place regeneration task.
+    """
+    conn, chapter = load_content_for_user(chapter_id, user, {"owner", "editor"})
+    if chapter["type"] != "chapter":
+        conn.close()
+        raise HTTPException(status_code=400, detail="content is not a chapter")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if payload.decision == "approve":
+        conn.execute(
+            """UPDATE contents
+               SET status='reviewed',
+                   meta=meta || %s,
+                   updated_at=now()
+               WHERE id=%s""",
+            (encode({
+                "quality_status": "accepted",
+                "manual_review": {
+                    "status": "approved",
+                    "reviewed_by": user["id"],
+                    "reviewed_at": now_iso,
+                    "reason": payload.reason,
+                },
+            }), chapter_id),
+        )
+        conn.execute(
+            """INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at)
+               VALUES (%s,'content',%s,'manual_review.approved',%s,now())""",
+            (new_id(), chapter_id, encode({"reason": payload.reason, "user_id": user["id"]})),
+        )
+        conn.commit()
+        updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id=%s", (chapter_id,)).fetchone()))
+        conn.close()
+        return ok({"chapter": updated, "status": "reviewed"})
+
+    conn.execute(
+        """UPDATE contents
+           SET status='needs_rewrite',
+               meta=meta || %s,
+               updated_at=now()
+           WHERE id=%s""",
+        (encode({
+            "quality_status": "needs_review",
+            "manual_review": {
+                "status": "rejected",
+                "reviewed_by": user["id"],
+                "reviewed_at": now_iso,
+                "reason": payload.reason,
+            },
+        }), chapter_id),
+    )
+    conn.execute(
+        """INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at)
+           VALUES (%s,'content',%s,'manual_review.rejected',%s,now())""",
+        (new_id(), chapter_id, encode({"reason": payload.reason, "user_id": user["id"]})),
+    )
+    conn.commit()
+    conn.close()
+
+    from .workers.tasks import regenerate_chapter_task
+    task = regenerate_chapter_task.delay(
+        chapter_id,
+        payload.reason,
+        api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
+        api_url=request.headers.get("X-Api-Base-Url", ""),
+        model=request.headers.get("X-Model", ""),
+    )
+    return ok({"chapter_id": chapter_id, "status": "regenerating", "task_id": task.id})
 
 
 @app.post("/api/v1/novels/{novel_id}/expand-outline")
@@ -510,7 +743,7 @@ async def batch_generate_chapters(
     try:
         task = batch_generate_chapters_task.delay(
             batch_id,
-            api_key=request.headers.get("X-Api-Key", ""),
+            api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
             api_url=request.headers.get("X-Api-Base-Url", ""),
             model=request.headers.get("X-Model", ""),
         )
@@ -533,11 +766,15 @@ async def batch_generate_chapters(
 @app.get("/api/v1/novels/{novel_id}/generation-batches")
 def list_novel_generation_batches(novel_id: str, limit: int = 20, offset: int = 0,
                                   user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn, novel = load_content_for_user(novel_id, user)
-    batches = conn.execute("""SELECT * FROM generation_batches WHERE novel_id=%s
-                              ORDER BY created_at DESC LIMIT %s OFFSET %s""",
-                           (novel_id, min(max(limit, 1), 100), max(offset, 0))).fetchall()
-    conn.close()
+    conn = None
+    try:
+        conn, novel = load_content_for_user(novel_id, user)
+        batches = conn.execute("""SELECT * FROM generation_batches WHERE novel_id=%s
+                                  ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+                               (novel_id, min(max(limit, 1), 100), max(offset, 0))).fetchall()
+    finally:
+        if conn is not None:
+            conn.close()
     items = []
     for batch in batches:
         requested = max(int(batch.get("requested_count") or 0), 1)
@@ -615,7 +852,7 @@ def resume_generation_batch(request: Request, batch_id: str, user: dict = Depend
     try:
         task = batch_generate_chapters_task.delay(
             batch_id,
-            api_key=request.headers.get("X-Api-Key", ""),
+            api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
             api_url=request.headers.get("X-Api-Base-Url", ""),
             model=request.headers.get("X-Model", ""),
         )
@@ -736,16 +973,49 @@ async def generate_video_script(
     return ok({"platform": platform, "script": output})
 
 
-@app.get("/api/v1/runs/{run_id}")
-def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
-    conn, run = load_run_for_user(run_id, user)
+def _hydrate_run(conn, run: dict) -> dict:
+    run = dict(run)
+    run_id = str(run["id"])
     nodes = [dict(row) for row in conn.execute("SELECT * FROM run_nodes WHERE run_id = %s ORDER BY node_key", (run_id,)).fetchall()]
     for node in nodes:
         node["output"] = decode(node["output"], {})
     run["context"] = decode(run["context"], {})
     run["nodes"] = nodes
+    return run
+
+
+@app.get("/api/v1/runs/latest")
+def get_latest_run(project_id: str | None = None, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Restore the user's newest workflow after a browser reload or device switch."""
+    conn = connect()
+    params: list[str] = [user["id"]]
+    project_filter = ""
+    if project_id:
+        project_filter = " AND wr.project_id = %s"
+        params.append(project_id)
+    run = conn.execute(
+        """SELECT wr.*
+           FROM workflow_runs wr
+           JOIN project_members pm ON pm.project_id = wr.project_id
+           WHERE pm.user_id = %s""" + project_filter + """
+           ORDER BY wr.created_at DESC, wr.id DESC
+           LIMIT 1""",
+        tuple(params),
+    ).fetchone()
+    if not run:
+        conn.close()
+        raise HTTPException(status_code=404, detail="workflow run not found")
+    hydrated = _hydrate_run(conn, dict(run))
     conn.close()
-    return ok(run)
+    return ok(hydrated)
+
+
+@app.get("/api/v1/runs/{run_id}")
+def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, run = load_run_for_user(run_id, user)
+    hydrated = _hydrate_run(conn, run)
+    conn.close()
+    return ok(hydrated)
 
 
 @app.get("/api/v1/runs/{run_id}/ledger")
@@ -812,6 +1082,45 @@ async def confirm_title(request: Request, run_id: str, payload: HumanConfirm, us
                   api_url=request.headers.get("X-Api-Base-Url", ""),
                   model=request.headers.get("X-Model", ""))
     return ok({"run_id": run_id, "selected_title": payload.selected_title})
+
+
+@app.post("/api/v1/runs/{run_id}/titles/regenerate")
+@limiter.limit("10/minute")
+def regenerate_run_titles(
+    request: Request,
+    run_id: str,
+    payload: TitleRegenerateRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    conn, run = load_run_for_user(run_id, user, {"owner", "editor"})
+    human = conn.execute(
+        "SELECT status FROM run_nodes WHERE run_id=%s AND node_key='human_confirm_title'",
+        (run_id,),
+    ).fetchone()
+    context = run["context"] if isinstance(run.get("context"), dict) else {}
+    conn.close()
+    if not human or human["status"] != "waiting_human":
+        raise HTTPException(409, "书名只能在人工选名阶段重新生成")
+
+    result = complete(
+        run_id=run_id,
+        node_key="human_confirm_title",
+        project_id=run["project_id"],
+        task_type="regenerate_titles",
+        prompt_name="bootstrap.regenerate_titles",
+        variables={**context, "feedback": payload.feedback},
+        client_mutation_id=f"title-regenerate:{run_id}:{new_id('ttl')}",
+    )
+    titles = result["title_candidates"]
+    context["title_candidates"] = titles
+    context["title_regeneration_count"] = int(context.get("title_regeneration_count") or 0) + 1
+    conn = connect()
+    conn.execute(
+        "UPDATE workflow_runs SET context=%s,updated_at=now() WHERE id=%s",
+        (encode(context), run_id),
+    )
+    conn.commit(); conn.close()
+    return ok({"run_id": run_id, "title_candidates": titles})
 
 
 @app.post("/api/v1/runs/{run_id}/nodes/{node_key}/retry")
@@ -915,7 +1224,16 @@ def ai_edit(
 ) -> ApiResponse:
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
+    # Plan gate: enforce the monthly word quota before any AI generation so
+    # Free users cannot bypass the cap via the generic editor / continue path.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_words_per_month")
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
+    # P1-T3: the bare complete() calls below intentionally let ProviderError /
+    # ProviderRateLimitError / BudgetExceeded propagate to the global error
+    # handler (main.py) which wraps them in a consistent {code,message,data}
+    # envelope. The ai_edit version branch is written only AFTER every completion
+    # succeeds, so a mid-pipeline failure leaves no half-written version row.
     output = complete(
         run_id=None,
         node_key=None,
@@ -973,6 +1291,11 @@ def _chapter_review_context(content: dict, text: str) -> dict:
             "worldview": worldview[:4000] or "暂无世界观档案"}
 
 
+def sse_event(payload: dict) -> str:
+    """Frame a Server-Sent-Event payload as ``data: {json}\\n\\n`` (single source of truth)."""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 @app.post("/api/v1/contents/{content_id}/ai/{op}/stream")
 @limiter.limit("20/minute")
 def ai_edit_stream(
@@ -990,6 +1313,9 @@ def ai_edit_stream(
 
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
+    # Plan gate: enforce the monthly word quota before streaming AI generation.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_words_per_month")
     project_id = content["project_id"]
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
 
@@ -1004,10 +1330,10 @@ def ai_edit_stream(
                 client_mutation_id=payload.client_mutation_id,
             ):
                 chunks.append(delta)
-                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+                yield sse_event({"delta": delta})
         except (ProviderError, BudgetExceeded) as exc:
             code = "PENDING_BUDGET" if isinstance(exc, BudgetExceeded) else "PROVIDER_FAILED"
-            yield f"data: {json.dumps({'error': str(exc), 'code': code}, ensure_ascii=False)}\n\n"
+            yield sse_event({"error": public_message(exc, "AI 服务暂时不可用"), "code": code})
             return
         full_text = "".join(chunks)
         version_conn = connect()
@@ -1022,7 +1348,7 @@ def ai_edit_stream(
         )
         version_conn.commit()
         version_conn.close()
-        yield f"data: {json.dumps({'done': True, 'text': full_text}, ensure_ascii=False)}\n\n"
+        yield sse_event({"done": True, "text": full_text})
 
     return StreamingResponse(event_source(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1035,7 +1361,20 @@ def agents_status(user: dict = Depends(get_current_user)) -> ApiResponse:
     rows = [dict(r) for r in conn.execute(
         """SELECT rn.agent AS name,
                   COUNT(*) AS task_count,
-                  COUNT(*) FILTER (WHERE rn.status = 'running') AS running_count,
+                  COUNT(*) FILTER (
+                    WHERE rn.status = 'running'
+                      AND wr.status = 'running'
+                      AND wr.current_node_key = rn.node_key
+                      AND rn.started_at >= now() - interval '30 minutes'
+                  ) AS running_count,
+                  COUNT(*) FILTER (
+                    WHERE rn.status = 'running'
+                      AND NOT (
+                        wr.status = 'running'
+                        AND wr.current_node_key = rn.node_key
+                        AND rn.started_at >= now() - interval '30 minutes'
+                      )
+                  ) AS stale_running_count,
                   MAX(COALESCE(rn.finished_at, rn.started_at)) AS last_run
            FROM run_nodes rn
            JOIN workflow_runs wr ON wr.id = rn.run_id
@@ -1046,7 +1385,7 @@ def agents_status(user: dict = Depends(get_current_user)) -> ApiResponse:
     ).fetchall()]
     conn.close()
     return ok([{"name": r["name"],
-                "status": "running" if r["running_count"] else "idle",
+                "status": "running" if r["running_count"] else ("stale" if r["stale_running_count"] else "idle"),
                 "task_count": int(r["task_count"]),
                 "last_run": str(r["last_run"]) if r["last_run"] else "--"} for r in rows])
 
@@ -1139,30 +1478,51 @@ def daily_briefing(request: Request, project_id: str, user: dict = Depends(get_c
     return ok(generate_daily_briefing(project_id, user_id=user["id"]))
 
 
+class StyleLearnRequest(BaseModel):
+    project_id: str = ""
+    samples: list = []
+
+
 @app.post("/api/v1/knowledge/style-learn")
 async def style_learn(request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Learn style from sample texts."""
     from .services.style_learn import learn_style
-    body = await request.json()
-    project_id = body.get("project_id") if isinstance(body, dict) else None
+    # P2-T10: validate body via Pydantic
+    try:
+        raw = await request.json()
+        req = StyleLearnRequest.model_validate(raw if isinstance(raw, dict) else {})
+    except Exception:
+        req = StyleLearnRequest()
+    project_id = req.project_id
     if project_id:
         conn = connect()
         ensure_project_member(conn, project_id, user, {"owner", "editor"})
         conn.close()
-    return ok(learn_style(body.get("samples", body if isinstance(body, list) else [])))
+    return ok(learn_style(req.samples))
+
+
+class CheckSimilarityRequest(BaseModel):
+    project_id: str = ""
+    original: str = ""
+    generated: str = ""
 
 
 @app.post("/api/v1/knowledge/check-similarity")
 async def check_similarity(request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Check similarity between original and generated text."""
     from .services.style_learn import check_similarity
-    body = await request.json()
-    project_id = body.get("project_id") if isinstance(body, dict) else None
+    # P2-T10: validate body via Pydantic
+    try:
+        raw = await request.json()
+        req = CheckSimilarityRequest.model_validate(raw if isinstance(raw, dict) else {})
+    except Exception:
+        req = CheckSimilarityRequest()
+    project_id = req.project_id
     if project_id:
         conn = connect()
         ensure_project_member(conn, project_id, user)
         conn.close()
-    return ok(check_similarity(body.get("original",""), body.get("generated","")))
+    return ok(check_similarity(req.original, req.generated))
 
 
 @app.post("/api/v1/prompts/lab")
@@ -1414,3 +1774,45 @@ def execute_agent_endpoint(request: Request, agent_id: str, payload: AgentExecut
     except KeyError:
         raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
     return ok(result)
+
+
+
+# ---- Feedback ----
+
+class FeedbackPayload(BaseModel):
+    type: str = "bug"
+    title: str
+    body: str = ""
+    page: str = ""
+    metadata: dict | None = None
+
+
+@app.post("/api/v1/feedback")
+def submit_feedback(payload: FeedbackPayload, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """User feedback endpoint — bugs, feature requests, suggestions."""
+    conn = connect()
+    conn.execute(
+        "INSERT INTO operation_logs (id, user_id, action, target_type, target_id, details, project_id, created_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)",
+        (
+            new_id("fb"),
+            user["id"],
+            f"feedback_{payload.type}",
+            payload.title[:200],
+            payload.page or "",
+            encode({"body": payload.body[:2000], "type": payload.type, "meta": payload.metadata or {}}),
+            user.get("active_project_id"),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return ok({"submitted": True})
+
+
+# ---- Feature Flags ----
+
+
+@app.get("/api/v1/admin/feature-flags")
+def list_feature_flags(user: dict = Depends(require_admin_reads)) -> ApiResponse:
+    from app.core.feature_flags import all_flags as get_all_flags
+    return ok({"flags": get_all_flags()})

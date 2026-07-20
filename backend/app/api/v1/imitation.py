@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re as _re
 import socket
 import urllib.request
 from urllib.parse import urlsplit
@@ -14,6 +15,11 @@ from app.gateway import BudgetExceeded, ProviderError, complete
 from app.services.style_learn import check_similarity, learn_style
 
 router = APIRouter(prefix="/api/v1/imitation", tags=["imitation"])
+
+COPYRIGHT_WARNING = (
+    "仿写仅可用于用户有权使用的文本风格学习；系统会按相似度红线阻断高相似输出，"
+    "但该提示不构成法律意见，发布前仍需人工确认版权与平台规则风险。"
+)
 
 
 class ImitationRequest(BaseModel):
@@ -36,12 +42,27 @@ def _assert_public_https(url: str) -> None:
 
 def _fetch_source(url: str) -> str:
     _assert_public_https(url)
-    req = urllib.request.Request(url, headers={"User-Agent": "NovelCraft/1.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; NovelCraft/1.0)"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
         content_type = resp.headers.get("Content-Type", "")
         if "text" not in content_type and "html" not in content_type:
             raise HTTPException(415, "source_url must return text/html content")
-        return resp.read(200_000).decode("utf-8", errors="replace")
+        raw = resp.read(200_000).decode("utf-8", errors="replace")
+    return _extract_text(raw)
+
+
+def _extract_text(html: str) -> str:
+    """Strip HTML tags/extract novel chapter content."""
+    # Remove scripts, styles, nav, footer, header entirely
+    text = _re.sub(r"<(script|style|noscript|nav|footer|header)[^>]*>.*?</\1>", " ", html, flags=_re.DOTALL | _re.I)
+    # Replace block-level tags with newlines, inline tags with space
+    text = _re.sub(r"</?(p|div|br|h\d|li|tr|article|section)[^>]*>", "\n", text, flags=_re.I)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _re.sub(r"&[a-z]+;", " ", text)
+    # Normalize whitespace per line, keep paragraph breaks
+    lines = [_re.sub(r"\s+", " ", line).strip() for line in text.split("\n")]
+    paras = [line for line in lines if len(line) > 15]
+    return "\n\n".join(paras[:50]) if paras else " ".join(lines)[:30000]
 
 
 @router.post("")
@@ -68,7 +89,9 @@ def imitate(payload: ImitationRequest, user: dict = Depends(get_current_user)):
         raise HTTPException(502, {"code": "AI_OUTPUT_INVALID", "detail": "imitation output text is empty"})
     similarity = check_similarity(source, text)
     if similarity.get("verdict") == "blocked":
-        raise HTTPException(422, {"code": "IMITATION_SIMILARITY_BLOCKED", **similarity})
+        raise HTTPException(422, {"code": "IMITATION_SIMILARITY_BLOCKED", **similarity,
+                                  "copyright_warning": COPYRIGHT_WARNING})
+    copyright_risk = "manual_review" if similarity.get("verdict") == "warning" else "low"
     style_profile = output.get("style_profile") or learn_style([source])
     content_id = new_id()
     db = connect()
@@ -78,11 +101,14 @@ def imitate(payload: ImitationRequest, user: dict = Depends(get_current_user)):
                    (content_id, payload.project_id, output.get("title", "仿写样稿")[:200],
                     encode({"type": "doc", "content": [{"type": "paragraph", "text": text}]}),
                     encode({"source_url": payload.source_url, "instruction": payload.instruction,
-                            "style_profile": style_profile, "similarity": similarity}),
+                            "style_profile": style_profile, "similarity": similarity,
+                            "copyright_risk": copyright_risk, "copyright_warning": COPYRIGHT_WARNING}),
                     user["id"]))
         db.commit()
     finally:
         db.close()
     return {"code": 0, "message": "ok", "data": {"content_id": content_id, **output,
                                                   "style_profile": style_profile,
-                                                  "similarity": similarity}}
+                                                  "similarity": similarity,
+                                                  "copyright_risk": copyright_risk,
+                                                  "copyright_warning": COPYRIGHT_WARNING}}

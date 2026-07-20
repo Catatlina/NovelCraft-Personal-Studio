@@ -1,0 +1,5 @@
+[bandit]
+# Baseline for NovelCraft SAST. Excludes test scaffolding, migrations and ops scripts.
+# Security-relevant rules (SQLi/B3xx/etc.) are intentionally NOT skipped — new code
+# must stay clean; pre-existing HIGH findings surface via the CI security job.
+exclude = backend/tests,backend/alembic,scripts
