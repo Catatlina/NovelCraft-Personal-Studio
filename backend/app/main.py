@@ -1818,3 +1818,13 @@ from app.api.v1.config import require_admin_reads
 def list_feature_flags(user: dict = Depends(require_admin_reads)) -> ApiResponse:
     from app.core.feature_flags import all_flags as get_all_flags
     return ok({"flags": get_all_flags()})
+
+
+# ---- SSE Progress ----
+
+from sse_starlette.sse import EventSourceResponse
+
+@app.get("/api/v1/runs/{run_id}/stream")
+async def stream_run_progress(run_id: str, user: dict = Depends(get_current_user)):
+    from app.api.v1.sse_progress import run_progress_stream
+    return EventSourceResponse(run_progress_stream(run_id))

@@ -1,0 +1,16 @@
+{
+  "appId": "com.xinghe.aiworkspace",
+  "appName": "星禾AI工作台",
+  "webDir": "../frontend/dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://novel.xyjin.xyz",
+    "cleartext": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#0a0a14"
+    }
+  }
+}
