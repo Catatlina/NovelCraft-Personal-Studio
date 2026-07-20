@@ -2,8 +2,8 @@
 星禾AI工作台 · Agent API
 """
 from fastapi import APIRouter, Depends, Query
-from ..core.authz import get_current_user
-from ..platform.agents.manager import AgentManager
+from app.core.authz import get_current_user
+from app.platform.agents.manager import AgentManager
 
 router = APIRouter(prefix="/api/v1/agents", tags=["Agents"])
 

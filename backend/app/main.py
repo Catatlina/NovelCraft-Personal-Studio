@@ -1811,6 +1811,8 @@ def submit_feedback(payload: FeedbackPayload, user: dict = Depends(get_current_u
 
 # ---- Feature Flags ----
 
+from app.api.v1.config import require_admin_reads
+
 
 @app.get("/api/v1/admin/feature-flags")
 def list_feature_flags(user: dict = Depends(require_admin_reads)) -> ApiResponse:

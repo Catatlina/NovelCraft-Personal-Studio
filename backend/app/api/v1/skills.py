@@ -2,8 +2,8 @@
 星禾AI工作台 · Skill API
 """
 from fastapi import APIRouter, Depends
-from ..core.authz import get_current_user
-from ..platform.skills.manager import SkillManager
+from app.core.authz import get_current_user
+from app.platform.skills.manager import SkillManager
 
 router = APIRouter(prefix="/api/v1/skills", tags=["Skills"])
 
