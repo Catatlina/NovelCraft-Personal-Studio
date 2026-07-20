@@ -1023,6 +1023,25 @@ def _stringify(value: Any) -> str:
         return ""
     return sanitize_untrusted(value)
 
+# User-origin fields that must always be scrubbed of prompt-injection patterns
+# before interpolation, regardless of value type (P2-7 / Q13).
+_USER_FIELD_TOKENS = ("idea", "selection", "instruction")
+
+
 def render_prompt(template: str, variables: dict[str, Any]) -> str:
-    safe_values = {key: _stringify(value) for key, value in variables.items()}
+    """Render a ``$-substitution`` template, treating every value as untrusted.
+
+    All values pass through :func:`_stringify` (which scrubs injection patterns,
+    control chars, and truncates). User-supplied creative / instruction fields
+    (``idea`` / ``selection`` / ``instruction`` and friends) get an additional
+    explicit pass through :func:`sanitize_untrusted` so a future change to
+    ``_stringify`` can never silently let user text bypass the injection guard.
+    """
+    safe_values: dict[str, str] = {}
+    for key, value in variables.items():
+        if any(token in str(key).lower() for token in _USER_FIELD_TOKENS):
+            # Explicit, type-agnostic injection scrub for user-origin fields.
+            safe_values[key] = sanitize_untrusted(value)
+        else:
+            safe_values[key] = _stringify(value)
     return Template(template).safe_substitute(safe_values)

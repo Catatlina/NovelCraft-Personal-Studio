@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
+from .core.byok import stash_byok_key
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
 from .gateway import (
     BudgetExceeded,
@@ -577,7 +578,7 @@ async def continue_novel(request: Request, novel_id: str, user: dict = Depends(g
         raise HTTPException(status_code=400, detail="content is not a novel")
     from .workers.tasks import gen_next_chapter_task
     result = gen_next_chapter_task.delay(novel_id, novel["project_id"],
-                                         api_key=request.headers.get("X-Api-Key", ""),
+                                         api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
                                          api_url=request.headers.get("X-Api-Base-Url", ""),
                                          model=request.headers.get("X-Model", ""))
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
@@ -656,7 +657,7 @@ async def manual_review_chapter(
     task = regenerate_chapter_task.delay(
         chapter_id,
         payload.reason,
-        api_key=request.headers.get("X-Api-Key", ""),
+        api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
         api_url=request.headers.get("X-Api-Base-Url", ""),
         model=request.headers.get("X-Model", ""),
     )
@@ -723,7 +724,7 @@ async def batch_generate_chapters(
     try:
         task = batch_generate_chapters_task.delay(
             batch_id,
-            api_key=request.headers.get("X-Api-Key", ""),
+            api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
             api_url=request.headers.get("X-Api-Base-Url", ""),
             model=request.headers.get("X-Model", ""),
         )
@@ -832,7 +833,7 @@ def resume_generation_batch(request: Request, batch_id: str, user: dict = Depend
     try:
         task = batch_generate_chapters_task.delay(
             batch_id,
-            api_key=request.headers.get("X-Api-Key", ""),
+            api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
             api_url=request.headers.get("X-Api-Base-Url", ""),
             model=request.headers.get("X-Model", ""),
         )

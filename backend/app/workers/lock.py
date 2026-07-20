@@ -16,12 +16,18 @@ def _get_redis():
 
 
 def acquire_lock(lock_key: str, ttl: int = 300) -> bool:
-    """Try to acquire a distributed lock. Returns True if acquired."""
+    """Try to acquire a distributed lock. Returns True if acquired.
+
+    P2-T4 / Q10: fail-closed. If Redis is unavailable we MUST NOT grant the
+    lock, otherwise mutual exclusion is lost and concurrent tasks can corrupt
+    shared state (e.g. two generations writing the same chapter slot). Callers
+    treat a ``False`` return as "queue / skip / retry later".
+    """
     try:
         r = _get_redis()
         return bool(r.set(lock_key, "1", nx=True, ex=ttl))
     except Exception:
-        return True  # If Redis is down, don't block — let the task proceed
+        return False  # fail-closed: deny the lock when the store is unreachable
 
 
 def release_lock(lock_key: str) -> None:

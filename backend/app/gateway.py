@@ -11,7 +11,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import settings
-from .core.circuit_breaker import circuit_breaker, record_failure, record_success
+from .core.circuit_breaker import (
+    circuit_breaker,
+    record_failure,
+    record_success,
+    acquire_provider_token,
+)
 from .core.retry import with_provider_retry
 from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
@@ -467,26 +472,40 @@ def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
 
 
 def _execute_provider_call(
-    provider: str, task_type: str, prompt_text: str, model: str, params: dict
+    provider: str, task_type: str, prompt_text: str, model: str, params: dict,
+    project_id: str | None = None,
 ) -> tuple[dict[str, Any], int, int, str, str]:
     """Execute one real provider call and normalise its return tuple.
 
     Raises ``ProviderError`` / ``ProviderRateLimitError`` on transport / 429 / 5xx
     failures (these are retried by the caller's ``with_provider_retry``), and
     ``OutputValidationError`` only for malformed JSON (handled as a schema
-    concern by the caller). Records a breaker success on the deepseek path.
+    concern by the caller).
+
+    P2-T9 / Q5: before calling, the per-provider / per-scope circuit breaker and
+    token bucket are checked. ``scope`` is the ``project_id`` so a single
+    tenant's 429 storm no longer fuses the whole site, and the token bucket caps
+    outbound rate to protect DeepSeek during fan-out.
     """
+    scope = project_id or "global"
+    if not circuit_breaker(provider, scope=scope):
+        raise ProviderError(
+            f"{provider} circuit breaker open — too many failures (scope={scope})"
+        )
+    if not acquire_provider_token(provider, scope=scope):
+        raise ProviderRateLimitError(
+            f"{provider} provider token bucket exhausted (scope={scope})"
+        )
     if provider == "deepseek":
-        if not circuit_breaker("deepseek"):
-            raise ProviderError("deepseek circuit breaker open — too many failures")
         model_ = _request_model.get() or model or settings.deepseek_model
         output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
-        record_success("deepseek")
+        record_success("deepseek", scope=scope)
         return output, prompt_tokens, completion_tokens, "deepseek", model_
     if provider in ("claude", "openai", "gemini"):
         output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
             provider, model or "", prompt_text, params
         )
+        record_success(provider, scope=scope)
         return output, prompt_tokens, completion_tokens, provider_name, model_name
     raise ProviderError(f"unsupported real provider: {provider}")
 
@@ -536,8 +555,12 @@ def _complete_impl(
                 rate_limit_exc=(ProviderRateLimitError,),
                 transport_exc=(ProviderError,),
                 no_retry_exc=(OutputValidationError,),
-                on_final_failure=lambda exc: record_failure(provider),
-            )(_execute_provider_call)(provider, task_type, prompt_text, model, params)
+                on_final_failure=lambda exc: record_failure(
+                    provider, scope=project_id or "global"
+                ),
+            )(_execute_provider_call)(
+                provider, task_type, prompt_text, model, params, project_id=project_id
+            )
         except OutputValidationError:
             # Schema-contract violation (non-JSON / malformed structured output)
             # is a model-sample failure, not a transport outage — retry with a
@@ -947,17 +970,20 @@ def _complete_stream_impl(
     chunks: list[str] = []
     usage: dict[str, int] = {}
     if provider == "deepseek":
-        if not circuit_breaker("deepseek"):
+        scope = project_id or "global"
+        if not circuit_breaker("deepseek", scope=scope):
             raise ProviderError("deepseek circuit breaker open — too many failures")
+        if not acquire_provider_token("deepseek", scope=scope):
+            raise ProviderRateLimitError("deepseek provider token bucket exhausted")
         model_name = _request_model.get() or model or settings.deepseek_model
         provider_name = "deepseek"
         try:
             for delta in _deepseek_stream(prompt_text, model_name, params, usage):
                 chunks.append(delta)
                 yield delta
-            record_success("deepseek")
+            record_success("deepseek", scope=scope)
         except ProviderError:
-            record_failure("deepseek")
+            record_failure("deepseek", scope=scope)
             raise
     else:
         # Other providers use different auth/protocol implementations in the

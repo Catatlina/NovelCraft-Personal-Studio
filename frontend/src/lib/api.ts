@@ -18,21 +18,29 @@ export class ApiError extends Error {
   }
 }
 
-export function getApiKey(): string { return sessionStorage.getItem(K_API_KEY) || ""; }
-export function setApiKey(key: string) { sessionStorage.setItem(K_API_KEY, key); }
-export function getApiUrl(): string { return sessionStorage.getItem(K_API_URL) || ""; }
-export function setApiUrl(url: string) { sessionStorage.setItem(K_API_URL, url); }
+// P2-T3 / Q5: BYOK secrets (provider key / URL / model) are held in memory only
+// and sent exclusively via request headers. They are NEVER persisted to
+// sessionStorage / localStorage, so a retrieved browser session cannot exfiltrate
+// a customer's provider key. (The auth access token is handled separately by the
+// login-flow work and remains in sessionStorage for now.)
+let memApiKey = "";
+let memApiUrl = "";
+let memModel = "";
+
+export function getApiKey(): string { return memApiKey; }
+export function setApiKey(key: string) { memApiKey = key || ""; }
+export function getApiUrl(): string { return memApiUrl; }
+export function setApiUrl(url: string) { memApiUrl = url || ""; }
 export function getModel(): string {
-  const stored = sessionStorage.getItem(K_MODEL) || "";
   // One-time migration: this low-cost model produced demonstrable long-form
   // fact drift. An empty override lets the server's visible v4-pro route apply.
-  if (stored === "deepseek-v4-flash") {
-    sessionStorage.removeItem(K_MODEL);
+  if (memModel === "deepseek-v4-flash") {
+    memModel = "";
     return "";
   }
-  return stored;
+  return memModel;
 }
-export function setModel(m: string) { sessionStorage.setItem(K_MODEL, m); }
+export function setModel(m: string) { memModel = m || ""; }
 
 function getCookie(name: string): string {
   const prefix = `${encodeURIComponent(name)}=`;
