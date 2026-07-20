@@ -12,6 +12,46 @@ from app.db import connect, new_id, encode
 
 PUBLISH_STATES = ["draft", "scheduled", "submitted", "published", "failed", "retrying", "retracted"]
 
+# NC-PUB-001 / P1-T7: required connection fields per platform.
+# Each platform maps to a list of alternative-groups; within a group ANY one key
+# present (non-empty) satisfies it. A platform absent from the spec requires no
+# stored credentials (e.g. zhihu/baijia publish via title+body only).
+PLATFORM_CREDENTIAL_SPECS: dict[str, list[list[str]]] = {
+    "wechat": [["app_id"], ["app_secret"]],
+    "toutiao": [["token", "access_token"]],
+    "substack": [["token", "api_key"]],
+    "x": [["token", "bearer_token", "access_token"]],
+    "xiaohongshu": [["images"]],
+}
+
+
+def validate_publish_credentials(platform: str, credentials: dict) -> list[str]:
+    """Return a list of human-readable missing requirements (empty = OK)."""
+    spec = PLATFORM_CREDENTIAL_SPECS.get(platform)
+    if not spec:
+        return []
+    missing: list[str] = []
+    present = {k: str(v).strip() for k, v in (credentials or {}).items()}
+    for group in spec:
+        if not any(present.get(k) for k in group):
+            missing.append("/".join(group))
+    return missing
+
+
+def record_publish_attempt(content_id: str, platform: str, status: str,
+                            meta: dict | None = None) -> dict:
+    """P1-T7: persist a publish attempt (success/failed) for status reflow/query."""
+    rid = new_id()
+    db = connect()
+    db.execute(
+        "INSERT INTO publish_records (id, content_id, platform, status, mode, meta) "
+        "VALUES (%s,%s,%s,%s,'manual',%s)",
+        (rid, content_id or None, platform, status, encode(meta or {})),
+    )
+    db.commit()
+    db.close()
+    return {"record_id": rid, "status": status}
+
 
 # ===== NC-PUB-001: Publish state machine + account authorization =====
 # Accounts live in platform_accounts with Fernet-encrypted credentials

@@ -1015,9 +1015,13 @@ def untrusted_block(label: str, text: Any, limit: int = 1500) -> str:
             f"{sanitize_untrusted(text, limit)}")
 
 def _stringify(value: Any) -> str:
+    # P2-T6: every interpolated value is treated as untrusted and passed through
+    # the injection guard (filters prompt-injection patterns + control chars + truncates).
     if isinstance(value, (list, dict)):
-        return str(value)
-    return "" if value is None else str(value)
+        return sanitize_untrusted(str(value))
+    if value is None:
+        return ""
+    return sanitize_untrusted(value)
 
 def render_prompt(template: str, variables: dict[str, Any]) -> str:
     safe_values = {key: _stringify(value) for key, value in variables.items()}

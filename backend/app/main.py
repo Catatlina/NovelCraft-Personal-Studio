@@ -540,18 +540,25 @@ def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends
 
 
 @app.post("/api/v1/novels/{novel_id}/bootstrap")
+class BootstrapNovelRequest(BaseModel):
+    class Config:
+        extra = "allow"
+
+
 @limiter.limit("10/minute")
 async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
     conn.close()
     if novel["type"] != "novel":
         raise HTTPException(status_code=400, detail="content is not a novel")
+    # P2-T10: validate the request body shape (permissive) instead of raw request.json()
     try:
-        payload = await request.json()
-        if not isinstance(payload, dict):
-            payload = {}
+        raw = await request.json()
+        if not isinstance(raw, dict):
+            raw = {}
+        BootstrapNovelRequest(**raw)
     except Exception:
-        payload = {}
+        raw = {}
     run_id = create_run(novel["project_id"], novel_id,
                         api_key=request.headers.get("X-Api-Key", ""),
                         api_url=request.headers.get("X-Api-Base-Url", ""),
@@ -1446,30 +1453,51 @@ def daily_briefing(request: Request, project_id: str, user: dict = Depends(get_c
     return ok(generate_daily_briefing(project_id, user_id=user["id"]))
 
 
+class StyleLearnRequest(BaseModel):
+    project_id: str = ""
+    samples: list = []
+
+
 @app.post("/api/v1/knowledge/style-learn")
 async def style_learn(request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Learn style from sample texts."""
     from .services.style_learn import learn_style
-    body = await request.json()
-    project_id = body.get("project_id") if isinstance(body, dict) else None
+    # P2-T10: validate body via Pydantic
+    try:
+        raw = await request.json()
+        req = StyleLearnRequest.model_validate(raw if isinstance(raw, dict) else {})
+    except Exception:
+        req = StyleLearnRequest()
+    project_id = req.project_id
     if project_id:
         conn = connect()
         ensure_project_member(conn, project_id, user, {"owner", "editor"})
         conn.close()
-    return ok(learn_style(body.get("samples", body if isinstance(body, list) else [])))
+    return ok(learn_style(req.samples))
+
+
+class CheckSimilarityRequest(BaseModel):
+    project_id: str = ""
+    original: str = ""
+    generated: str = ""
 
 
 @app.post("/api/v1/knowledge/check-similarity")
 async def check_similarity(request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """M3: Check similarity between original and generated text."""
     from .services.style_learn import check_similarity
-    body = await request.json()
-    project_id = body.get("project_id") if isinstance(body, dict) else None
+    # P2-T10: validate body via Pydantic
+    try:
+        raw = await request.json()
+        req = CheckSimilarityRequest.model_validate(raw if isinstance(raw, dict) else {})
+    except Exception:
+        req = CheckSimilarityRequest()
+    project_id = req.project_id
     if project_id:
         conn = connect()
         ensure_project_member(conn, project_id, user)
         conn.close()
-    return ok(check_similarity(body.get("original",""), body.get("generated","")))
+    return ok(check_similarity(req.original, req.generated))
 
 
 @app.post("/api/v1/prompts/lab")

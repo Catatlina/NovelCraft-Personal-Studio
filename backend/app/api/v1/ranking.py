@@ -523,9 +523,21 @@ def get_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
     latest_analysis = None
     if analysis:
         signals = analysis["signals"] if isinstance(analysis["signals"], dict) else {}
+        candidates = rows(db, "SELECT market_score FROM topic_candidates WHERE analysis_id=%s", (analysis["id"],))
+        scores = [float(c["market_score"]) for c in candidates if c.get("market_score") is not None]
+        current_avg = round(sum(scores) / len(scores), 2) if scores else None
+        trend = compute_market_trend(db, snapshot["project_id"], snapshot["source_id"], current_avg)
         latest_analysis = {"analysis_id": analysis["id"], "summary": analysis["summary"], **signals,
-                           "status": analysis["status"], "analysis_mode": analysis["analysis_mode"]}
-    data = {**dict(snapshot), "items": items, "latest_analysis": latest_analysis}; db.close(); return ok(data)
+                           "status": analysis["status"], "analysis_mode": analysis["analysis_mode"],
+                           "market_score_avg": current_avg, "trend": trend}
+    # P1-T11: attach cross-platform normalized metrics to every item.
+    from app.services.ranking_adapter import normalize_item_metrics
+    enriched_items = []
+    for it in items:
+        it = dict(it)
+        it["unified_metrics"] = normalize_item_metrics(it.get("metrics"))
+        enriched_items.append(it)
+    data = {**dict(snapshot), "items": enriched_items, "latest_analysis": latest_analysis}; db.close(); return ok(data)
 
 
 @router.post("/snapshots/{snapshot_id}/retry")

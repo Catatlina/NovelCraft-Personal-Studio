@@ -49,30 +49,50 @@ def test_provider(provider: str, project_id: str, model: str = "",
 
 
 @router.post("/publish/{platform}")
-def publish_to_platform(platform: str, title: str, body: str, credentials: dict = {}, user: dict = Depends(get_current_user)):
+def publish_to_platform(platform: str, title: str, body: str, credentials: dict = {},
+                       content_id: str = "", user: dict = Depends(get_current_user)):
     from app.services.providers_and_adapters import (_publish_wechat, _publish_toutiao, _publish_xiaohongshu,
                                                      _publish_zhihu, _publish_baijia, _publish_substack, _publish_x)
+    from app.services.publish_hub import (get_platform_credentials, validate_publish_credentials,
+                                           record_publish_attempt)
     adapters = {
         "wechat": _publish_wechat, "toutiao": _publish_toutiao, "xiaohongshu": _publish_xiaohongshu,
         "zhihu": _publish_zhihu, "baijia": _publish_baijia, "substack": _publish_substack, "x": _publish_x,
     }
     fn = adapters.get(platform)
     if not fn: raise HTTPException(404, f"unknown platform: {platform}")
-    from app.services.publish_hub import get_platform_credentials
+
+    # P1-T7: strong connection/credential check BEFORE any publish attempt.
     stored_credentials = get_platform_credentials(user["id"], platform) or {}
     merged = {**stored_credentials, **(credentials or {})}
-    if platform == "wechat":
-        result = fn(title, body, app_id=merged.get("app_id", ""), app_secret=merged.get("app_secret", ""))
-    elif platform == "toutiao":
-        result = fn(title, body, token=merged.get("token") or merged.get("access_token", ""))
-    elif platform == "substack":
-        result = fn(title, body, token=merged.get("token") or merged.get("api_key", ""))
-    elif platform == "x":
-        result = fn(title, body, token=merged.get("token") or merged.get("bearer_token") or merged.get("access_token", ""))
-    elif platform == "xiaohongshu":
-        result = fn(title, body, images=merged.get("images", []))
-    else:
-        result = fn(title, body)
+    missing = validate_publish_credentials(platform, merged)
+    if missing:
+        raise HTTPException(422, {
+            "code": "PUBLISH_CREDENTIALS_MISSING",
+            "message": f"发布到 {platform} 缺少必需的平台凭据/连接：{', '.join(missing)}",
+            "missing": missing,
+        })
+
+    try:
+        if platform == "wechat":
+            result = fn(title, body, app_id=merged.get("app_id", ""), app_secret=merged.get("app_secret", ""))
+        elif platform == "toutiao":
+            result = fn(title, body, token=merged.get("token") or merged.get("access_token", ""))
+        elif platform == "substack":
+            result = fn(title, body, token=merged.get("token") or merged.get("api_key", ""))
+        elif platform == "x":
+            result = fn(title, body, token=merged.get("token") or merged.get("bearer_token") or merged.get("access_token", ""))
+        elif platform == "xiaohongshu":
+            result = fn(title, body, images=merged.get("images", []))
+        else:
+            result = fn(title, body)
+    except Exception as exc:  # never silently fail — record + surface as envelope
+        record_publish_attempt(content_id, platform, "failed", {"error": str(exc)[:500]})
+        logger.warning("publish_to_platform failed: %s", exc)
+        raise HTTPException(502, {"code": "PUBLISH_FAILED",
+                                  "message": f"发布到 {platform} 失败：{exc}",
+                                  "detail": str(exc)[:300]}) from exc
+
     # Reflect the adapter's honest status in the response message
     adapter_status = result.get("status", "unknown")
     adapter_mode = result.get("mode", "")
@@ -84,7 +104,22 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
         msg = "draft — content saved as draft, manual review required"
     else:
         msg = adapter_status
-    return ok(result, message=msg)
+
+    # P1-T7: record final status for reflow/query (no silent success/failure).
+    if result.get("error") or adapter_status == "failed":
+        rec_status = "failed"
+    elif adapter_status in ("submitted", "exported"):
+        rec_status = "submitted"
+    elif adapter_status == "published":
+        rec_status = "published"
+    elif adapter_status == "draft":
+        rec_status = "draft"
+    else:
+        rec_status = "submitted"
+    attempt = record_publish_attempt(content_id, platform, rec_status,
+                                     {"adapter_status": adapter_status, "mode": adapter_mode})
+    return ok({**result, "publish_record_id": attempt["record_id"], "publish_status": rec_status},
+              message=msg)
 
 
 @router.post("/review/multi-round")

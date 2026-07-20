@@ -1093,3 +1093,67 @@ def normalize_ranking_items(source: str, items: list[dict],
         if previous is None or item["rank_no"] < previous["rank_no"]:
             best_by_key[dedupe_key] = item
     return sorted(best_by_key.values(), key=lambda x: x["rank_no"])
+
+
+# ---------------------------------------------------------------------------
+# P1-T11: cross-platform metric normalization
+# Each source scrapes slightly different field names (readers/read_count,
+# wordCount/word_count, status/creation_status). We collapse them into one
+# comparable schema and derive an engagement index (0-100, log-scaled) so a
+# 番茄 title and a 起点 title can be ranked on the same axis.
+# ---------------------------------------------------------------------------
+UNIFIED_METRIC_SCHEMA = {
+    "readers": "int — 阅读/追读数（readers / read_count 归一）",
+    "word_count": "int — 字数（word_count / wordCount 归一）",
+    "completion_status": "str — 连载/完结状态",
+    "engagement_index": "float 0-100 — 跨平台可比的参与度指数（log 缩放读者数）",
+}
+
+
+def _to_int(value) -> int:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    digits = re.sub(r"[^\d]", "", str(value))
+    return int(digits) if digits else 0
+
+
+def normalize_item_metrics(raw_metrics: dict | None) -> dict:
+    """P1-T11: map a source's heterogeneous ``metrics`` into UNIFIED_METRIC_SCHEMA."""
+    m = raw_metrics or {}
+    readers = _to_int(m.get("readers", m.get("read_count", 0)))
+    word_count = _to_int(m.get("word_count", m.get("wordCount", 0)))
+    status = str(m.get("status", m.get("creation_status", m.get("completion_status", "")))).strip()
+    # log-scaled engagement index: 0 readers -> 0; 10k -> ~52; 1M -> ~80; 100M -> 100
+    if readers > 0:
+        import math
+        engagement_index = round(min(100.0, 12.0 + 10.0 * math.log10(readers)), 2)
+    else:
+        engagement_index = 0.0
+    return {
+        "readers": readers,
+        "word_count": word_count,
+        "completion_status": status,
+        "engagement_index": engagement_index,
+    }
+
+
+def compute_market_trend(db, project_id: str, source_id: str, current_avg: float | None) -> dict:
+    """P1-T11: compare this snapshot's avg market_score with the previous succeeded
+    analysis for the same project+source; return {prev_avg, delta, direction}."""
+    if current_avg is None:
+        return {"prev_avg": None, "delta": None, "direction": "unknown"}
+    prev = db.execute(
+        """SELECT AVG(tc.market_score) AS avg_score FROM market_analyses ma
+           JOIN ranking_snapshots rs ON rs.id = ma.snapshot_id
+           JOIN topic_candidates tc ON tc.analysis_id = ma.id
+           WHERE ma.status='succeeded' AND rs.project_id=%s AND rs.source_id=%s""",
+        (project_id, source_id),
+    ).fetchone()
+    prev_avg = float(prev["avg_score"]) if prev and prev["avg_score"] is not None else None
+    if prev_avg is None:
+        return {"prev_avg": None, "delta": None, "direction": "new"}
+    delta = round(current_avg - prev_avg, 2)
+    direction = "up" if delta > 0 else ("down" if delta < 0 else "flat")
+    return {"prev_avg": prev_avg, "delta": delta, "direction": direction}
