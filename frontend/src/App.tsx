@@ -512,7 +512,26 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
       {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
-      {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} /></React.Suspense>}
+      {tab === "editor" && <div className="editor-pro">
+        <div className="editor-left">
+          <div style={{fontSize:11,textTransform:'uppercase',color:'var(--text-muted)',marginBottom:8,letterSpacing:'.5px'}}>章节</div>
+          {chapters.map(ch => <div key={ch.id} className={`editor-chapter-item${chapter?.id===ch.id?' active':''}`} onClick={()=>selectChapter(ch.id)}>{ch.title||'未命名'}</div>)}
+        </div>
+        <div className="editor-center">
+          <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} />
+          </React.Suspense>
+        </div>
+        <div className="editor-right">
+          <div style={{fontSize:11,textTransform:'uppercase',color:'var(--text-muted)',marginBottom:8,letterSpacing:'.5px'}}>AI 助手</div>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("continue")}>续写</button>
+            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("polish")}>润色</button>
+            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("expand")}>扩写</button>
+            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("deai")}>去AI味</button>
+          </div>
+        </div>
+      </div>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
       {tab === "billing" && <Billing />}
       {tab === "prompts" && <Prompts prompts={prompts} projectId={project?.id || ""} />}
