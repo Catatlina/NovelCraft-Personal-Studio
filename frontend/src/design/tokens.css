@@ -85,6 +85,8 @@
   --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.45);
   --shadow-lg: 0 12px 32px hsl(0 0% 0% / 0.55);
   --shadow-focus: 0 0 0 2px var(--brand-500);
+  /* Overlay / scrim for modals & command palette; follows --bg-base in both themes */
+  --overlay: color-mix(in srgb, var(--bg-base) 55%, transparent);
 
   /* z-index */
   --z-base: 0;
@@ -148,4 +150,6 @@
   --shadow-md: 0 4px 12px hsl(225 30% 20% / 0.10);
   --shadow-lg: 0 12px 32px hsl(225 30% 20% / 0.14);
   --shadow-focus: 0 0 0 2px var(--brand-500);
+  /* Overlay / scrim for modals & command palette; follows --bg-base in both themes */
+  --overlay: color-mix(in srgb, var(--bg-base) 55%, transparent);
 }

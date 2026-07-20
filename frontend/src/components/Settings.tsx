@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap, Users, Upload, Download, Database } from "lucide-react";
 import { api, getApiKey, getApiUrl, getModel, setApiKey, setApiUrl, setModel } from "../lib/api";
-import { Pagination, ConfirmDialog } from "./ui";
+import { Pagination, ConfirmDialog, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
@@ -326,58 +326,68 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               )}
             </section>
 
-            {/* 数据导入导出 */}
-            <section>
-              <h3 style={{fontSize:15, fontWeight:600, marginBottom:12}}>知识库</h3>
-              <div style={{display:"flex", gap:16, flexWrap:"wrap"}}>
-                <div>
-                  <label className="form-label">导入知识库</label>
-                  <input
-                    type="file"
-                    accept=".txt,.md,.json,.jsonl,.pdf,.docx"
-                    disabled={!projectId}
-                    onChange={async e=>{
-                      const f=e.target.files?.[0]; if(!f)return;
-                      const form = new FormData(); form.append("file", f);
-                      await api(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
-                      setMsg("导入成功");
-                    }}
-                    style={{fontSize:13}}
-                  />
-                  {!projectId && <div className="hint" style={{fontSize:12, color:"var(--text-3)", marginTop:4}}>请先选择项目再导入。</div>}
-                </div>
-                <div style={{display:"flex", alignItems:"flex-end"}}>
-                  <button
-                    onClick={async()=>{
-                      if (!projectId) { setMsg("请先选择项目"); return; }
-                      const r=await api(`/api/v1/knowledge?project_id=${projectId}`);
-                      const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
-                      const a=document.createElement("a");a.href=URL.createObjectURL(blob);
-                      a.download="novelcraft_knowledge.json";a.click();
-                    }}
-                    className="btn-primary"
-                    style={{maxWidth:180, height:38, gap:6}}
-                  >
-                    <Download size={14}/> 导出 JSON
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            {/* 数据统计 */}
-            <section>
-              <h3 style={{fontSize:15, fontWeight:600, marginBottom:12}}>数据统计</h3>
-              <table style={{width:"100%", maxWidth:400, borderCollapse:"collapse"}}>
-                <tbody>
-                  {[{label:"AI 调用次数",value:stats?.ai_calls ?? "加载中…"},{label:"内容条数",value:stats?.contents ?? "加载中…"},{label:"数据库大小",value:stats?.db_size ?? "加载中…"}].map((m,i)=>
-                    <tr key={i} style={{borderBottom:"1px solid var(--border)"}}>
-                      <td style={{padding:"10px 12px", fontSize:13, color:"var(--text-2)"}}>{m.label}</td>
-                      <td style={{padding:"10px 12px", fontWeight:600}}>{String(m.value)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </section>
+            {/* 知识库导入导出 + 数据统计：L3 低频/工具类，默认折叠 */}
+            <Accordion items={[
+              {
+                key: "knowledge",
+                title: "知识库导入 / 导出",
+                defaultOpen: false,
+                content: (
+                  <div>
+                    <div style={{display:"flex", gap:16, flexWrap:"wrap"}}>
+                      <div>
+                        <label className="form-label">导入知识库</label>
+                        <input
+                          type="file"
+                          accept=".txt,.md,.json,.jsonl,.pdf,.docx"
+                          disabled={!projectId}
+                          onChange={async e=>{
+                            const f=e.target.files?.[0]; if(!f)return;
+                            const form = new FormData(); form.append("file", f);
+                            await api(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
+                            setMsg("导入成功");
+                          }}
+                          style={{fontSize:13}}
+                        />
+                        {!projectId && <div className="hint" style={{fontSize:12, color:"var(--text-3)", marginTop:4}}>请先选择项目再导入。</div>}
+                      </div>
+                      <div style={{display:"flex", alignItems:"flex-end"}}>
+                        <button
+                          onClick={async()=>{
+                            if (!projectId) { setMsg("请先选择项目"); return; }
+                            const r=await api(`/api/v1/knowledge?project_id=${projectId}`);
+                            const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
+                            const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+                            a.download="novelcraft_knowledge.json";a.click();
+                          }}
+                          className="btn-primary"
+                          style={{maxWidth:180, height:38, gap:6}}
+                        >
+                          <Download size={14}/> 导出 JSON
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: "stats",
+                title: "数据统计",
+                defaultOpen: false,
+                content: (
+                  <table style={{width:"100%", maxWidth:400, borderCollapse:"collapse"}}>
+                    <tbody>
+                      {[{label:"AI 调用次数",value:stats?.ai_calls ?? "加载中…"},{label:"内容条数",value:stats?.contents ?? "加载中…"},{label:"数据库大小",value:stats?.db_size ?? "加载中…"}].map((m,i)=>
+                        <tr key={i} style={{borderBottom:"1px solid var(--border)"}}>
+                          <td style={{padding:"10px 12px", fontSize:13, color:"var(--text-2)"}}>{m.label}</td>
+                          <td style={{padding:"10px 12px", fontWeight:600}}>{String(m.value)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                ),
+              },
+            ]} />
           </div>
         )}
 

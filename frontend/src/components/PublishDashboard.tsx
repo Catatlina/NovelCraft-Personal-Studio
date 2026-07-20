@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle } from "lucide-react";
 import { api } from "../lib/api";
-import { Pagination } from "./ui";
+import { Pagination, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
 export function PublishDashboard() {
@@ -162,7 +162,16 @@ export function PublishDashboard() {
               : <div style={{marginTop:8,padding:"6px 10px",borderRadius:"var(--r-sm)",fontSize:13,color:"var(--red)",background:"var(--danger-bg)"}}>
                   检测到敏感词：{sensitiveResult.blocked_words.join("、")}
                 </div>)}
-            {result && <pre style={{fontSize:11,marginTop:12,padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap"}}>{JSON.stringify(result,null,2)}</pre>}
+            {result && (
+              <Accordion items={[{
+                key: "publish-raw",
+                title: "发布回执（原始返回）",
+                defaultOpen: false,
+                content: (
+                  <pre style={{fontSize:11,marginTop:12,padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap"}}>{JSON.stringify(result,null,2)}</pre>
+                ),
+              }]} />
+            )}
           </div>
         )}
 

@@ -40,9 +40,9 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
 
   // ── AI chat state ──
   const [aiChatInput, setAiChatInput] = useState("");
-  const [aiChatMessages, setAiChatMessages] = useState<Array<{ role: "system" | "user"; text: string }>>([
-    { role: "system", text: "检测到本章情绪偏「治愈收束」，建议下一章以「微光」意象承接，保持节奏。" },
-  ]);
+  // 初始为空数组：不再伪造"AI 已分析"的问候语（审计 P2-1）。
+  // 真实结果由 editorAiReview 回填 / 用户提问后追加；空态由下方引导文案承接。
+  const [aiChatMessages, setAiChatMessages] = useState<Array<{ role: "system" | "user"; text: string }>>([]);
 
   const sendAiMessage = () => {
     const text = aiChatInput.trim();
@@ -262,11 +262,17 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
 
           {/* AI chat messages */}
           <div style={{ flex: 1, overflowY: "auto", marginBottom: 8 }}>
-            {aiChatMessages.map((msg, i) => (
-              <div key={i} className={`ai-msg${msg.role === "user" ? " user" : ""}`}>
-                {msg.text}
+            {aiChatMessages.length === 0 ? (
+              <div style={{ color: "var(--text-3)", fontSize: 13, lineHeight: 1.7, padding: "8px 4px" }}>
+                向 AI 助手提问，或选中文本用浮动工具栏润色 / 续写。
               </div>
-            ))}
+            ) : (
+              aiChatMessages.map((msg, i) => (
+                <div key={i} className={`ai-msg${msg.role === "user" ? " user" : ""}`}>
+                  {msg.text}
+                </div>
+              ))
+            )}
 
             {/* De-AI results display */}
             {deaiResult && (

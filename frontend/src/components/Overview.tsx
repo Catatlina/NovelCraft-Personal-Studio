@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { BarChart3, Loader2, RefreshCw, AlertTriangle, TrendingUp } from "lucide-react";
 import { api } from "../lib/api";
-import { Pagination } from "./ui";
+import { Pagination, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -387,16 +387,12 @@ export function Overview() {
             </div>
           </div>
 
-          {/* Topic suggestions */}
-          <div className="card">
-            <div className="card-head">
-              <div className="card-title">
-                <TrendingUp size={18} />
-                选题建议
-              </div>
-              <span className="card-sub">基于真实回流数据可追溯</span>
-            </div>
-            {data.topic_suggestions.length === 0 ? (
+          {/* Topic suggestions (L3: lower-frequency detail, collapsed by default) */}
+          <Accordion items={[{
+            key: "topic-suggestions",
+            title: "选题建议（基于真实回流数据可追溯）",
+            defaultOpen: false,
+            content: data.topic_suggestions.length === 0 ? (
               <div className="empty" style={{ border: "none", padding: 24 }}>
                 <p>暂无选题建议</p>
               </div>
@@ -427,8 +423,8 @@ export function Overview() {
                   pageSizeOptions={[10, 20, 50, 100]}
                 />
               </>
-            )}
-          </div>
+            ),
+          }]} />
         </>
       )}
     </div>

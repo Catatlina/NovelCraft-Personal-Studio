@@ -191,6 +191,95 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
   const timelinePager = usePagination({ items: timeline, pageSize: 10, mode: "client" });
   const arcsPager = usePagination({ items: arcs, pageSize: 10, mode: "client" });
 
+  // ── Export the rendered review data as a downloadable Markdown report ──
+  // Assembles the SAME source data already shown on this page (the 8-section
+  // report, consistency checks, issues, strengths, continuity, characters,
+  // timeline, outline) into a Markdown string and triggers a browser download.
+  // No backend endpoint required — purely client-side serialization.
+  function exportReport(): void {
+    const lines: string[] = [];
+    lines.push(`# 七维审查报告：${chapter?.title || "未命名作品"}`);
+    lines.push("");
+    lines.push(`- 类型：${chapter?.type || "—"}`);
+    lines.push(`- 状态：${chapter?.status || "—"}`);
+    if (hasScoreEvidence) lines.push(`- 综合评分：${Math.round(totalScore)}`);
+    if (metaAny.genre) lines.push(`- 题材：${String(metaAny.genre)}`);
+    if (metaAny.premise) lines.push(`- 核心设定：${String(metaAny.premise)}`);
+    if (metaAny.idea) lines.push(`- 创作灵感：${String(metaAny.idea)}`);
+    lines.push("");
+
+    if (dims.length) {
+      lines.push("## 文风分析（七维）");
+      dims.forEach((d) => lines.push(`- ${d.name}：${d.score}`));
+      lines.push("");
+    }
+
+    const checkEntries = Object.entries(consistencyChecks);
+    if (checkEntries.length) {
+      lines.push("## 一致性检查");
+      checkEntries.forEach(([name, check]) => lines.push(`- ${DIMENSION_LABELS[name] || name}：${check?.status || "—"}`));
+      lines.push("");
+    }
+
+    if (issues.length) {
+      lines.push("## 问题与弱点");
+      issues.forEach((s) => lines.push(`- ${s}`));
+      lines.push("");
+    }
+
+    if (strengths.length) {
+      lines.push("## 优点");
+      strengths.forEach((s) => lines.push(`- ${s}`));
+      lines.push("");
+    }
+
+    if (continuity) {
+      lines.push("## 连续性审计");
+      if (continuity.status) lines.push(`- 状态：${continuity.status}`);
+      if (continuity.narrative_flow) lines.push(`- 叙事流：${continuity.narrative_flow}`);
+      if (Array.isArray(continuity.gaps) && continuity.gaps.length) {
+        lines.push("- 连续性缺口：");
+        (continuity.gaps as unknown[]).forEach((g) => lines.push(`  - ${typeof g === "string" ? g : JSON.stringify(g)}`));
+      }
+      lines.push("");
+    }
+
+    if (characters?.length) {
+      lines.push("## 人物卡");
+      characters.forEach((c: any) => {
+        const name = c.name || c.character || "角色";
+        lines.push(`- **${name}**${c.role ? `（${c.role}）` : ""}`);
+        if (c.description) lines.push(`  - ${c.description}`);
+      });
+      lines.push("");
+    }
+
+    if (timeline?.length) {
+      lines.push("## 时间线");
+      timeline.forEach((e: any) => lines.push(`- 第${e.chapter_seq}章：${e.event}`));
+      lines.push("");
+    }
+
+    const outline = metaAny.outline || metaAny.chapter_outlines;
+    if (Array.isArray(outline) && outline.length) {
+      lines.push("## 大纲");
+      outline.forEach((n: any, i: number) => lines.push(`${i + 1}. ${typeof n === "string" ? n : (n.title || n.label || JSON.stringify(n))}`));
+      lines.push("");
+    }
+
+    const md = lines.join("\n");
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeTitle = (chapter?.title || "review").replace(/[\\/:*?"<>|]/g, "_");
+    a.download = `novelcraft-review-${safeTitle}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       {/* ── Page head ── */}
@@ -206,10 +295,15 @@ export function Review({ chapter, review, characters, timeline, arcs }: {
           </p>
         </div>
         <div className="head-actions">
-          <button className="btn-sm" style={{ background: "var(--primary-dim)", color: "var(--primary-light)" }}>
-            重新审查
-          </button>
-          <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)" }}>
+          {/* 「重新审查」依赖后端 final_consistency_check 工作流节点，超出纯前端范围，已移除（见审计 P1-1）。
+              「导出报告」为真实功能：将本页已渲染的审查数据拼装为 Markdown 并触发浏览器下载。 */}
+          <button
+            className="btn-sm"
+            style={{ background: "var(--bg-hover)", color: "var(--text-2)" }}
+            onClick={exportReport}
+            disabled={!chapter}
+            title={chapter ? "导出当前审查数据为 Markdown" : "请先选择章节"}
+          >
             导出报告
           </button>
         </div>

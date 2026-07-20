@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { BookOpen, Database, TrendingUp, Play, Loader2, CopyCheck } from "lucide-react";
 import { api } from "../lib/api";
+import { Accordion } from "./ui";
 
 export function Studio() {
   const [tab, setTab] = useState<"short"|"knowledge"|"hotspot"|"imitation">("short");
@@ -149,7 +150,14 @@ export function Studio() {
                 ) : (
                   <>
                     <h4 style={{margin:0,fontSize:15}}>生成完成</h4>
-                    <pre style={{fontSize:11,maxHeight:300,overflowY:"auto",marginTop:8,color:"var(--text-2)"}}>{JSON.stringify(result, null, 2)}</pre>
+                    <Accordion items={[{
+                      key: "short-raw",
+                      title: "原始返回",
+                      defaultOpen: false,
+                      content: (
+                        <pre style={{fontSize:11,maxHeight:300,overflowY:"auto",marginTop:8,color:"var(--text-2)"}}>{JSON.stringify(result, null, 2)}</pre>
+                      ),
+                    }]} />
                   </>
                 )}
               </div>
@@ -261,7 +269,16 @@ export function Studio() {
                 {result.data.similarity && <span> 相似度 {Math.round((result.data.similarity.similarity || 0) * 100)}%，处理建议：{result.data.similarity.action}</span>}
               </div>
             )}
-            {result?.data && <pre style={{fontSize:11,maxHeight:300,overflowY:"auto",padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap",margin:0}}>{JSON.stringify(result.data, null, 2)}</pre>}
+            {result?.data && (
+              <Accordion items={[{
+                key: "imitation-raw",
+                title: "原始返回",
+                defaultOpen: false,
+                content: (
+                  <pre style={{fontSize:11,maxHeight:300,overflowY:"auto",padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap",margin:0}}>{JSON.stringify(result.data, null, 2)}</pre>
+                ),
+              }]} />
+            )}
           </div>
         )}
       </div>

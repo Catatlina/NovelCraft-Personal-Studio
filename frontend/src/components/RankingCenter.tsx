@@ -436,80 +436,91 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         />
       </div>
 
-      {/* ── Import section ── */}
-      <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
-        <strong style={{ fontSize: 14, display: "block", marginBottom: 4 }}>导入已有榜单文件</strong>
-        <small style={{ color: "var(--text-2)" }}>支持 UTF-8 CSV、普通 JSON 数组，或浏览器/OCR 采集工件。番茄 OCR / 起点会话工件会自动保留截图、置信度和来源证据。</small>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 10 }}>
-          <input
-            aria-label="榜单来源标识"
-            value={importSource}
-            onChange={event => setImportSource(event.target.value)}
-            placeholder="来源标识，例如 qidian_manual"
-            className="form-input"
-            style={{ width: 200 }}
-          />
-          <input
-            aria-label="选择榜单文件"
-            type="file"
-            accept=".csv,.json,text/csv,application/json"
-            onChange={event => void selectImportFile(event.target.files?.[0])}
-            style={{ fontSize: 13 }}
-          />
-          <button
-            className="btn-primary"
-            style={{ width: "auto", padding: "0 18px", height: 38 }}
-            disabled={!!busy || !importItems.length}
-            onClick={() => void importRanking()}
-          >
-            {busy === "import" ? "导入中…" : "导入榜单"}
-          </button>
-        </div>
-        {importFileName && (
-          <small style={{ color: "var(--text-2)", display: "block", marginTop: 6 }}>
-            {importFileName}：{captureArtifact ? `识别为 ${captureArtifact.source} 采集工件，状态 ${captureArtifact.status || "succeeded"}` : "已解析"}{" "}
-            {importItems.length} 条，提交前不会上传。
-          </small>
-        )}
-      </div>
+      {/* ── Import section (L3: advanced / low-frequency, collapsed by default) ── */}
+      <Accordion items={[{
+        key: "import-ranking",
+        title: "导入已有榜单文件",
+        defaultOpen: false,
+        content: (
+          <div>
+            <small style={{ color: "var(--text-2)" }}>支持 UTF-8 CSV、普通 JSON 数组，或浏览器/OCR 采集工件。番茄 OCR / 起点会话工件会自动保留截图、置信度和来源证据。</small>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 10 }}>
+              <input
+                aria-label="榜单来源标识"
+                value={importSource}
+                onChange={event => setImportSource(event.target.value)}
+                placeholder="来源标识，例如 qidian_manual"
+                className="form-input"
+                style={{ width: 200 }}
+              />
+              <input
+                aria-label="选择榜单文件"
+                type="file"
+                accept=".csv,.json,text/csv,application/json"
+                onChange={event => void selectImportFile(event.target.files?.[0])}
+                style={{ fontSize: 13 }}
+              />
+              <button
+                className="btn-primary"
+                style={{ width: "auto", padding: "0 18px", height: 38 }}
+                disabled={!!busy || !importItems.length}
+                onClick={() => void importRanking()}
+              >
+                {busy === "import" ? "导入中…" : "导入榜单"}
+              </button>
+            </div>
+            {importFileName && (
+              <small style={{ color: "var(--text-2)", display: "block", marginTop: 6 }}>
+                {importFileName}：{captureArtifact ? `识别为 ${captureArtifact.source} 采集工件，状态 ${captureArtifact.status || "succeeded"}` : "已解析"}{" "}
+                {importItems.length} 条，提交前不会上传。
+              </small>
+            )}
+          </div>
+        ),
+      }]} />
     </div>
 
-    {/* ── Analysis mode selector ── */}
+    {/* ── Analysis mode selector (L3: scan settings, collapsed by default) ── */}
     {snapshots.filter(s => s.status === "succeeded").length > 0 && (
-    <div className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <strong style={{ fontSize: 13 }}>分析模式：</strong>
-          <div className="seg" style={{ width: "auto" }}>
-            <button
-              className={analysisMode === "single" ? "on" : ""}
-              onClick={() => { setAnalysisMode("single"); setMultiAnalysisResult(null); }}
-            >
-              📋 单平台分析
-            </button>
-            <button
-              className={analysisMode === "multi" ? "on" : ""}
-              onClick={() => setAnalysisMode("multi")}
-            >
-              📊 多平台聚合
-            </button>
+    <Accordion items={[{
+      key: "analysis-mode",
+      title: "分析模式（单平台 / 多平台聚合）",
+      defaultOpen: false,
+      content: (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <strong style={{ fontSize: 13 }}>分析模式：</strong>
+            <div className="seg" style={{ width: "auto" }}>
+              <button
+                className={analysisMode === "single" ? "on" : ""}
+                onClick={() => { setAnalysisMode("single"); setMultiAnalysisResult(null); }}
+              >
+                📋 单平台分析
+              </button>
+              <button
+                className={analysisMode === "multi" ? "on" : ""}
+                onClick={() => setAnalysisMode("multi")}
+              >
+                📊 多平台聚合
+              </button>
+            </div>
           </div>
+          {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length >= 2 && (
+            <button
+              className="btn-primary"
+              style={{ width: "auto", padding: "0 20px", height: 40, fontSize: 14 }}
+              disabled={multiAnalysisLoading}
+              onClick={() => void analyzeMultiPlatform()}
+            >
+              {multiAnalysisLoading ? "聚合分析中…" : "🚀 多平台聚合分析"}
+            </button>
+          )}
+          {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length < 2 && (
+            <small style={{ color: "var(--text-2)" }}>需要至少 2 个成功快照才能聚合分析</small>
+          )}
         </div>
-        {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length >= 2 && (
-          <button
-            className="btn-primary"
-            style={{ width: "auto", padding: "0 20px", height: 40, fontSize: 14 }}
-            disabled={multiAnalysisLoading}
-            onClick={() => void analyzeMultiPlatform()}
-          >
-            {multiAnalysisLoading ? "聚合分析中…" : "🚀 多平台聚合分析"}
-          </button>
-        )}
-        {analysisMode === "multi" && snapshots.filter(s => s.status === "succeeded").length < 2 && (
-          <small style={{ color: "var(--text-2)" }}>需要至少 2 个成功快照才能聚合分析</small>
-        )}
-      </div>
-    </div>
+      ),
+    }]} />
     )}
 
     {/* ── Snapshots table ── */}

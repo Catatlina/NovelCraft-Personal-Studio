@@ -207,12 +207,10 @@ export function Prompts({ prompts, projectId }: { prompts: any[]; projectId: str
             <RefreshCw size={14} />
             刷新
           </button>
-          {/* Prompt 版本由后端注册表管理，前端不提供写接口 —— 仅作展示 */}
-          <button className="btn-sm btn-ghost" disabled title="Prompt 版本由后端注册表管理，前端仅可读与实验室对比">
-            <FileText size={13} />
-            新建版本
-          </button>
         </div>
+        <p style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 12 }}>
+          Prompt 版本由后端注册表管理，前端仅可读与实验室对比，不提供写接口。
+        </p>
       </div>
 
       {/* Loading state */}

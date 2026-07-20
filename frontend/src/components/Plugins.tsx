@@ -236,21 +236,8 @@ export function Plugins() {
                     来源：{s.source}
                   </div>
 
-                  {/* 安装 / 启用 / 禁用 —— 后端暂未提供变更接口，按钮置灰并标注 */}
-                  <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
-                    <button className="btn-sm btn-ghost" disabled title="后端暂未提供安装接口">
-                      <Download size={13} />
-                      安装
-                    </button>
-                    <button className="btn-sm btn-ghost" disabled title="后端暂未提供启用接口">
-                      <Power size={13} />
-                      启用
-                    </button>
-                    <button className="btn-sm btn-ghost" disabled title="后端暂未提供禁用接口">
-                      <Ban size={13} />
-                      禁用
-                    </button>
-                  </div>
+                  {/* 安装 / 启用 / 禁用：后端暂未提供变更接口，已移除冗余 disabled 按钮（审计 P2-5）。
+                      保留说明，避免用户误以为存在可操作入口。 */}
                   <p style={{ fontSize: 11, color: "var(--text-3)", margin: 0 }}>
                     后端暂未提供安装 / 启用 / 禁用接口，操作按钮仅作展示。
                   </p>

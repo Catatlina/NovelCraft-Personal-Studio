@@ -470,7 +470,7 @@ export function HotspotDashboard() {
               total={hotspotTotal}
               onPageChange={hotspotPager.setPage}
               onPageSizeChange={hotspotPager.setPageSize}
-              pageSizeOptions={[10, 20, 50]}
+              pageSizeOptions={[10, 20, 50, 100]}
             />
           )}
         </>

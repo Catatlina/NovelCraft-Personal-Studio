@@ -24,7 +24,7 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 9999,
-        background: "rgba(11,15,25,0.55)", // --bg with opacity
+        background: "var(--overlay)",
         backdropFilter: "blur(4px)",
         WebkitBackdropFilter: "blur(4px)",
         display: "flex", justifyContent: "center", paddingTop: "15vh",
@@ -35,7 +35,7 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
         style={{
           background: "var(--bg-elev)", borderRadius: "var(--r-xl)", width: 520, maxHeight: "60vh",
           overflow: "hidden", border: "1px solid var(--border-strong)",
-          boxShadow: "var(--shadow-card), 0 0 40px rgba(99,102,241,.12)",
+          boxShadow: "var(--shadow-card)",
         }}
         onClick={e => e.stopPropagation()}
       >
