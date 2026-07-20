@@ -49,3 +49,6 @@ AgentManager.register("hotspot-analyzer", {
     "skills": ["hotspot-tracking", "trend-analysis", "topic-suggestion"],
     "prompt_template": "分析当前热点：{query}",
 })
+
+# Backward compat
+BUILTIN_AGENTS = AgentManager.agents
