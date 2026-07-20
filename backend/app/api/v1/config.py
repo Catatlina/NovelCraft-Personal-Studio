@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.db import connect, encode, decode, new_id
 from app.core.security import get_current_user
+from app.core.authz import require_project_membership
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -40,19 +41,6 @@ def require_admin_reads(user: dict = Depends(get_current_user)) -> dict:
     if allowed and user["email"].lower() not in allowed:
         raise HTTPException(status_code=403, detail="admin access required")
     return user
-
-
-def ensure_project_member(project_id: str, user: dict, roles: set[str] | None = None) -> None:
-    db = connect()
-    member = db.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    db.close()
-    if not member:
-        raise HTTPException(status_code=403, detail="not a project member")
-    if roles and member["role"] not in roles:
-        raise HTTPException(status_code=403, detail="insufficient permissions")
 
 
 class ProviderSettings(BaseModel):
@@ -137,7 +125,7 @@ def list_budgets(project_id: str = "", user: dict = Depends(get_current_user)):
     db = connect()
     if project_id:
         db.close()
-        ensure_project_member(project_id, user)
+        require_project_membership(project_id, user)
         db = connect()
         rows = db.execute("SELECT * FROM budgets WHERE project_id = %s ORDER BY scope", (project_id,)).fetchall()
     else:
@@ -161,7 +149,7 @@ def update_budget(
     payload: BudgetLimitRequest,
     user: dict = Depends(get_current_user),
 ):
-    ensure_project_member(project_id, user, {"owner"})
+    require_project_membership(project_id, user, {"owner"})
     db = connect()
     db.execute(
         """INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
@@ -209,7 +197,7 @@ def update_setting(key: str, payload: SettingUpdateRequest, user: dict = Depends
     """Update non-runtime metadata. Provider runtime configuration is env/BYOK only."""
     runtime_keys = {f"{provider}_{suffix}" for provider in ("deepseek", "claude", "openai", "gemini")
                     for suffix in ("api_key", "base_url", "model")}
-    runtime_keys |= {"request_timeout_seconds", "bootstrap_budget_cny"}
+    runtime_keys |= {"request_timeout_seconds", "default_monthly_budget_cny"}
     if key.lower() in runtime_keys:
         raise HTTPException(409, "运行时 AI 配置请使用环境变量（服务重启生效）或浏览器 BYOK 会话配置")
     db = connect()
@@ -252,7 +240,7 @@ def list_workflows(project_id: str = "", user: dict = Depends(get_current_user))
     db = connect()
     if project_id:
         db.close()
-        ensure_project_member(project_id, user)
+        require_project_membership(project_id, user)
         db = connect()
         rows = db.execute(
             """SELECT * FROM workflows
@@ -282,7 +270,7 @@ def save_workflow(
     user: dict = Depends(get_current_user),
 ):
     project_id = payload.project_id
-    ensure_project_member(project_id, user, {"owner", "editor"})
+    require_project_membership(project_id, user, {"owner", "editor"})
     if name == "bootstrap":
         raise HTTPException(
             status_code=409,

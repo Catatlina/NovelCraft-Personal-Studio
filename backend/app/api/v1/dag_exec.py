@@ -5,12 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import get_current_user
 from app.db import connect, row_to_dict, new_id, encode
+from app.core.authz import ok
 
 router = APIRouter(prefix="/api/v1/admin/workflows", tags=["workflows"])
-
-
-def ok(data: dict) -> dict:
-    return {"code": 0, "message": "ok", "data": data}
 
 
 @router.post("/{name}/execute")

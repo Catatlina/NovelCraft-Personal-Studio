@@ -10,59 +10,15 @@ import logging
 logger = logging.getLogger(__name__)
 from app.core.security import get_current_user
 from app.db import connect
+from app.core.authz import (
+    ok,
+    require_content_member,
+    require_member,
+    require_novel_member,
+    require_project_member,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["complete"])
-
-def ok(data): return {"code": 0, "message": "ok", "data": data}
-
-
-def require_member(db, project_id: str, user: dict, write: bool = False) -> None:
-    row = db.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    if not row:
-        raise HTTPException(403, "not a project member")
-    if write and row["role"] not in {"owner", "editor"}:
-        raise HTTPException(403, "insufficient permissions")
-
-
-def require_novel_member(novel_id: str, user: dict, write: bool = False) -> None:
-    """Resolve a novel to its project and enforce membership before any access."""
-    db = connect()
-    try:
-        novel = db.execute(
-            "SELECT project_id FROM contents WHERE id = %s AND type = 'novel'", (novel_id,)
-        ).fetchone()
-        if not novel:
-            raise HTTPException(404, "novel not found")
-        require_member(db, novel["project_id"], user, write=write)
-    finally:
-        db.close()
-
-
-def require_project_member(project_id: str, user: dict, write: bool = False) -> None:
-    if not project_id or not project_id.strip():
-        raise HTTPException(422, "project_id is required")
-    db = connect()
-    try:
-        require_member(db, project_id, user, write=write)
-    finally:
-        db.close()
-
-
-def require_content_member(content_id: str, user: dict, write: bool = False) -> str:
-    db = connect()
-    try:
-        content = db.execute(
-            "SELECT project_id FROM contents WHERE id=%s AND is_deleted=FALSE", (content_id,)
-        ).fetchone()
-        if not content:
-            raise HTTPException(404, "content not found")
-        require_member(db, content["project_id"], user, write=write)
-        return str(content["project_id"])
-    finally:
-        db.close()
 
 
 def user_project_ids(user: dict) -> list[str]:
@@ -128,7 +84,7 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
         msg = "draft — content saved as draft, manual review required"
     else:
         msg = adapter_status
-    return {"code": 0, "message": msg, "data": result}
+    return ok(result, message=msg)
 
 
 @router.post("/review/multi-round")

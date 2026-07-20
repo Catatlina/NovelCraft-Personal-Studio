@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import settings
 from .core.circuit_breaker import circuit_breaker, record_failure, record_success
+from .core.retry import with_provider_retry
 from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
 from .core.billing import get_active_subscription, monthly_window
@@ -52,6 +53,18 @@ class ProviderError(RuntimeError):
 
 class OutputValidationError(ProviderError):
     """Raised when a provider response is JSON but violates the task contract."""
+
+
+class ProviderRateLimitError(RuntimeError):
+    """Raised on an HTTP 429 from a provider; triggers the rate-limit backoff (P1-T1).
+
+    Carries an optional ``retry_after`` (seconds) parsed from the Retry-After
+    header so callers / the envelope can surface a precise backoff hint.
+    """
+
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class _StrictOutput(BaseModel):
@@ -453,6 +466,31 @@ def validate_task_output(task_type: str, output: Any) -> dict[str, Any]:
         raise OutputValidationError(f"provider output schema mismatch for {task_type}: {exc}") from exc
 
 
+def _execute_provider_call(
+    provider: str, task_type: str, prompt_text: str, model: str, params: dict
+) -> tuple[dict[str, Any], int, int, str, str]:
+    """Execute one real provider call and normalise its return tuple.
+
+    Raises ``ProviderError`` / ``ProviderRateLimitError`` on transport / 429 / 5xx
+    failures (these are retried by the caller's ``with_provider_retry``), and
+    ``OutputValidationError`` only for malformed JSON (handled as a schema
+    concern by the caller). Records a breaker success on the deepseek path.
+    """
+    if provider == "deepseek":
+        if not circuit_breaker("deepseek"):
+            raise ProviderError("deepseek circuit breaker open — too many failures")
+        model_ = _request_model.get() or model or settings.deepseek_model
+        output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
+        record_success("deepseek")
+        return output, prompt_tokens, completion_tokens, "deepseek", model_
+    if provider in ("claude", "openai", "gemini"):
+        output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
+            provider, model or "", prompt_text, params
+        )
+        return output, prompt_tokens, completion_tokens, provider_name, model_name
+    raise ProviderError(f"unsupported real provider: {provider}")
+
+
 def _complete_impl(
     *,
     run_id: str | None,
@@ -486,37 +524,27 @@ def _complete_impl(
     # are non-deterministic, so a malformed structured payload is retried
     # (FR-C3-07, <=2 retries) before it is surfaced as a failure.
     MAX_SCHEMA_ATTEMPTS = 3
+    # Transport / 429 failures are retried by with_provider_retry. The circuit
+    # breaker records a failure ONLY after every retry is exhausted
+    # (on_final_failure), so transient provider blips do not trip the breaker.
+    # Schema-contract violations (OutputValidationError) are NOT transport errors
+    # and are retried separately by the loop below (no_retry_exc re-raises them).
     for schema_attempt in range(MAX_SCHEMA_ATTEMPTS):
         prompt_tokens, completion_tokens = 0, 0
-        if provider == "deepseek":
-            if not circuit_breaker("deepseek"):
-                raise ProviderError("deepseek circuit breaker open — too many failures")
-            try:
-                model_ = _request_model.get() or model or settings.deepseek_model
-                output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
-                record_success("deepseek")
-                provider_name = "deepseek"
-                model_name = model_
-            except OutputValidationError:
-                # Non-JSON and other structured-response violations are model
-                # sample failures, not transport outages. Retry with a fresh
-                # real completion under the same contract.
-                if schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
-                    record_failure("deepseek")
-                    raise
-                continue
-            except ProviderError:
-                record_failure("deepseek")
+        try:
+            output, prompt_tokens, completion_tokens, provider_name, model_name = with_provider_retry(
+                rate_limit_exc=(ProviderRateLimitError,),
+                transport_exc=(ProviderError,),
+                no_retry_exc=(OutputValidationError,),
+                on_final_failure=lambda exc: record_failure(provider),
+            )(_execute_provider_call)(provider, task_type, prompt_text, model, params)
+        except OutputValidationError:
+            # Schema-contract violation (non-JSON / malformed structured output)
+            # is a model-sample failure, not a transport outage — retry with a
+            # fresh real completion under the same contract.
+            if schema_attempt >= MAX_SCHEMA_ATTEMPTS - 1:
                 raise
-        elif provider in ("claude", "openai", "gemini"):
-            try:
-                output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
-                    provider, model or "", prompt_text, params
-                )
-            except Exception as exc:
-                raise ProviderError(f"provider {provider} failed for {task_type}: {exc}") from exc
-        else:
-            raise ProviderError(f"unsupported real provider: {provider}")
+            continue
 
         try:
             output = validate_task_output(task_type, output)
@@ -802,6 +830,16 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     try:
         with urllib.request.urlopen(request, timeout=settings.request_timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # HTTP 429 -> dedicated rate-limit error so the rate-limit backoff applies.
+        if exc.code == 429:
+            raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            retry_after = int(raw_retry_after) if (raw_retry_after and str(raw_retry_after).isdigit()) else None
+            raise ProviderRateLimitError(
+                f"deepseek rate limited (429): {exc}", retry_after=retry_after
+            ) from exc
+        alert_provider_error(task_type, f"deepseek http {exc.code}")
+        raise ProviderError(f"deepseek http error {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         alert_provider_error(task_type, str(exc))
         raise ProviderError(f"deepseek request failed: {exc}") from exc

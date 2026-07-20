@@ -53,7 +53,7 @@ def reindex_knowledge_item(item_id: str, user: dict = Depends(get_current_user))
 @router.post("/reindex-project")
 def reindex_project(project_id: str, user: dict = Depends(get_current_user)):
     """切换 EMBEDDING_BACKEND 后全量重嵌当前项目（owner/editor）。"""
-    from app.api.v1.complete_api import require_project_member
+    from app.core.authz import require_project_member
     from app.services.knowledge_hub import reindex_project_embeddings
 
     require_project_member(project_id, user, write=True)

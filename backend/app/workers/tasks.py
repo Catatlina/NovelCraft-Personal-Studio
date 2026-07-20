@@ -405,9 +405,9 @@ def _track_budget(run_id, node_key, cost_cny):
             from app.config import settings
             db.execute(
                 "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s,%s,'bootstrap',%s,%s)",
-                (new_id("bdg"), project_id, settings.bootstrap_budget_cny, spent),
+                (new_id("bdg"), project_id, settings.default_monthly_budget_cny, spent),
             )
-            limit = float(settings.bootstrap_budget_cny)
+            limit = float(settings.default_monthly_budget_cny)
         else:
             limit = float(budget["limit_cny"])
             db.execute(
@@ -823,12 +823,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                     payload={"reason": "invalid_output"})
             return {"status": "invalid_output", "node_key": node_key}
         except ProviderError as exc:
-            # AI provider failures are terminal for this run: no mock, no silent
-            # fallback, and no "pending" state that can be mistaken for success.
-            _mark_node(run_id, node_key, "failed", f"provider error: {exc}"[:500])
-            _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
+            # Provider failures are retryable through Celery (max_retries=3).
+            # The gateway already exhausted its internal backoff before
+            # re-raising, so we let the whole run retry rather than failing it
+            # silently. Once Celery exhausts its retries this becomes terminal.
+            _mark_node(run_id, node_key, "pending_provider", f"provider error: {exc}"[:500])
+            _record_bootstrap_event(run_id, "node.retrying", node_key=node_key,
                                     payload={"reason": "provider_error", "detail": str(exc)[:200]})
-            return {"status": "failed", "node_key": node_key, "reason": str(exc)}
+            raise self.retry(exc=exc, countdown=5)
         except Exception as exc:
             _mark_node(run_id, node_key, "failed", str(exc))
             _record_bootstrap_event(run_id, "node.failed", node_key=node_key,
@@ -874,6 +876,18 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
     celery_app.backend.set(f"run:{run_id}:status", final_status)
     _record_bootstrap_event(run_id, "run.completed", payload={"status": final_status})
     return {"status": final_status}
+
+
+@celery_app.task(name="app.core.billing.reset_monthly_usage")
+def monthly_usage_reset() -> dict[str, Any]:
+    """Celery wrapper for the monthly usage reset (P1-T2).
+
+    The heavy lifting lives in ``app.core.billing.reset_monthly_usage`` so it
+    stays testable without a Celery runtime. Registered under the canonical
+    name so the beat schedule can reference ``app.core.billing.reset_monthly_usage``.
+    """
+    from app.core.billing import reset_monthly_usage
+    return reset_monthly_usage()
 # ═══════════════════════════════════════════════════════════════════════════
 # Context enrichment helpers
 # ═══════════════════════════════════════════════════════════════════════════

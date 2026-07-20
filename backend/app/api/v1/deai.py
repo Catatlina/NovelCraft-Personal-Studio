@@ -9,14 +9,11 @@ from pydantic import BaseModel, Field
 from app.core.security import get_current_user
 from app.db import connect
 from app.services.deai_pipeline import DeaiPipeline, deai_score, quick_deai_score
+from app.core.authz import ok
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["deai"])
-
-
-def ok(data: dict) -> dict:
-    return {"code": 0, "message": "ok", "data": data}
 
 
 def err(code: int, message: str) -> dict:

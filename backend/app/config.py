@@ -13,6 +13,11 @@ class Settings:
     # Verified against the official /models endpoint on 2026-07-16.
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "180"))
+    # DEPRECATED (P1-T2): the per-project "bootstrap" budget is no longer
+    # enforced. Monthly spend is derived from the active plan's
+    # ``monthly_budget_cny`` in ``gateway._assert_budget``. Kept only for
+    # backward compatibility; new code must use ``default_monthly_budget_cny``
+    # as the single source of truth. Will be removed in a future cleanup.
     bootstrap_budget_cny: float = float(os.getenv("NOVELCRAFT_BOOTSTRAP_BUDGET_CNY", "2.0"))
     # Single source of truth for the default per-user monthly AI cost budget (CNY).
     # The seeded Free plan derives its own finite limit from this same value so

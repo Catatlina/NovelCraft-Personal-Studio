@@ -1,6 +1,7 @@
 import json
 import os
 import secrets
+import uuid
 from typing import Any
 
 from contextlib import asynccontextmanager
@@ -15,8 +16,15 @@ from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
-from .gateway import BudgetExceeded, ProviderError, complete
+from .gateway import (
+    BudgetExceeded,
+    OutputValidationError,
+    ProviderError,
+    ProviderRateLimitError,
+    complete,
+)
 from .config import settings
+from .core.authz import ensure_project_member, ok
 from .schemas import (
     AiEditRequest,
     AiOperation,
@@ -91,6 +99,78 @@ async def database_pool_exhausted(_request: Request, exc: psycopg2.pool.PoolErro
         "message": "database connection pool exhausted",
         "data": {"retryable": True},
     })
+
+@app.exception_handler(BudgetExceeded)
+async def handle_budget_exceeded(_request: Request, exc: BudgetExceeded):
+    logger.warning("budget exceeded: %s", exc)
+    return JSONResponse(status_code=402, content={
+        "code": 402,
+        "message": str(exc),
+        "data": {"retryable": False},
+    })
+
+
+@app.exception_handler(ProviderRateLimitError)
+async def handle_provider_rate_limit(_request: Request, exc: ProviderRateLimitError):
+    data: dict[str, Any] = {"retryable": True}
+    if exc.retry_after is not None:
+        data["retry_after"] = exc.retry_after
+    return JSONResponse(status_code=429, content={
+        "code": 429,
+        "message": str(exc) or "请求过于频繁，请稍后重试",
+        "data": data,
+    })
+
+
+@app.exception_handler(OutputValidationError)
+async def handle_output_validation(_request: Request, exc: OutputValidationError):
+    logger.error("provider output invalid: %s", exc)
+    return JSONResponse(status_code=502, content={
+        "code": 502,
+        "message": str(exc),
+        "data": {"code": "PROVIDER_OUTPUT_INVALID", "retryable": False},
+    })
+
+
+@app.exception_handler(ProviderError)
+async def handle_provider_error(_request: Request, exc: ProviderError):
+    logger.error("provider error: %s", exc)
+    return JSONResponse(status_code=502, content={
+        "code": 502,
+        "message": "AI 服务商暂时不可用，请稍后重试",
+        "data": {"retryable": True, "detail": str(exc)},
+    })
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(_request: Request, exc: HTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict):
+        code = detail.get("code", exc.status_code)
+        message = detail.get("message", str(detail))
+        data = {k: v for k, v in detail.items() if k not in ("code", "message")} or None
+    else:
+        code = exc.status_code
+        message = str(detail)
+        data = None
+    return JSONResponse(status_code=exc.status_code, content={
+        "code": code,
+        "message": message,
+        "data": data,
+    })
+
+
+@app.exception_handler(Exception)
+async def handle_unhandled(_request: Request, exc: Exception):
+    # P1-T5: never leak stack traces; return a sanitized 500 with a trace_id.
+    trace_id = uuid.uuid4().hex
+    logger.exception("unhandled exception trace_id=%s", trace_id)
+    return JSONResponse(status_code=500, content={
+        "code": 500,
+        "message": "服务内部错误，请稍后重试",
+        "data": {"trace_id": trace_id},
+    })
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -182,10 +262,6 @@ async def capture_api_key(request: Request, call_next):
             variable.reset(token)
 
 
-def ok(data: Any = None) -> ApiResponse:
-    return ApiResponse(data=data)
-
-
 def parse_content(row: dict[str, Any]) -> dict[str, Any]:
     row["body"] = decode(row["body"], {})
     row["meta"] = decode(row["meta"], {})
@@ -210,18 +286,6 @@ class AgentExecuteRequest(BaseModel):
 class ChapterReviewRequest(BaseModel):
     decision: str = Field(pattern="^(approve|reject)$")
     reason: str = Field(default="", max_length=1000)
-
-
-def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
-    member = conn.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    if not member:
-        raise HTTPException(status_code=403, detail="not a project member")
-    if roles and member["role"] not in roles:
-        raise HTTPException(status_code=403, detail="insufficient permissions")
-    return dict(member)
 
 
 def load_content_for_user(content_id: str, user: dict, roles: set[str] | None = None) -> tuple[Any, dict]:
@@ -1138,6 +1202,11 @@ def ai_edit(
     from .core.billing import enforce_quota
     enforce_quota(user["id"], None, "max_words_per_month")
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
+    # P1-T3: the bare complete() calls below intentionally let ProviderError /
+    # ProviderRateLimitError / BudgetExceeded propagate to the global error
+    # handler (main.py) which wraps them in a consistent {code,message,data}
+    # envelope. The ai_edit version branch is written only AFTER every completion
+    # succeeds, so a mid-pipeline failure leaves no half-written version row.
     output = complete(
         run_id=None,
         node_key=None,

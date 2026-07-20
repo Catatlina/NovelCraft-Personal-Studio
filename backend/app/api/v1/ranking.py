@@ -17,6 +17,7 @@ from app.db import connect, encode, new_id
 from app.services.ranking_adapter import RANKING_FETCHERS, normalize_ranking_items
 from app.services.ranking_capture import ALLOWED_CAPTURE_SOURCES, CaptureResult, validate_with_open_library
 from app.gateway import BudgetExceeded, ProviderError, complete
+from app.core.authz import ok, require_member
 
 router = APIRouter(prefix="/api/v1/ranking", tags=["ranking"])
 library_router = APIRouter(prefix="/api/v1/library", tags=["library"])
@@ -25,21 +26,6 @@ SOURCE_NAMES = {"fanqie": "番茄小说", "qidian": "起点中文网", "zongheng
                 "qqread": "QQ阅读", "jjwxc": "晋江文学城",
                 "sfacg": "SF轻小说", "xxsy": "潇湘书院"}
 MIN_AUTOMATED_CONFIDENCE = 0.85
-
-
-def ok(data: Any):
-    return {"code": 0, "message": "ok", "data": data}
-
-
-def require_member(db, project_id: str, user: dict, write: bool = False) -> None:
-    row = db.execute(
-        "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
-        (project_id, user["id"]),
-    ).fetchone()
-    if not row:
-        raise HTTPException(403, "not a project member")
-    if write and row["role"] not in {"owner", "editor"}:
-        raise HTTPException(403, "insufficient permissions")
 
 
 def rows(db, sql: str, params: tuple = ()) -> list[dict]:

@@ -15,13 +15,23 @@ No payment gateway is involved (MVP): plans are switched manually.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException
 
-from app.db import connect, row_to_dict
+from app.db import connect, new_id, row_to_dict
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Optional extension hooks. These are module-level callables rather than hard
+# imports so deployments that wire a cache or analytics pipeline can plug in
+# without creating a circular dependency on those modules. The billing module
+# has no in-process cache of its own — usage is derived from ``ai_calls`` per
+# request — so the default hook is a no-op.
+_on_cache_invalidate: Callable[[str], None] | None = None
 
 FREE_PLAN_ID = "plan_free"
 
@@ -199,3 +209,114 @@ def enforce_quota(
                     },
                 )
     # Unknown kind is a no-op (defensive).
+
+
+def register_cache_invalidation_hook(hook: Callable[[str], None] | None) -> None:
+    """Register a callback invoked with the archived month key on a monthly reset.
+
+    The billing module keeps no in-process cache (usage is derived from
+    ``ai_calls`` per request), but deployments that *do* cache subscription or
+    usage views can flush them here. Passing ``None`` clears the hook.
+    """
+    global _on_cache_invalidate
+    _on_cache_invalidate = hook
+
+
+def reset_monthly_usage(
+    now: datetime | None = None,
+    on_archive: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Archive the previous calendar month's AI usage and invalidate caches.
+
+    Idempotent: re-running for the same previous month is a no-op for the
+    archive (guarded by an existence check), and cache invalidation is naturally
+    idempotent. There is **no stored monthly counter to reset** — monthly spend
+    is *derived* from ``ai_calls`` by natural-month window (see ``monthly_window``
+    and ``gateway._assert_budget``), so a new month automatically starts from zero.
+
+    This is intended to be driven by a Celery beat (see
+    ``app.workers.celery_app`` — ``monthly-usage-reset``) on the first of each
+    month.
+
+    Args:
+        now: Injectable current time (defaults to ``datetime.now(timezone.utc)``).
+        on_archive: Optional extension hook receiving the snapshot dict.
+
+    Returns:
+        The previous-month snapshot (or an empty placeholder when nothing ran).
+    """
+    now = now or datetime.now(timezone.utc)
+
+    # Previous calendar month relative to ``now``.
+    if now.month == 1:
+        p_start = now.replace(year=now.year - 1, month=12, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        p_start = now.replace(month=now.month - 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    if p_start.month == 12:
+        p_end = p_start.replace(year=p_start.year + 1, month=1)
+    else:
+        p_end = p_start.replace(month=p_start.month + 1)
+    month_key = p_start.strftime("%Y-%m")
+
+    db = connect()
+    try:
+        agg = row_to_dict(db.execute(
+            """
+            SELECT COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,
+                   COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
+                   COALESCE(SUM(cost_cny), 0)::float AS cost_cny,
+                   COUNT(*) AS calls
+            FROM ai_calls
+            WHERE created_at >= %s AND created_at < %s
+            """,
+            (p_start, p_end),
+        ).fetchone())
+        snapshot = {
+            "month": month_key,
+            "prompt_tokens": int(agg.get("prompt_tokens") or 0),
+            "completion_tokens": int(agg.get("completion_tokens") or 0),
+            "cost_cny": float(agg.get("cost_cny") or 0),
+            "calls": int(agg.get("calls") or 0),
+        }
+
+        # ── Archive (best-effort; the table is optional per deployment) ──
+        try:
+            table_exists = db.execute(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = current_schema() AND table_name = 'usage_archive'
+                """
+            ).fetchone()
+            if table_exists:
+                already = db.execute(
+                    "SELECT 1 FROM usage_archive WHERE month = %s", (month_key,)
+                ).fetchone()
+                if not already:
+                    db.execute(
+                        """
+                        INSERT INTO usage_archive
+                            (id, month, prompt_tokens, completion_tokens, cost_cny, calls, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, now())
+                        """,
+                        (new_id("ua"), month_key, snapshot["prompt_tokens"],
+                         snapshot["completion_tokens"], snapshot["cost_cny"], snapshot["calls"]),
+                    )
+                    db.commit()
+        except Exception as exc:  # pragma: no cover - defensive, deployment-specific
+            logger.warning("monthly usage archive skipped for %s: %s", month_key, exc)
+            db.rollback()
+
+        # ── Cache invalidation (extension point) ──
+        if _on_cache_invalidate is not None:
+            try:
+                _on_cache_invalidate(month_key)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("cache invalidation hook failed for %s: %s", month_key, exc)
+
+        # ── Extension hook ──
+        if on_archive is not None:
+            on_archive(snapshot)
+
+        return snapshot
+    finally:
+        db.close()
