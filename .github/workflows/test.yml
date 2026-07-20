@@ -50,7 +50,26 @@ jobs:
       - name: Verify delivery claims
         run: python scripts/verify_delivery_claims.py
       - name: Validate prompt golden-case definitions
-        run: PYTHONPATH=backend python -c "from app.services.fusion_deep import run_golden_case_ci; r=run_golden_case_ci(); print(r); assert r['definition_invalid'] == 0 and r['provider_outputs_verified'] == 0"
+        run:           PYTHONPATH=backend python -c "from app.services.fusion_deep import run_golden_case_ci; r=run_golden_case_ci(); print(r); assert r['definition_invalid'] == 0 and r['provider_outputs_verified'] == 0"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Install SAST tools
+        run: pip install bandit semgrep
+      - name: Bandit (Python SAST — fail on HIGH)
+        # P3-T4 / G11: CI 跑 SAST。对历史存量高危先以 continue-on-error 暴露而不阻断
+        # 既有流水线；新代码应保证 bandit -s high 零高危。基线排除 tests/alembic/scripts。
+        run: bandit -r backend/app -c .bandit -s high
+        continue-on-error: true
+      - name: Semgrep (best-effort, requires SEMGREP_APP_TOKEN)
+        if: ${{ env.SEMGREP_APP_TOKEN != '' }}
+        env: {SEMGREP_APP_TOKEN: "${{ secrets.SEMGREP_APP_TOKEN }}"}
+        run: semgrep ci
+        continue-on-error: true
 
   frontend:
     runs-on: ubuntu-latest

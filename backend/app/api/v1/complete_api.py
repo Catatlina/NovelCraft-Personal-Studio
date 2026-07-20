@@ -9,6 +9,7 @@ import re
 import logging
 logger = logging.getLogger(__name__)
 from app.core.security import get_current_user
+from app.core.errors import public_message
 from app.db import connect
 from app.core.authz import (
     ok,
@@ -90,8 +91,8 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
         record_publish_attempt(content_id, platform, "failed", {"error": str(exc)[:500]})
         logger.warning("publish_to_platform failed: %s", exc)
         raise HTTPException(502, {"code": "PUBLISH_FAILED",
-                                  "message": f"发布到 {platform} 失败：{exc}",
-                                  "detail": str(exc)[:300]}) from exc
+                                  "message": f"发布到 {platform} 失败，请检查平台凭据或稍后重试",
+                                  "detail": public_message(exc, "发布服务返回异常")}) from exc
 
     # Reflect the adapter's honest status in the response message
     adapter_status = result.get("status", "unknown")
@@ -423,10 +424,7 @@ def get_performance_feedback(payload: PerformanceFeedbackRequest, user: dict = D
     try:
         return ok(performance_feedback(payload.project_id, project_ids=user_project_ids(user)))
     except (ProviderError, BudgetExceeded) as exc:
-        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
-
-
-# --- NC-SEA-001~003: Overseas markets, translation, publishing ---
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": public_message(exc, "AI 服务暂时不可用")}) from exc
 
 @router.get("/markets")
 def get_market_config_endpoint(market: str = "", user: dict = Depends(get_current_user)):

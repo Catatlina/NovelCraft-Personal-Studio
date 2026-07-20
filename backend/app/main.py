@@ -1273,6 +1273,11 @@ def _chapter_review_context(content: dict, text: str) -> dict:
 
 @app.post("/api/v1/contents/{content_id}/ai/{op}/stream")
 @limiter.limit("20/minute")
+def sse_event(payload: dict) -> str:
+    """Frame a Server-Sent-Event payload as ``data: {json}\\n\\n`` (single source of truth)."""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 def ai_edit_stream(
     request: Request,
     content_id: str,
@@ -1305,10 +1310,10 @@ def ai_edit_stream(
                 client_mutation_id=payload.client_mutation_id,
             ):
                 chunks.append(delta)
-                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+                yield sse_event({"delta": delta})
         except (ProviderError, BudgetExceeded) as exc:
             code = "PENDING_BUDGET" if isinstance(exc, BudgetExceeded) else "PROVIDER_FAILED"
-            yield f"data: {json.dumps({'error': str(exc), 'code': code}, ensure_ascii=False)}\n\n"
+            yield sse_event({"error": public_message(exc, "AI 服务暂时不可用"), "code": code})
             return
         full_text = "".join(chunks)
         version_conn = connect()
@@ -1323,7 +1328,7 @@ def ai_edit_stream(
         )
         version_conn.commit()
         version_conn.close()
-        yield f"data: {json.dumps({'done': True, 'text': full_text}, ensure_ascii=False)}\n\n"
+        yield sse_event({"done": True, "text": full_text})
 
     return StreamingResponse(event_source(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
