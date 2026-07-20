@@ -541,22 +541,18 @@ class TenLayerAnalyzer:
         start_time = time.monotonic()
 
         def _do_call() -> dict[str, Any]:
-            try:
-                return complete(
-                    run_id=None,
-                    node_key=None,
-                    project_id=self.project_id,
-                    task_type=task_type,
-                    prompt_name=prompt_name,
-                    variables={
-                        "system_context": system_context,
-                        "analysis_instructions": analysis_instructions,
-                    },
-                    client_mutation_id=f"ten-layer:{self.project_id}:{layer}:v1",
-                )
-            except Exception as e:
-                # DB connection may fail in thread context — return error dict
-                return {"error": str(e), "error_type": type(e).__name__}
+            return complete(
+                run_id=None,
+                node_key=None,
+                project_id=self.project_id,
+                task_type=task_type,
+                prompt_name=prompt_name,
+                variables={
+                    "system_context": system_context,
+                    "analysis_instructions": analysis_instructions,
+                },
+                client_mutation_id=f"ten-layer:{self.project_id}:{layer}:v1",
+            )
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

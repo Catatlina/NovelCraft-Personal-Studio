@@ -154,8 +154,10 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function analyze(snapshot: Snapshot) {
     setBusy(`analysis:${snapshot.id}`); setMessage("");
     try {
-      // Use new 10-layer analysis endpoint
-      const result = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
+      const detailBefore = await api<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
+      // Ten-layer analysis produces heatmap/trend insight; the snapshot analysis endpoint
+      // produces persisted original topic candidates used by the book-creation buttons.
+      const tenLayerResult = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
         method: "POST",
         body: JSON.stringify({
           snapshot_id: snapshot.id,
@@ -163,26 +165,32 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           analysis_mode: "single",
         }),
       });
-      const data = result.data;
+      const data = tenLayerResult.data;
+      const topicResult = await api<Wrapped<any>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, { method: "POST", body: "{}" });
+      const topicData = topicResult.data || {};
       setSnapshotDetails(current => ({
         ...current,
         [snapshot.id]: {
-          ...(current[snapshot.id] || snapshot),
-          items: current[snapshot.id]?.items || [],
+          ...detailBefore.data,
           latest_analysis: {
-            analysis_id: data.analysis_id,
-            summary: `十层分析完成：${data.succeeded_layers}/${data.total_layers}层`,
-            status: data.status,
-            analysis_mode: "ten_layer",
-            signals: data.TrendReport?.market_trends || [],
+            analysis_id: topicData.analysis_id || data.analysis_id,
+            summary: topicData.summary || `十层分析完成：${data.succeeded_layers}/${data.total_layers}层`,
+            status: topicData.status || data.status,
+            analysis_mode: topicData.analysis_mode || "ai",
+            signals: topicData.signals || data.TrendReport?.market_trends || [],
             layers: data.ScanResult || {},
             heatmap: data.HeatMap,
             keywords: data.KeywordCloud,
+            audience: topicData.audience,
+            title_patterns: topicData.title_patterns,
+            pacing: topicData.pacing,
+            market_signals: topicData.market_signals,
+            originality_constraints: topicData.originality_constraints,
           },
         } as SnapshotDetail,
       }));
       setOpenSnapshotId(snapshot.id);
-      setMessage(`十层分析完成：${data.succeeded_layers}/${data.total_layers}层通过`);
+      setMessage(`分析完成：十层 ${data.succeeded_layers}/${data.total_layers} 层通过，生成 ${Array.isArray(topicData.candidates) ? topicData.candidates.length : 0} 个原创选题`);
       await load();
     } catch (error) { setMessage(`分析失败：${errorText(error)}`); }
     finally { setBusy(""); }

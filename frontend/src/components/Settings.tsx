@@ -244,7 +244,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
               {model.includes("flash") && (
                 <div style={{fontSize:12, color:"var(--orange)", marginBottom:12}}>
-                  Flash 是速度优先模型，容易出现长篇设定漂移；小说规划和正文建议使用 deepseek-v4-pro。
+                  Flash 是速度优先模型，容易出现长篇设定漂移；小说规划和正文建议留空使用后端路由模型。
                 </div>
               )}
 
@@ -560,20 +560,21 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
               <div style={{display:"flex", flexDirection:"column", gap:12, padding:"16px", background:"var(--bg-hover)", borderRadius:"var(--r-md)", border:"1px solid var(--border)"}}>
                 <div className="field">
-                  <label>平台</label>
-                  <select className="form-input" value={connectionPlatform} onChange={e => { setConnectionPlatform(e.target.value); setConnectionCreds({}); }}>
+                  <label htmlFor="connection-platform">平台</label>
+                  <select id="connection-platform" className="form-input" value={connectionPlatform} onChange={e => { setConnectionPlatform(e.target.value); setConnectionCreds({}); }}>
                     {platformsForCategory.map(([key, spec]) => <option key={key} value={key}>{spec.display_name}</option>)}
                   </select>
                 </div>
                 {activeSpec?.help && <p style={{fontSize:12, color:"var(--text-3)"}}>{activeSpec.help}</p>}
                 <div className="field">
-                  <label>账号/连接名</label>
-                  <input className="form-input" value={connectionAccount} onChange={e=>setConnectionAccount(e.target.value)} placeholder="default" />
+                  <label htmlFor="connection-account">账号/连接名</label>
+                  <input id="connection-account" className="form-input" value={connectionAccount} onChange={e=>setConnectionAccount(e.target.value)} placeholder="default" />
                 </div>
                 {activeSpec?.fields?.map(field => (
                   <div className="field" key={field.key}>
-                    <label>{field.label}{field.required ? " *" : ""}</label>
+                    <label htmlFor={`connection-field-${field.key}`}>{field.label}{field.required ? " *" : ""}</label>
                     <input
+                      id={`connection-field-${field.key}`}
                       className="form-input"
                       type={field.type === "secret" ? "password" : field.type === "url" ? "url" : "text"}
                       value={connectionCreds[field.key] || ""}

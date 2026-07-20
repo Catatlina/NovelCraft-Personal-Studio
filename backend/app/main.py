@@ -183,6 +183,19 @@ class ChapterReviewRequest(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class PublishReceiptRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=50)
+    status: str = Field(default="published", pattern="^(submitted|published|failed|retracted)$")
+    published_url: str = Field(default="", max_length=2000)
+    receipt_note: str = Field(default="", max_length=2000)
+    reads: int = Field(default=0, ge=0)
+    likes: int = Field(default=0, ge=0)
+    comments: int = Field(default=0, ge=0)
+    shares: int = Field(default=0, ge=0)
+    revenue: float = Field(default=0, ge=0)
+    currency: str = Field(default="CNY", max_length=10)
+
+
 def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict:
     member = conn.execute(
         "SELECT role FROM project_members WHERE project_id = %s AND user_id = %s",
@@ -1510,6 +1523,75 @@ def publish_records(content_id: str | None = None, user: dict = Depends(get_curr
     ]
     conn.close()
     return ok(list_publish_records(project_ids=project_ids))
+
+
+@app.post("/api/v1/publish-receipts")
+def publish_receipt(content_id: str, payload: PublishReceiptRequest, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Record a real manual/platform publish receipt and optional engagement metrics.
+
+    This endpoint does not claim external publishing by itself. It records the
+    user/platform-provided receipt after the user has actually published or
+    submitted the content, then feeds the ROI dashboard with the supplied real
+    metrics.
+    """
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
+    project_id = content["project_id"]
+    conn.close()
+    data = payload.model_dump()
+    evidence = {
+        "published_url": data["published_url"],
+        "receipt_note": data["receipt_note"],
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "metrics": {
+            "reads": data["reads"],
+            "likes": data["likes"],
+            "comments": data["comments"],
+            "shares": data["shares"],
+            "revenue": data["revenue"],
+            "currency": data["currency"],
+        },
+    }
+    db = connect()
+    existing = db.execute(
+        "SELECT id, meta, result FROM publish_records WHERE content_id=%s AND platform=%s ORDER BY created_at DESC LIMIT 1",
+        (content_id, data["platform"]),
+    ).fetchone()
+    if existing:
+        db.execute(
+            """
+            UPDATE publish_records
+            SET status=%s,
+                published_url=%s,
+                published_at=CASE WHEN %s='published' THEN COALESCE(published_at, now()) ELSE published_at END,
+                result=COALESCE(result, '{}'::jsonb) || %s,
+                meta=COALESCE(meta, '{}'::jsonb) || %s,
+                updated_at=now()
+            WHERE id=%s
+            """,
+            (data["status"], data["published_url"] or None, data["status"],
+             encode({"receipt": evidence}), encode({"receipt": evidence}), existing["id"]),
+        )
+        record_id = existing["id"]
+    else:
+        record_id = new_id()
+        db.execute(
+            """
+            INSERT INTO publish_records
+              (id, content_id, platform, mode, status, published_url, published_at, result, meta)
+            VALUES (%s, %s, %s, 'manual', %s, %s,
+              CASE WHEN %s='published' THEN now() ELSE NULL END, %s, %s)
+            """,
+            (record_id, content_id, data["platform"], data["status"], data["published_url"] or None,
+             data["status"], encode({"receipt": evidence}), encode({"receipt": evidence})),
+        )
+    db.commit()
+    db.close()
+
+    metrics_result = None
+    if any(data[key] for key in ("reads", "likes", "comments", "shares")) or data["revenue"] > 0:
+        from .services.publish_hub import collect_platform_data
+        metrics_result = collect_platform_data(data["platform"], content_id, {**data, "project_id": project_id})
+    return ok({"status": "recorded", "record_id": record_id, "metrics": metrics_result})
 
 
 @app.post("/api/v1/collaboration/invite")

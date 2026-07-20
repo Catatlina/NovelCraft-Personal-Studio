@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.gateway import complete as gateway_complete, ProviderError, OutputValidationError
+from app.gateway import complete, ProviderError, OutputValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ class DeaiPipeline:
             }
 
             try:
-                result = gateway_complete(
+                result = complete(
                     run_id=None,
                     node_key=None,
                     project_id=self.project_id,
@@ -145,11 +145,17 @@ class DeaiPipeline:
                     },
                 )
                 new_text = result.get("text", current_text)
-                if new_text and new_text.strip() and new_text != current_text:
-                    current_text = new_text
+                candidate_text = (
+                    new_text
+                    if new_text and new_text.strip() and new_text != current_text
+                    else current_text
+                )
 
-                # Re-score after this layer
-                new_score = deai_score(self.project_id, current_text)
+                # Re-score before accepting this layer's text. If scoring
+                # fails, the layer is marked skipped and the previous text is
+                # preserved rather than returning a half-applied rewrite.
+                new_score = deai_score(self.project_id, candidate_text)
+                current_text = candidate_text
                 layer_result["score_after"] = new_score
                 layer_result["changes"] = result.get("changes", [])
                 layer_result["status"] = "done"
@@ -177,6 +183,8 @@ def deai_score(project_id: str, text: str) -> int:
     """Score a text for AI-taste (0 = natural, 100 = robotic/AI-generated).
 
     Uses heuristic pre-check + LLM scoring via gateway.complete().
+    Provider/output failures are terminal: callers must surface an explicit
+    error instead of returning a local score as if AI scoring succeeded.
     Returns 0-100 integer.
     """
     if not text or not text.strip():
@@ -191,9 +199,8 @@ def deai_score(project_id: str, text: str) -> int:
 
     heuristic_base = min(len(detected_isms) * 6, 45)  # Cap heuristic at 45
 
-    # LLM deep scoring
     try:
-        result = gateway_complete(
+        result = complete(
             run_id=None,
             node_key=None,
             project_id=project_id,
@@ -207,8 +214,8 @@ def deai_score(project_id: str, text: str) -> int:
         )
         ai_score = int(result.get("score", 50))
     except (ProviderError, OutputValidationError, ValueError) as exc:
-        logger.warning("DeAI scoring via LLM failed: %s — using heuristic", exc)
-        ai_score = heuristic_base + 30  # Conservative fallback
+        logger.warning("DeAI scoring via LLM failed: %s", exc)
+        raise ProviderError(f"DeAI scoring failed: {exc}") from exc
 
     # Blend: 40% heuristic + 60% AI
     final_score = int(heuristic_base * 0.4 + ai_score * 0.6)

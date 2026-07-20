@@ -139,6 +139,39 @@ def test_metrics_backflow_sweep_aggregates_collected_platform_data():
     assert row["result"]["last_checked"]
 
 
+def test_manual_publish_receipt_records_status_and_roi_data():
+    client, headers, project_id = _auth_project()
+    content_id = _make_content(project_id, "人工回执文章")
+
+    response = client.post(
+        f"/api/v1/publish-receipts?content_id={content_id}",
+        headers=headers,
+        json={
+            "platform": "wechat",
+            "status": "published",
+            "published_url": "https://example.com/manual-receipt",
+            "receipt_note": "人工复制发布后登记回执",
+            "reads": 123,
+            "likes": 7,
+            "comments": 2,
+            "shares": 3,
+            "revenue": 1.5,
+            "currency": "CNY",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "recorded"
+
+    records = client.get(f"/api/v1/publish/records?content_id={content_id}", headers=headers).json()["data"]
+    assert records[0]["status"] == "published"
+    assert records[0]["published_url"] == "https://example.com/manual-receipt"
+    assert records[0]["result"]["receipt"]["metrics"]["reads"] == 123
+
+    dashboard = client.get("/api/v1/analytics/dashboard", headers=headers).json()["data"]
+    assert dashboard["totals"]["total_reads"] >= 123
+    assert dashboard["totals"]["total_revenue"] >= 1.5
+
+
 def test_beat_schedule_covers_publish_automation():
     from app.workers.celery_app import celery_app
 

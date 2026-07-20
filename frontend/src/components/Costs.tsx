@@ -43,7 +43,7 @@ export function Costs({ aiCalls, budgets, routes }: {
       </div>
       <div className="card" style={{display:"flex",flexDirection:"column",gap:14}}>
         <div className="card-head">
-          <div className="card-title">预算</div>
+          <h3 className="card-title">预算</h3>
         </div>
         {safeBudgets.length > 0 ? safeBudgets.map(b => (
           <div key={b.id}>
@@ -59,7 +59,7 @@ export function Costs({ aiCalls, budgets, routes }: {
           </div>
         )}
         <div className="card-head" style={{marginTop:4}}>
-          <div className="card-title">模型路由</div>
+          <h3 className="card-title">模型路由</h3>
         </div>
         {safeRoutes.length > 0 ? safeRoutes.slice(0,10).map(r => (
           <div key={r.id} className="card" style={{padding:12}}>

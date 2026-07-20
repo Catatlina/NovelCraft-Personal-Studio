@@ -24,8 +24,8 @@ export function getApiUrl(): string { return sessionStorage.getItem(K_API_URL) |
 export function setApiUrl(url: string) { sessionStorage.setItem(K_API_URL, url); }
 export function getModel(): string {
   const stored = sessionStorage.getItem(K_MODEL) || "";
-  // One-time migration: this low-cost model produced demonstrable long-form
-  // fact drift. An empty override lets the server's visible v4-pro route apply.
+  // One-time migration: this low-cost model is not the preferred long-form
+  // route. An empty override lets the server-side route apply.
   if (stored === "deepseek-v4-flash") {
     sessionStorage.removeItem(K_MODEL);
     return "";

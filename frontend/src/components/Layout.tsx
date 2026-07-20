@@ -58,6 +58,8 @@ export function Layout({ tab, setTab, title, children }: {
             label="概览" active={isActive('overview')} onClick={() => setTab('overview')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>}
             label="工作台" active={isActive('dashboard')} onClick={() => setTab('dashboard')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v16H4z"/><path d="M4 10h16"/><path d="M10 10v10"/></svg>}
+            label="工作区" active={isActive('workspace')} onClick={() => setTab('workspace')} />
         </div>
 
         {/* 小说创作 */}
@@ -102,6 +104,8 @@ export function Layout({ tab, setTab, title, children }: {
             label="工作流编排" active={isActive('dag')} onClick={() => setTab('dag')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>}
             label="版本树" active={isActive('versions')} onClick={() => setTab('versions')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>}
+            label="协作管理" active={isActive('collaboration')} onClick={() => setTab('collaboration')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}
             label="插件管理" active={isActive('plugins')} onClick={() => setTab('plugins')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/></svg>}

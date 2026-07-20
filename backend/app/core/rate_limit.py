@@ -25,5 +25,7 @@ limiter = Limiter(
 
 def install_rate_limiter(app) -> None:
     app.state.limiter = limiter
+    if os.getenv("NOVELCRAFT_DISABLE_RATE_LIMIT", "").lower() in {"1", "true", "yes"}:
+        return
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)

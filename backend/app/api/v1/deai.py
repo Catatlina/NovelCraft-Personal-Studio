@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
 from app.db import connect
+from app.gateway import ProviderError, OutputValidationError
 from app.services.deai_pipeline import DeaiPipeline, deai_score, quick_deai_score
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ def get_deai_score(
     content_id: str,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Get AI-taste score for a chapter (heuristic + LLM)."""
+    """Get AI-taste score for a chapter (heuristic context + real LLM score)."""
     project_id, _ = _get_content_project(content_id)
     text = _get_content_body(content_id)
 
@@ -137,9 +138,9 @@ def get_deai_score(
 
     try:
         score = deai_score(project_id, text)
-    except Exception as exc:
-        logger.warning("LLM deai scoring failed: %s — using heuristic only", exc)
-        score = heuristic + 30
+    except (ProviderError, OutputValidationError, ValueError) as exc:
+        logger.warning("LLM deai scoring failed: %s", exc)
+        raise HTTPException(502, f"DeAI scoring failed: {exc}") from exc
 
     return ok({
         "score": min(score, 100),
@@ -155,7 +156,7 @@ def quick_score(
     content_id: str,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Fast heuristic-only AI score (no LLM call)."""
+    """Fast heuristic-only local metric; this endpoint does not call an LLM."""
     text = _get_content_body(content_id)
     score = quick_deai_score(text)
 

@@ -390,7 +390,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         const completion = completions[book.id];
         const rank = page * PAGE_SIZE + index + 1;
         const badgeClass = book.status === "draft" ? "gray" : book.status === "planning" ? "cyan" : book.status === "generated" ? "purple" : book.status === "completed" ? "green" : "gray";
-        return <div className="card" key={book.id}>
+        return <div className="card book-row" key={book.id}>
           <div className="card-head">
             <div className="card-title" style={{ gap: 6 }}>
               <input type="checkbox" checked={selectedBooks.has(book.id)}

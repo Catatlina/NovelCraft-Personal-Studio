@@ -98,6 +98,39 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     return text.replace(/\s/g, "").length;
   }, [editorText]);
 
+  if (!chapter && chapters.length === 0) {
+    return (
+      <div>
+        <div className="breadcrumb">
+          <b>NovelCraft</b> › 编辑器
+        </div>
+        <div className="page-head" style={{ marginBottom: 14 }}>
+          <div>
+            <h1 style={{ fontFamily: "var(--font-read)" }}>章节编辑器</h1>
+            <p>当前项目还没有可编辑章节</p>
+          </div>
+          <div className="head-actions">
+            <button className="btn-sm btn-ghost" disabled>AI 续写</button>
+            <button className="btn-sm btn-ghost" disabled>AI 润色</button>
+            <button className="btn-sm btn-primary" disabled style={{ width: "auto", padding: "0 14px" }}>
+              <Save size={15} /> 保存
+            </button>
+          </div>
+        </div>
+        <div className="empty">
+          <div className="empty-ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+          </div>
+          <h3>暂无章节</h3>
+          <p>请先在「灵感创作」生成作品，或在「书库管理」导入/打开已有作品后再进入编辑器。</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* ── Breadcrumb ── */}

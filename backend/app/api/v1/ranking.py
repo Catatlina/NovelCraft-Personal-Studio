@@ -566,7 +566,9 @@ def analyze_snapshot(snapshot_id: str, user: dict = Depends(get_current_user)):
     if snapshot.get("capture_status") in {"needs_review", "partial"}:
         db.close()
         raise HTTPException(409, "ranking capture requires review before market analysis")
-    existing = db.execute("""SELECT * FROM market_analyses WHERE snapshot_id=%s AND status='succeeded'
+    existing = db.execute("""SELECT * FROM market_analyses
+                           WHERE snapshot_id=%s AND status='succeeded' AND analysis_mode='ai'
+                             AND EXISTS (SELECT 1 FROM topic_candidates tc WHERE tc.analysis_id = market_analyses.id)
                            ORDER BY created_at DESC LIMIT 1""", (snapshot_id,)).fetchone()
     if existing:
         candidates = rows(db, "SELECT * FROM topic_candidates WHERE analysis_id=%s ORDER BY market_score DESC", (existing["id"],))
@@ -880,12 +882,13 @@ def analyze_rankings(request: AnalyzeRequest, user: dict = Depends(get_current_u
         analysis_id = new_id()
         summary = result.get("TrendReport", {}).get("market_trends", [])
         summary_text = "; ".join(str(s) for s in summary[:3]) if summary else "ten-layer analysis completed"
+        analysis_status = "succeeded" if result.get("status") == "completed" else "failed"
         db.execute(
             """INSERT INTO market_analyses
                (id, project_id, snapshot_id, summary, signals, status, analysis_mode, prompt_name, prompt_version)
-               VALUES (%s, %s, %s, %s, %s, 'succeeded', 'ten_layer', 'analysis.ten_layer', '1.0.0')""",
+               VALUES (%s, %s, %s, %s, %s, %s, 'ten_layer', 'analysis.ten_layer', '1.0.0')""",
             (analysis_id, snapshot["project_id"], request.snapshot_id,
-             summary_text[:500], encode(result)),
+             summary_text[:500], encode(result), analysis_status),
         )
         db.commit()
 
@@ -903,6 +906,7 @@ def analyze_rankings(request: AnalyzeRequest, user: dict = Depends(get_current_u
         return ok({
             "analysis_id": analysis_id,
             "status": result["status"],
+            "persisted_status": analysis_status,
             "total_layers": result["total_layers"],
             "succeeded_layers": result["succeeded_layers"],
             "failed_layers": result["failed_layers"],

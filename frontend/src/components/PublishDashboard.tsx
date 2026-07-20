@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle } from "lucide-react";
+import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle, RefreshCw, CheckCircle2 } from "lucide-react";
 import { api } from "../lib/api";
 import "../styles/proto.css";
 
@@ -7,6 +7,10 @@ export function PublishDashboard() {
   const [platforms] = useState(["wechat","toutiao","xiaohongshu","zhihu","medium","substack","twitter","wordpress","royalroad","kdp"]);
   const [selected, setSelected] = useState<string[]>([]);
   const [contentId, setContentId] = useState("");
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [contentOptions, setContentOptions] = useState<any[]>([]);
+  const [contentLoading, setContentLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [tab, setTab] = useState<"publish"|"overseas"|"roi"|"team">("publish");
   const [translateResult, setTranslateResult] = useState<any>(null);
@@ -21,14 +25,71 @@ export function PublishDashboard() {
   const [feedback, setFeedback] = useState<any>(null);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
+  const [receiptPlatform, setReceiptPlatform] = useState("wechat");
+  const [receiptStatus, setReceiptStatus] = useState("published");
+  const [receiptUrl, setReceiptUrl] = useState("");
+  const [receiptNote, setReceiptNote] = useState("");
+  const [receiptReads, setReceiptReads] = useState(0);
+  const [receiptLikes, setReceiptLikes] = useState(0);
+  const [receiptComments, setReceiptComments] = useState(0);
+  const [receiptShares, setReceiptShares] = useState(0);
+  const [receiptRevenue, setReceiptRevenue] = useState(0);
+  const [receiptResult, setReceiptResult] = useState<any>(null);
+  const [receiptBusy, setReceiptBusy] = useState(false);
 
   useEffect(() => {
-    api("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
-  }, [result]);
+    void loadWorkspaceContent();
+    void loadRecords();
+  }, []);
+
+  useEffect(() => {
+    if (selectedProjectId) void loadContentOptions(selectedProjectId);
+  }, [selectedProjectId]);
 
   useEffect(() => {
     if (tab === "roi") api("/api/v1/analytics/dashboard").then(d=>setDashboard(d.data||null)).catch(()=>setDashboard(null));
-  }, [tab]);
+  }, [tab, receiptResult]);
+
+  async function loadWorkspaceContent() {
+    try {
+      const p = await api("/api/v1/projects");
+      const rows = p.data || [];
+      setProjects(rows);
+      const firstProject = rows[0]?.id || "";
+      setSelectedProjectId(current => current || firstProject);
+      if (firstProject) await loadContentOptions(firstProject);
+    } catch {
+      setProjects([]);
+    }
+  }
+
+  async function loadContentOptions(projectId: string) {
+    setContentLoading(true);
+    try {
+      const books = await api(`/api/v1/ranking/library/books?project_id=${encodeURIComponent(projectId)}&limit=100`);
+      const options = (books.data || []).map((book: any) => ({
+        id: book.latest_chapter_id || book.id,
+        book_id: book.id,
+        title: book.latest_chapter_id ? `${book.title} · ${book.latest_chapter_title || "最新章节"}` : `${book.title}（作品）`,
+        subtitle: `${book.genre || "未分类"} · ${book.chapter_count || 0} 章 · ${book.total_words || 0} 字`,
+      }));
+      setContentOptions(options);
+      setContentId(current => current || options[0]?.id || "");
+    } catch {
+      setContentOptions([]);
+    } finally {
+      setContentLoading(false);
+    }
+  }
+
+  async function loadRecords() {
+    try {
+      const d = await api(contentId ? `/api/v1/publish/records?content_id=${encodeURIComponent(contentId)}` : "/api/v1/publish/records");
+      setRecords(d.data || []);
+    } catch {
+      setRecords([]);
+    }
+  }
 
   async function loadFeedback() {
     setFeedbackBusy(true); setFeedbackError("");
@@ -55,6 +116,7 @@ export function PublishDashboard() {
     setResult({ items: settled.map((item, index) => item.status === "fulfilled"
       ? { platform: selected[index], status: "queued", response: item.value }
       : { platform: selected[index], status: "failed", error: String(item.reason) }) });
+    await loadRecords();
   }
 
   async function doTranslate() {
@@ -95,6 +157,39 @@ export function PublishDashboard() {
     }
   }
 
+  async function submitReceipt() {
+    if (!contentId || !receiptPlatform) return;
+    setReceiptBusy(true);
+    setReceiptResult(null);
+    try {
+      const response = await api(`/api/v1/publish-receipts?content_id=${encodeURIComponent(contentId)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          platform: receiptPlatform,
+          status: receiptStatus,
+          published_url: receiptUrl,
+          receipt_note: receiptNote,
+          reads: receiptReads,
+          likes: receiptLikes,
+          comments: receiptComments,
+          shares: receiptShares,
+          revenue: receiptRevenue,
+          currency: "CNY",
+        }),
+      });
+      setReceiptResult(response.data || response);
+      await loadRecords();
+      if (tab === "roi") {
+        const dash = await api("/api/v1/analytics/dashboard").catch(() => null);
+        setDashboard(dash?.data || null);
+      }
+    } catch (caught: any) {
+      setReceiptResult({ status: "failed", error: caught?.payload?.detail || caught?.message || String(caught) });
+    } finally {
+      setReceiptBusy(false);
+    }
+  }
+
   return (
     <div style={{display:"grid",gridTemplateColumns:"180px 1fr",gap:16}}>
       <div className="card" style={{display:"flex",flexDirection:"column",gap:4,padding:12}}>
@@ -124,9 +219,29 @@ export function PublishDashboard() {
       </div>
 
       <div className="card">
+        <div className="grid grid-2" style={{marginBottom:16}}>
+          <div className="field" style={{marginBottom:0}}>
+            <label>项目</label>
+            <select className="form-input" value={selectedProjectId} onChange={e=>setSelectedProjectId(e.target.value)}>
+              {projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>) : <option value="">暂无项目</option>}
+            </select>
+          </div>
+          <div className="field" style={{marginBottom:0}}>
+            <label>发布内容</label>
+            <select className="form-input" value={contentId} onChange={e=>setContentId(e.target.value)} disabled={contentLoading || contentOptions.length === 0}>
+              {contentOptions.length
+                ? contentOptions.map(item => <option key={item.id} value={item.id}>{item.title}</option>)
+                : <option value="">{contentLoading ? "读取书库中…" : "暂无可发布内容"}</option>}
+            </select>
+            <div className="hint">优先选择最新章节；仍可在下方手动粘贴 Content ID。</div>
+          </div>
+        </div>
         <div className="field" style={{marginBottom:16}}>
-          <label>Content ID</label>
-          <input className="form-input" value={contentId} onChange={e=>setContentId(e.target.value)} placeholder="输入 Content ID..." />
+          <label>手动 Content ID</label>
+          <div style={{display:"flex",gap:8}}>
+            <input className="form-input" value={contentId} onChange={e=>setContentId(e.target.value)} placeholder="输入 Content ID..." />
+            <button className="btn-sm btn-ghost" onClick={()=>void loadRecords()}><RefreshCw size={14}/>记录</button>
+          </div>
         </div>
 
         {tab === "publish" && (
@@ -158,6 +273,30 @@ export function PublishDashboard() {
                   检测到敏感词：{sensitiveResult.blocked_words.join("、")}
                 </div>)}
             {result && <pre style={{fontSize:11,marginTop:12,padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap"}}>{JSON.stringify(result,null,2)}</pre>}
+
+            <div className="card" style={{marginTop:16,padding:16}}>
+              <div className="card-head">
+                <div className="card-title"><CheckCircle2 size={18}/> 人工发布回执 / 数据回流</div>
+              </div>
+              <p className="cell-sub" style={{marginBottom:12}}>平台发布完成后，把真实 URL、状态和互动数据登记回来；这会更新发布记录和 ROI 看板。</p>
+              <div className="grid grid-3">
+                <div className="field"><label>平台</label><select className="form-input" value={receiptPlatform} onChange={e=>setReceiptPlatform(e.target.value)}>{platforms.map(p=><option key={p} value={p}>{p}</option>)}</select></div>
+                <div className="field"><label>状态</label><select className="form-input" value={receiptStatus} onChange={e=>setReceiptStatus(e.target.value)}><option value="submitted">已提交</option><option value="published">已发布</option><option value="failed">失败</option><option value="retracted">已撤回</option></select></div>
+                <div className="field"><label>收益 ¥</label><input className="form-input" type="number" min={0} value={receiptRevenue} onChange={e=>setReceiptRevenue(Number(e.target.value || 0))}/></div>
+              </div>
+              <div className="field"><label>发布 URL / 回执链接</label><input className="form-input" value={receiptUrl} onChange={e=>setReceiptUrl(e.target.value)} placeholder="https://..."/></div>
+              <div className="grid grid-4">
+                <div className="field"><label>阅读</label><input className="form-input" type="number" min={0} value={receiptReads} onChange={e=>setReceiptReads(Number(e.target.value || 0))}/></div>
+                <div className="field"><label>点赞</label><input className="form-input" type="number" min={0} value={receiptLikes} onChange={e=>setReceiptLikes(Number(e.target.value || 0))}/></div>
+                <div className="field"><label>评论</label><input className="form-input" type="number" min={0} value={receiptComments} onChange={e=>setReceiptComments(Number(e.target.value || 0))}/></div>
+                <div className="field"><label>分享</label><input className="form-input" type="number" min={0} value={receiptShares} onChange={e=>setReceiptShares(Number(e.target.value || 0))}/></div>
+              </div>
+              <div className="field"><label>备注</label><textarea className="form-input" rows={3} value={receiptNote} onChange={e=>setReceiptNote(e.target.value)} placeholder="填写平台回执、审核编号、人工说明等"/></div>
+              <button className="btn-sm btn-primary" disabled={!contentId || receiptBusy} onClick={()=>void submitReceipt()} style={{width:"fit-content"}}>
+                <CheckCircle2 size={14}/>{receiptBusy ? "登记中…" : "登记回执"}
+              </button>
+              {receiptResult && <pre style={{fontSize:11,marginTop:12,padding:12,borderRadius:"var(--r-sm)",border:"1px solid var(--border)",color:"var(--text-2)",whiteSpace:"pre-wrap"}}>{JSON.stringify(receiptResult,null,2)}</pre>}
+            </div>
           </div>
         )}
 

@@ -20,6 +20,7 @@ export function FanoutMatrix({ contentId }: { contentId: string }) {
   const [busy, setBusy] = useState(false);
 
   async function runFanout() {
+    if (!contentId) return;
     setBusy(true);
     const data = await api(`/api/v1/contents/${contentId}/fanout?platforms=${selected.join(",")}`, {
       method: "POST",
@@ -57,7 +58,12 @@ export function FanoutMatrix({ contentId }: { contentId: string }) {
           </label>
         ))}
       </div>
-      <button className="btn-primary btn-sm" onClick={runFanout} disabled={busy || !selected.length} style={{ width: "auto" }}>
+      {!contentId && (
+        <div className="empty" style={{ padding: "24px 16px", marginBottom: 12 }}>
+          <p style={{ color: "var(--text-2)", fontSize: 13 }}>请先在书库打开一篇内容，再执行多平台分发。</p>
+        </div>
+      )}
+      <button className="btn-primary btn-sm" onClick={runFanout} disabled={busy || !contentId || !selected.length} style={{ width: "auto" }}>
         <Send size={14} /> {busy ? "分发中..." : `分发到 ${selected.length} 个平台`}
       </button>
       {Object.keys(results).length > 0 && (

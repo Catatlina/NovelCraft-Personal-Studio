@@ -46,6 +46,8 @@ AI_WRAPPER_CALLS = {
     "generate_material_suggestions",
     "generate_daily_briefing",
     "_review_via_gateway",
+    "_call_ai",
+    "deai_score",
     "execute_bootstrap",
     "batch_generate_chapters_task",
 }
@@ -71,6 +73,16 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/api/v1/complete_api.py:analyze_book": "endpoint delegates to AI wrapper book_analysis_workbench",
     "backend/app/api/v1/batch_endpoints.py:get_layered_plan": "read-only outline view endpoint",
     "backend/app/api/v1/ranking.py:generate_book": "book creation endpoint; AI generation is dispatched by worker after persistence",
+    "backend/app/api/v1/ranking.py:analyze_rankings": "endpoint dispatcher; delegates ten-layer AI work to TenLayerAnalyzer._call_ai and persists partial/failed status honestly",
+    "backend/app/api/v1/deai.py:quick_score": "explicit heuristic-only endpoint; name is API-compatible but it does not claim provider-backed AI scoring",
+    "backend/app/services/deai_pipeline.py:quick_deai_score": "explicit heuristic-only local metric used as context/quick estimate, not provider-backed scoring",
+    "backend/app/services/ten_layer_analysis.py:analyze_book_profile": "Layer 1 deterministic metadata normalization; no generated prose",
+    "backend/app/services/ten_layer_analysis.py:analyze_genre_report": "Layer 2 deterministic counts/co-occurrence statistics; no generated prose",
+    "backend/app/services/ten_layer_analysis.py:analyze_selling_points": "Layer 3 deterministic regex hook extraction; no generated prose",
+    "backend/app/services/ten_layer_analysis.py:analyze": "orchestrator over local layers plus gateway-backed AI layer methods; generated analysis is delegated to _call_ai",
+    "backend/app/services/ten_layer_analysis.py:_generate_heat_map": "deterministic aggregation report over collected ranking metrics",
+    "backend/app/services/ten_layer_analysis.py:_generate_keyword_cloud": "deterministic tag/hook frequency extraction from layer outputs",
+    "backend/app/services/ten_layer_analysis.py:_generate_trend_report": "deterministic packaging of AIInsight output and local top genres/hooks",
 }
 
 
