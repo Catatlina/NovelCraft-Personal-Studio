@@ -1821,10 +1821,12 @@ def list_feature_flags(user: dict = Depends(require_admin_reads)) -> ApiResponse
 
 
 # ---- SSE Progress ----
+try:
+    from sse_starlette.sse import EventSourceResponse
 
-from sse_starlette.sse import EventSourceResponse
-
-@app.get("/api/v1/runs/{run_id}/stream")
-async def stream_run_progress(run_id: str, user: dict = Depends(get_current_user)):
-    from app.api.v1.sse_progress import run_progress_stream
-    return EventSourceResponse(run_progress_stream(run_id))
+    @app.get("/api/v1/runs/{run_id}/stream")
+    async def stream_run_progress(run_id: str, user: dict = Depends(get_current_user)):
+        from app.api.v1.sse_progress import run_progress_stream
+        return EventSourceResponse(run_progress_stream(run_id))
+except ImportError:
+    pass  # sse-starlette not installed — SSE unavailable
