@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { Search, Bell, Sun, Moon, LogOut, ChevronDown, PanelLeftClose, PanelLeft, Sparkles, BookOpen, Zap, LayoutDashboard, Settings, Bot, PlugZap, Wrench } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 
-type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins" | "skills" | "chat";
+type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins" | "skills" | "chat" | "marketplace";
 
 type NavSection = {
   id: string;
@@ -38,7 +38,7 @@ const NAV_SECTIONS: NavSection[] = [
     { id: "dag", label: "工作流" },
     { id: "agents", label: "Agent" },
     { id: "skills", label: "Skill" },
-    { id: "plugins", label: "Plugin" },
+    { id: "marketplace", label: "模块市场" },
   ]},
   { id: "system", label: "系统", icon: <Settings size={16} />, items: [
     { id: "settings", label: "设置" },

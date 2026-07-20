@@ -1830,3 +1830,7 @@ try:
         return EventSourceResponse(run_progress_stream(run_id))
 except ImportError:
     pass  # sse-starlette not installed — SSE unavailable
+
+# ---- Module Marketplace ----
+from app.api.v1.modules import router as modules_router
+app.include_router(modules_router)
