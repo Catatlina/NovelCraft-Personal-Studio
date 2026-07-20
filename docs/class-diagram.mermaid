@@ -1,84 +1,67 @@
 classDiagram
-    %% ── 前端桥接层（本次新增动作函数）──
-    class NC {
-        +string token
-        +string currentProjectId
-        +string currentContentId
-        +api(path, opts) data
-        +generateInspiration(projectId, idea) data
-        +adaptContent(projectId, topic, content, platform) data
-        +publishTo(platform, contentId) data
-        +connectPlatform(payload) data
-        +testPlatform(platform) data
-        +registerAccount(payload) data
-        +saveBudget(pid, scope, limit) data
-        +saveSetting(key, value) data
-        +saveWorkflow(name, projectId, nodes) data
-        +runWorkflow(name, projectId) data
-        +generateHotspotReport(payload) data
-        +logout() data
-        +register(email, password, name) data
-        +loadReview(contentId) data
-        +runDeai(contentId) data
-        +exportNovel(novelId, fmt) data
-        +newKnowledge(projectId, file) data
-        +loadPlugins() data
-        +loadShortStoryTemplates() data
+    class ApiResponse {
+        +code: int|string = 0
+        +message: string = "ok"
+        +data: Any = null
+    }
+    class ProjectContext {
+        +user: dict
+        +project_id: str
+        +role: str
+    }
+    class Authz {
+        +ok(data, message, code) ApiResponse
+        +require_project_member(role) Depends
+        +require_content_member(content_id, role) Depends
+        +require_novel_member(novel_id, role) Depends
+        +ensure_project_member(conn, project_id, user, roles) dict
+    }
+    class RetryPolicy {
+        +max_retries: int = 3
+        +transport_base: float = 0.5
+        +transport_cap: float = 10.0
+        +rate_limit_base: float = 1.0
+        +rate_limit_factor: float = 2.0
+        +rate_limit_cap: float = 30.0
+        +jitter: float = 0.1
+    }
+    class Retry {
+        +with_provider_retry(policy) decorator
+    }
+    class Gateway {
+        +complete(...) dict
+        +_complete_impl(...) dict
+        +_assert_budget(...) void
+        +_deepseek_complete(...) tuple
+        +_call_real_provider(...) tuple
+    }
+    class GatewayErrors {
+        <<exception>>
+        +BudgetExceeded
+        +ProviderError
+        +ProviderRateLimitError
+        +OutputValidationError
+    }
+    class Billing {
+        +get_active_subscription(user_id) dict
+        +monthly_window() tuple
+        +get_subscription_usage(user_id) dict
+        +reset_monthly_usage() void
+    }
+    class MainApp {
+        +exception_handler(BudgetExceeded) 402
+        +exception_handler(ProviderError) 502/429
+        +exception_handler(HTTPException) passthrough
+        +exception_handler(Exception) 500
+        +ai_edit(...)
     }
 
-    %% ── 后端服务（Bug2 新建/修复）──
-    class DeaiPipeline {
-        +__init__(project_id, content_id, chapter_title)
-        +run(text) dict
-    }
-    class HotspotCollector {
-        +fetch_hotspots(user_id) tuple
-    }
-    class config {
-        +require_admin(user) user
-        +require_admin_reads(user) user
-    }
-
-    NC ..> DeaiPipeline : 经 /contents/{id}/deai 端点内部调用
-    note for NC "所有动作经 NC.api→fetch 后端；\n自动注入 token/CSRF、12s 超时、解包 json.data"
-
-    %% ── 关键请求 Schema（块3修复 + 块4复用）──
-    class ImitationRequest {
-        +string project_id
-        +string source_text  // 灵感文本 ≥200字
-        +string source_url
-        +string instruction
-    }
-    class HmTopicRequest {
-        +string project_id
-        +string topic
-        +int count
-        +string platform
-        +string content  // 原文
-    }
-    class SettingUpdateRequest {
-        +string value  // ≤4000
-    }
-    class RegisterRequest {
-        +string email
-        +string password  // ≥8
-        +string display_name
-    }
-    class TopicBookmarkRequest {
-        +bool bookmark  // True=加入备选
-    }
-    class DeaiRunResponse {
-        +int original_score
-        +int final_score
-        +list layers
-        +string final_text
-    }
-    class DeaiScoreResponse {
-        +int score
-        +int heuristic_score
-        +string text_preview
-    }
-
-    note for ImitationRequest "inspiration 生成灵感 → POST /imitation (Decision A)"
-    note for HmTopicRequest "content-studio 改编 → POST /hotspots/material-suggestions (Decision B)"
-    note for TopicBookmarkRequest "存在但仅作用于 topic_candidates；ranking 表行无 topic_id → 本期占位"
+    Authz ..> ApiResponse : returns
+    Authz ..> ProjectContext : returns
+    Retry ..> RetryPolicy : uses
+    Gateway ..> GatewayErrors : raises
+    Gateway ..> Billing : get_active_subscription
+    Retry ..> Gateway : wraps provider call
+    MainApp ..> GatewayErrors : catches
+    MainApp ..> ApiResponse : envelopes
+    Billing ..> RetryPolicy : reset_monthly_usage scheduled

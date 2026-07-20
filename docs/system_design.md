@@ -1,237 +1,380 @@
-# NovelCraft 增量设计 + 任务分解（架构师：高见远）
+# NovelCraft 增量系统设计 + 任务拆解（P1-T1 ~ P1-T5）
 
-> 范围：基于已上线 B0+B1（11 屏读已通）的收尾增量。
-> 三大块：**B2 动作屏接线** · **B3 内容屏接线** · **块3 修复 3 个真·后端 Bug** · **块4 前端有/后端无 → 复用或占位**。
-> 约束：只改 3 个前端文件（`frontend/proto.html` / `frontend/public/nc-api.js` / `frontend/public/app.js`）+ 少数后端文件；不重写 React、不动构建、不写实现代码（仅设计+任务分解）。
+> 产出人：高见远（架构师 software-architect）
+> 依据：增量 PRD（产品经理许清楚）+ 主理人拍板事项 + `docs/novelcraft-remediation-plan.md` 阶段二
+> 方法：完整实际阅读仓库源码（file:line 已逐一核验），**纯架构/任务分解，不含实现代码**
+> 仓库根：`NovelCraft-Personal-Studio/`（以下路径均相对仓库根）
+
+---
+
+## 0. 现状核验（关键 file:line，已实际阅读确认）
+
+| 关注点 | 当前代码事实 |
+|---|---|
+| `ok()` 多副本 | `main.py:185`、`complete_api.py:16`、`ranking.py:30`、`deai.py:18`、`batch_endpoints.py:15`、`dag_exec.py:12` 各定义一份；`main.py` 的 `ok()` 返回 `ApiResponse(data=...)`（pydantic），其余返回裸 dict `{"code":0,"message":"ok","data":...}`（内容等价） |
+| 鉴权重复实现 | `main.py:215 ensure_project_member(conn,...)`（同步，供 `load_content_for_user`/`load_run_for_user` 用）；`complete_api.py:19-74` 的 `require_member/require_project_member/require_content_member/require_novel_member`；`ranking.py:34 require_member`；`security.py:195 require_project_role`（factory 依赖，与本次目标重叠）；`deai/batch/dag_exec` 内联 `project_members` 直查 |
+| 错误信封 | `main.py:86` 仅 `PoolError` 处理器返回 envelope；`ai_edit`（`main.py:1125`）调 `complete()` **无 try** → `ProviderError` 直接 500；`ProviderError`/`BudgetExceeded`/`HTTPException`/未捕获 500 返回 FastAPI 默认 `{detail}` 或裸 dict |
+| 预算/套餐 | `gateway._assert_budget`（`gateway.py:701`）已用 `get_active_subscription(user_id).monthly_budget_cny` 作 limit（**无 2.0 硬编码**）；`config.bootstrap_budget_cny=2.0`（`config.py:16`）当前**未被 `_assert_budget` 引用**（已解耦）；`db.py:168` dev seed `budgets` 已用 `default_monthly_budget_cny`(50.0)；`billing.py:29 monthly_window` 自然月；`billing.get_active_subscription`/`get_subscription_usage` 已落地 |
+| 重试 | `gateway._complete_impl`（`gateway.py:488`）仅有 `MAX_SCHEMA_ATTEMPTS=3` 重试 `OutputValidationError`；`ProviderError` 在 `:508-510` 直接 re-raise；`_deepseek_complete`（`gateway.py:805`）把 `urllib.error.URLError`/`TimeoutError` 包成 `ProviderError`（**未区分 429**） |
+| 断路器 | `circuit_breaker.py` 全局共享、`record_failure` 在每次 `ProviderError` 时调用（`gateway.py:509`）——重试会误触熔断 |
+| 月度重置 | 用量由 `ai_calls.cost_cny` 在 `monthly_window()` 内求和**派生**，自然月边界天然清零；无 stored counter；`celery_app.py:29 beat_schedule` 已有 7 个 beat，可加月度 beat |
+| `execute_bootstrap` | `workers/tasks.py:486`（`max_retries=3`）；`:825` `ProviderError` 分支为**终态失败**（`_mark_node(...,"failed",...)` 后 `return`），未配合重试 |
 
 ---
 
 ## 1. 实现方案 + 框架选型
 
-**后端**：FastAPI（Python）不变。仅修改 3 个现有文件、新增 1 个文件（`app/services/deai_pipeline.py`），不新增第三方依赖。
-**前端**：静态原型（`proto.html` + `nc-api.js` + `app.js`）不变动架构，沿用既有 `NC.api` 桥与 `NC.withState/renderList/statCards/ncToast/showToast` helper；仅新增动作函数、改按钮 `onclick`、补少量容器 `id`。
+### 1.1 重试 + 429 专用退避 —— **自写退避装饰器（不引入 tenacity）**
 
-**三处后端真 Bug 的根因与方案**（已读源码确认）：
+**明确选型**：在 `backend/app/core/retry.py` 新增 `RetryPolicy` 数据类 + `with_provider_retry` 装饰器/上下文管理器；**不新增第三方依赖**。
 
-| Bug | 根因（读源码确认） | 修复方案 | 改动文件 |
-|---|---|---|---|
-| ① `GET /hotspots` 线上挂起 ~10s | `hotspot_collector.fetch_hotspots` 对 10 个中文源**同步串行**抓取，每源 `timeout=10s`；海外 VPS 直连 zhihu/weibo 常超时，单源即可拖到 10s | 加**全局 deadline**（默认 8s）逐源前检查 `time.monotonic()` 超额即 `break`；每源超时降到 5s。保证 `GET /hotspots` ≤ ~8s 返回 200（空或错误对象）。前端 12s 超时已兜底，不再永久卡死 | `backend/app/services/hotspot_collector.py` |
-| ② `GET/POST /contents/{cid}/deai(/score)` 返回 500 | `deai.py` 模块顶层 `from app.services.deai_pipeline import DeaiPipeline, deai_score, quick_deai_score`；**仓库缺失该模块**，部署版存在但运行时异常（`DeaiPipeline.run` 或 `deai_score` 未捕获异常 → 500）。`deai.py` 仅对 `pipeline.run`/`deai_score` 部分 try，构造与 body 解析未包 | **新建 `backend/app/services/deai_pipeline.py`**（纯启发式 + LLM 回退，且 `DeaiPipeline.run` 内部永不抛）；并**加固 `deai.py` 两个端点整体 try/except**，异常返回 `ok({warning})` 而非 500 | 新增 `backend/app/services/deai_pipeline.py`；改 `backend/app/api/v1/deai.py` |
-| ③ `PUT /admin/settings/{key}` 返回 403 | `config.require_admin` 在 `NOVELCRAFT_ADMIN_EMAILS` 未配置时 `raise 403`；而 GET 用的 `require_admin_reads` 未配置时放行 → 读 200 / 写 403 | 将 `require_admin` 改为与 `require_admin_reads` 一致：**未配置 env 时放行**，配置时仍校验白名单 | `backend/app/api/v1/config.py` |
+**理由**：
+1. 全仓为**同步**代码（`urllib` + `psycopg2`），无 async；tenacity 的同步能力无额外收益。
+2. 需**按异常类别**选择不同退避（429：`base=1s, factor=2, cap=30s`；传输/网络：`base=0.5s, cap=10s`）。tenacity 的 `wait_exponential` 是单一策略，要做"双策略"须自定义 `wait` 回调，反而更复杂。
+3. 须与 `circuit_breaker` **协同**：仅在**最终耗尽**后 `record_failure("deepseek")`，重试过程中**不**调用 `record_failure/record_success`，避免抖动误触全局熔断。自写装饰器可在重试循环内精确控制。
+4. `gateway` 已有 `MAX_SCHEMA_ATTEMPTS=3` 的自定义重试骨架，延续同风格降低认知成本、零供应链影响。
 
-**关键事实**（来自 `integration-map.md` / `novelcraft-integration-inventory.md` + 源码核对）：
-- `deai_router` 已在 `main.py` 注册（line 79），故部署版确有 `deai_pipeline` 模块；本仓库缺，新建即可覆盖修复。
-- `POST /ranking/topics/{topic_id}/bookmark` **仓库已存在**（ranking.py:1032），但仅作用于 `topic_candidates`（市场分析后的题材），**与 ranking 表行（snapshot `ranking_items`，无 `topic_id`）无映射** → ranking 表「+收藏」仍只能占位。
-- 块4 引用但看似无后端的功能，经核对均有近似/真实端点可复用（见 §8 决策记录），**不新增后端文件**。
+**备选**：tenacity（`retry_if_exception_type` + `stop_after_attempt` + `wait_exponential`）。仅当未来需要复杂组合（条件重试 + 指数 + jitter + retry-on-result）时引入；本期不引入。
+
+### 1.2 鉴权统一 —— **FastAPI `Depends` 依赖注入**
+
+新建 `backend/app/core/authz.py`，以 **依赖工厂** `require_project_member(role=...)` 统一所有端点鉴权；`ok()` 收敛为 `authz.ok(...)`；`ensure_project_member(conn,...)` 收敛为 `authz.ensure_project_member(...)`（供 `main.load_content_for_user`/`load_run_for_user` 同步路径复用）。
+
+`project_id` 在端点中既有 **Path** 也有 **Query**（如 `complete_api` 多为 query，`main` 多为 path），故依赖内部从 `Request` 的 `path_params`/`query_params` 中解析 `project_id`，避免双绑定冲突。
+
+### 1.3 错误信封 —— **Starlette `exception_handler` + `ExceptionMiddleware`**
+
+在 `main.py` 注册一组异常处理器，将 `BudgetExceeded`/`ProviderError`(含 429 子类)/`HTTPException`/`PoolError`/未捕获 `Exception` 统一包成 `ApiResponse{code,message,data}`；HTTP 状态码语义保持正确。成功响应仍由各端点 `ok(...)` 返回，**中间件只处理异常路径**，保证错误也是 `{code,message,data}`。
+
+### 1.4 预算可配 + 套餐 + 周期重置
+
+- **限额口径**：沿用现有派生口径 —— `_assert_budget` 取 `get_active_subscription(user_id).monthly_budget_cny`（已落地，无需改语义；仅需确认 `config.bootstrap_budget_cny` 2.0 不再被引用，可保留为 dead-config 或删除）。
+- **自然月重置**：用量由 `ai_calls` 在 `monthly_window()` 求和**派生**，自然月边界天然清零。新增 `reset_monthly_usage()`（billing.py）作为**月度 Celery beat**（复用 `monthly_window` 逻辑）：① 失效按月的 Redis 用量缓存（若后续为热端点加缓存）；② 归档超保留期的 `ai_calls` 以保持求和查询轻量；③ 作为**未来引入 stored counter 时的唯一重置钩子**（见 §7/§8）。
+- `db.py:168` dev seed 已与 `default_monthly_budget_cny` 对齐（50.0），与 Free 套餐一致，无需改动。
+
+### 1.5 整体架构模式
+
+分层：**路由层（FastAPI 端点）** → **鉴权依赖层（authz.py）** → **业务逻辑层（gateway/billing/main）** → **异常信封层（main 全局 handler）**；重试/退避位于 gateway 的 provider 调用内层，与 circuit_breaker 解耦。
 
 ---
 
 ## 2. 文件列表及相对路径
 
-### 仅改前端（3 文件）
-- `frontend/public/nc-api.js` — 新增动作函数（B2/B3/B4）+ `loadPageData` 分发扩展
-- `frontend/public/app.js` — `enterApp()` 改调 `NC.register()`；`loadPageData` 增加 inspiration/editor/review 分发
-- `frontend/proto.html` — 按钮 `onclick` 改调真实函数；补少量容器 `id`
-
-### 仅改后端（3 文件）
-- `backend/app/services/hotspot_collector.py` — `fetch_hotspots` 加全局 deadline + 每源超时（Bug①）
-- `backend/app/api/v1/deai.py` — 两个端点整体 try/except 加固（Bug②）
-- `backend/app/api/v1/config.py` — `require_admin` 放开未配置放行（Bug③）
-
-### 新增后端（1 文件）
-- `backend/app/services/deai_pipeline.py` — 导出 `DeaiPipeline` / `deai_score` / `quick_deai_score`，健壮实现（Bug②）
-
-> 无需改动 `main.py`（router 已注册）；无需 alembic 迁移（本次不动表结构）；无新增 Python 依赖。
+| 动作 | 相对路径 | 作用 |
+|---|---|---|
+| **新建** | `backend/app/core/authz.py` | 统一鉴权依赖 `require_project_member/require_content_member/require_novel_member` + 同步 `ensure_project_member` + 收敛 `ok()`；验收硬指标 `def ok(` 全仓仅此一处 |
+| **新建** | `backend/app/core/retry.py` | `RetryPolicy` + `with_provider_retry`（429/传输双策略退避，max_retries=3）；不引新依赖 |
+| 修改 | `backend/app/main.py` | ① 删除本地 `ok()`/`ensure_project_member`，改 import authz；② 加全局异常处理器（T5）；③ `ai_edit`/`ai_edit_stream` 改为依赖 `project: ProjectContext = Depends(require_project_member())` 并去除内联 `project_members` 直查 |
+| 修改 | `backend/app/api/v1/complete_api.py` | 删本地 `ok()`/`require_*`；~43 端点改用 `Depends(require_project_member(...))` + `ok(...)`；`publish_to_platform` 内联 envelope → `ok(...)` |
+| 修改 | `backend/app/api/v1/ranking.py` | 删本地 `ok()`/`require_member`；端点改用统一依赖 + `ok(...)` |
+| 修改 | `backend/app/api/v1/deai.py` | 删本地 `ok()`/`err()`，改 `ok(...)` |
+| 修改 | `backend/app/api/v1/batch_endpoints.py` | 删本地 `ok()`，改 `ok(...)`（含 `import-chapters` 内联 `project_members` 直查→依赖） |
+| 修改 | `backend/app/api/v1/dag_exec.py` | 删本地 `ok()`，内联 `project_members` 直查→依赖 |
+| 修改 | `backend/app/gateway.py` | ① 新增 `ProviderRateLimitError(ProviderError)`；② `_deepseek_complete`/`_call_real_provider` 区分 429（`HTTPError.code==429`）；③ 用 `with_provider_retry` 包裹 provider 调用（max_retries=3 外层，不与 schema 重试冲突）；④ `_assert_budget` 确认只用 `get_active_subscription().monthly_budget_cny` |
+| 修改 | `backend/app/core/circuit_breaker.py` | `record_failure/record_success` 调用点从"每次 ProviderError"收敛到"最终重试耗尽后一次"（gateway 内调整，breaker 文件逻辑基本不动，仅确认不被重试误触） |
+| 修改 | `backend/app/core/billing.py` | 新增 `reset_monthly_usage()`（月度 beat 任务体） |
+| 修改 | `backend/app/config.py` | `bootstrap_budget_cny`(2.0) 标记为 deprecated / 移除引用（口径改由套餐派生） |
+| 修改 | `backend/app/db.py` | dev seed 已对齐套餐（无需改；如需更严谨可把 `budgets` 行的 `limit_cny` 显式取自 Free 套餐） |
+| 修改 | `backend/app/workers/tasks.py` | `execute_bootstrap`（`:825`）`ProviderError` 分支改为**可重试终态**：抛出交由 Celery `max_retries=3` 退避重投，而非立即 `return failed` |
+| 修改 | `backend/app/workers/celery_app.py` | `beat_schedule` 新增 `"reset-monthly-usage"`（`crontab(day_of_month=1, hour=0, minute=5)`）指向 `billing.reset_monthly_usage` |
+| 新建 | `backend/tests/test_error_contract.py` | 错误契约测试：各异常路径返 `{code,message,data}` 且状态码正确（配套 T5） |
+| 新建 | `backend/tests/test_authz_matrix.py` | 跨租户鉴权矩阵：枚举端点 method/path/角色 → 401/403/200（配套 T4，P1-T9） |
 
 ---
 
 ## 3. 数据结构与接口
 
-### 3.1 新增前端桥动作函数签名（`nc-api.js`，均经 `NC.api` 调后端，12s 超时 + `json.data` 解包）
-```
-NC.generateInspiration(projectId, idea)        → POST /imitation
-NC.adaptContent(projectId, topic, content, platform) → POST /hotspots/material-suggestions
-NC.publishTo(platform, contentId?)             → POST /publish/{platform}
-NC.connectPlatform(payload)                     → POST /platform-connections
-NC.testPlatform(platform)                       → POST /platform-connections/{platform}/test
-NC.registerAccount(payload)                     → POST /publish/account/register
-NC.saveBudget(pid, scope, limit)                → PUT  /admin/budgets/{pid}/{scope}
-NC.saveSetting(key, value)                       → PUT  /admin/settings/{key}
-NC.saveWorkflow(name, projectId, nodes)         → PUT  /admin/workflows/{name}
-NC.runWorkflow(name, projectId)                  → POST /admin/workflows/{name}/execute
-NC.generateHotspotReport(payload)               → POST /hotspots/generate
-NC.logout()                                      → POST /auth/logout
-NC.register(email, password, name)              → POST /auth/register
-NC.loadReview(contentId) / NC.runDeai(contentId) → GET/POST /contents/{id}/deai(/score)
-NC.exportNovel(novelId, fmt)                    → GET  /novels/{id}/export/{fmt}   (fmt∈txt|markdown|epub)
-NC.newKnowledge(projectId, file)                → POST /knowledge/import  (multipart file)
-NC.loadPlugins()                                 → GET  /skills/community
-NC.loadShortStoryTemplates()                    → GET  /short-stories/templates
+### 3.1 错误信封 `ApiResponse`（复用 `schemas.py:9`，与前端对齐）
+
+```json
+{
+  "code": 0,            // int | string：0=成功；非 0=业务/错误码（前端按 code 分支）
+  "message": "ok",      // string：人类可读提示（前端 toast）
+  "data": {}            // any：业务数据（前端读完整 envelope 的 .data 为业务数据）
+}
 ```
 
-### 3.2 关键请求/响应 Schema（仅列本次新增/修复相关）
-**POST /imitation**（inspiration → Decision A）
-- Request `ImitationRequest`：`{project_id:str, source_text:str(≥200字), source_url:str?, instruction:str?}`
-- Response data：`{content_id, text, title, style_profile, similarity:{verdict,score}, copyright_risk, copyright_warning, ...}`
-- 注意：`source_text` 不足 200 字后端 422；前端用「核心灵感/想法」文本框内容（proto.html:534），不足时提示或拼接题材/风格说明（见 §9）。
+前端契约：`api<T>()` 读完整 envelope 的 `.data` 为业务数据，按 `.code` 分支、`.message` 提示。
 
-**POST /hotspots/material-suggestions**（content-studio 改编 → Decision B）
-- Request `HmTopicRequest`：`{project_id:str, topic:str, count:int=5, platform:str='douyin', content:str}`
-- Response data：`result`（封面/图表/数据源等改编素材 dict）。
+### 3.2 `authz.py` 接口签名（规范）
 
-**PUT /admin/settings/{key}**（settings 写，修复 403）
-- Request `SettingUpdateRequest`：`{value:str(≤4000)}`
-- Response data：`{key, value, description, updated_at}`（若 key 含 api_key 则 value 脱敏）
-- 注意：runtime_keys（`deepseek_api_key` 等、`request_timeout_seconds`、`bootstrap_budget_cny`）仍 409——前端避开这些 key。
+```python
+# backend/app/core/authz.py
+class ProjectRole(str, Enum):
+    member = "member"   # 任意项目成员即可
+    owner  = "owner"    # 需 owner 级
+    admin  = "admin"    # 视作 owner 级权限
 
-**POST /auth/register**（register，块4 复用）
-- Request `RegisterRequest`：`{email:str, password:str(≥8), display_name:str?}`
-- Response data：`{user:{id,email,display_name}, access_token}`；限流 5/min；邮箱已存在→400 通用文案。
+ROLE_RANK = {"viewer": 0, "editor": 1, "owner": 2}      # project_members.role 取值
+MIN_RANK  = {"member": 0, "owner": 2, "admin": 2}       # 所需最小层级
 
-**POST /knowledge/import**（knowledge 新建，块4 复用）
-- Content-Type `multipart/form-data`：`file:UploadFile` + query `project_id`
-- Response：导入结果 dict。
+class ProjectContext(NamedTuple):
+    user: dict          # get_current_user 结果
+    project_id: str
+    role: str           # 实际存储角色
 
-**GET /novels/{novel_id}/export/{fmt}**（editor 导出，块4 复用；fmt∈txt|markdown|epub）
-- Response：txt/markdown 返回文本；epub 返回文件流（前端用 `window.open` 直接下载，非 JSON）。
-
-**GET/POST /contents/{id}/deai(/score)**（review 去AI，修复 500）
-- Response `DeaiRunResponse`：`{original_score:int, final_score:int, layers:list, final_text:str}`
-- Response `DeaiScoreResponse`：`{score:int, heuristic_score:int, text_preview:str}`
-
-**POST /ranking/topics/{topic_id}/bookmark**（已存在，但本期不用）
-- `TopicBookmarkRequest`：`{bookmark:bool}`；仅作用于 `topic_candidates`，ranking 表行无 `topic_id` → 占位。
-
-### 3.3 后端新增模块接口（`deai_pipeline.py`，Bug②）
+def ok(data: Any = None, message: str = "ok", code: int | str = 0) -> ApiResponse: ...
+def require_project_member(role: str = "member") -> Callable[[Request, dict], ProjectContext]: ...
+def require_content_member(content_id: str = "", role: str = "member") -> Callable[[Request, dict], ProjectContext]: ...
+def require_novel_member(novel_id: str = "", role: str = "member") -> Callable[[Request, dict], ProjectContext]: ...
+def ensure_project_member(conn, project_id: str, user: dict, roles: set[str] | None = None) -> dict: ...
 ```
-def quick_deai_score(text:str) -> int          # 纯启发式（不联网），0–100
-def deai_score(project_id:str, text:str) -> int # 先 LLM(gateway.complete)，失败回退 quick_deai_score+30
-class DeaiPipeline:
-    def __init__(self, project_id, content_id, chapter_title="")
-    def run(self, text:str) -> dict             # 内部 try/except，返回 {original_score,final_score,layers,final_text}，绝不抛
+
+- `require_project_member(role="member"|"owner"|"admin")` 为依赖工厂；内部 `get_current_user` + 查 `project_members`；非成员→403，角色不足→403；成功返回 `ProjectContext`。
+- 端点用法：`project: ProjectContext = Depends(require_project_member())`；下游用 `project.project_id`、`project.user["id"]`。
+- `ensure_project_member(conn, project_id, user, roles)` 为**同步**版（保留 `main.load_content_for_user`/`load_run_for_user` 适配），仅此文件定义。
+
+> 注：`security.py:195 require_project_role` 与本次目标重叠。统一后建议 `authz.require_project_member` 为唯一权威；`require_project_role` 可改为委托 authz 或直接删除（不在 `grep "def ok("` / `ensure_project_member` 门禁内，列为收敛项，见 §8）。
+
+### 3.3 `RetryPolicy`（重试配置结构，`core/retry.py`）
+
+```python
+@dataclass
+class RetryPolicy:
+    max_retries: int = 3            # 主理人拍板 #1
+    transport_base: float = 0.5     # 传输/网络错误 base（拍板 #2）
+    transport_cap: float = 10.0
+    rate_limit_base: float = 1.0    # 429 base（拍板 #2）
+    rate_limit_factor: float = 2.0  # 429 指数 factor
+    rate_limit_cap: float = 30.0
+    jitter: float = 0.1             # 抖动，避免惊群
+```
+
+### 3.4 错误类型 → HTTP 状态码映射表
+
+| 异常（定义位置） | HTTP | envelope.code | 说明 |
+|---|---|---|---|
+| `BudgetExceeded`（`gateway.py:45`） | **402** | `BUDGET_EXCEEDED` | 套餐月度额度用尽；data=`{plan_name, spent, limit, scope}` |
+| `ProviderRateLimitError`(新增, 子类 `ProviderError`) | **429** | `PROVIDER_RATE_LIMITED` | 上游限流（429） |
+| `ProviderError` 其他/传输（`gateway.py:49`） | **502** | `PROVIDER_ERROR` | 上游不可用/超时/网络错误 |
+| `OutputValidationError`(子类 `ProviderError`, `:53`) | **502** | `PROVIDER_OUTPUT_INVALID` | 上游返回不合契约 |
+| `HTTPException` | 原 `status_code` | 透传（detail 为 dict 时整体透传；为 str 时 `code=status_code, message=detail`） | 鉴权/业务错误 |
+| `PoolError`（`psycopg2`） | **503** | `DB_POOL_EXHAUSTED` | 连接池耗尽（保留现有 `main.py:86` 处理器，envelope 化） |
+| 未捕获 `Exception` | **500** | `INTERNAL_ERROR` | message="服务内部错误，请稍后重试" + `data={trace_id: uuid4}`（脱敏，不回显堆栈，主理人拍板 #5） |
+
+### 3.5 类图（Mermaid）
+
+```mermaid
+classDiagram
+    class ApiResponse {
+        +code: int|string = 0
+        +message: string = "ok"
+        +data: Any = null
+    }
+    class ProjectContext {
+        +user: dict
+        +project_id: str
+        +role: str
+    }
+    class Authz {
+        +ok(data, message, code) ApiResponse
+        +require_project_member(role) Depends
+        +require_content_member(content_id, role) Depends
+        +require_novel_member(novel_id, role) Depends
+        +ensure_project_member(conn, project_id, user, roles) dict
+    }
+    class RetryPolicy {
+        +max_retries: int = 3
+        +transport_base: float = 0.5
+        +transport_cap: float = 10.0
+        +rate_limit_base: float = 1.0
+        +rate_limit_factor: float = 2.0
+        +rate_limit_cap: float = 30.0
+        +jitter: float = 0.1
+    }
+    class Retry {
+        +with_provider_retry(policy) decorator
+    }
+    class Gateway {
+        +complete(...) dict
+        +_complete_impl(...) dict
+        +_assert_budget(...) void
+        +_deepseek_complete(...) tuple
+        +_call_real_provider(...) tuple
+    }
+    class GatewayErrors {
+        <<exception>>
+        +BudgetExceeded
+        +ProviderError
+        +ProviderRateLimitError
+        +OutputValidationError
+    }
+    class Billing {
+        +get_active_subscription(user_id) dict
+        +monthly_window() tuple
+        +get_subscription_usage(user_id) dict
+        +reset_monthly_usage() void
+    }
+    class MainApp {
+        +exception_handler(BudgetExceeded) 402
+        +exception_handler(ProviderError) 502/429
+        +exception_handler(HTTPException) passthrough
+        +exception_handler(Exception) 500
+        +ai_edit(...)
+    }
+
+    Authz ..> ApiResponse : returns
+    Authz ..> ProjectContext : returns
+    Retry ..> RetryPolicy : uses
+    Gateway ..> GatewayErrors : raises
+    Gateway ..> Billing : get_active_subscription
+    Retry ..> Gateway : wraps provider call
+    MainApp ..> GatewayErrors : catches
+    MainApp ..> ApiResponse : envelopes
+    Billing ..> RetryPolicy : reset_monthly_usage scheduled
 ```
 
 ---
 
-## 4. 程序调用流程（关键动作）
+## 4. 程序调用流程（时序图：一次 `ai_edit` 请求）
 
-完整 mermaid 见 `docs/sequence-diagram.mermaid`。要点：
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 前端
+    participant EP as main.ai_edit
+    participant AZ as authz.require_project_member
+    participant SEC as security.get_current_user
+    participant GW as gateway.complete
+    participant RT as retry.with_provider_retry
+    participant PV as DeepSeek Provider
+    participant BL as billing.get_active_subscription
+    participant EH as main 全局 ExceptionHandler
+    participant CB as circuit_breaker
 
-1. **发布**：点「发布」→ `NC.publishTo(platform)` → `POST /publish/{platform}`（后端 `publish_gateway`）→ 200 → toast + 重渲 `#distribution-grid`。
-2. **生成灵感**：输入灵感 → 点「生成灵感」→ `NC.generateInspiration(projectId, idea)` → `POST /imitation`（携带 `source_text≥200`）→ `gateway.complete(style_imitation)` → 200 `{text,style_profile,similarity}` → 渲染 `#inspiration-results` 3 卡。
-3. **保存设置**：点「保存」→ `NC.saveSetting(key,value)` → `PUT /admin/settings/{key}` → 现 `require_admin` 未配 env 时**放行** → 200 → toast。
-4. **审阅去AI**：选章节 → 点「运行去AI」→ `NC.runDeai(contentId)` → `POST /contents/{id}/deai` → `DeaiPipeline.run()`（安全不抛）→ 200 `{layers,final_text}` → 渲染。**不再 500**。
-5. **热点流**：进 hotspot → `GET /hotspots` → `fetch_hotspots()`（全局 deadline 8s，超源即 break）→ ≤8s 返回 200（空或错误对象）→ 渲染 `#hotspot-flow` 或空态。**不再挂起**。
-6. **一键改编**：原文 + 平台 → 点「一键改编」→ `NC.adaptContent(projectId, topic, content, platform)` → `POST /hotspots/material-suggestions` → 200 `{result}` → 渲染 `#cs-adapted`。
-7. **注册**：登录页「没有账号？注册」→ `app.js enterApp()` 改调 `NC.register()` → `POST /auth/register` → 200 `{access_token}` → 存 token + 进后台。
+    U->>EP: POST /contents/{id}/ai/{op}
+    EP->>AZ: Depends(require_project_member())
+    AZ->>SEC: get_current_user(Bearer)
+    SEC-->>AZ: user dict
+    AZ->>AZ: 查 project_members（project_id 来自 path/query）
+    alt 非成员/角色不足
+        AZ-->>EH: raise HTTPException(403)
+        EH-->>U: 403 {code:FORBIDDEN,message,...}
+    else 成员
+        AZ-->>EP: ProjectContext(user, project_id)
+    end
+    EP->>GW: complete(project_id, task_type=editor_*, ...)
+    GW->>BL: _assert_budget → get_active_subscription().monthly_budget_cny
+    alt 超额
+        BL-->>EH: raise BudgetExceeded
+        EH-->>U: 402 {code:BUDGET_EXCEEDED, data:{plan,spent,limit}}
+    else 预算 OK
+        GW->>RT: 包裹的 provider 调用
+        loop 最多 max_retries=3（重试中不 record_failure）
+            RT->>PV: POST /chat/completions
+            alt 429
+                PV-->>RT: HTTP 429
+                RT->>RT: ProviderRateLimitError，退避 base=1s factor=2 cap=30s
+            else 超时/网络错误
+                PV-->>RT: TimeoutError/URLError
+                RT->>RT: ProviderError，退避 base=0.5s cap=10s
+            else 成功
+                PV-->>RT: JSON output
+            end
+        end
+        alt 最终耗尽
+            RT-->>CB: record_failure("deepseek")（仅一次）
+            RT-->>EH: raise ProviderRateLimitError / ProviderError
+            EH-->>U: 429 / 502 {code:PROVIDER_*,message}
+        else 成功
+            RT-->>CB: record_success("deepseek")
+            GW-->>EP: output dict（gateway 记 ai_calls 账本）
+        end
+    end
+    EP->>EP: 写 version 分支（仅 success 后）
+    EP-->>U: 200 ok({code:0,message:"ok",data:output})
+```
 
 ---
 
 ## 5. 任务列表（有序、含依赖、按实现顺序）
 
-> 优先级：P0=后端修复（阻塞 B2 设置写 / B3 审阅）；P1=前端接线。
-> 归属标注：后端修复 / B2 / B3 / B4。
+> 标号 T01~T05 对应 PRD 池 **P1-T4 / P1-T5 / P1-T1 / P1-T2 / P1-T3**（主理人拍板顺序：T4→T5→T1→T2→T3）。
+> 验收钩子均为可在 CI/脚本中执行的硬指标。
 
-### T1 · P0 · 后端修复①：hotspots 抓取挂起
-- **文件**：`backend/app/services/hotspot_collector.py`（`fetch_hotspots`）
-- **改动**：加 `import time`；新增 env `HOTSPOT_FETCH_DEADLINE`（默认 8）、`HOTSPOT_FETCH_SOURCE_TIMEOUT`（默认 5，替换原硬编码 10）；`fetch_hotspots` 开头记 `start=time.monotonic()`，遍历每源前 `if time.monotonic()-start > deadline: source_status[key]='skipped: deadline'; break`；`_fetch_source_items` 用新超时。
-- **验收**：`GET /hotspots` 在 ~8s 内返回 200（即便全部源失败也返回 `{hotspots:[], sources:{...error}}`）；不再挂起。
-- **依赖**：无。
+### T01 · P1-T4 鉴权统一 `authz.py`（P0 基石）
+- **目标**：抽统一鉴权依赖 + 收敛 `ok()`；删各端点内联 `require_*`。
+- **修改文件**：`backend/app/core/authz.py`(新)、`backend/app/main.py`、`backend/app/api/v1/complete_api.py`、`backend/app/api/v1/ranking.py`、`backend/app/api/v1/deai.py`、`backend/app/api/v1/batch_endpoints.py`、`backend/app/api/v1/dag_exec.py`
+- **关键改动**：① 新建 `authz.py`（`require_project_member/require_content_member/require_novel_member` + `ensure_project_member` + `ok`）；② `main.py` 删本地 `ok`/`ensure_project_member`，`ai_edit`/`list_contents` 等改 `project: ProjectContext = Depends(require_project_member())`；③ 其余 5 个模块删本地 `ok()`/`require_*`/`err()`，import `ok` 与依赖；④ `batch_endpoints.import-chapters`、`dag_exec.execute_workflow` 内联 `project_members` 直查改依赖。
+- **依赖**：无（可最早启动）。
+- **验收钩子**：① `grep -rn "def ok(" backend` **仅 `authz.py` 一处**；② `grep -rn "def ensure_project_member(" backend` **仅 `authz.py` 一处**；③ 所有写操作端点经统一依赖（跨租户矩阵 `test_authz_matrix.py` 全绿）。
 
-### T2 · P0 · 后端修复②：deai 500
-- **新增**：`backend/app/services/deai_pipeline.py`（导出 `DeaiPipeline`/`deai_score`/`quick_deai_score`，行为见 §3.3；`DeaiPipeline.run` 内部 try/except 返回降级 dict，绝不抛）。
-- **改**：`backend/app/api/v1/deai.py` —— `run_deai_pipeline` 与 `get_deai_score` 整体包 `try/except Exception`，异常时 `return ok({warning, ...})` 而非 500（保留现有 404 语义）。
-- **验收**：`GET/POST /contents/{任意id}/deai(/score)` 返回 200（成功或降级），不再 500；空内容返回 `{original_score:0,...}`。
-- **依赖**：无。
+### T02 · P1-T5 全局异常中间件 / 错误信封（P0 基石）
+- **目标**：任意异常统一包 `ApiResponse{code,message,data}`，状态码语义正确。
+- **修改文件**：`backend/app/main.py`、`backend/app/schemas.py`(复用 `ApiResponse`)、`backend/tests/test_error_contract.py`(新)
+- **关键改动**：① `main.py` 注册 `exception_handler(BudgetExceeded)`→402、`exception_handler(ProviderError)`（先判 `ProviderRateLimitError`→429，否则 502）、`exception_handler(HTTPException)`（dict detail 透传 / str detail 包 envelope）、`exception_handler(PoolError)`→503、兜底 `exception_handler(Exception)`→500 脱敏 + `trace_id`；② 保留现有 `PoolError` 处理器并 envelope 化；③ 新增错误契约测试。
+- **依赖**：T01（依赖统一 `ok`/`ApiResponse` 结构；HTTPException 透传需与 authz 的 403 形态一致）。
+- **验收钩子**：① 任意异常返 `{code,message,data}`；② `BudgetExceeded`→402、`ProviderError`→502、429→429、未捕获→500（message 通用、带 trace_id、无堆栈）；③ `test_error_contract.py` 全过。
 
-### T3 · P0 · 后端修复③：settings 写 403
-- **文件**：`backend/app/api/v1/config.py`（`require_admin`）
-- **改动**：`require_admin` 逻辑改为——`allowed` 为空（未配 `NOVELCRAFT_ADMIN_EMAILS`）时 `return user`；否则校验白名单（与 `require_admin_reads` 一致）。
-- **验收**：`PUT /admin/settings/{key}` 在单用户实例（未配 admin env）返回 200；配了 env 仍按白名单校验。
-- **依赖**：无。
+### T03 · P1-T1 重试 + 429 专处理
+- **目标**：Provider 抖动/网络错误指数退避重试；429 专用退避；3 次失败才转终态。
+- **修改文件**：`backend/app/core/retry.py`(新)、`backend/app/gateway.py`、`backend/app/workers/tasks.py`、`backend/app/core/circuit_breaker.py`(确认)
+- **关键改动**：① 新 `retry.py`（`RetryPolicy` + `with_provider_retry`）；② `gateway` 新增 `ProviderRateLimitError(ProviderError)`；`_deepseek_complete`/`_call_real_provider` 捕获 `urllib.error.HTTPError` 且 `code==429` → 抛 `ProviderRateLimitError`，其余 `URLError/TimeoutError` → `ProviderError`；provider 调用外层用 `with_provider_retry`（max_retries=3，不与 `MAX_SCHEMA_ATTEMPTS` 冲突）；③ 重试期间**不** `record_failure/record_success`，仅最终耗尽后 `record_failure` 一次；④ `execute_bootstrap`(`:825`) `ProviderError` 分支改为抛出让 Celery `max_retries=3` 退避重投（可重试终态）。
+- **依赖**：T02（重试失败经 T02 信封渲染为 502/429）。
+- **验收钩子**：① 模拟超时→节点自动重试成功；② 429 走专用退避（base=1s factor=2 cap=30s）非立即失败；③ 连续 3 次失败才转终态（worker 重试耗尽后 `failed`）；④ 重试不误触全局熔断（`circuit_breaker` failures 计数仅在最终耗尽 +1）。
 
-### T4 · P1 · 前端 B2 动作屏接线
-- **文件**：`frontend/public/nc-api.js`（新增 §3.1 中 distribution/settings/workflow/hotspot/auth 动作函数）、`frontend/public/app.js`（`enterApp()` 改调 `NC.register`）、`frontend/proto.html`（改按钮 `onclick`）
-- **接线点**：distribution 连接(`connectPlatform`)/授权(`testPlatform`)/发布(`publishTo`)/注册账号(`registerAccount`)；settings 保存预算(`saveBudget`→`PUT /admin/budgets/{pid}/{scope}`)/保存通用(`saveSetting`→`PUT /admin/settings/{key}`)；workflow 保存(`saveWorkflow`)/运行(`runWorkflow`)；hotspot 生成报告(`generateHotspotReport`)；auth 退出(`logout`)/注册(`enterApp`→`NC.register`)。
-- **规则**：成功 `ncToast('已…')` + 重跑对应 loader（如 `NC.loadDistribution()` / `NC.loadSettings()`）；失败 `ncToast('…失败: '+extractErrorMessage(e.message))`。
-- **依赖**：T3（saveSetting 需 403 修复）。
+### T04 · P1-T2 预算可配 + 套餐 + 周期重置
+- **目标**：限额走套餐 `monthly_budget_cny`；新增月度重置 beat。
+- **修改文件**：`backend/app/gateway.py`、`backend/app/core/billing.py`、`backend/app/config.py`、`backend/app/workers/celery_app.py`、`backend/app/db.py`(确认)
+- **关键改动**：① 确认 `_assert_budget` 仅用 `get_active_subscription(user_id).monthly_budget_cny`（已是）；`config.bootstrap_budget_cny`(2.0) 标记 deprecated / 移除引用；② `billing.py` 新增 `reset_monthly_usage()`；③ `celery_app.py` `beat_schedule` 加 `"reset-monthly-usage"`（`crontab(day_of_month=1, hour=0, minute=5)`）；④ `db.py` dev seed 已对齐套餐（无需改，确认即可）。
+- **依赖**：T02（`BudgetExceeded` 信封由 T02 渲染）；P0 计费/计量（已落地）。
+- **验收钩子**：① 不同套餐限额生效（`get_active_subscription().monthly_budget_cny` 取值正确）；② 超额返 `BudgetExceeded`(402)；③ 自然月边界用量清零（派生口径天然满足）；④ `reset_monthly_usage` beat 注册且幂等可执行（dry-run 验证不破坏数据）。
 
-### T5 · P1 · 前端 B3 内容屏接线
-- **文件**：`frontend/public/nc-api.js`（§3.1 中 inspiration/content-studio/editor/review/knowledge 函数）、`frontend/public/app.js`（`loadPageData` 增加 inspiration/editor/review）、`frontend/proto.html`（改按钮 + 补 `id`）
-- **接线点**：
-  - inspiration：原型已有 `#inspiration-results`(540)；把「生成灵感」按钮(538) `onclick` 改 `NC.generateInspiration(NC.currentProjectId, 文本框值)` → 渲染 3 卡（Decision A）。
-  - content-studio：原文本 `#cs-original`(720)、改编稿 `#cs-adapted`(721) 已存在；「一键改编」(717) 改 `NC.adaptContent(projectId, 平台下拉值, 原文, 平台)` → 渲染 `#cs-adapted`（Decision B）。
-  - editor：补「大纲/AI续写/AI润色」按钮动作 → `GET /ranking/library/books/{book_id}`（大纲）、`GET /novels/{id}/completion`（进度）、导出按钮 → `NC.exportNovel(id, fmt)`；进入 editor 时设 `NC.currentContentId`。
-  - review：补「版本对比」+「运行去AI」动作 → `NC.loadReview`/`NC.runDeai`（用 `NC.currentContentId`，默认取项目首个 chapter）；渲染 `#review-list`。
-  - knowledge：「+ 新建」(742) 改 `NC.newKnowledge(projectId, file)`（隐藏 `<input type=file>`）。
-- **依赖**：T2（review deai 修复）、T4（NC 基础动作函数已就位）。
+### T05 · P1-T3 AI 编辑主链路异常捕获
+- **目标**：编辑器润色/改写遇 Provider 异常不再返 500，转 502/429 信封。
+- **修改文件**：`backend/app/main.py`、`backend/app/gateway.py`(复用 `ProviderError`/`ProviderRateLimitError`)、`backend/tests/test_error_contract.py`
+- **关键改动**：① `ai_edit`（`main.py:1125`）去除裸 `complete()` 调用——改为依赖 `project: ProjectContext` 后直接调用 `complete()`，**让 `ProviderError`/`ProviderRateLimitError`/`BudgetExceeded` 自然上抛至 T02 全局处理器**（版本分支 `versions` 写入在 `complete()` 成功后，故失败不会留半截状态）；② `ai_edit_stream`（`main.py:1198`）已有 SSE 错误帧，保持并补充 `ProviderRateLimitError` 分支；③ `generate_video_script`/`fanout` 的 try/except 保持。
+- **依赖**：T02（信封渲染）、T03（ProviderError/429 区分）。
+- **验收钩子**：① `ai_edit` 遇 `ProviderError` 返 502（结构化）而非 500；② 429 限流返 429 信封；③ 编辑器不再白屏 500（友好 toast 由前端基于 envelope.message 展示）。
 
-### T6 · P1 · 前端 B4 边缘 + 块4 复用/占位
-- **文件**：`frontend/public/nc-api.js`（`loadPlugins`/`loadShortStoryTemplates`）、`frontend/proto.html`
-- **接线点**：plugins 列表 `#plugins-grid`(854)→`GET /skills/community`；content-studio 模板下拉可选接 `GET /short-stories/templates`；ranking 表「+收藏」、plugin 安装/启用 **保持 `showToast` 占位**（理由见 §8）。
-- **依赖**：T4。
+### 实现顺序总览
 
-> 注：块4 经核查**不新增后端文件**——register/import/export/skills/templates 均复用现有端点；收藏/安装因数据模型或范围原因占位（见 §8、§9）。
+```
+T01 (authz) ──► T02 (envelope) ──► T03 (retry)
+                                ├──► T04 (budget+beat)
+                                └──► T05 (ai_edit capture)
+```
+T01 独立可先启；T02 紧随；T03/T04/T05 并行构建于 T02 之上，三者互不阻塞（T03 改 gateway/worker，T04 改 billing/celery，T05 改 main）。
 
 ---
 
 ## 6. 依赖包列表
-- **无新增 Python 依赖**。`deai_pipeline.py` 仅用现有 `app.gateway.complete`（已存在）；`hotspot_collector` 仅用标准库 `urllib`/`time`。
-- 前端无新增依赖，沿用既有 `NC` helper。
+
+| 包 | 版本/来源 | 用途 | 是否新增 |
+|---|---|---|---|
+| `fastapi` | 现有 | `Depends` 依赖注入 / `exception_handler` | 否 |
+| `starlette` | 现有（FastAPI 依赖） | `ExceptionMiddleware` / HTTPException | 否 |
+| `pydantic` | 现有 | `ApiResponse` 模型 | 否 |
+| `celery` | 现有 | `beat_schedule` / `crontab` / `max_retries` | 否 |
+| `urllib`（标准库） | Python 内置 | provider HTTP；`HTTPError.code` 区分 429 | 否 |
+| `tenacity` | —— | （**本期不引入**；备选，未来复杂重试组合时再评估） | **否（不新增）** |
+
+> 结论：**本期零新依赖**。重试自写 `core/retry.py`，错误信封用 FastAPI/Starlette 原生能力。
 
 ---
 
-## 7. 共享知识（跨文件约定，工程师必须遵守）
+## 7. 共享知识（跨文件约定，供工程师实现遵循）
 
-1. **`NC.api` 调用约定**（沿用）：自动注入 `Authorization: Bearer <token>` 与 `X-CSRF-Token`（有 cookie 时）；非 GET 自动带；12s `AbortController` 超时；返回 `json.data ?? json`（已解包）。**不要**在每个调用里手动加 header。
-2. **错误兜底**：所有新增动作函数统一 `try { ... } catch(e){ ncToast('操作失败: '+extractErrorMessage(e.message)); }`；成功 `ncToast('已…')` + 重跑对应 loader 刷新列表。禁止 `alert`。
-3. **三态/渲染 helper**：列表用 `NC.renderList`；进入屏加载用 `NC.withState`；统计用 `NC.statCards`；轻提示用 `ncToast`/`showToast`（二者等价，原型内 `showToast` 为全局）。
-4. **当前项目/内容上下文**：`NC.currentProjectId`（B1 已 `ensureCurrentProject` 初始化）；review/editor 用 `NC.currentContentId`（进入 editor/library 时设置，review 默认取项目首个 chapter）。
-5. **project_id 必需**：distribution/settings/workflow/hotspot-generate/imitation/material-suggestions/knowledge-import 均带 `NC.currentProjectId`；为空时 `NC.needProject()` 提示并跳 workspace。
-6. **不破坏既有**：`proto.html` 仅改 `onclick` 目标 / 补 `id`；`nc-api.js` 的 `login/initLogin/loadWorkspaceData` 保留并扩展；`app.js` 的 `goPage` 仅追加分发。
-7. **后端鉴权照搬现有写法**：新增/修改后端写接口沿用 `get_current_user` + `require_*` 守卫 + `ensure_project_member`（本项目已存在）；写操作带 `project_id` 校验角色。
-8. **settings 写避坑**：runtime_keys（`*_api_key`/`*_base_url`/`*_model`/`request_timeout_seconds`/`bootstrap_budget_cny`）后端 409，前端「保存通用」只提交非 runtime key。
-9. **部署**：后端改完 `git push` 后重启 systemd `api` service（worker/beat 不动）；前端 3 文件随前端容器发布；不动 nginx、不动构建。
-
----
-
-## 8. 决策记录（拍板项）
-
-1. **inspiration「生成灵感」→ `POST /imitation`**（而非 `/ranking/analyze`）。理由：`/imitation` 输入 seed 文本生成创意仿写方案，最贴合「灵感创作」产出 3 张方案卡；`/ranking/analyze` 需 `snapshot_id` 且是市场/题材分析，过重且与「灵感」语义不符。源文本取原型「核心灵感/想法」文本框（proto.html:534）。
-2. **content-studio「一键改编」→ `POST /hotspots/material-suggestions`**（而非 `video-script`/`translate`）。理由：`material-suggestions` 接收原文 `content` + `topic` 返回改编素材，最贴合「把小说改编为多平台文稿」；`video-script` 仅取 topic 无原文；`translate` 仅出海翻译。原文取自 `#cs-original`，平台取自 #717 下拉。
-3. **settings 写 403 → 放开后端 admin 写守卫**。理由：用户明确要求修后端；将 `require_admin` 改为未配 `NOVELCRAFT_ADMIN_EMAILS` 时放行，与读守卫 `require_admin_reads` 一致，单用户实例可写，配置后仍按白名单。
-4. **块4 各功能映射（复用现有端点）**：register→`/auth/register`；knowledge 新建→`/knowledge/import`（multipart）；editor 导出→`/novels/{id}/export/{fmt}`；plugins 列表→`/skills/community`；content-studio 模板→`/short-stories/templates`。均后端已存在（已 grep 确认路径）。
-5. **ranking 表「+收藏」→ 保持 toast 占位**。理由：ranking 表行是 snapshot `ranking_items`，**无 `topic_id`**；现有 `POST /ranking/topics/{topic_id}/bookmark` 仅作用于 `topic_candidates`（市场分析后题材），与表行无映射；要真正收藏需新增 `snapshot_bookmarks` 表 + 迁移 + 前端传 `snapshot_id/rank_no`，超出「可用版」最小变更。列入 §9 待明确。
-6. **plugin 安装/启用 → 保持 toast 占位**。理由：仅有 `GET /skills/community` 列表端点，无安装/启用端点；保持占位，不新增大后端。
-7. **Bug② deai 500 → 新建 `deai_pipeline.py` + 加固 `deai.py`**。理由：仓库缺失该模块（部署版存在但运行时异常致 500）；新建健壮实现并整体 try/except，确保不再 500，且无需新增依赖。
-8. **Bug① hotspots 挂起 → 仅加全局 deadline**。理由：不动抓取逻辑与源配置；靠全局 8s deadline + 每源 5s 超时保证后端 ≤~8s 返回 200；前端 12s 超时已兜底，屏不空死。
+1. **Envelope 结构**：所有成功响应走 `authz.ok(data)`，所有异常走 `main` 全局处理器，二者都产出 `{code,message,data}`。`code=0` 表示成功；前端读 `.data` 为业务数据，按 `.code` 分支、`.message` 提示。
+2. **`require_project_member` 用法**：端点签名加 `project: ProjectContext = Depends(require_project_member())`（默认 `role="member"`；写操作用 `Depends(require_project_member("owner"))` 或 `("admin")`）。下游用 `project.project_id` / `project.user["id"]`。**禁止**在端点内再直查 `project_members` 表。
+3. **角色层级**：`ROLE_RANK={viewer:0,editor:1,owner:2}`；`require_project_member(role)` 的 `member`=任意成员、`owner`=需 owner、`admin`=视作 owner 级。`ensure_project_member(conn,...,roles=set)` 同步版保留旧 `roles` 集合语义（供 `load_content_for_user` 适配）。
+4. **重试装饰器用法**：provider 调用（同步）用 `with_provider_retry(policy=RetryPolicy())` 包裹；仅抛 `ProviderRateLimitError`/`ProviderError`/`OutputValidationError` 才重试；重试**不**触发 `circuit_breaker.record_failure`，仅最终耗尽后一次。
+5. **错误类型 → 状态码**：见 §3.4。新抛业务异常请继承既有 `GatewayErrors` 体系，勿新增散落异常类。
+6. **月度重置 beat 注册位置**：`backend/app/workers/celery_app.py` 的 `beat_schedule`；任务体 `reset_monthly_usage` 在 `backend/app/core/billing.py`。须 `imports` 已含 `app.workers.tasks`（现有），若在 billing.py 则确保被 beat worker 加载（可放 `app.workers.tasks` 内转发或直接 import billing）。
+7. **`ok()` 单一来源**：`grep "def ok("` 全仓仅 `authz.py`；其它模块一律 `from app.core.authz import ok`。
+8. **`ensure_project_member` 单一来源**：仅 `authz.py` 定义；`main.load_content_for_user`/`load_run_for_user` 改为 `from app.core.authz import ensure_project_member`。
 
 ---
 
-## 9. 待明确事项（仅确实无法自行决定项）
+## 8. 待明确事项（仅列无法由主理人决策的技术点）
 
-1. **ranking 收藏是否真要做后端**：本期占位。若要做，需新增 `POST /ranking/snapshots/{snapshot_id}/items/{rank_no}/bookmark` + `snapshot_bookmarks(user_id, snapshot_id, rank_no, title)` 表 + 迁移，并在 `loadRankingTable` 行内传 `snapshot_id/rank_no`。待用户后续拍板。
-2. **inspiration 源文本不足 200 字**：`/imitation` 要求 `source_text≥200`，否则 422。建议前端把「核心灵感/想法」+ 题材 + 风格基调 拼接凑够；或不足时提示用户补充。采用拼接方案（默认）。
-3. **editor 导出 epub**：返回文件流，前端用 `window.open('/api/v1/novels/{id}/export/epub')` 直接下载（非 JSON 解析），txt/markdown 同理可用 fetch 取文本预览。
-4. **review 的 content_id 上下文**：默认取当前项目首个 chapter（`NC.currentContentId`）；后续可从章节进入 review 以绑定具体章节。本期 review 接入以「首个 chapter」演示去AI/打分即可。
-5. **部署账号角色**：`require_admin` 放开后，单用户实例（admin env 未配）即可写设置；若生产配了 `NOVELCRAFT_ADMIN_EMAILS`，需把 `jxianyang@gmail.com` 等账号加入白名单（运维侧，非代码改动）。
+1. **`security.py:195 require_project_role` 的归宿**：它已是与 `authz.require_project_member` 重叠的依赖工厂。建议统一后**删除**或改为委托 `authz`，否则存在两套鉴权依赖、易漂移。需确认是否有其它模块（如 `auth.py`/admin 路由）直接 import 它——若有，统一期一并迁移。
+2. **月度重置的"stored counter"取舍**：当前用量由 `ai_calls` 在 `monthly_window()` **派生**，自然月边界天然清零，`reset_monthly_usage` 目前作为**缓存失效 + 归档 + 扩展钩子**（无 stored counter 可重置）。若主理人期望"在 `subscriptions` 上落 stored monthly counter（如 `monthly_cost_used_cny` + `usage_reset_at`）并由 beat 清零"，则需追加 Alembic migration + 改 `_assert_budget` 写路径（写入即累加、beat 清零），工作量 +M 且需防 ai_calls 与 counter 双写不一致。当前设计选**派生口径**（低风险），stored counter 列为未来扩展。
+3. **`config.bootstrap_budget_cny`(2.0) 是否物理删除**：当前未被 `_assert_budget` 引用（已解耦）。建议标记 `deprecated` 并留作文档，物理删除需先 grep 确认无引用（预计无）；删除属纯清理，不阻塞。
+4. **`OutputValidationError` 的对外码**：建议 `502 / PROVIDER_OUTPUT_INVALID`（视作上游输出不合契约）。若前端希望与传输类 `ProviderError` 合并为同一 `502 PROVIDER_ERROR`，可在 T02 handler 中合并——需前端契约确认（建议保留细分便于排障）。
+
+> 以上均为实现细节层面的可选决策，**均不阻塞 T01~T05 实现**；按当前设计（派生口径 + 自写重试 + 原生信封）即可落地并通过全部验收钩子。
 
 ---
 
-## 附：任务依赖图
-
-```mermaid
-graph TD
-  T1[T1 后端修复① hotspots挂起 P0]
-  T2[T2 后端修复② deai 500 P0]
-  T3[T3 后端修复③ settings 403 P0]
-  T4[T4 前端 B2 动作屏 P1]
-  T5[T5 前端 B3 内容屏 P1]
-  T6[T6 前端 B4 边缘+块4 P1]
-  T1 --> T4
-  T3 --> T4
-  T2 --> T5
-  T4 --> T5
-  T4 --> T6
-  T5 --> T6
-```
+*本设计由架构师高见远基于增量 PRD、主理人拍板事项与仓库源码实际核验产出，所有 file:line 均经阅读确认，不含实现代码，供工程师实现与 QA 验收使用。*

@@ -1,53 +1,54 @@
 sequenceDiagram
-    actor U as 用户
-    participant F as 前端 (NC + proto.html)
-    participant B as 后端 (FastAPI)
-    participant G as AI网关 (gateway.complete)
+    autonumber
+    actor U as 前端
+    participant EP as main.ai_edit
+    participant AZ as authz.require_project_member
+    participant SEC as security.get_current_user
+    participant GW as gateway.complete
+    participant RT as retry.with_provider_retry
+    participant PV as DeepSeek Provider
+    participant BL as billing.get_active_subscription
+    participant EH as main 全局 ExceptionHandler
+    participant CB as circuit_breaker
 
-    Note over F,B: ① 分布式发布 (distribution · B2)
-    U->>F: 点「发布」
-    F->>B: POST /publish/{platform}
-    B-->>F: 200 {status, post_id}
-    F->>F: toast + 重渲 #distribution-grid
-
-    Note over F,B: ② 生成灵感 (inspiration · B3 · Decision A)
-    U->>F: 在「核心灵感/想法」输入 → 点「生成灵感」
-    F->>B: POST /imitation {project_id, source_text}
-    B->>G: complete(style_imitation)
-    G-->>B: text / style_profile
-    B-->>F: 200 {text, style_profile, similarity, copyright_risk}
-    F->>F: 渲染 #inspiration-results (3 方案卡)
-
-    Note over F,B: ③ 保存通用设置 (settings · B2 · 修复 403)
-    U->>F: 编辑配置 → 点「保存」
-    F->>B: PUT /admin/settings/{key} {value}
-    B->>B: require_admin() 未配 NOVELCRAFT_ADMIN_EMAILS 时放行
-    B-->>F: 200 {key, value}
-    F->>F: toast
-
-    Note over F,B: ④ 审阅·去AI (review · B3 · 修复 500)
-    U->>F: 选章节 → 点「运行去AI」
-    F->>B: POST /contents/{id}/deai
-    B->>B: DeaiPipeline.run() 内部 try/except 不抛
-    B-->>F: 200 {original_score, final_score, layers, final_text}
-    F->>F: 渲染 layers / final_text
-
-    Note over F,B: ⑤ 热点流 (hotspot · 修复挂起)
-    F->>B: GET /hotspots
-    B->>B: fetch_hotspots() 全局 deadline 8s 提前 break
-    B-->>F: ≤8s 返回 200 {hotspots:[], sources}
-    F->>F: 渲染 #hotspot-flow 或空态（不再永久卡死）
-
-    Note over F,B: ⑥ 内容工作室·一键改编 (content-studio · B3 · Decision B)
-    U->>F: 原文(#cs-original)+选平台 → 点「一键改编」
-    F->>B: POST /hotspots/material-suggestions {project_id, topic, content, platform}
-    B->>G: generate_material_suggestions()
-    G-->>B: 改编素材
-    B-->>F: 200 {result}
-    F->>F: 渲染 #cs-adapted
-
-    Note over F,B: ⑦ 注册 (auth · 块4 复用)
-    U->>F: 登录页点「没有账号？注册」
-    F->>B: POST /auth/register {email, password, display_name}
-    B-->>F: 200 {user, access_token}
-    F->>F: 存 token + 进后台
+    U->>EP: POST /contents/{id}/ai/{op}
+    EP->>AZ: Depends(require_project_member())
+    AZ->>SEC: get_current_user(Bearer)
+    SEC-->>AZ: user dict
+    AZ->>AZ: 查 project_members（project_id 来自 path/query）
+    alt 非成员/角色不足
+        AZ-->>EH: raise HTTPException(403)
+        EH-->>U: 403 {code:FORBIDDEN,message,...}
+    else 成员
+        AZ-->>EP: ProjectContext(user, project_id)
+    end
+    EP->>GW: complete(project_id, task_type=editor_*, ...)
+    GW->>BL: _assert_budget → get_active_subscription().monthly_budget_cny
+    alt 超额
+        BL-->>EH: raise BudgetExceeded
+        EH-->>U: 402 {code:BUDGET_EXCEEDED, data:{plan,spent,limit}}
+    else 预算 OK
+        GW->>RT: 包裹的 provider 调用
+        loop 最多 max_retries=3（重试中不 record_failure）
+            RT->>PV: POST /chat/completions
+            alt 429
+                PV-->>RT: HTTP 429
+                RT->>RT: ProviderRateLimitError，退避 base=1s factor=2 cap=30s
+            else 超时/网络错误
+                PV-->>RT: TimeoutError/URLError
+                RT->>RT: ProviderError，退避 base=0.5s cap=10s
+            else 成功
+                PV-->>RT: JSON output
+            end
+        end
+        alt 最终耗尽
+            RT-->>CB: record_failure("deepseek")（仅一次）
+            RT-->>EH: raise ProviderRateLimitError / ProviderError
+            EH-->>U: 429 / 502 {code:PROVIDER_*,message}
+        else 成功
+            RT-->>CB: record_success("deepseek")
+            GW-->>EP: output dict（gateway 记 ai_calls 账本）
+        end
+    end
+    EP->>EP: 写 version 分支（仅 success 后）
+    EP-->>U: 200 ok({code:0,message:"ok",data:output})
