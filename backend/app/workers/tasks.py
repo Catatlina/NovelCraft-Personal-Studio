@@ -456,6 +456,29 @@ def _resume_from_checkpoint(run_id: str) -> str | None:
     if isinstance(details, dict):
         return details.get("node")
     return None
+
+
+def _attach_user_context(novel_id: str) -> None:
+    """Best-effort: attribute a worker process's AI calls to the novel owner.
+
+    Worker tasks run outside the HTTP request lifecycle, so the request-scoped
+    ``_request_user_id`` ContextVar is unset. Without this, ``ai_calls.user_id``
+    stays NULL for generated chapters and the user's token bill undercounts. We
+    resolve the owner from the novel and set the ContextVar for the task's run.
+    """
+    try:
+        from app.gateway import _request_user_id
+        db = connect()
+        try:
+            owner = db.execute(
+                "SELECT owner_id FROM contents WHERE id = %s", (novel_id,)
+            ).fetchone()
+        finally:
+            db.close()
+        if owner and owner.get("owner_id"):
+            _request_user_id.set(owner["owner_id"])
+    except Exception:
+        pass
 # ═══════════════════════════════════════════════════════════════════════════
 # Core bootstrap execution
 # ═══════════════════════════════════════════════════════════════════════════
@@ -482,6 +505,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         _request_api_base_url.set(api_url)
     if model:
         _request_model.set(model)
+
+    # Attribute AI calls to the novel owner for per-user metering/billing.
+    _run_lookup = connect()
+    _run_row = _run_lookup.execute("SELECT novel_id FROM workflow_runs WHERE id = %s", (run_id,)).fetchone()
+    _run_lookup.close()
+    if _run_row and _run_row.get("novel_id"):
+        _attach_user_context(_run_row["novel_id"])
 
     # Determine start index in flattened node list
     try:
@@ -1432,6 +1462,8 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
         _request_api_base_url.set(api_url)
     if model:
         _request_model.set(model)
+    # Attribute generated chapters to the novel owner for per-user metering.
+    _attach_user_context(novel_id)
 
     lock_key = f"lock:novel:{novel_id}:gen_chapter"
     if not acquire_lock(lock_key):

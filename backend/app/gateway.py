@@ -14,12 +14,14 @@ from .config import settings
 from .core.circuit_breaker import circuit_breaker, record_failure, record_success
 from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
+from .core.billing import get_active_subscription, monthly_window
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
 
 # Context variable for per-request API key (set by middleware from X-Api-Key header)
 _request_api_key: ContextVar[str | None] = ContextVar("request_api_key", default=None)
 _request_api_base_url: ContextVar[str | None] = ContextVar("request_api_base_url", default=None)
 _request_model: ContextVar[str | None] = ContextVar("request_model", default=None)
+_request_user_id: ContextVar[str | None] = ContextVar("request_user_id", default=None)
 
 
 # Default model when no route exists. Must be a model that actually exists on
@@ -456,6 +458,7 @@ def _complete_impl(
     run_id: str | None,
     node_key: str | None,
     project_id: str,
+    user_id: str | None = None,
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
@@ -473,7 +476,7 @@ def _complete_impl(
     start = time.perf_counter()
     prompt_text, provider, model, params = _load_prompt_and_route(prompt_name, task_type, variables)
     estimated_cost = _estimate_cost(variables, {"prompt": prompt_text})
-    _assert_budget(project_id, "bootstrap", estimated_cost)
+    _assert_budget(user_id, project_id, "bootstrap", estimated_cost)
 
     prompt_tokens, completion_tokens = 0, 0  # default
     provider_name = model_name = ""
@@ -537,8 +540,8 @@ def _complete_impl(
             INSERT INTO ai_calls (
                 id, run_id, node_key, provider, model, prompt_name, task_type,
                 input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
-                client_mutation_id, project_id
-            ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s)
+                client_mutation_id, project_id, user_id
+            ) VALUES (%s, %s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s ,%s, %s, %s, %s, %s, %s)
             ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
             DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model,
                 prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
@@ -564,16 +567,8 @@ def _complete_impl(
                 "succeeded",
                 client_mutation_id,
                 project_id,
+                user_id,
             ),
-        )
-        conn.execute(
-            """
-            INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny)
-            VALUES (%s, %s, 'bootstrap', 2.0, %s)
-            ON CONFLICT(project_id, scope)
-            DO UPDATE SET spent_cny = budgets.spent_cny + excluded.spent_cny, updated_at = CURRENT_TIMESTAMP
-            """,
-            (new_id("bdg"), project_id, cost_cny),
         )
         conn.commit()
     finally:
@@ -589,20 +584,23 @@ def complete(
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
+    user_id: str | None = None,
     client_mutation_id: str | None = None,
 ) -> dict[str, Any]:
     """Execute an AI call and keep both successful and failed attempts in the ledger."""
+    user_id = user_id or _request_user_id.get()
     started = time.perf_counter()
     try:
         return _complete_impl(
             run_id=run_id, node_key=node_key, project_id=project_id,
             task_type=task_type, prompt_name=prompt_name, variables=variables,
-            client_mutation_id=client_mutation_id,
+            user_id=user_id, client_mutation_id=client_mutation_id,
         )
     except Exception as exc:
         _record_failed_call(
             run_id=run_id, node_key=node_key, project_id=project_id, task_type=task_type,
-            prompt_name=prompt_name, variables=variables, client_mutation_id=client_mutation_id,
+            prompt_name=prompt_name, variables=variables, user_id=user_id,
+            client_mutation_id=client_mutation_id,
             started=started, error=exc,
         )
         raise
@@ -610,7 +608,8 @@ def complete(
 
 def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id: str,
                         task_type: str, prompt_name: str, variables: dict[str, Any],
-                        client_mutation_id: str | None, started: float, error: Exception) -> None:
+                        user_id: str | None = None, client_mutation_id: str | None,
+                        started: float, error: Exception) -> None:
     conn = None
     try:
         route = _load_route(task_type) or {}
@@ -624,14 +623,14 @@ def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id:
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
                    input, output, prompt_tokens, completion_tokens, cost_cny,
-                   latency_ms, status, error, client_mutation_id, project_id
-               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s)
+                   latency_ms, status, error, client_mutation_id, project_id, user_id
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s,%s)
                ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
                DO NOTHING""",
             (new_id("call"), run_id, node_key, provider, model, prompt_name, task_type,
              encode({"variables": variables}), encode({}),
              int((time.perf_counter() - started) * 1000), str(error)[:2000],
-             client_mutation_id, project_id),
+             client_mutation_id, project_id, user_id),
         )
         conn.commit()
     except Exception:
@@ -699,18 +698,42 @@ def _load_prompt_and_route(
     return prompt_text, provider, model, params
 
 
-def _assert_budget(project_id: str, scope: str, estimated_cost: float) -> None:
+def _assert_budget(user_id: str | None, project_id: str, scope: str, estimated_cost: float) -> None:
+    """Enforce the user's plan-derived monthly cost budget.
+
+    The limit is sourced from the user's active plan (plans.monthly_budget_cny)
+    instead of the previously hardcoded 2.0 CNY per-project 'bootstrap' budget.
+    When no user context is available (e.g. background workers), fall back to the
+    configured default and aggregate spend by project_id. Spend is the sum of
+    ai_calls.cost_cny for the current natural month.
+    """
+    limit = float(settings.default_monthly_budget_cny)
+    if user_id:
+        try:
+            sub = get_active_subscription(user_id)
+            limit = float(sub.get("monthly_budget_cny") or settings.default_monthly_budget_cny)
+        except Exception:
+            limit = float(settings.default_monthly_budget_cny)
+    start, end = monthly_window()
     conn = connect()
-    budget = row_to_dict(
-        conn.execute(
-            "SELECT * FROM budgets WHERE project_id = %s AND scope = %s",
-            (project_id, scope),
-        ).fetchone()
-    )
-    conn.close()
-    if budget and float(budget["spent_cny"]) + estimated_cost > float(budget["limit_cny"]):
-        alert_budget(project_id, "bootstrap", float(budget["spent_cny"]), float(budget["limit_cny"]))
-        raise BudgetExceeded(f"{scope} budget exceeded")
+    try:
+        agg = row_to_dict(conn.execute(
+            """
+            SELECT COALESCE(SUM(cost_cny), 0)::float AS spent
+            FROM ai_calls
+            WHERE created_at >= %s AND created_at < %s
+              AND (user_id = %s OR (user_id IS NULL AND project_id = %s))
+            """,
+            (start, end, user_id, project_id),
+        ).fetchone())
+    finally:
+        conn.close()
+    spent = float(agg.get("spent") or 0)
+    if spent + estimated_cost > limit:
+        alert_budget(project_id, scope, spent, limit)
+        raise BudgetExceeded(
+            f"{scope} monthly budget exceeded: {spent:.4f}/{limit:.2f} CNY"
+        )
 
 
 def _estimate_cost(variables: dict[str, Any], output_hint: dict[str, Any]) -> float:
@@ -853,6 +876,7 @@ def _deepseek_stream(prompt: str, model: str, params: dict[str, Any], usage_out:
 def _complete_stream_impl(
     *,
     project_id: str,
+    user_id: str | None = None,
     task_type: str,
     prompt_name: str,
     variables: dict[str, Any],
@@ -880,7 +904,7 @@ def _complete_stream_impl(
     prompt_text, provider, model, params = _load_prompt_and_route(
         prompt_name, task_type, variables, include_contract=False
     )
-    _assert_budget(project_id, "bootstrap", _estimate_cost(variables, {"prompt": prompt_text}))
+    _assert_budget(user_id, project_id, "bootstrap", _estimate_cost(variables, {"prompt": prompt_text}))
 
     chunks: list[str] = []
     usage: dict[str, int] = {}
@@ -917,8 +941,8 @@ def _complete_stream_impl(
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
                    input, output, prompt_tokens, completion_tokens, cost_cny, latency_ms, status,
-                   client_mutation_id, project_id
-               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   client_mutation_id, project_id, user_id
+               ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
                DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model,
                    prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
@@ -931,7 +955,7 @@ def _complete_stream_impl(
              encode({"text": full_text}),
              prompt_tokens, completion_tokens,
              _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens), latency_ms,
-             "succeeded", client_mutation_id, project_id),
+             "succeeded", client_mutation_id, project_id, user_id),
         )
         conn.commit()
     finally:
@@ -940,19 +964,21 @@ def _complete_stream_impl(
 
 def complete_stream(
     *, project_id: str, task_type: str, prompt_name: str,
-    variables: dict[str, Any], client_mutation_id: str | None = None,
+    variables: dict[str, Any], user_id: str | None = None,
+    client_mutation_id: str | None = None,
 ):
     """Public streaming wrapper with the same failed-call ledger contract as complete()."""
+    user_id = user_id or _request_user_id.get()
     started = time.perf_counter()
     try:
         yield from _complete_stream_impl(
-            project_id=project_id, task_type=task_type, prompt_name=prompt_name,
+            project_id=project_id, user_id=user_id, task_type=task_type, prompt_name=prompt_name,
             variables=variables, client_mutation_id=client_mutation_id,
         )
     except Exception as exc:
         _record_failed_call(
             run_id=None, node_key=None, project_id=project_id, task_type=task_type,
             prompt_name=prompt_name, variables={**variables, "stream": True},
-            client_mutation_id=client_mutation_id, started=started, error=exc,
+            user_id=user_id, client_mutation_id=client_mutation_id, started=started, error=exc,
         )
         raise

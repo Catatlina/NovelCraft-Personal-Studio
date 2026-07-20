@@ -373,6 +373,48 @@ def get_performance_dashboard(user: dict = Depends(get_current_user)):
     return ok(build_performance_dashboard(project_ids=user_project_ids(user)))
 
 
+@router.get("/analytics/usage")
+def get_usage(scope: str = "user", project_id: str = "", user: dict = Depends(get_current_user)):
+    """P0-T4: AI cost / token usage.
+
+    - ``scope=user``    -> current-month usage for the authenticated user
+                           (projects owned, words generated, cost, calls).
+    - ``scope=project``  -> cumulative AI usage for a project the user belongs to.
+    """
+    from app.core.billing import get_subscription_usage
+    from app.db import row_to_dict
+
+    if scope == "project":
+        if not project_id or not project_id.strip():
+            raise HTTPException(422, "project_id is required when scope=project")
+        require_project_member(project_id, user)
+        db = connect()
+        try:
+            agg = row_to_dict(db.execute(
+                """
+                SELECT COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
+                       COALESCE(SUM(cost_cny), 0)::float AS cost_cny,
+                       COUNT(*) AS calls
+                FROM ai_calls WHERE project_id = %s
+                """,
+                (project_id,),
+            ).fetchone())
+        finally:
+            db.close()
+        return ok({
+            "scope": "project",
+            "project_id": project_id,
+            "prompt_tokens": int(agg["prompt_tokens"] or 0),
+            "completion_tokens": int(agg["completion_tokens"] or 0),
+            "words_used": int(agg["completion_tokens"] or 0),
+            "cost_used": float(agg["cost_cny"] or 0),
+            "calls": int(agg["calls"] or 0),
+        })
+    usage = get_subscription_usage(user["id"])
+    return ok({"scope": "user", **usage})
+
+
 class PerformanceFeedbackRequest(BaseModel):
     project_id: str
 

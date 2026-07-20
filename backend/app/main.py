@@ -44,6 +44,7 @@ from .api.v1.complete_api import router as complete_router
 from .api.v1.ranking import library_router, router as ranking_router
 from .api.v1.fusion import router as fusion_router
 from .api.v1.deai import router as deai_router
+from .api.v1.billing import router as billing_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -77,6 +78,7 @@ app.include_router(complete_router)
 app.include_router(ranking_router)
 app.include_router(fusion_router, prefix="/api/v1")
 app.include_router(deai_router)
+app.include_router(billing_router)
 init_metrics(app)
 install_rate_limiter(app)
 
@@ -125,12 +127,25 @@ async def metrics_guard(request: Request, call_next):
             return JSONResponse({"detail": "not found"}, status_code=404)
     return await call_next(request)
 
-# Middleware: capture X-Api-* headers for this request
+# Middleware: capture X-Api-* headers + resolved user for this request
 @app.middleware("http")
 async def capture_api_key(request: Request, call_next):
-    from app.gateway import _request_api_key, _request_api_base_url, _request_model
+    from app.gateway import _request_api_key, _request_api_base_url, _request_model, _request_user_id
     from app.core.url_security import validate_ai_base_url
+    from app.core.security import decode_token_payload
+    from app.core.billing import enforce_quota
     tokens = []
+    # Resolve the authenticated user from the Bearer token (soft-decode; no 401
+    # here — the route dependency enforces auth). The result scopes the AI cost
+    # ledger + plan quota to the real user instead of a shared project budget.
+    auth = request.headers.get("Authorization", "")
+    user_id = None
+    if auth.lower().startswith("bearer "):
+        payload = decode_token_payload(auth[7:].strip(), expected_type="access")
+        if payload:
+            user_id = payload.get("sub")
+    if user_id:
+        tokens.append((_request_user_id, _request_user_id.set(user_id)))
     key = request.headers.get("X-Api-Key")
     if key:
         tokens.append((_request_api_key, _request_api_key.set(key)))
@@ -145,6 +160,20 @@ async def capture_api_key(request: Request, call_next):
         tokens.append((_request_api_base_url, _request_api_base_url.set(base_url)))
     model = request.headers.get("X-Model")
     if model:
+        # Plan gate: a model not in the user's plan is rejected at the boundary.
+        if user_id:
+            try:
+                enforce_quota(user_id, None, "model", model)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={
+                        "code": detail.get("code", "FORBIDDEN"),
+                        "message": detail.get("message", "forbidden"),
+                        "data": {k: v for k, v in detail.items() if k not in ("code", "message")},
+                    },
+                )
         tokens.append((_request_model, _request_model.set(model)))
     try:
         return await call_next(request)
@@ -286,6 +315,9 @@ def create_project(payload: ProjectCreate | None = Body(default=None), name: str
     body_name = payload.name.strip() if payload and payload.name and payload.name.strip() else ""
     project_name = body_name or name
     description = payload.description if payload else ""
+    # Plan gate: block project creation once the user's plan project limit is hit.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_projects")
     conn = connect()
     pid = new_id()
     conn.execute(
@@ -1101,6 +1133,10 @@ def ai_edit(
 ) -> ApiResponse:
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
+    # Plan gate: enforce the monthly word quota before any AI generation so
+    # Free users cannot bypass the cap via the generic editor / continue path.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_words_per_month")
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
     output = complete(
         run_id=None,
@@ -1176,6 +1212,9 @@ def ai_edit_stream(
 
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
     conn.close()
+    # Plan gate: enforce the monthly word quota before streaming AI generation.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_words_per_month")
     project_id = content["project_id"]
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
 

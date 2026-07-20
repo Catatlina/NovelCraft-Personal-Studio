@@ -14,6 +14,10 @@ class Settings:
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "180"))
     bootstrap_budget_cny: float = float(os.getenv("NOVELCRAFT_BOOTSTRAP_BUDGET_CNY", "2.0"))
+    # Single source of truth for the default per-user monthly AI cost budget (CNY).
+    # The seeded Free plan derives its own finite limit from this same value so
+    # the gateway budget and the dev seed stay aligned (no more hardcoded 2.0/50.0).
+    default_monthly_budget_cny: float = float(os.getenv("NOVELCRAFT_DEFAULT_MONTHLY_BUDGET_CNY", "50.0"))
     jwt_secret: str = os.getenv("NOVELCRAFT_JWT_SECRET", "")
     access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_EXP_MINUTES", "30"))
     refresh_token_days: int = int(os.getenv("REFRESH_TOKEN_EXP_DAYS", "30"))

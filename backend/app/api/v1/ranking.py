@@ -753,6 +753,10 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
     topic = db.execute("SELECT * FROM topic_candidates WHERE id=%s FOR UPDATE", (topic_id,)).fetchone()
     if not topic: db.close(); raise HTTPException(404, "topic not found")
     require_member(db, topic["project_id"], user, write=True)
+    # Plan gate: book generation is token-heavy; block once the monthly word
+    # quota is exhausted (402). The workflow's own AI calls also enforce budget.
+    from .core.billing import enforce_quota
+    enforce_quota(user["id"], None, "max_words_per_month")
     if topic.get("novel_id"):
         novel_id = topic["novel_id"]
         existing_run = db.execute("SELECT id FROM workflow_runs WHERE novel_id=%s ORDER BY created_at DESC LIMIT 1", (novel_id,)).fetchone()

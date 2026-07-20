@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Search, Bell, Sun, Moon, LogOut, ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 
-type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
+type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
 
 function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick: () => void }) {
   return (
@@ -87,11 +87,13 @@ export function Layout({ tab, setTab, title, children }: {
         </NavGroup>
 
         {/* 工具服务 */}
-        <NavGroup title="工具服务" defaultOpen={['publish','costs','prompts','dag','versions','plugins','collaboration','agents'].includes(tab)}>
+        <NavGroup title="工具服务" defaultOpen={['publish','costs','billing','prompts','dag','versions','plugins','collaboration','agents'].includes(tab)}>
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>}
             label="发布看板" active={isActive('publish')} onClick={() => setTab('publish')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>}
             label="成本追踪" active={isActive('costs')} onClick={() => setTab('costs')} />
+          <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>}
+            label="订阅套餐" active={isActive('billing')} onClick={() => setTab('billing')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>}
             label="Prompt管理" active={isActive('prompts')} onClick={() => setTab('prompts')} />
           <NavItem icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4v7a2 2 0 0 1-2 2H6"/></svg>}

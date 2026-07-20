@@ -33,9 +33,9 @@ interface StatCard {
 const STAT_CARDS: StatCard[] = [
   {
     label: "今日生成字数",
-    value: "12,580",
-    trend: "↑ 18%",
-    trendClass: "up",
+    value: "—",
+    trend: "",
+    trendClass: "flat",
     iconCls: "ic-purple",
     iconEl: <Edit3 size={18} />,
   },
@@ -57,8 +57,8 @@ const STAT_CARDS: StatCard[] = [
   },
   {
     label: "本周 AI 调用",
-    value: "847",
-    trend: "成本 ¥23.5",
+    value: "—",
+    trend: "",
     trendClass: "flat",
     iconCls: "ic-green",
     iconEl: <Zap size={18} />,
@@ -78,7 +78,7 @@ interface QAction {
 const QUICK_ACTIONS: QAction[] = [
   {
     id: "inspiration",
-    tab: "inspiration",
+    tab: "wizard",
     icon: <Lightbulb size={20} />,
     title: "灵感创作",
     description: "从灵感到大纲，AI 驱动起点",
@@ -248,7 +248,7 @@ export function DashboardV2({ projectId: _projectId, onNavigate }: DashboardV2Pr
         <div className="head-actions">
           <button
             className="btn-sm btn-primary"
-            onClick={() => onNavigate("inspiration")}
+            onClick={() => onNavigate("wizard")}
           >
             <svg
               viewBox="0 0 24 24"

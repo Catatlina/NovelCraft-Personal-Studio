@@ -9,7 +9,7 @@ type Source = { source_key: string; display_name: string; last_success_at?: stri
 type Snapshot = { id: string; source_key: string; display_name: string; status: string; capture_status?: string; collector?: string; confidence?: number; validation_summary?: Record<string, unknown>; item_count: number; error?: string; captured_at: string };
 type Evidence = Record<string, unknown>;
 type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string; metadata_status?: string; collector?: string; confidence?: number; evidence?: Evidence; metrics?: { collector?: string; confidence?: number; evidence?: Evidence; validation?: Evidence } };
-type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals?: Array<{ signal?: string; evidence?: string }>; audience?: { primary?: string; needs?: string[] }; title_patterns?: Array<{ pattern?: string }>; pacing?: { opening?: string; retention_hooks?: string[] }; originality_constraints?: string[]; signals?: any; layers?: any; heatmap?: any; keywords?: any };
+type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals?: Array<{ signal?: string; evidence?: string }>; audience?: { primary?: string; needs?: string[] }; title_patterns?: Array<{ pattern?: string }>; pacing?: { opening?: string; retention_hooks?: string[] }; originality_constraints?: string[]; signals?: any; layers?: any; heatmap?: any; keywords?: any; candidates?: Topic[] };
 type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
 type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string; originality_notes?: string; novel_id?: string };
 type ImportItem = Record<string, unknown>;
@@ -157,16 +157,16 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function analyze(snapshot: Snapshot) {
     setBusy(`analysis:${snapshot.id}`); setMessage("");
     try {
-      // Use new 10-layer analysis endpoint
-      const result = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
-        method: "POST",
-        body: JSON.stringify({
-          snapshot_id: snapshot.id,
-          platforms: [snapshot.source_key],
-          analysis_mode: "single",
-        }),
+      // P0-T3: snapshot-level market analysis (ranking.py:560) is the source of
+      // truth for the 选题→成书 flow — it returns `topic_candidates`, which the
+      // old ten-layer /ranking/analyze endpoint never produced.
+      const result = await api<Wrapped<any>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, {
+        method: "POST", body: "{}",
       });
       const data = result.data;
+      const candidates: Topic[] = Array.isArray(data.candidates)
+        ? data.candidates
+        : (Array.isArray(data.topic_candidates) ? data.topic_candidates : []);
       setSnapshotDetails(current => ({
         ...current,
         [snapshot.id]: {
@@ -174,18 +174,18 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           items: current[snapshot.id]?.items || [],
           latest_analysis: {
             analysis_id: data.analysis_id,
-            summary: `十层分析完成：${data.succeeded_layers}/${data.total_layers}层`,
-            status: data.status,
-            analysis_mode: "ten_layer",
-            signals: data.TrendReport?.market_trends || [],
-            layers: data.ScanResult || {},
-            heatmap: data.HeatMap,
-            keywords: data.KeywordCloud,
-          },
+            summary: data.summary || "市场分析完成",
+            status: data.status || "succeeded",
+            analysis_mode: "market",
+            // Backend returns market_signals as a dict (not an array) here; the
+            // legacy card renders it via .map, so keep it empty to avoid a crash.
+            market_signals: [],
+            candidates,
+          } as MarketAnalysis,
         } as SnapshotDetail,
       }));
       setOpenSnapshotId(snapshot.id);
-      setMessage(`十层分析完成：${data.succeeded_layers}/${data.total_layers}层通过`);
+      setMessage(`市场分析完成：产出 ${candidates.length} 个选题候选`);
       await load();
     } catch (error) { setMessage(`分析失败：${errorText(error)}`); }
     finally { setBusy(""); }
@@ -196,17 +196,35 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     if (succeeded.length < 2) { setMessage("需要至少 2 个成功的快照才能进行聚合分析"); return; }
     setMultiAnalysisLoading(true); setMessage(""); setMultiAnalysisResult(null);
     try {
+      // P0-T3: aggregate per-snapshot market analysis across platforms and
+      // collect the union of topic candidates (deduped by title).
       const platformKeys = [...new Set(succeeded.map(s => s.source_key))];
-      const result = await api<Wrapped<any>>(`/api/v1/ranking/analyze`, {
-        method: "POST",
-        body: JSON.stringify({
-          snapshot_id: succeeded[0].id,
-          analysis_mode: "multi",
-          platforms: platformKeys,
-        }),
+      const allCandidates: Topic[] = [];
+      let lastSummary = "";
+      for (const snap of succeeded) {
+        const res = await api<Wrapped<any>>(`/api/v1/ranking/snapshots/${snap.id}/analyze`, {
+          method: "POST", body: "{}",
+        });
+        const d = res.data;
+        lastSummary = d.summary || lastSummary;
+        const cs: Topic[] = Array.isArray(d.candidates)
+          ? d.candidates
+          : (Array.isArray(d.topic_candidates) ? d.topic_candidates : []);
+        allCandidates.push(...cs);
+      }
+      const seen = new Set<string>();
+      const deduped = allCandidates.filter(c => {
+        const k = c.title || "";
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
       });
-      setMultiAnalysisResult(result.data);
-      setMessage(`多平台聚合分析完成：${result.data.succeeded_layers || 0}/${result.data.total_layers || 0}层通过`);
+      setMultiAnalysisResult({
+        summary: lastSummary || `多平台聚合分析完成：${platformKeys.length} 个平台，产出 ${deduped.length} 个选题候选`,
+        candidates: deduped,
+        platform_keys: platformKeys,
+      });
+      setMessage(`多平台聚合分析完成：${platformKeys.length} 个平台，产出 ${deduped.length} 个选题候选`);
     } catch (error) { setMessage(`聚合分析失败：${errorText(error)}`); }
     finally { setMultiAnalysisLoading(false); }
   }
@@ -267,7 +285,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     setBusy(`book:${topic.id}`); setMessage("");
     try {
       const result = await api<Wrapped<{ novel_id: string; run_id?: string; status: string; warning?: string }>>(`/api/v1/ranking/topics/${topic.id}/generate-book`, {
-        method: "POST", body: JSON.stringify({ auto_start: true, target_words: 800000 }),
+        method: "POST", body: JSON.stringify({ auto_start: true, target_words: 800000, style: "克制、有画面感、适合网文平台阅读" }),
       });
       await onBookCreated(result.data.novel_id, result.data.run_id);
       setMessage(result.data.run_id ? "小说已进入书库并启动自动生成" : `小说已进入书库，工作流待恢复：${result.data.warning || "队列不可用"}`);
@@ -633,6 +651,49 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                               <small style={{ color: "var(--text-3)" }}>原创风险检查仅作辅助，不构成版权或法律结论。</small>
                             </div>
                           )}
+                          {(() => {
+                            const candidates = snapshotDetails[snapshot.id]?.latest_analysis?.candidates || [];
+                            if (!candidates.length) return null;
+                            return (
+                              <div className="card" style={{ marginTop: 14, padding: 16, background: "var(--bg-base)", borderColor: "var(--border-strong)" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                                  <strong style={{ fontSize: 14 }}>选题候选（一键成书）</strong>
+                                  <span className="badge cyan">{candidates.length}</span>
+                                </div>
+                                <div style={{ display: "grid", gap: 12 }}>
+                                  {candidates.map((topic) => (
+                                    <div key={topic.id} className="card" style={{ padding: 12, margin: 0 }}>
+                                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                                        <div>
+                                          <strong style={{ fontSize: 14 }}>{topic.title}</strong>
+                                          <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>{topic.genre}{topic.target_audience ? ` · ${topic.target_audience}` : ""}</div>
+                                          {topic.premise && <p style={{ fontSize: 12, color: "var(--text-3)", margin: "6px 0 0", lineHeight: 1.6 }}>{topic.premise}</p>}
+                                        </div>
+                                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                                          <div style={{ fontSize: 18, color: "var(--primary-light)", fontWeight: 700 }}>{typeof topic.market_score === "number" ? topic.market_score.toFixed(1) : topic.market_score ?? "—"}</div>
+                                          <div style={{ fontSize: 11, color: "var(--text-3)" }}>市场分</div>
+                                        </div>
+                                      </div>
+                                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                                        <button
+                                          className="btn-sm btn-primary"
+                                          disabled={busy === `book:${topic.id}`}
+                                          onClick={() => void createBook(topic)}
+                                        >
+                                          {busy === `book:${topic.id}` ? "生成中…" : "生成小说"}
+                                        </button>
+                                        {topic.novel_id && (
+                                          <button className="btn-sm btn-ghost" onClick={() => void onBookCreated(topic.novel_id!)}>
+                                            打开作品
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </td>
@@ -665,6 +726,41 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         </span>
       </div>
       <div style={{ display: "grid", gap: 16 }}>
+
+        {/* ── Aggregated topic candidates (P0-T3) ── */}
+        {Array.isArray((multiAnalysisResult as any)?.candidates) && (multiAnalysisResult as any).candidates.length > 0 && (
+          <div className="card" style={{ padding: 16, background: "var(--bg-base)", borderColor: "var(--border-strong)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <strong style={{ fontSize: 14 }}>跨平台选题候选（一键成书）</strong>
+              <span className="badge cyan">{(multiAnalysisResult as any).candidates.length}</span>
+            </div>
+            <div style={{ display: "grid", gap: 12 }}>
+              {((multiAnalysisResult as any).candidates as Topic[]).map((topic) => (
+                <div key={topic.id} className="card" style={{ padding: 12, margin: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                    <div>
+                      <strong style={{ fontSize: 14 }}>{topic.title}</strong>
+                      <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>{topic.genre}{topic.target_audience ? ` · ${topic.target_audience}` : ""}</div>
+                      {topic.premise && <p style={{ fontSize: 12, color: "var(--text-3)", margin: "6px 0 0", lineHeight: 1.6 }}>{topic.premise}</p>}
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 18, color: "var(--primary-light)", fontWeight: 700 }}>{typeof topic.market_score === "number" ? topic.market_score.toFixed(1) : topic.market_score ?? "—"}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-3)" }}>市场分</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button className="btn-sm btn-primary" disabled={busy === `book:${topic.id}`} onClick={() => void createBook(topic)}>
+                      {busy === `book:${topic.id}` ? "生成中…" : "生成小说"}
+                    </button>
+                    {topic.novel_id && (
+                      <button className="btn-sm btn-ghost" onClick={() => void onBookCreated(topic.novel_id!)}>打开作品</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── 8-section novel analysis report (reuses existing multi-analysis data) ── */}
         <div className="card" style={{ padding: 16, background: "var(--primary-dim)", borderColor: "var(--border-strong)" }}>

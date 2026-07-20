@@ -92,9 +92,15 @@ def register(request: Request, response: Response, payload: RegisterRequest = Bo
         "INSERT INTO project_members (id, project_id, user_id, role) VALUES (%s, %s, %s, %s)",
         (new_id(), project_id, user_id, "owner"),
     )
+    # Every new user gets a Free subscription so plan/quota enforcement has a row.
+    db.execute(
+        "INSERT INTO subscriptions (id, user_id, plan_id, status, started_at, expires_at, auto_renew) "
+        "VALUES (%s, %s, 'plan_free', 'active', now(), NULL, TRUE)",
+        (new_id(), user_id),
+    )
     db.execute(
         "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s, %s, %s, %s, %s)",
-        (new_id(), project_id, "bootstrap", 2.0, 0),
+        (new_id(), project_id, "bootstrap", float(settings.default_monthly_budget_cny), 0),
     )
     db.commit()
     db.close()

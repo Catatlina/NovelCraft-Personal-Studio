@@ -4,6 +4,7 @@ import { Wizard } from "./components/Wizard";
 import { Progress } from "./components/Progress";
 import { Review } from "./components/Review";
 import { Costs } from "./components/Costs";
+import { Billing } from "./components/Billing";
 import { CommandPalette } from "./components/CommandPalette";
 import { DagEditor } from "./components/DagEditor";
 import { Settings } from "./components/Settings";
@@ -22,7 +23,6 @@ import { AgentConsole } from "./components/AgentConsole";
 import { ApiError, api as baseApi, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
-import { DashboardV2 } from "./components/DashboardV2";
 import { Overview } from "./components/Overview";
 import { Plugins } from "./components/Plugins";
 import { Prompts } from "./components/Prompts";
@@ -38,7 +38,7 @@ type Knowledge = { id: string; kind: string; title: string; body: string; meta: 
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
+type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins";
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
@@ -450,7 +450,7 @@ export default function App() {
     final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
   }) as any;
 
-  const titles: Record<Tab, string> = { dashboard: "工作台", overview: "数据概览", workspace: "工作区", ranking: "扫榜选书", library: "书库管理", wizard: "灵感创作", progress: "创作进度", review: "质量审阅", editor: "章节编辑器", costs: "AI 成本", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理" };
+  const titles: Record<Tab, string> = { dashboard: "工作台", overview: "数据概览", workspace: "工作区", ranking: "扫榜选书", library: "书库管理", wizard: "灵感创作", progress: "创作进度", review: "质量审阅", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理" };
   const [prompts, setPrompts] = useState<any[]>([]);
 
   useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
@@ -462,6 +462,7 @@ export default function App() {
     { id: "editor", label: "编辑器 → 写章节", action: () => setTab("editor") },
     { id: "review", label: "审阅 → 查看审核", action: () => setTab("review") },
     { id: "costs", label: "成本追踪 → AI 调用", action: () => setTab("costs") },
+    { id: "billing", label: "订阅套餐 → 套餐/用量", action: () => setTab("billing") },
     { id: "prompts", label: "Prompt 管理", action: () => setTab("prompts") },
     { id: "dag", label: "工作流编排 → DAG 编辑器", action: () => setTab("dag") },
     { id: "settings", label: "系统设置 → AI配置/预算", action: () => setTab("settings") },
@@ -502,7 +503,7 @@ export default function App() {
     <ThemeProvider>
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
       {error && <div className="error">{error}</div>}
-      {tab === "dashboard" && <DashboardV2 projectId={project?.id || ""} onNavigate={(tab: string) => setTab(tab as Tab)} />}
+      {tab === "dashboard" && <Overview />}
       {tab === "ranking" && project && <RankingCenter projectId={project.id} onBookCreated={async (novelId, runId) => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); if (runId) { setTab("progress"); await refreshRun(runId); } else setTab("library"); }} />}
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
@@ -510,6 +511,7 @@ export default function App() {
       {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}><Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} /></React.Suspense>}
       {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
+      {tab === "billing" && <Billing />}
       {tab === "prompts" && <Prompts prompts={prompts} projectId={project?.id || ""} />}
       {tab === "dag" && <DagEditor projectId={project?.id || ""} novelId={novel?.id || ""} />}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
@@ -523,7 +525,7 @@ export default function App() {
       {tab === "collaboration" && project && <CollaborationPanel projectId={project.id} />}
       {tab === "agents" && <AgentConsole />}
       {tab === "overview" && <Overview />}
-      {tab === "workspace" && <DashboardV2 projectId={project?.id || ""} onNavigate={(t) => setTab(t as Tab)} />}
+      {tab === "workspace" && <Overview />}
       {tab === "plugins" && <Plugins />}
       <CommandPalette commands={cmdActions} />
     </Layout>

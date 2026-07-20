@@ -166,7 +166,16 @@ def init_db() -> None:
         )
         db.execute(
             "INSERT INTO budgets (id, project_id, scope, limit_cny, spent_cny) VALUES (%s, %s, %s, %s, %s)",
-            (new_id("bdg"), project_id, "default", 50.0, 0),
+            (new_id("bdg"), project_id, "default", float(settings.default_monthly_budget_cny), 0),
+        )
+        # Give the dev admin a Free subscription so billing queries return a real row.
+        db.execute(
+            """
+            INSERT INTO subscriptions (id, user_id, plan_id, status, started_at, expires_at, auto_renew)
+            SELECT %s, %s, 'plan_free', 'active', now(), NULL, TRUE
+            WHERE NOT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = %s)
+            """,
+            (new_id(), user_id, user_id),
         )
     # Keep project ownership and authorization membership consistent, including
     # databases created by older builds that omitted the owner membership row.
