@@ -1,0 +1,8 @@
+# 星禾 AI 工作台 · Starlume AI
+node_modules/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+dist/
+.vscode/

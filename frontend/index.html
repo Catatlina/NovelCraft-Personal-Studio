@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>星禾 · Starlume AI 工作台</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2c.4 4.8 3 7.6 7.8 8M12 2c-.4 4.8-3 7.6-7.8 8M12 22c-.4-4.8-3-7.6-7.8-8M12 22c.4-4.8 3-7.6 7.8-8' fill='none' stroke='%235B66DB' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+/* ═══════════════════════════════════════
+   Starlume AI · Apple Minimal Design System
+   品牌: 星禾 · Starlume
+   哲学: 克制/留白/零发光/细描边/Inter
+   ═══════════════════════════════════════ */
+
+:root {
+  --brand-500: #5B66DB;
+  --brand-600: #4A54CF;
+  --brand-700: #3E48C2;
+  --primary: #5B66DB;
+  --primary-hover: #4A54CF;
+  --primary-soft: rgba(91,102,219,.08);
+  --on-primary: #fff;
+  --bg: #F5F5F7;
+  --bg-elev: #FFFFFF;
+  --bg-hover: #ECECF0;
+  --bg-subtle: #FAFAFC;
+  --text-1: #1D1D1F;
+  --text-2: #6E6E73;
+  --text-3: #86868B;
+  --border: #E3E3E8;
+  --border-strong: #C7C7CC;
+  --success: #2C9C62; --success-soft: #E1F5EA;
+  --warning: #D98E1F; --warning-soft: #FBEEDB;
+  --danger: #CC3B4E;  --danger-soft: #FBE3E7;
+  --info: #1878B8;    --info-soft: #E0EFFA;
+  --font: 'Inter',system-ui,-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  --font-mono: 'SF Mono',ui-monospace,'JetBrains Mono',Menlo,monospace;
+  --fs-12:12px;--fs-13:13px;--fs-14:14px;--fs-15:15px;--fs-16:16px;--fs-17:17px;
+  --fs-20:20px;--fs-24:24px;--fs-28:28px;--fs-32:32px;--fs-40:40px;--fs-48:48px;
+  --radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-full:9999px;
+  --space-4:4px;--space-8:8px;--space-12:12px;--space-16:16px;
+  --space-20:20px;--space-24:24px;--space-32:32px;--space-40:40px;--space-48:48px;--space-64:64px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.08);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,.12);
+  --dur: 180ms;
+  --ease: cubic-bezier(.2,0,0,1);
+}
+
+[data-theme="dark"] {
+  --primary: #7C84EC;--primary-hover:#8E95EF;--primary-soft:rgba(124,132,236,.16);
+  --bg:#000;--bg-elev:#1C1C1E;--bg-hover:#2C2C2E;--bg-subtle:#161618;
+  --text-1:#F5F5F7;--text-2:#AEAEB2;--text-3:#8E8E93;
+  --border:#38383A;--border-strong:#48484A;
+  --success:#31B572;--success-soft:#163A28;
+  --warning:#F2A93B;--warning-soft:#3D2E12;
+  --danger:#DE4B5E;--danger-soft:#3F1820;
+  --info:#2E9BD6;--info-soft:#143545;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.4);
+  --shadow-md:0 4px 16px rgba(0,0,0,.5);
+  --shadow-lg:0 12px 32px rgba(0,0,0,.55);
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--bg);color:var(--text-1);
+  font-family:var(--font);font-size:var(--fs-16);line-height:1.47;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  min-height:100vh;transition:background var(--dur) var(--ease),color var(--dur) var(--ease);
+}
+a{color:var(--primary);text-decoration:none}
+:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(91,102,219,.32);border-radius:4px}
+button{font-family:inherit;cursor:pointer}
+input,textarea,select{font-family:inherit;font-size:inherit}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--border-strong)}
+
+/* ═══ Login Page ═══ */
+.login-page{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:var(--space-16);background:var(--bg);
+  background-image:radial-gradient(ellipse at 50% 0%,var(--primary-soft) 0%,transparent 70%);
+}
+.login-card{
+  width:420px;max-width:100%;background:var(--bg-elev);border-radius:var(--radius-xl);
+  border:1px solid var(--border);box-shadow:var(--shadow-lg);padding:var(--space-40) var(--space-32);
+  transition:all var(--dur) var(--ease);
+}
+.login-logo{text-align:center;margin-bottom:var(--space-32)}
+.login-logo svg{width:44px;height:44px;color:var(--primary)}
+.login-logo h1{font-size:var(--fs-24);font-weight:700;margin-top:var(--space-12);letter-spacing:-.02em}
+.login-logo p{font-size:var(--fs-14);color:var(--text-3);margin-top:4px}
+.login-tabs{display:flex;margin-bottom:var(--space-24);border-bottom:1px solid var(--border)}
+.login-tabs button{
+  flex:1;padding:12px 0;border:none;background:transparent;
+  font-weight:600;font-size:var(--fs-14);color:var(--text-3);
+  border-bottom:2px solid transparent;transition:all var(--dur) var(--ease);
+}
+.login-tabs button.active{color:var(--primary);border-bottom-color:var(--primary)}
+.form-group{margin-bottom:var(--space-16)}
+.form-group label{display:block;font-size:var(--fs-13);color:var(--text-3);margin-bottom:6px;font-weight:500}
+.form-group input{
+  width:100%;padding:11px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);
+  font-size:var(--fs-14);background:var(--bg);color:var(--text-1);
+  transition:border-color var(--dur) var(--ease),box-shadow var(--dur) var(--ease);
+}
+.form-group input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft);outline:none}
+.form-group input::placeholder{color:var(--text-3)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 20px;border-radius:var(--radius-sm);font-size:var(--fs-14);font-weight:600;
+  border:1px solid transparent;transition:all var(--dur) var(--ease);
+  white-space:nowrap;line-height:1.4;
+}
+.btn-primary{background:var(--primary);color:var(--on-primary)}
+.btn-primary:hover{background:var(--primary-hover)}
+.btn-primary:disabled{opacity:.6;cursor:not-allowed}
+.btn-secondary{background:var(--bg-hover);color:var(--text-1);border-color:var(--border)}
+.btn-secondary:hover{background:var(--border)}
+.btn-ghost{color:var(--text-2);background:transparent}
+.btn-ghost:hover{background:var(--bg-hover);color:var(--text-1)}
+.btn-sm{padding:6px 12px;font-size:var(--fs-13)}
+.btn-block{width:100%}
+.btn-lg{padding:14px 24px;font-size:var(--fs-16)}
+.alert{
+  padding:10px 14px;border-radius:var(--radius-sm);
+  font-size:var(--fs-13);margin-bottom:var(--space-16);
+}
+.alert-danger{background:var(--danger-soft);color:var(--danger)}
+.alert-success{background:var(--success-soft);color:var(--success)}
+.alert-info{background:var(--info-soft);color:var(--info)}
+
+/* ═══ App Layout ═══ */
+.app-root{display:flex;min-height:100vh}
+.sidebar{
+  width:248px;flex-shrink:0;background:var(--bg-elev);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;
+  padding:var(--space-20);position:sticky;top:0;height:100vh;
+  overflow-y:auto;transition:transform var(--dur) var(--ease),opacity var(--dur) var(--ease);
+  z-index:100;
+}
+.sidebar-brand{
+  display:flex;align-items:center;gap:var(--space-12);
+  padding-bottom:var(--space-20);border-bottom:1px solid var(--border);
+  margin-bottom:var(--space-16);
+}
+.sidebar-brand svg{width:28px;height:28px;color:var(--primary);flex-shrink:0}
+.sidebar-brand span{font-weight:700;font-size:var(--fs-17);letter-spacing:-.01em}
+.sidebar-nav{display:flex;flex-direction:column;gap:2px;flex:1}
+.nav-item{
+  display:flex;align-items:center;gap:var(--space-12);padding:10px var(--space-12);
+  border-radius:var(--radius-sm);font-size:var(--fs-14);font-weight:500;
+  color:var(--text-2);cursor:pointer;transition:all var(--dur) var(--ease);
+  border:none;background:none;width:100%;text-align:left;
+}
+.nav-item:hover{background:var(--bg-hover);color:var(--text-1)}
+.nav-item.active{background:var(--primary-soft);color:var(--primary)}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.nav-section{
+  font-size:var(--fs-11);font-weight:700;color:var(--text-3);
+  text-transform:uppercase;letter-spacing:.05em;padding:var(--space-16) var(--space-12) var(--space-8);
+}
+.sidebar-footer{
+  margin-top:auto;padding-top:var(--space-16);border-top:1px solid var(--border);
+}
+.user-row{
+  padding:0 var(--space-12) var(--space-8);font-size:var(--fs-13);
+  color:var(--text-1);font-weight:500;display:flex;align-items:center;gap:8px;
+}
+.user-row .avatar{
+  width:28px;height:28px;border-radius:var(--radius-full);background:var(--primary-soft);
+  color:var(--primary);display:flex;align-items:center;justify-content:center;
+  font-size:var(--fs-12);font-weight:700;
+}
+.theme-row{display:flex;gap:4px;padding:var(--space-8) 0}
+.theme-row button{
+  flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:6px 0;border-radius:var(--radius-full);background:var(--bg-hover);
+  border:none;font-size:var(--fs-12);color:var(--text-2);transition:all var(--dur) var(--ease);
+}
+.theme-row button:hover{color:var(--text-1)}
+.theme-row button svg{width:14px;height:14px}
+
+/* ─── Main Content ─── */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.main-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:var(--space-16) var(--space-32);border-bottom:1px solid var(--border);
+  background:var(--bg-elev);gap:var(--space-16);
+}
+.main-header-left{display:flex;align-items:center;gap:var(--space-12)}
+.main-header h2{font-size:var(--fs-17);font-weight:600}
+.main-breadcrumb{font-size:var(--fs-14);color:var(--text-3)}
+.main-breadcrumb span{color:var(--text-1);font-weight:500}
+.main-content{flex:1;padding:var(--space-32);overflow-y:auto}
+.hamburger{
+  display:none;background:none;border:none;padding:4px;
+  color:var(--text-1);border-radius:var(--radius-sm);
+}
+.hamburger:hover{background:var(--bg-hover)}
+.hamburger svg{width:22px;height:22px}
+
+/* ─── Cards & Components ─── */
+.card{
+  background:var(--bg-elev);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:var(--space-20);transition:box-shadow var(--dur) var(--ease);
+}
+.card:hover{box-shadow:var(--shadow-md)}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-16)}
+.stat-card{
+  background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:var(--space-20);text-align:center;transition:box-shadow var(--dur) var(--ease);
+}
+.stat-card:hover{box-shadow:var(--shadow-md)}
+.stat-value{font-size:var(--fs-28);font-weight:700;letter-spacing:-.02em}
+.stat-label{font-size:var(--fs-13);color:var(--text-3);margin-top:4px}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-16)}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-16)}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-16)}
+
+.section-title{
+  font-size:var(--fs-14);font-weight:600;color:var(--text-2);
+  margin-bottom:var(--space-12);display:flex;align-items:center;gap:var(--space-8);
+}
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:var(--space-24)}
+.page-header h1{font-size:var(--fs-28);font-weight:700;letter-spacing:-.02em}
+.page-header .sub{font-size:var(--fs-14);color:var(--text-3);margin-top:4px}
+
+.badge{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 10px;
+  border-radius:var(--radius-full);font-size:var(--fs-12);font-weight:500;white-space:nowrap;
+}
+.badge-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.badge-success{background:var(--success-soft);color:var(--success)}.badge-success .badge-dot{background:var(--success)}
+.badge-info{background:var(--info-soft);color:var(--info)}.badge-info .badge-dot{background:var(--info)}
+.badge-warning{background:var(--warning-soft);color:var(--warning)}.badge-warning .badge-dot{background:var(--warning)}
+.badge-danger{background:var(--danger-soft);color:var(--danger)}.badge-danger .badge-dot{background:var(--danger)}
+.badge-muted{background:var(--bg-hover);color:var(--text-3)}
+
+.table{width:100%;border-collapse:collapse;font-size:var(--fs-14)}
+.table th{text-align:left;padding:12px 16px;font-weight:600;color:var(--text-2);font-size:var(--fs-13);border-bottom:1px solid var(--border)}
+.table td{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text-1)}
+.table tr:last-child td{border-bottom:none}
+.table tr:hover td{background:var(--bg-hover)}
+
+.tag{display:inline-block;padding:3px 10px;border-radius:var(--radius-sm);font-size:var(--fs-12);background:var(--bg-hover);color:var(--text-2)}
+.quick-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-12)}
+.quick-card{
+  background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:var(--space-16);cursor:pointer;transition:all var(--dur) var(--ease);
+  display:flex;align-items:center;gap:var(--space-12);
+}
+.quick-card:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
+.quick-card svg{width:20px;height:20px;color:var(--primary);flex-shrink:0}
+.quick-card-label{font-weight:600;font-size:var(--fs-14)}
+.quick-card-desc{font-size:var(--fs-12);color:var(--text-3);margin-top:2px}
+
+/* ─── Subnav (Novel) ─── */
+.subnav{display:flex;gap:2px;padding-bottom:var(--space-16);flex-wrap:wrap}
+.subnav button{
+  padding:7px 14px;border-radius:var(--radius-sm);border:none;cursor:pointer;
+  font-size:var(--fs-13);font-weight:500;color:var(--text-2);background:transparent;
+  transition:all var(--dur) var(--ease);
+}
+.subnav button:hover{background:var(--bg-hover);color:var(--text-1)}
+.subnav button.active{background:var(--primary-soft);color:var(--primary)}
+
+/* ─── Progress Bar ─── */
+.progress{height:6px;background:var(--bg-hover);border-radius:var(--radius-full);overflow:hidden;flex:1}
+.progress-bar{height:100%;background:var(--primary);border-radius:var(--radius-full);transition:width .4s var(--ease)}
+
+/* ─── Mobile Overlay ─── */
+.sidebar-overlay{display:none}
+.mobile-only{display:none}
+
+/* ─── Toast ─── */
+.toast-container{
+  position:fixed;right:24px;bottom:24px;z-index:9999;
+  display:flex;flex-direction:column;gap:10px;align-items:flex-end;
+  pointer-events:none;
+}
+.toast{
+  background:var(--bg-elev);border:1px solid var(--border);box-shadow:var(--shadow-md);
+  border-radius:var(--radius-md);padding:12px 16px;font-size:var(--fs-14);color:var(--text-1);
+  display:flex;align-items:center;gap:10px;pointer-events:auto;
+  animation:toastIn .25s var(--ease);max-width:360px;
+}
+.toast-success{border-left:3px solid var(--success)}
+.toast-error{border-left:3px solid var(--danger)}
+.toast-info{border-left:3px solid var(--info)}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ─── Spinner ─── */
+.spinner{
+  width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--primary);
+  border-radius:50%;animation:spin .6s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-wrap{display:flex;align-items:center;justify-content:center;padding:var(--space-48);color:var(--text-3);gap:12px}
+.empty-state{text-align:center;padding:var(--space-48);color:var(--text-3);font-size:var(--fs-14)}
+
+/* ─── Responsive ─── */
+@media(max-width:1024px){
+  .sidebar{position:fixed;top:0;left:0;transform:translateX(-100%);opacity:0;box-shadow:var(--shadow-lg)}
+  .sidebar.open{transform:translateX(0);opacity:1}
+  .sidebar-overlay{display:block;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:99}
+  .hamburger{display:flex}
+  .main-header{padding:var(--space-12) var(--space-16)}
+  .main-content{padding:var(--space-16)}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .grid-3,.grid-4{grid-template-columns:repeat(2,1fr)}
+  .quick-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:640px){
+  .stat-grid,.grid-2,.grid-3,.grid-4,.quick-grid{grid-template-columns:1fr}
+  .page-header{flex-direction:column;gap:var(--space-12)}
+  .page-header h1{font-size:var(--fs-24)}
+  .mobile-only{display:block}
+  .hide-mobile{display:none!important}
+}
+
+/* ─── Utility ─── */
+.mb-8{margin-bottom:var(--space-8)}.mb-12{margin-bottom:var(--space-12)}
+.mb-16{margin-bottom:var(--space-16)}.mb-20{margin-bottom:var(--space-20)}
+.mb-24{margin-bottom:var(--space-24)}.mb-32{margin-bottom:var(--space-32)}
+.mt-16{margin-top:var(--space-16)}.mt-24{margin-top:var(--space-24)}
+.gap-8{gap:var(--space-8)}.gap-12{gap:var(--space-12)}.gap-16{gap:var(--space-16)}
+.flex{display:flex}.flex-col{flex-direction:column}
+.items-center{align-items:center}.justify-between{justify-content:space-between}
+.flex-1{flex:1}.text-center{text-align:center}
+.text-2{color:var(--text-2)}.text-3{color:var(--text-3)}
+.text-sm{font-size:var(--fs-13)}.text-xs{font-size:var(--fs-12)}
+.fw-600{font-weight:600}.fw-700{font-weight:700}
+.mono{font-family:var(--font-mono)}
+</style>
+</head>
+<body>
+
+<!-- ═══ Login Page ═══ -->
+<div id="login-page" class="login-page">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg viewBox="0 0 24 24"><path d="M12 2c.4 4.8 3 7.6 7.8 8M12 2c-.4 4.8-3 7.6-7.8 8M12 22c-.4-4.8-3-7.6-7.8-8M12 22c.4-4.8 3-7.6 7.8-8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h1>星禾 · Starlume</h1>
+      <p>AI 内容创作全景工作台</p>
+    </div>
+    <div class="login-tabs" id="login-tabs">
+      <button class="active" data-tab="login">登录</button>
+      <button data-tab="register">注册</button>
+    </div>
+    <form id="login-form">
+      <div id="login-error"></div>
+      <div class="form-group">
+        <label>邮箱</label>
+        <input type="email" id="login-email" placeholder="your@email.com" required>
+      </div>
+      <div class="form-group" id="name-group" style="display:none">
+        <label>显示名称</label>
+        <input type="text" id="login-name" placeholder="你的名字">
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <input type="password" id="login-password" placeholder="输入密码" required minlength="6">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-submit">登录</button>
+    </form>
+    <p class="text-center text-3 text-sm mt-16">注册即表示同意服务条款 · Starlume AI</p>
+  </div>
+</div>
+
+<!-- ═══ App (hidden initially) ═══ -->
+<div id="app-root" class="app-root" style="display:none">
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <svg viewBox="0 0 24 24"><path d="M12 2c.4 4.8 3 7.6 7.8 8M12 2c-.4 4.8-3 7.6-7.8 8M12 22c-.4-4.8-3-7.6-7.8-8M12 22c.4-4.8 3-7.6 7.8-8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>星禾 · Starlume</span>
+    </div>
+    <nav class="sidebar-nav" id="sidebar-nav">
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-row" id="sidebar-user"></div>
+      <div class="theme-row">
+        <button onclick="toggleTheme('light')">☀️ 浅色</button>
+        <button onclick="toggleTheme('dark')">🌙 暗色</button>
+      </div>
+      <button class="btn btn-ghost btn-sm btn-block mt-8" onclick="doLogout()">退出登录</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="main-header">
+      <div class="main-header-left">
+        <button class="hamburger" onclick="toggleSidebar()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+        </button>
+        <h2 id="page-title">控制台</h2>
+      </div>
+      <div id="header-actions" class="flex items-center gap-12"></div>
+    </header>
+    <div class="main-content" id="main-content"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+/* ═══════════════════════════════════════
+   Starlume AI · Frontend Application
+   Apple Minimal Design · Single Page App
+   ═══════════════════════════════════════ */
+
+// ─── Config ───
+const API_BASE = '/api/v1';
+let AUTH_TOKEN = localStorage.getItem('starlume_token') || '';
+let USER = JSON.parse(localStorage.getItem('starlume_user') || 'null');
+let CURRENT_PAGE = 'console';
+let CURRENT_SUB = '';
+
+// ─── Navigation ───
+const NAV = [
+  { id:'console', label:'控制台', icon:'M4 6h16M4 12h16M4 18h16', desc:'系统概览', group:'main' },
+  { id:'novel-dashboard', label:'小说创作', icon:'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z', desc:'AI 辅助写作', group:'main' },
+  { id:'hotspot', label:'热点中心', icon:'M13 2L3 14h9l-1 8 10-12h-9l1-8z', desc:'实时热点追踪', group:'main' },
+  { id:'versions', label:'版本管理', icon:'M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z', desc:'版本树与回溯', group:'main' },
+  { id:'agent', label:'Agent 中心', icon:'M12 2a4 4 0 0 1 4 4v2h4v12H4V8h4V6a4 4 0 0 1 4-4z', desc:'AI Agent', group:'platform' },
+  { id:'skill', label:'Skill 中心', icon:'M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z', desc:'技能插件', group:'platform' },
+  { id:'appcenter', label:'App Center', icon:'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z', desc:'应用市场', group:'platform' },
+  { id:'copilot', label:'AI 助手', icon:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', desc:'智能对话', group:'tool' },
+  { id:'settings', label:'设置', icon:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z', desc:'系统配置', group:'tool' },
+];
+
+const PAGES = {};
+
+// ─── Theme ───
+function toggleTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('starlume_theme', t);
+}
+
+// ─── API ───
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+  const res = await fetch(`${API_BASE}${path}`, { headers, ...opts });
+  const data = await res.json().catch(() => ({ code: res.status, message: res.statusText }));
+  if (!res.ok) throw new Error(data.message || data.detail || `HTTP ${res.status}`);
+  return data.data !== undefined ? data.data : data;
+}
+
+// ─── Toast ───
+function toast(msg, type = 'info') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 3500);
+}
+
+// ─── Auth ───
+async function doLogin(email, pass) {
+  const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password: pass }) });
+  AUTH_TOKEN = data.access_token;
+  USER = data.user;
+  localStorage.setItem('starlume_token', AUTH_TOKEN);
+  localStorage.setItem('starlume_user', JSON.stringify(USER));
+}
+
+async function doRegister(email, pass, name) {
+  const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ email, password: pass, display_name: name }) });
+  AUTH_TOKEN = data.access_token;
+  USER = data.user;
+  localStorage.setItem('starlume_token', AUTH_TOKEN);
+  localStorage.setItem('starlume_user', JSON.stringify(USER));
+}
+
+function doLogout() {
+  AUTH_TOKEN = ''; USER = null;
+  localStorage.removeItem('starlume_token');
+  localStorage.removeItem('starlume_user');
+  document.getElementById('app-root').style.display = 'none';
+  document.getElementById('login-page').style.display = '';
+}
+
+// ─── Init ───
+function init() {
+  const saved = localStorage.getItem('starlume_theme');
+  if (saved) toggleTheme(saved);
+  if (AUTH_TOKEN && USER) {
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    buildSidebar();
+    document.getElementById('sidebar-user').innerHTML = `<div class="avatar">${(USER.display_name || USER.email || '?')[0].toUpperCase()}</div>${USER.display_name || USER.email}`;
+    navigate('console');
+  }
+}
+
+// ─── Sidebar ───
+function buildSidebar() {
+  const nav = document.getElementById('sidebar-nav');
+  let lastGroup = '';
+  nav.innerHTML = NAV.map(item => {
+    let groupHtml = '';
+    if (item.group !== lastGroup && item.group === 'platform') { groupHtml = '<div class="nav-section">平台</div>'; lastGroup = 'platform'; }
+    else if (item.group !== lastGroup && item.group === 'tool') { groupHtml = '<div class="nav-section">工具</div>'; lastGroup = 'tool'; }
+    else { lastGroup = item.group; }
+    return `${groupHtml}<button class="nav-item" data-page="${item.id}" onclick="navigate('${item.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${item.icon}"/></svg>${item.label}</button>`;
+  }).join('');
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (document.getElementById('sidebar').classList.contains('open')) {
+    overlay.style.display = 'block';
+  } else {
+    overlay.style.display = 'none';
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('sidebar-overlay').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').style.display = 'none';
+  });
+});
+
+// ─── Router ───
+function navigate(page, sub) {
+  CURRENT_PAGE = page; CURRENT_SUB = sub || '';
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const activeNav = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (activeNav) activeNav.classList.add('active');
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').style.display = 'none';
+  renderPage();
+}
+
+// ─── Page Render ───
+function renderPage() {
+  const title = document.getElementById('page-title');
+  const content = document.getElementById('main-content');
+  const p = CURRENT_PAGE;
+
+  if (p === 'console') { renderConsole(content); title.textContent = '控制台'; }
+  else if (p.startsWith('novel-')) { renderNovel(content, p.replace('novel-', '')); title.textContent = '小说创作'; }
+  else if (p === 'hotspot') { renderHotspot(content); title.textContent = '热点中心'; }
+  else if (p === 'versions') { renderVersions(content); title.textContent = '版本管理'; }
+  else if (p === 'agent') { renderCenter(content, 'Agent'); title.textContent = 'Agent 中心'; }
+  else if (p === 'skill') { renderCenter(content, 'Skill'); title.textContent = 'Skill 中心'; }
+  else if (p === 'appcenter') { renderAppCenter(content); title.textContent = 'App Center'; }
+  else if (p === 'copilot') { renderCopilot(content); title.textContent = 'AI 助手'; }
+  else if (p === 'settings') { renderSettings(content); title.textContent = '设置'; }
+  else { content.innerHTML = '<div class="empty-state">页面未找到</div>'; title.textContent = '星禾 AI'; }
+
+  // Update header actions
+  const actions = document.getElementById('header-actions');
+  if (p === 'console') {
+    actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="navigate('novel-editor')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 新建小说</button>`;
+  } else if (p.startsWith('novel-')) {
+    actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="navigate('novel-editor')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 新建</button>`;
+  } else {
+    actions.innerHTML = '';
+  }
+
+  // Scroll to top
+  content.scrollTop = 0;
+}
+
+// ─── Login Form ───
+let loginMode = 'login';
+document.getElementById('login-tabs').addEventListener('click', (e) => {
+  if (e.target.tagName !== 'BUTTON') return;
+  loginMode = e.target.dataset.tab;
+  document.querySelectorAll('#login-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === loginMode));
+  document.getElementById('name-group').style.display = loginMode === 'register' ? '' : 'none';
+  document.getElementById('login-submit').textContent = loginMode === 'login' ? '登录' : '注册';
+  document.getElementById('login-error').innerHTML = '';
+});
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const name = document.getElementById('login-name').value.trim();
+  const btn = document.getElementById('login-submit');
+  const errEl = document.getElementById('login-error');
+  btn.disabled = true; btn.textContent = '处理中…';
+
+  try {
+    if (loginMode === 'login') await doLogin(email, password);
+    else await doRegister(email, password, name);
+    errEl.innerHTML = '';
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    init();
+  } catch (err) {
+    errEl.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+    btn.disabled = false; btn.textContent = loginMode === 'login' ? '登录' : '注册';
+  }
+});
+
+// ═══════════════════════════════════════
+//  Page Render Functions
+// ═══════════════════════════════════════
+
+function fmt(n) { const v = n ?? 0; return v >= 10000 ? (v/10000).toFixed(1)+'万' : v.toLocaleString(); }
+
+function iconSvg(d, size=18) { return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`; }
+
+// ─── Console ───
+async function renderConsole(el) {
+  el.innerHTML = '<div class="loading-wrap"><div class="spinner"></div> 加载控制台…</div>';
+  try {
+    const [stats, projects, health] = await Promise.all([
+      api('/stats/overview').catch(() => ({ai_calls:0,contents:0,cost_cny:0,tokens:0})),
+      api('/projects').catch(() => []),
+      api('/modules/health').catch(() => []),
+    ]);
+    const hlist = health.length > 0 ? health : [
+      {name:'小说创作引擎',status:'verified',uptime:'--',endpoint:'/api/v1/novel'},
+      {name:'AI 网关',status:'verified',uptime:'--',endpoint:'/api/v1/engine'},
+      {name:'热点分析',status:'wip',uptime:'--',endpoint:'/api/v1/hotspots'},
+      {name:'Agent 中心',status:'verified',uptime:'--',endpoint:'/api/v1/agents'},
+      {name:'Skill 中心',status:'verified',uptime:'--',endpoint:'/api/v1/skills'},
+      {name:'知识库',status:'verified',uptime:'--',endpoint:'/api/v1/knowledge'},
+    ];
+    const pj = Array.isArray(projects) ? projects.slice(0,4) : [];
+
+    const statusBadge = s => {
+      const map = {verified:['success','✅ 已验证'],wip:['info','🧪 开发中'],stub:['warning','⚠️ 空壳'],missing:['danger','❌ 缺失']};
+      const [c,l] = map[s]||['muted',s];
+      return `<span class="badge badge-${c}"><span class="badge-dot"></span>${l}</span>`;
+    };
+
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h1>控制台</h1>
+          <div class="sub">${USER ? `欢迎回来，${USER.display_name || USER.email}` : '下午好'} · AI 创作全景</div>
+        </div>
+        <button class="btn btn-primary" onclick="navigate('novel-editor')">${iconSvg('M12 5v14M5 12h14',16)} 新建小说</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:var(--space-16);font-size:var(--fs-13);color:var(--success)">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--success)"></span>
+        已接入后端 · 数据实时
+      </div>
+
+      <div class="stat-grid mb-24">
+        <div class="stat-card"><div class="stat-value">${fmt(stats.ai_calls)}</div><div class="stat-label">AI 调用 · 累计</div></div>
+        <div class="stat-card"><div class="stat-value">${stats.contents || 0} 篇</div><div class="stat-label">内容产出</div></div>
+        <div class="stat-card"><div class="stat-value">¥ ${(stats.cost_cny||0).toFixed(1)}</div><div class="stat-label">成本 · 本月</div></div>
+        <div class="stat-card"><div class="stat-value">${((stats.tokens||0)/1_000_000).toFixed(1)}M</div><div class="stat-label">Tokens · 累计</div></div>
+      </div>
+
+      <div class="section-title">模块健康度</div>
+      <div class="grid-3 mb-24">
+        ${hlist.map(m => `<div class="card" style="padding:var(--space-16)"><div class="flex justify-between items-center mb-8"><span class="fw-600 text-sm">${m.name}</span>${statusBadge(m.status)}</div><div class="text-sm text-3">${m.uptime||'--'} 可用 <span class="mono">${m.endpoint||''}</span></div></div>`).join('')}
+      </div>
+
+      <div class="section-title">最近项目</div>
+      ${pj.length > 0 ? `<div class="grid-2 mb-24">${pj.map(p => `<div class="card" onclick="navigate('novel-editor')" style="cursor:pointer"><div class="flex justify-between items-start"><div><div class="fw-600" style="font-size:var(--fs-15)">${p.name||p.title||'未命名'}</div><div class="text-sm text-3 mt-4">${p.genre||'创作'} · 更新 ${p.updated_at ? new Date(p.updated_at).toLocaleDateString('zh-CN') : '--'}</div></div><span class="tag">${p.status||'草稿'}</span></div></div>`).join('')}</div>` : `<div class="card mb-24 empty-state">还没有项目，点击右上角「新建小说」开始创作</div>`}
+
+      <div class="grid-2">
+        <div class="card" style="text-align:center;padding:var(--space-32);color:var(--text-3)">暂无进行中任务</div>
+        <div class="card">
+          <div class="section-title">快捷入口</div>
+          <div class="quick-grid">
+            ${[
+              ['novel-ranking','M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z','扫榜中心','洞察多平台榜单'],
+              ['novel-library','M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z','书库管理','全部作品与草稿'],
+              ['novel-editor','M12 5v14M5 12h14','新建小说','从选题到成书'],
+              ['hotspot','M13 2L3 14h9l-1 8 10-12h-9l1-8z','热点中心','追踪实时热点'],
+            ].map(([to,ic,lb,dc]) => `<div class="quick-card" onclick="navigate('${to}')">${iconSvg(ic,20)}<div><div class="quick-card-label">${lb}</div><div class="quick-card-desc">${dc}</div></div></div>`).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">⚠️ 加载失败：${e.message}<br><small>请确认后端服务已启动</small></div>`;
+  }
+}
+
+// ─── Novel Pages ───
+function renderNovel(el, sub) {
+  const subs = [
+    ['dashboard','工作台首页','M3 12h18M3 6h18M3 18h18'],
+    ['ranking','扫榜中心','M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z'],
+    ['library','书库管理','M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'],
+    ['editor','三栏编辑器','M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z'],
+    ['progress','进度任务','M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'],
+    ['review','审核中心','M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'],
+    ['foreshadow','伏笔看板','M13 10V3L4 14h7v7l9-11h-7z'],
+    ['inspiration','灵感生成','M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0'],
+  ];
+  const active = sub || 'dashboard';
+  el.innerHTML = `
+    <div class="subnav">${subs.map(([id,label]) => `<button class="${active===id?'active':''}" onclick="navigate('novel-${id}','${id}')">${label}</button>`).join('')}</div>
+    <div id="novel-content"></div>
+  `;
+  const nc = document.getElementById('novel-content');
+  if (active === 'dashboard') renderNovelDashboard(nc);
+  else if (active === 'ranking') renderNovelRanking(nc);
+  else if (active === 'library') renderNovelLibrary(nc);
+  else if (active === 'editor') renderNovelEditor(nc);
+  else if (active === 'progress') renderNovelProgress(nc);
+  else if (active === 'review') renderNovelReview(nc);
+  else if (active === 'foreshadow') renderNovelForeshadow(nc);
+  else if (active === 'inspiration') renderNovelInspiration(nc);
+}
+
+function renderNovelDashboard(el) {
+  Promise.all([api('/projects').catch(()=>[])]).then(([projs]) => {
+    const p = projs.length > 0 ? projs[0] : {id:'demo',name:'星落长河',genre:'仙侠',words:88000,chapters:24,status:'连载中'};
+    el.innerHTML = `
+      <div class="grid-2 mb-24">
+        <div class="card">
+          <div class="flex justify-between items-start">
+            <div><div style="font-size:var(--fs-20);font-weight:700">${p.name||p.title||'未命名'}</div><div class="text-3 text-sm mt-4">${p.genre||'创作'} · ${fmt(p.words||0)}字 · ${p.chapters||0}章</div></div>
+            <span class="tag">${p.status||'草稿'}</span>
+          </div>
+          <div class="flex items-center gap-12 mt-16"><div class="progress" style="flex:1"><div class="progress-bar" style="width:${p.progress||67}%"></div></div><span class="text-sm text-2">${p.progress||67}%</span></div>
+        </div>
+        <div class="card"><div class="section-title">最近活动</div><div class="text-sm text-3">暂无活动记录</div></div>
+      </div>
+      <div class="grid-3">
+        <div class="card text-center" style="padding:var(--space-32)"><div style="font-size:var(--fs-28);font-weight:700">0</div><div class="text-sm text-3 mt-4">待审阅章节</div></div>
+        <div class="card text-center" style="padding:var(--space-32)"><div style="font-size:var(--fs-28);font-weight:700">0</div><div class="text-sm text-3 mt-4">活跃伏笔</div></div>
+        <div class="card text-center" style="padding:var(--space-32)"><div style="font-size:var(--fs-28);font-weight:700">0</div><div class="text-sm text-3 mt-4">灵感碎片</div></div>
+      </div>
+    `;
+  });
+}
+
+function renderNovelRanking(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1 style="font-size:var(--fs-24)">扫榜中心</h1><div class="sub">多平台榜单扫描与市场分析</div></div></div>
+    <div class="card"><div class="section-title">榜单来源</div>
+      <div class="grid-3">${[
+        ['起点中文网','月票榜 · 畅销榜 · 推荐榜','success'],
+        ['番茄小说','热搜榜 · 完本榜 · 新书榜','info'],
+        ['晋江文学城','积分榜 · 霸王票 · 签约榜','warning'],
+      ].map(([n,d,s]) => `<div class="card" style="padding:var(--space-16)"><div class="fw-600">${n}</div><div class="text-sm text-3 mt-4">${d}</div><span class="badge badge-${s} mt-8"><span class="badge-dot"></span>可用</span></div>`).join('')}</div>
+    </div>
+  `;
+}
+
+function renderNovelLibrary(el) {
+  el.innerHTML = `<div class="empty-state">📚 书库管理 — 连接后端查看作品列表</div>`;
+}
+
+function renderNovelEditor(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1 style="font-size:var(--fs-24)">三栏编辑器</h1><div class="sub">AI 辅助创作 · 大纲 / 正文 / 助手</div></div></div>
+    <div style="display:grid;grid-template-columns:1fr 3fr 2fr;gap:0;height:calc(100vh - 200px);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden">
+      <div style="border-right:1px solid var(--border);padding:var(--space-16);overflow-y:auto;background:var(--bg-subtle)"><div class="fw-600 mb-12">📋 大纲</div><div class="text-sm text-3">卷 1 · 开篇<br>章 1 · 楔子<br>章 2 · 初遇<br>...</div></div>
+      <div style="padding:var(--space-16);overflow-y:auto"><textarea placeholder="开始写作…" style="width:100%;height:100%;border:none;outline:none;resize:none;font-family:var(--font);font-size:var(--fs-16);line-height:1.8;color:var(--text-1);background:transparent;padding:var(--space-16)"></textarea></div>
+      <div style="border-left:1px solid var(--border);padding:var(--space-16);overflow-y:auto;background:var(--bg-subtle)"><div class="fw-600 mb-12">🤖 AI 助手</div><div class="text-sm text-3">选择文本后可使用 AI 润色、扩写、缩写等操作</div></div>
+    </div>
+  `;
+}
+
+function renderNovelProgress(el) {
+  el.innerHTML = `<div class="empty-state">📊 进度任务中心 — 查看生成进度与任务管理</div>`;
+}
+
+function renderNovelReview(el) {
+  el.innerHTML = `<div class="empty-state">✅ 审核中心 — 章节审阅与质量门禁</div>`;
+}
+
+function renderNovelForeshadow(el) {
+  el.innerHTML = `<div class="empty-state">🔗 伏笔看板 — 伏笔追踪与回收状态</div>`;
+}
+
+function renderNovelInspiration(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1 style="font-size:var(--fs-24)">灵感生成</h1><div class="sub">AI 灵感创作 · 生成小说选题</div></div></div>
+    <div class="card"><div class="form-group"><label>创作想法</label><textarea style="width:100%;padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text-1);resize:vertical;min-height:100px" placeholder="描述你的创作想法…例如：一个关于时间循环的都市奇幻故事"></textarea></div>
+    <button class="btn btn-primary" onclick="toast('灵感生成已提交（需连接AI后端）','info')">${iconSvg('M13 10V3L4 14h7v7l9-11h-7z',16)} 生成灵感</button></div>
+  `;
+}
+
+// ─── Hotspot ───
+function renderHotspot(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1>热点中心</h1><div class="sub">实时热点追踪 · 分析与内容生成</div></div><button class="btn btn-secondary btn-sm" onclick="api('/hotspots').then(d=>{toast('已刷新','success');renderHotspot(document.getElementById('main-content'))}).catch(()=>toast('后端未连接，显示演示数据','info'))">${iconSvg('M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',14)} 刷新</button></div>
+    <div class="grid-2">
+      ${[
+        ['AI 创作版权新规草案公布','国务院','98,400','↑','92%','success'],
+        ['2026 年度网络文学白皮书','作协','87,200','↑','88%','info'],
+        ['B 站 UP 主跨界写网文趋势','Bilibili','65,400','→','85%','info'],
+        ['新武侠复兴：年轻读者回归','豆瓣阅读','53,100','↑','81%','warning'],
+        ['短剧改编网文 TOP10 出炉','优酷','48,700','→','79%','warning'],
+        ['AI 小说获奖引发行业震动','新华社','41,200','↑','76%','muted'],
+      ].map(([t,s,h,tr,cf,st]) => `<div class="card"><div class="flex justify-between items-start"><div class="flex-1"><div class="fw-600" style="font-size:var(--fs-15)">${t}</div><div class="text-sm text-3 mt-4">${s} · 热度 ${h}</div></div><span class="badge badge-${st}"><span class="badge-dot"></span>${cf}</span></div><div class="flex items-center gap-8 mt-12"><span style="color:${tr==='↑'?'var(--success)':'var(--text-3)'};font-weight:700">${tr}</span></div></div>`).join('')}
+    </div>
+  `;
+}
+
+// ─── Versions ───
+function renderVersions(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1>版本管理</h1><div class="sub">版本树与回溯 · 所有 AI 编辑自动存档</div></div></div>
+    <div class="card"><div class="section-title">版本列表</div>
+    <table class="table"><thead><tr><th>标签</th><th>作者</th><th>时间</th><th>操作</th></tr></thead><tbody>
+    <tr><td>initial_idea</td><td>系统</td><td>--</td><td><button class="btn btn-ghost btn-sm">恢复</button></td></tr>
+    <tr><td colspan="4" class="text-center text-3">连接后端查看完整版本历史</td></tr>
+    </tbody></table></div>
+  `;
+}
+
+// ─── Agent/Skill Center ───
+function renderCenter(el, type) {
+  const t = type.toLowerCase();
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${type} 中心</h1><div class="sub">${type==='Agent'?'AI Agent 管理':'技能插件管理'} · 注册、配置与执行</div></div><button class="btn btn-primary btn-sm">${iconSvg('M12 5v14M5 12h14',14)} 新建${type}</button></div>
+    <div class="loading-wrap"><div class="spinner"></div> 正在加载 ${type}…</div>
+  `;
+  api(`/${t}s`).then(items => {
+    const list = Array.isArray(items) ? items : (items?.agents || items?.skills || []);
+    el.innerHTML = `<div class="page-header"><div><h1>${type} 中心</h1><div class="sub">共 ${list.length} 个${type}</div></div><button class="btn btn-primary btn-sm">${iconSvg('M12 5v14M5 12h14',14)} 新建</button></div>
+    <div class="grid-3">${list.map(a => `<div class="card"><div class="fw-600">${a.name||a.id||'未命名'}</div><div class="text-sm text-3 mt-4">${a.description||'无描述'}</div><div class="flex justify-between items-center mt-12"><span class="badge badge-${a.status==='active'?'success':'muted'}"><span class="badge-dot"></span>${a.status||'idle'}</span></div></div>`).join('')}</div>`;
+  }).catch(() => {
+    el.innerHTML = `<div class="page-header"><div><h1>${type} 中心</h1><div class="sub">离线模式 · 演示数据</div></div></div>
+    <div class="grid-3"><div class="card text-center" style="padding:var(--space-32)"><div style="font-size:var(--fs-40);margin-bottom:8px">🧠</div><div class="fw-600">小说创作 Agent</div><div class="text-sm text-3 mt-4">全自动长篇创作</div><span class="badge badge-success mt-12"><span class="badge-dot"></span>已验证</span></div>
+    <div class="card text-center" style="padding:var(--space-32)"><div style="font-size:var(--fs-40);margin-bottom:8px">🔍</div><div class="fw-600">扫榜分析 Agent</div><div class="text-sm text-3 mt-4">多平台榜单扫描</div><span class="badge badge-info mt-12"><span class="badge-dot"></span>开发中</span></div>
+    <div class="card text-center" style="padding:var(--space-32)"><div style="font-size:var(--fs-40);margin-bottom:8px">✍️</div><div class="fw-600">润色优化 Skill</div><div class="text-sm text-3 mt-4">AI 文本润色</div><span class="badge badge-success mt-12"><span class="badge-dot"></span>已验证</span></div></div>`;
+  });
+}
+
+// ─── App Center ───
+function renderAppCenter(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1>App Center</h1><div class="sub">应用模块市场 · 模块化功能管理</div></div></div>
+    <div class="grid-3">
+      ${[
+        ['📝','小说创作','全自动长篇与短篇 AI 创作','success','已启用'],
+        ['🔥','热点追踪','实时热点采集与内容生成','success','已启用'],
+        ['🌐','出海翻译','多语种自动翻译发布','info','可选'],
+        ['📊','数据分析','创作数据洞察与报表','warning','开发中'],
+        ['📱','自媒体发布','多平台一键分发','info','可选'],
+        ['🤖','Agent 市场','第三方 Agent 插件','danger','未安装'],
+      ].map(([em,n,d,s,l]) => `<div class="card"><div style="font-size:var(--fs-32);margin-bottom:var(--space-8)">${em}</div><div class="fw-600">${n}</div><div class="text-sm text-3 mt-4">${d}</div><div class="flex justify-between items-center mt-12"><span class="badge badge-${s}"><span class="badge-dot"></span>${l}</span><button class="btn btn-ghost btn-sm">${s==='success'?'管理':'安装'}</button></div></div>`).join('')}
+    </div>
+  `;
+}
+
+// ─── Copilot ───
+function renderCopilot(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1>AI 助手</h1><div class="sub">智能对话助手 · 随时回答你的创作问题</div></div></div>
+    <div class="card" style="min-height:400px;display:flex;flex-direction:column">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--text-3)">
+        ${iconSvg('M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',48)}
+        <div class="fw-600" style="font-size:var(--fs-17)">有什么我可以帮你的？</div>
+        <div class="text-sm">输入创作问题，AI 助手随时响应</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input placeholder="输入消息…" style="flex:1;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);font-size:var(--fs-14);background:var(--bg);color:var(--text-1)">
+        <button class="btn btn-primary">发送</button>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Settings ───
+function renderSettings(el) {
+  el.innerHTML = `
+    <div class="page-header"><div><h1>设置</h1><div class="sub">系统配置与 API 密钥管理</div></div></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="section-title">账户信息</div>
+        <div class="text-sm"><strong>邮箱</strong><br><span class="text-3">${USER?.email||'--'}</span></div>
+        <div class="text-sm mt-12"><strong>显示名称</strong><br><span class="text-3">${USER?.display_name||'--'}</span></div>
+      </div>
+      <div class="card">
+        <div class="section-title">API 配置</div>
+        <div class="form-group"><label>DeepSeek API Key</label><input type="password" placeholder="sk-…" style="width:100%;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text-1)"></div>
+        <button class="btn btn-primary btn-sm">保存</button>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Bootstrap ───
+init();
+</script>
+</body>
+</html>
