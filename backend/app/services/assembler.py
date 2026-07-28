@@ -28,6 +28,7 @@ class ContextAssembler:
         ("foreshadowing_alerts", 300, 6),
         ("knowledge_recall", 1500, 7),
         ("chapter_outline", 700, 8),
+        ("author_style", 300, 9),       # V3-P3-⑩: Author Style Card 强化（最低优先级，预算小）
     ]
 
     def __init__(self, novel_id: str, chapter_id: str | None = None):
@@ -47,6 +48,7 @@ class ContextAssembler:
             "knowledge_recall": self._knowledge_recall(),
             "chapter_outline": self._chapter_outline(),
             "arc_summary": self._arc_summary(),
+            "author_style": self._author_style_card(),
         }
 
         sections = []
@@ -258,6 +260,33 @@ class ContextAssembler:
             return detail or "\n".join(str(o) for o in outline[:3])
         return "[无章节细纲]"
 
+    def _author_style_card(self) -> str:
+        """V3-P3-⑩: 注入 Learning Agent 重建的作者风格卡（无数据则降级为空）。"""
+        db = connect()
+        row = db.execute("SELECT project_id FROM contents WHERE id = %s", (self.novel_id,)).fetchone()
+        db.close()
+        if not row or not row.get("project_id"):
+            return ""
+        from app.services import author_style
+        card = author_style.get_card(row["project_id"])
+        if not card:
+            return ""
+        lines = ["[作者风格卡 · 由编辑器学习信号强化]"]
+        if card.get("avg_sentence_length"):
+            lines.append(f"平均句长：{card['avg_sentence_length']} 字")
+        if card.get("dialogue_ratio") is not None:
+            lines.append(f"对话占比：{round(card['dialogue_ratio'] * 100)}%")
+        if card.get("edit_preference"):
+            lines.append(f"编辑偏好：{card['edit_preference']}")
+        sig = card.get("author_signals") or {}
+        if sig.get("signal_count"):
+            lines.append(f"学习信号：{sig['signal_count']} 条（保留率 {sig.get('keep_ratio')}）")
+        if card.get("common_motifs"):
+            lines.append("常用语汇：" + "、".join(card["common_motifs"][:8]))
+        if card.get("liked_phrases"):
+            lines.append("偏好表达：" + "、".join(card["liked_phrases"][:8]))
+        return "\n".join(lines)
+
     @staticmethod
     def _label(name: str) -> str:
         return {
@@ -269,4 +298,5 @@ class ContextAssembler:
             "foreshadowing_alerts": "伏笔提醒",
             "knowledge_recall": "知识素材",
             "chapter_outline": "章节细纲",
+            "author_style": "作者风格卡",
         }.get(name, name)

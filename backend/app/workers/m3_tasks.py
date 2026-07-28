@@ -94,3 +94,19 @@ def run_batch_fanout(self, content_id: str, platforms: list[str]) -> dict:
         except Exception as e:
             results[platform] = f"error: {str(e)[:60]}"
     return {"status": "done", "results": results}
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=10)
+def run_author_style_learning(self, project_id: str = "") -> dict:
+    """V3-P3-⑩: Learning Agent — 异步消费编辑器 diff 信号 + 知识库样本，重建 style_card。
+
+    不阻塞实时编辑体验；结果持久化到 style_cards 表，由 assembler 注入生成上下文。
+    """
+    if not project_id:
+        return {"status": "error", "message": "project_id required"}
+    from app.services import author_style
+    try:
+        card = author_style.run_style_learning(project_id)
+        return {"status": "ok", "project_id": project_id, "card": card}
+    except Exception as exc:  # 不污染队列，记录失败返回
+        return {"status": "error", "message": str(exc)[:120]}

@@ -10,7 +10,7 @@ type Content = { id: string; title: string; body: { content?: { text?: string }[
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -26,6 +26,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   discardPendingAiEdit?: () => void;
   deaiResult?: { original_score?: number; final_score?: number; layers?: Array<{ name: string; label: string; score_before: number; score_after: number; status: string }>; final_text?: string } | null;
   deaiLoading?: boolean;
+  markLiked?: (text: string) => void;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
   const docText = (body: any) => body?.content?.map((item: any) => item?.text || "").join("\n\n") || "";
@@ -274,6 +275,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               <button type="button" onClick={() => runEditorOp("rewrite_chapter")}><RefreshCcw size={15} /><span><strong>整章重写</strong><small>保留核心剧情</small></span></button>
               <button type="button" disabled={!selection.trim()} onClick={() => runEditorOp("polish")}><Wand2 size={15} /><span><strong>润色选区</strong><small>{selection.trim() ? `${selection.length} 字已选择` : "请先选择文字"}</small></span></button>
               <button type="button" disabled={!selection.trim()} onClick={() => runEditorOp("deai")}><RefreshCcw size={15} /><span><strong>去 AI 味</strong><small>{selection.trim() ? "处理已选文字" : "请先选择文字"}</small></span></button>
+              <button type="button" disabled={!selection.trim()} onClick={() => markLiked?.(selection.trim())}><Check size={15} /><span><strong>标记喜欢</strong><small>{selection.trim() ? "记录为偏好表达" : "请先选择文字"}</small></span></button>
             </div>
 
             {editorAiReview?.review?.issues?.length ? (

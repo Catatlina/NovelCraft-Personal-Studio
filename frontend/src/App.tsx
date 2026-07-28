@@ -308,6 +308,7 @@ export default function App() {
 
   async function saveChapter() {
     if (!chapter) return;
+    const prevText = docToText(chapter.body);
     const mutationId = crypto.randomUUID();
     const body = {
       body: textToDoc(editorText), label: "offline_save",
@@ -331,6 +332,7 @@ export default function App() {
         return;
       }
       setChapter(updated); await cacheDelete(`offline-content:${chapter.id}`); loadVersions(updated.id);
+      sendEditSignal(updated.id, prevText, editorText);
     } catch (caught) {
       if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
       await queueOfflineMutation(mutationId, "content_update", `/api/v1/contents/${chapter.id}`, "PUT", body);
@@ -338,6 +340,39 @@ export default function App() {
       setChapter(optimistic);
       await cacheSet(`offline-content:${chapter.id}`, optimistic);
       setOfflineNotice("网络不可用，内容已进入同步队列");
+    }
+  }
+
+  // V3-P3-⑩：编辑器 diff 信号采集（fire-and-forget，绝不阻塞保存）
+  async function sendEditSignal(chapterId: string, prevText: string, newText: string) {
+    if (!project?.id) return;
+    if (prevText === newText) return;
+    if (!newText.trim()) return;
+    try {
+      await api(`/api/v1/author-style/${project.id}/signals`, {
+        method: "POST",
+        body: JSON.stringify({
+          content_id: chapterId,
+          signals: [
+            { signal_type: "edit", kept_text: newText, deleted_text: prevText, edited_text: newText },
+          ],
+        }),
+      });
+    } catch {
+      /* 风格学习信号失败不影响编辑体验 */
+    }
+  }
+
+  async function markLiked(text: string) {
+    if (!project?.id || !text.trim()) return;
+    try {
+      await api(`/api/v1/author-style/${project.id}/like`, {
+        method: "POST",
+        body: JSON.stringify({ content_id: chapter?.id ?? null, text }),
+      });
+      setOfflineNotice("已记录为偏好表达，将用于强化风格卡");
+    } catch {
+      /* 标记失败静默 */
     }
   }
 
@@ -601,7 +636,7 @@ export default function App() {
       {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
