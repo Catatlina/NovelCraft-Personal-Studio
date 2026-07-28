@@ -1937,6 +1937,7 @@ def _persist_chapter_polish(db, node_key: str, output: dict, context: dict, run_
                 task_type="write_polish",
                 before_text=before_text or context.get("chapter_text", ""),
                 after_paragraphs=polished_paragraphs,
+                min_ratio=0.50,
             )
             _assert_min_chapter_length("write_polish", "\n".join(polished_paragraphs))
         except OutputValidationError:
