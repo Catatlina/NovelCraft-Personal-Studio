@@ -479,10 +479,15 @@ $instruction
 6. forbidden_changes：列出至少 3 条后续绝不能发生的事实漂移，例如不得改变主角职业、不得把核心设备替换成别的设备、不得把不同年代事件写在同一天
 7. 不得擅自增加“另一个重生者、系统任务、前妻/后宫、神秘组织”等会改变作品类型的重大设定；如确有价值，只能列入 design_additions，不能视为已经采用
 8. downstream_deliverables：逐条记录用户要求后续模块实际产出的内容及数量，例如“生成 8 卷分卷总纲”“生成前 30 章细纲”“第一章正文不低于 3000 字”。这里只登记交付物，不在本节点提前生成章节细纲或正文
+9. 【V3 Novel DNA（§3）】与 creative_bible 同一次调用产出，不增加调用次数：
+   - commercial_positioning：商业定位，含平台/读者画像/核心爽点/核心卖点/阅读期待
+   - story_promise：故事承诺，一句话回答“读者为什么追”
+   - forbidden_deviations：禁止偏离的结构化列表，如“禁止圣母”“禁止无理由暴富”（与 forbidden_changes 不同：此处是 DNA 级的题材/人设红线）
+   注意：forbidden_deviations 中提到的红线，绝不能在 commercial_positioning / story_promise 里出现矛盾（如写“卖点=重生穿越”却禁止“穿越”）。
 
 已有标题参考（可空）：$suggested_title
 
-输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经"}"""),
+输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}"""),
 
     ("bootstrap.audit_plan_fidelity", "1.0.0", "deepseek",
      """你是独立的需求验收员，不参与创作。逐项比较“用户原始需求”和“规划结果”，只判断规划是否忠实，不评价文笔和市场性。
@@ -726,6 +731,7 @@ $plan_output
 
 不可变事实：$source_facts
 禁止改动：$forbidden_changes
+Novel DNA 禁止偏离（题材/人设红线，强约束）：$forbidden_deviations
 
 严禁：
 - 网文套话（命运的齿轮开始转动/心猛地一沉/眼神复杂）
@@ -975,7 +981,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_volume":     '{"summary":"卷摘要"}',
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
-    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单"}',
+    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}',
     "audit_plan_fidelity":    '{"passed":false,"score":80,"matched_requirements":["匹配1","匹配2","匹配3"],"contradictions":["矛盾"],"omissions":["遗漏"]}',
     "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',

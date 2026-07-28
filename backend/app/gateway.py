@@ -162,6 +162,10 @@ class _PlanIdeaOutput(_LenientOutput):
     design_additions: list[str] = Field(default_factory=list, max_length=20)
     forbidden_changes: list[str] = Field(min_length=3, max_length=20)
     downstream_deliverables: list[str] = Field(min_length=1, max_length=20)
+    # V3 Novel DNA (§3): produced in the same plan_idea call as creative_bible.
+    commercial_positioning: str = Field(default="")
+    story_promise: str = Field(default="")
+    forbidden_deviations: list[str] = Field(default_factory=list, max_length=20)
 
 
 class _PlanFidelityAuditOutput(_LenientOutput):

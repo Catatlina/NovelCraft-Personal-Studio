@@ -11,7 +11,7 @@
 | # | 功能 | 状态 | 挂载点 | 验收 |
 |---|------|------|--------|------|
 | ① | Chapter Function | **已接线** | 细纲 Schema 加 function_type/chapter_goal/reader_expectation（必填，缺→打回重生成）；草稿提示强制围绕功能；Reviewer 七维增「节奏检测」维度（不阻塞门禁） | `tests/test_chapter_function.py` 5 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ② | Novel DNA | 未开始 | 书库+plan_idea 挂载创作圣经扩展字段 | 待做 |
+| ② | Novel DNA | **已接线** | plan_idea 同一次调用产出 commercial_positioning/story_promise/forbidden_deviations（不增调用）；存为书 meta 顶层键 + novel_dna 嵌套；草稿提示注入 `$forbidden_deviations` 强约束；`_check_novel_dna_consistency` 自洽校验（红线与定位/承诺矛盾→fail，存 meta） | `tests/test_novel_dna.py` 4 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
 | ③ | Story Arc 单层实体化 | 未开始 | 故事弧 entity_type=story_arc（parent_id 挂书）；Planner Agent 新增节点调度 | 待做 |
 | ④ | 网文策略库 MVP | 未开始 | 新 strategy 表（非versioned）；Prompt Compiler 组装函数注入 Writer；Skill 仅 generate_conflict/generate_hook | 待做 |
 | ⑤ | Repair Engine 三级版 | 未开始 | 句/段级局部修复 + 章级复用 + 打回规划；局部修复原地增量（不分支） | 待做 |
@@ -34,3 +34,4 @@
 ## 提交记录
 - 2682f9d KI-007 修复（前序）
 - （本批）① Chapter Function：gateway _BlueprintChapterOutlineItem 必填字段 + 提示扩展；tasks _check_chapter_function_pacing + 节奏检测维度；tests/test_chapter_function.py
+- （本批）② Novel DNA：gateway _PlanIdeaOutput 加 commercial_positioning/story_promise/forbidden_deviations；prompt_registry plan_idea 提示+契约示例+草稿注入；tasks _check_novel_dna_consistency + plan_idea 持久化（顶层 meta 键 + novel_dna 嵌套）；tests/test_novel_dna.py

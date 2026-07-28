@@ -241,6 +241,26 @@ def _check_chapter_function_pacing(outlines: Any) -> dict[str, Any]:
     return {"status": "pass", "issues": [], "sampled": len(seq), "longest_run": longest_run}
 
 
+# V3 Novel DNA (§3.2): self-consistency check — a forbidden deviation must not
+# contradict the positioning/promise. Deterministic; runs at plan_idea time and
+# the result is stored so audit_plan_fidelity / Reviewer can surface it.
+def _check_novel_dna_consistency(dna: Any) -> dict[str, Any]:
+    if not isinstance(dna, dict):
+        return {"status": "pass", "issues": [], "checked": False}
+    positioning = str(dna.get("commercial_positioning", ""))
+    promise = str(dna.get("story_promise", ""))
+    haystack = (positioning + " " + promise).lower()
+    deviations = dna.get("forbidden_deviations") or []
+    issues: list[str] = []
+    if isinstance(deviations, list):
+        for dev in deviations:
+            token = str(dev).replace("禁止", "").strip().lower()
+            if token and token in haystack:
+                issues.append(f"禁止偏离「{dev}」与商业定位/故事承诺自相矛盾")
+    status = "fail" if issues else "pass"
+    return {"status": status, "issues": issues, "checked": True}
+
+
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:
     paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
     after_chars = len("\n".join(paragraphs).strip())
@@ -1263,6 +1283,23 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 m["design_additions"] = output.get("design_additions", [])
                 m["forbidden_changes"] = output.get("forbidden_changes", [])
                 m["planning_module"] = "creative_bible_v2"
+                # V3 Novel DNA (§3): store as structured novel metadata merged
+                # with the creative bible, and carry it + forbidden_deviations
+                # into run context so the Writer injects the red lines.
+                novel_dna = {
+                    "commercial_positioning": str(output.get("commercial_positioning", "")),
+                    "story_promise": str(output.get("story_promise", "")),
+                    "forbidden_deviations": list(output.get("forbidden_deviations", []) or []),
+                }
+                dna_self_check = _check_novel_dna_consistency(novel_dna)
+                m["novel_dna"] = novel_dna
+                m["novel_dna_self_check"] = dna_self_check
+                # Top-level key (mirrors source_facts/forbidden_changes) so a fresh
+                # run seeded from **novel_meta has forbidden_deviations available
+                # to the Writer without waiting for in-memory context mutation.
+                m["forbidden_deviations"] = novel_dna["forbidden_deviations"]
+                context["novel_dna"] = novel_dna
+                context["forbidden_deviations"] = novel_dna["forbidden_deviations"]
                 db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
             knowledge_id = new_id()
             generation_key = f"run:{run_id}:node:{node_key}:creative-bible:v1"
