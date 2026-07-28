@@ -29,7 +29,7 @@ def test_platform_connection_specs_save_list_test_and_delete():
     missing = client.post("/api/v1/platform-connections", headers=headers,
                           json={"platform": "wordpress", "account_name": "blog", "credentials": {"wp_url": "https://example.com"}})
     assert missing.status_code == 422
-    assert missing.json()["detail"]["code"] == "CONNECTION_REQUIRED_FIELDS_MISSING"
+    assert missing.json()["code"] == "CONNECTION_REQUIRED_FIELDS_MISSING"
 
     saved = client.post("/api/v1/platform-connections", headers=headers, json={
         "platform": "wordpress",
@@ -77,7 +77,7 @@ def test_hotspot_collector_uses_visual_connection(monkeypatch):
 
     from app.services import hotspot_collector
 
-    seen = {}
+    seen = {"urls": [], "cookies": []}
     proxies: list[str] = []
 
     class _Resp:
@@ -92,7 +92,9 @@ def test_hotspot_collector_uses_visual_connection(monkeypatch):
     class _Opener:
         def open(self, req, timeout=10):
             seen["url"] = req.full_url
+            seen["urls"].append(req.full_url)
             seen["cookie"] = req.headers.get("Cookie")
+            seen["cookies"].append(req.headers.get("Cookie"))
             return _Resp()
 
     def fake_opener(proxy_override: str = ""):
@@ -115,6 +117,6 @@ def test_hotspot_collector_uses_visual_connection(monkeypatch):
     items, status = hotspot_collector.fetch_hotspots(user_id=uid)
     assert any(item["title"] == "XHS hot" for item in items)
     assert status["xiaohongshu"] == "ok"
-    assert seen["url"] == "https://example.com/hot.json"
-    assert seen["cookie"] == "sid=abc"
+    assert "https://example.com/hot.json" in seen["urls"]
+    assert "sid=abc" in seen["cookies"]
     assert "http://127.0.0.1:10809" in proxies

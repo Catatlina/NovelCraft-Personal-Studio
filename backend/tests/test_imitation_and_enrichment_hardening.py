@@ -48,8 +48,8 @@ def test_imitation_endpoint_blocks_high_similarity_before_persist(monkeypatch):
         json={"project_id": project_id, "source_text": source, "instruction": "仿写"},
     )
     assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "IMITATION_SIMILARITY_BLOCKED"
-    assert "版权" in response.json()["detail"]["copyright_warning"]
+    assert response.json()["code"] == "IMITATION_SIMILARITY_BLOCKED"
+    assert "版权" in response.json()["data"]["copyright_warning"]
 
     db = connect()
     count = db.execute(

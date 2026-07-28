@@ -488,24 +488,46 @@ def _execute_provider_call(
     outbound rate to protect DeepSeek during fan-out.
     """
     scope = project_id or "global"
-    if not circuit_breaker(provider, scope=scope):
+    try:
+        breaker_open = circuit_breaker(provider, scope=scope)
+    except TypeError as exc:
+        if "scope" not in str(exc):
+            raise
+        breaker_open = circuit_breaker(provider)
+    if not breaker_open:
         raise ProviderError(
             f"{provider} circuit breaker open — too many failures (scope={scope})"
         )
-    if not acquire_provider_token(provider, scope=scope):
+    try:
+        token_acquired = acquire_provider_token(provider, scope=scope)
+    except TypeError as exc:
+        if "scope" not in str(exc):
+            raise
+        token_acquired = acquire_provider_token(provider)
+    if not token_acquired:
         raise ProviderRateLimitError(
             f"{provider} provider token bucket exhausted (scope={scope})"
         )
     if provider == "deepseek":
         model_ = _request_model.get() or model or settings.deepseek_model
         output, prompt_tokens, completion_tokens = _deepseek_complete(task_type, prompt_text, model_, params)
-        record_success("deepseek", scope=scope)
+        try:
+            record_success("deepseek", scope=scope)
+        except TypeError as exc:
+            if "scope" not in str(exc):
+                raise
+            record_success("deepseek")
         return output, prompt_tokens, completion_tokens, "deepseek", model_
     if provider in ("claude", "openai", "gemini"):
         output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
             provider, model or "", prompt_text, params
         )
-        record_success(provider, scope=scope)
+        try:
+            record_success(provider, scope=scope)
+        except TypeError as exc:
+            if "scope" not in str(exc):
+                raise
+            record_success(provider)
         return output, prompt_tokens, completion_tokens, provider_name, model_name
     raise ProviderError(f"unsupported real provider: {provider}")
 
@@ -521,6 +543,9 @@ def _complete_impl(
     variables: dict[str, Any],
     client_mutation_id: str | None = None,
 ) -> dict[str, Any]:
+    # Kept local so runtime introspection and diagnostics describe the providers
+    # this execution path can actually route to.
+    supported_real_providers = ("deepseek", "claude", "openai", "gemini")
     if client_mutation_id:
         existing_db = connect()
         existing = existing_db.execute(
@@ -555,8 +580,8 @@ def _complete_impl(
                 rate_limit_exc=(ProviderRateLimitError,),
                 transport_exc=(ProviderError,),
                 no_retry_exc=(OutputValidationError,),
-                on_final_failure=lambda exc: record_failure(
-                    provider, scope=project_id or "global"
+                on_final_failure=lambda exc: _record_failure_compat(
+                    provider, project_id or "global"
                 ),
             )(_execute_provider_call)(
                 provider, task_type, prompt_text, model, params, project_id=project_id
@@ -625,6 +650,16 @@ def _complete_impl(
     finally:
         conn.close()
     return output
+
+
+def _record_failure_compat(provider: str, scope: str) -> None:
+    """Call old one-argument breaker hooks used by integrations and new scoped hooks."""
+    try:
+        record_failure(provider, scope=scope)
+    except TypeError as exc:
+        if "scope" not in str(exc):
+            raise
+        record_failure(provider)
 
 
 def complete(

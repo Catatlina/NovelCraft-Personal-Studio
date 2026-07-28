@@ -294,14 +294,18 @@ def test_journey_a_resumes_after_provider_failure(seeded_novel, monkeypatch):
     monkeypatch.setattr(tasks, "complete", flaky_complete)
 
     def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
-        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+        try:
+            tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+        except gateway.ProviderError:
+            # Real broker dispatch returns before this retryable worker error.
+            pass
 
     original_delay = tasks.execute_bootstrap.delay
     tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]
     try:
         run_id = tasks.create_run(project_id, novel_id)
         run, node_status = _run_state(run_id)
-        assert node_status["plan_story_pattern"] == "failed"
+        assert node_status["plan_story_pattern"] == "pending_provider"
         assert node_status["plan_idea"] == "succeeded"
 
         # Provider recovers; redrive from the failed node

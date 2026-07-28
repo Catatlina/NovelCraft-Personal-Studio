@@ -114,7 +114,7 @@ def test_hotspot_endpoint_returns_502_when_all_sources_fail(authed, monkeypatch)
                         lambda: ([], {"zhihu": "error: down", "weibo": "error: down"}))
     response = authed["client"].get("/api/v1/hotspots", headers=authed["headers"])
     assert response.status_code == 502
-    assert response.json()["detail"]["code"] == "HOTSPOT_SOURCES_FAILED"
+    assert response.json()["code"] == "HOTSPOT_SOURCES_FAILED"
 
 
 def test_hotspot_collector_has_no_silent_continue():
@@ -295,7 +295,7 @@ def test_system_bootstrap_workflow_cannot_be_overwritten(authed):
               "nodes": [{"key": "n1", "kind": "agent", "title": "伪 Bootstrap"}]},
     )
     assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "SYSTEM_WORKFLOW_READ_ONLY"
+    assert response.json()["code"] == "SYSTEM_WORKFLOW_READ_ONLY"
 
 
 def test_workflow_scope_migration_adds_real_columns_and_indexes():

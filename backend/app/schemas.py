@@ -11,6 +11,10 @@ class ApiResponse(BaseModel):
     message: str = "ok"
     data: Any = None
 
+    def __getitem__(self, key: str) -> Any:
+        """Preserve mapping-style access for internal service callers."""
+        return getattr(self, key)
+
 
 class NovelCreate(BaseModel):
     idea: str = Field(min_length=4, max_length=10000)

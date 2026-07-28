@@ -179,9 +179,9 @@ def test_batch_creation_blocked_by_failed_previous_volume_gate():
     blocked = client.post(f"/api/v1/novels/{novel_id}/chapters/batch", headers=headers,
                           json={"chapter_count": 5})
     assert blocked.status_code == 409
-    detail = blocked.json()["detail"]
+    detail = blocked.json()
     assert detail["code"] == "VOLUME_GATE_FAILED"
-    assert detail["blockers"]
+    assert detail["data"]["blockers"]
 
     # After the volume passes review, the gate clears and the batch is accepted
     from app.db import connect

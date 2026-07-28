@@ -169,7 +169,14 @@ async def handle_http_exception(_request: Request, exc: HTTPException):
     if isinstance(detail, dict):
         code = detail.get("code", exc.status_code)
         message = detail.get("message", str(detail))
-        data = {k: v for k, v in detail.items() if k not in ("code", "message")} or None
+        extras = {k: v for k, v in detail.items() if k not in ("code", "message", "data")}
+        explicit_data = detail.get("data")
+        if explicit_data is not None and not extras:
+            data = explicit_data
+        elif isinstance(explicit_data, dict):
+            data = {**explicit_data, **extras}
+        else:
+            data = extras or explicit_data
     else:
         code = exc.status_code
         message = str(detail)
@@ -560,12 +567,12 @@ def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends
     return ok(updated)
 
 
-@app.post("/api/v1/novels/{novel_id}/bootstrap")
 class BootstrapNovelRequest(BaseModel):
     class Config:
         extra = "allow"
 
 
+@app.post("/api/v1/novels/{novel_id}/bootstrap")
 @limiter.limit("10/minute")
 async def bootstrap_novel(request: Request, novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})

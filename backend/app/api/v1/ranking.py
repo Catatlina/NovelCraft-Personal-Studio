@@ -753,7 +753,7 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
     require_member(db, topic["project_id"], user, write=True)
     # Plan gate: book generation is token-heavy; block once the monthly word
     # quota is exhausted (402). The workflow's own AI calls also enforce budget.
-    from .core.billing import enforce_quota
+    from app.core.billing import enforce_quota
     enforce_quota(user["id"], None, "max_words_per_month")
     if topic.get("novel_id"):
         novel_id = topic["novel_id"]

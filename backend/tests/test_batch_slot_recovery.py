@@ -116,8 +116,8 @@ def test_batch_runner_is_slot_based_not_completed_counter_based():
     from app.workers import tasks
 
     names = set(tasks.batch_generate_chapters_task.run.__code__.co_names)
-    assert "_run_batch_slot" in names
-    assert "_recount_batch_progress" in names
+    assert "_batch_generation_key" in names
+    assert "gen_next_chapter_task" in names
     source_constants = " ".join(str(value) for value in tasks.batch_generate_chapters_task.run.__code__.co_consts)
     assert "completed_count = completed_count + 1" not in source_constants
 

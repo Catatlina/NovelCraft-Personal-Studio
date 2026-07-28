@@ -25,3 +25,4 @@ frontend/test-results/
 artifacts/
 .local/
 var/
+dump.rdb

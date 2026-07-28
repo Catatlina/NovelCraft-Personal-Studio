@@ -150,7 +150,8 @@ def test_create_run_with_selected_title_still_runs_full_planning(monkeypatch):
 
     assert run_id
     assert db.committed and db.closed
-    assert dispatched == [(run_id, "plan_idea", "api-key", "https://provider.example/v1", "model-id")]
+    # Plaintext BYOK secrets must never enter the broker payload.
+    assert dispatched == [(run_id, "plan_idea", "", "https://provider.example/v1", "model-id")]
 
     # A ranking title is only a suggestion. It must not fabricate planning
     # success, bypass creative-bible decomposition, or confirm itself.

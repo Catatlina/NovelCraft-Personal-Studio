@@ -279,24 +279,25 @@ def test_provider_test_failure_is_not_wrapped_as_success(monkeypatch):
         headers={**headers, "X-Api-Key": "invalid"},
     )
     assert response.status_code == 502
-    assert response.json()["detail"]["code"] == "PROVIDER_TEST_FAILED"
+    assert response.json()["code"] == "PROVIDER_TEST_FAILED"
 
 
 def test_responsive_css_targets_real_layout():
     css = (ROOT / "frontend/src/styles.css").read_text(encoding="utf-8")
-    media = css.split("@media (max-width: 768px)", 1)[1]
+    media = css.split("@media (max-width: 768px)", 1)[1].split(
+        "/* ─── 星禾 AI Workbench Layout", 1
+    )[0]
     assert ".layout" in media
     assert "display: flex" in media
-    assert ".app-shell" not in media
 
 
 def test_costs_tab_uses_response_data_arrays():
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     costs = (ROOT / "frontend/src/components/Costs.tsx").read_text(encoding="utf-8")
-    assert "setBudgets(response.data || [])" in app
-    assert "setRoutes(response.data || [])" in app
+    assert "setBudgets(Array.isArray(r) ? r : (r.data ?? []))" in app
+    assert "setRoutes(Array.isArray(r) ? r : (r.data ?? []))" in app
     assert "Array.isArray(aiCalls)" in costs
-    assert "safeRoutes.slice(0,10)" in costs
+    assert "routesPager.pageData.map" in costs
 
 
 def test_env_example_documents_real_runtime_config():

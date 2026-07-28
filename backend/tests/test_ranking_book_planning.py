@@ -12,6 +12,14 @@ def _request() -> Request:
     return Request({"type": "http", "method": "POST", "path": "/", "headers": []})
 
 
+@pytest.fixture(autouse=True)
+def _allow_unit_test_quota(monkeypatch):
+    """Keep these contract tests isolated from the real billing database."""
+    from app.core import billing
+
+    monkeypatch.setattr(billing, "enforce_quota", lambda *_args, **_kwargs: None)
+
+
 class _Cursor:
     def __init__(self, one=None):
         self.one = one
@@ -134,12 +142,13 @@ def test_provider_failure_keeps_retryable_run_state_without_fabricated_output(mo
     monkeypatch.setattr(tasks, "complete", lambda **_kwargs: (_ for _ in ()).throw(ProviderError("offline")))
     monkeypatch.setattr(tasks, "_persist_output", lambda *_args: pytest.fail("provider failure must not persist AI output"))
 
-    result = tasks.execute_bootstrap.run("run-1", "plan_idea")
+    # Direct execution represents the first Celery attempt: the exception must
+    # remain visible so Celery can perform the configured retry.
+    with pytest.raises(ProviderError, match="offline"):
+        tasks.execute_bootstrap.run("run-1", "plan_idea")
 
-    assert result["status"] == "failed"
-    assert result["node_key"] == "plan_idea"
     writes = [(sql, params) for sql, params in db.statements if sql.startswith("UPDATE")]
-    assert any(params and params[0] == "failed" for _sql, params in writes)
+    assert any(params and params[0] == "pending_provider" for _sql, params in writes)
     assert not any("output =" in sql for sql, _params in writes)
 
 

@@ -671,7 +671,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
         claim = conn.execute(
             """UPDATE run_nodes SET status='running', attempt=attempt+1, started_at=now(), error=NULL
                WHERE run_id=%s AND node_key=%s
-                 AND status IN ('pending','failed','pending_budget')
+                 AND status IN ('pending','failed','pending_budget','pending_provider')
                RETURNING id""", (run_id, node_key),
         )
         if hasattr(claim, "rowcount") and claim.rowcount != 1:
@@ -1064,8 +1064,15 @@ def dispatch_bootstrap_run(run_id: str, start_key: str, api_key: str = "",
                            api_url: str = "", model: str = "") -> None:
     """Dispatch or redrive one committed run, persisting broker failures."""
     try:
-        execute_bootstrap.delay(run_id, start_key, "", api_url, model,
-                                 api_key_ref=stash_byok_key(api_key))
+        api_key_ref = stash_byok_key(api_key)
+        try:
+            execute_bootstrap.delay(
+                run_id, start_key, "", api_url, model, api_key_ref=api_key_ref
+            )
+        except TypeError as exc:
+            if "api_key_ref" not in str(exc):
+                raise
+            execute_bootstrap.delay(run_id, start_key, "", api_url, model)
     except Exception as exc:
         db = connect()
         db.execute("""UPDATE workflow_runs SET status='dispatch_failed', dispatch_attempts=dispatch_attempts+1,
@@ -1101,8 +1108,16 @@ def confirm_human(run_id: str, selected_title: str,
 
     _record_bootstrap_event(run_id, "human.confirmed", node_key="human_confirm_title",
                             payload={"selected_title": selected_title})
-    execute_bootstrap.delay(run_id, "blueprint_volume_plan", "", api_url, model,
-                             api_key_ref=stash_byok_key(api_key))
+    api_key_ref = stash_byok_key(api_key)
+    try:
+        execute_bootstrap.delay(
+            run_id, "blueprint_volume_plan", "", api_url, model,
+            api_key_ref=api_key_ref,
+        )
+    except TypeError as exc:
+        if "api_key_ref" not in str(exc):
+            raise
+        execute_bootstrap.delay(run_id, "blueprint_volume_plan", "", api_url, model)
 # ═══════════════════════════════════════════════════════════════════════════
 # Node marking + output persistence
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2117,7 +2132,7 @@ def auto_serial_check() -> dict:
         if dispatched >= max_per_tick:
             break
         if shards > 1:
-            digest = hashlib.md5(novel["id"].encode("utf-8")).hexdigest()
+            digest = hashlib.sha256(novel["id"].encode("utf-8")).hexdigest()
             if int(digest, 16) % shards != tick % shards:
                 continue
         try:

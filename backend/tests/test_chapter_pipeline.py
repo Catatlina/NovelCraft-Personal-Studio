@@ -173,14 +173,16 @@ def test_batch_resumes_from_completed_count(monkeypatch):
     db = _BatchDb(_batch(completed=2, requested=5))
     monkeypatch.setattr(tasks, "connect", lambda: db)
     calls = []
-    monkeypatch.setattr(tasks.gen_next_chapter_task, "run",
+    monkeypatch.setattr(tasks.gen_next_chapter_task, "delay",
                         lambda *args, **kwargs: calls.append(args) or {"chapter_id": "c", "seq": len(calls)})
 
     result = tasks.batch_generate_chapters_task.run("batch-1")
 
-    assert result["status"] == "succeeded"
+    assert result["status"] == "running"
+    assert result["dispatched"] == 3
     assert len(calls) == 3  # only the remaining chapters, no duplicates
-    assert db.batch["completed_count"] == 5
+    # Child tasks own progress updates after each durable chapter commit.
+    assert db.batch["completed_count"] == 2
 
 
 def test_provider_failure_marks_batch_failed_with_cause(monkeypatch):
@@ -193,7 +195,7 @@ def test_provider_failure_marks_batch_failed_with_cause(monkeypatch):
     def _raise(*args, **kwargs):
         raise ProviderError("deepseek circuit breaker open")
 
-    monkeypatch.setattr(tasks.gen_next_chapter_task, "run", _raise)
+    monkeypatch.setattr(tasks.gen_next_chapter_task, "delay", _raise)
     result = tasks.batch_generate_chapters_task.run("batch-1")
 
     assert result["status"] == "failed"

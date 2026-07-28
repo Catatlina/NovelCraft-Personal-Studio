@@ -137,7 +137,11 @@ def test_stream_budget_failure_has_distinct_code(ctx, monkeypatch):
     response = ctx["client"].post(
         f"/api/v1/contents/{ctx['content_id']}/ai/polish/stream", headers=ctx["headers"],
         json={"selection": "原文", "instruction": "", "client_mutation_id": f"budget-{uuid.uuid4().hex}"})
-    assert _frames(response.text) == [{"error": "daily budget exceeded", "code": "PENDING_BUDGET"}]
+    frames = _frames(response.text)
+    assert len(frames) == 1
+    assert frames[0]["code"] == "PENDING_BUDGET"
+    assert "daily budget exceeded" not in frames[0]["error"]
+    assert "追踪码" in frames[0]["error"]
 
 
 def test_non_deepseek_route_does_not_use_deepseek_stream(ctx, monkeypatch):

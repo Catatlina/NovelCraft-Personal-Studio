@@ -65,7 +65,7 @@ jobs:
       - name: Bandit (Python SAST — fail on HIGH)
         # P3-T4 / G11: CI 跑 SAST。对历史存量高危先以 continue-on-error 暴露而不阻断
         # 既有流水线；新代码应保证 bandit -s high 零高危。基线排除 tests/alembic/scripts。
-        run: bandit -r backend/app -c .bandit -s high
+        run: bandit -r backend/app -c .bandit -lll
         continue-on-error: true
       - name: Semgrep (best-effort, requires SEMGREP_APP_TOKEN)
         if: ${{ env.SEMGREP_APP_TOKEN != '' }}

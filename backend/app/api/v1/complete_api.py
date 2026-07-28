@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 from app.core.security import get_current_user
 from app.core.errors import public_message
-from app.db import connect
+from app.db import connect, encode, new_id
 from app.core.authz import (
     ok,
     require_content_member,
@@ -73,6 +73,35 @@ def publish_to_platform(platform: str, title: str, body: str, credentials: dict 
             "message": f"发布到 {platform} 缺少必需的平台凭据/连接：{', '.join(missing)}",
             "missing": missing,
         })
+
+    if not content_id:
+        db = connect()
+        try:
+            membership = db.execute(
+                """SELECT project_id FROM project_members
+                   WHERE user_id=%s AND role IN ('owner','editor')
+                   ORDER BY created_at LIMIT 1""",
+                (user["id"],),
+            ).fetchone()
+            if not membership:
+                raise HTTPException(403, "no writable project")
+            content_id = new_id()
+            db.execute(
+                """INSERT INTO contents
+                   (id, project_id, owner_id, type, title, body, meta, status)
+                   VALUES (%s,%s,%s,'social_post',%s,%s,%s,'draft')""",
+                (
+                    content_id,
+                    membership["project_id"],
+                    user["id"],
+                    title,
+                    encode({"type": "doc", "content": [{"type": "paragraph", "text": body}]}),
+                    encode({"platform": platform, "source_type": "one_off_publish"}),
+                ),
+            )
+            db.commit()
+        finally:
+            db.close()
 
     try:
         if platform == "wechat":

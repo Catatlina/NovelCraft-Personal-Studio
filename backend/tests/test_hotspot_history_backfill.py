@@ -138,7 +138,7 @@ def test_history_backfill_endpoint_surfaces_unsupported_as_502(monkeypatch):
     result = client.post("/api/v1/hotspots/history/backfill?days=7", headers=headers)
 
     assert result.status_code == 502
-    body = result.json()["detail"]
+    body = result.json()
     assert body["code"] == "HOTSPOT_HISTORY_UNSUPPORTED"
     assert body["data"]["status"] == "unsupported"
 

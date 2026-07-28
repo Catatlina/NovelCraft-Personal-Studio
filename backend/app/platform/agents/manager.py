@@ -15,6 +15,19 @@ class AgentManager:
         return [{"id": k, "name": v.get("name", k), "goal": v.get("goal", ""), "skills": v.get("skills", [])} for k, v in cls.agents.items()]
 
     @classmethod
+    def list_agents(cls) -> list[dict]:
+        return cls.list_all()
+
+    @classmethod
+    def get_agent(cls, agent_id: str) -> dict | None:
+        config = cls.agents.get(agent_id)
+        return {"id": agent_id, **config} if config else None
+
+    @classmethod
+    def seed_builtin(cls) -> None:
+        """Built-ins are registered at import time; kept as an idempotent hook."""
+
+    @classmethod
     async def execute(cls, agent_id: str, project_id: str, variables: dict) -> dict:
         config = cls.agents.get(agent_id)
         if not config:

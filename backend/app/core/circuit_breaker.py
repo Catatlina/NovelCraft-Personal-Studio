@@ -44,6 +44,9 @@ BREAKER_PREFIX = "cb:"
 THRESHOLD = int(os.getenv("CB_FAILURE_THRESHOLD", "3"))
 COOLDOWN = int(os.getenv("CB_COOLDOWN_SECONDS", "60"))
 HALF_OPEN_PROBES = int(os.getenv("CB_HALF_OPEN_PROBES", "2"))
+# Stable public names retained for callers and operational introspection.
+BREAKER_THRESHOLD = THRESHOLD
+BREAKER_COOLDOWN = COOLDOWN
 
 TOKEN_PREFIX = "pt:"
 DEFAULT_TOKEN_RATE = int(os.getenv("PROVIDER_TOKEN_RATE", "8"))  # tokens / second

@@ -77,7 +77,7 @@ def test_hotspot_generate_rolls_back_on_provider_failure(monkeypatch):
         json={"project_id": project_id, "title": "回滚热点", "source": "baidu", "platforms": ["wechat", "toutiao"]},
     )
     assert response.status_code == 502
-    assert response.json()["detail"]["code"] == "AI_PROVIDER_FAILED"
+    assert response.json()["code"] == "AI_PROVIDER_FAILED"
 
     db = connect()
     count = db.execute(

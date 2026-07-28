@@ -46,7 +46,7 @@ class _MembershipDb:
 def test_export_rejects_non_member(monkeypatch):
     from app.api.v1 import complete_api
 
-    monkeypatch.setattr(complete_api, "connect", lambda: _MembershipDb(role=None))
+    monkeypatch.setattr("app.core.authz.connect", lambda: _MembershipDb(role=None))
     with pytest.raises(HTTPException) as exc_info:
         complete_api.require_novel_member("novel-1", {"id": "stranger"})
     assert exc_info.value.status_code == 403
@@ -55,7 +55,7 @@ def test_export_rejects_non_member(monkeypatch):
 def test_export_returns_404_for_unknown_novel(monkeypatch):
     from app.api.v1 import complete_api
 
-    monkeypatch.setattr(complete_api, "connect", lambda: _MembershipDb(novel_exists=False))
+    monkeypatch.setattr("app.core.authz.connect", lambda: _MembershipDb(novel_exists=False))
     with pytest.raises(HTTPException) as exc_info:
         complete_api.require_novel_member("missing", {"id": "user-1"})
     assert exc_info.value.status_code == 404
@@ -64,7 +64,7 @@ def test_export_returns_404_for_unknown_novel(monkeypatch):
 def test_member_can_access_novel_export_guard(monkeypatch):
     from app.api.v1 import complete_api
 
-    monkeypatch.setattr(complete_api, "connect", lambda: _MembershipDb(role="viewer"))
+    monkeypatch.setattr("app.core.authz.connect", lambda: _MembershipDb(role="viewer"))
     assert complete_api.require_novel_member("novel-1", {"id": "member"}) is None
 
 
@@ -96,7 +96,7 @@ def test_gemini_credentials_are_sent_in_header_not_url():
 def test_export_routes_enforce_membership_before_service(monkeypatch):
     from app.api.v1 import complete_api
 
-    monkeypatch.setattr(complete_api, "connect", lambda: _MembershipDb(role=None))
+    monkeypatch.setattr("app.core.authz.connect", lambda: _MembershipDb(role=None))
     called = []
     monkeypatch.setattr(
         "app.services.novel_export.export_novel_txt", lambda novel_id: called.append(novel_id)

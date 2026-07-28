@@ -91,7 +91,7 @@ def test_overseas_translate_uses_content_project_and_surfaces_provider_errors(mo
     response = client.post("/api/v1/overseas/translate", headers=headers,
                            params={"content_id": content_id, "target_lang": "en"})
     assert response.status_code == 502
-    assert response.json()["detail"]["code"] == "AI_PROVIDER_FAILED"
+    assert response.json()["code"] == "AI_PROVIDER_FAILED"
 
     with pytest.raises(gateway.ProviderError):
         # Service-level contract: provider errors are not converted to fake text.

@@ -22,6 +22,53 @@ def list_all_runs(limit: int = 20, user=Depends(get_current_user)):
     return {"code": "SUCCESS", "data": {"items": runs}}
 
 
+@router.get("/status")
+def agent_status(user=Depends(get_current_user)):
+    """Aggregate real run-node state for the current user's projects."""
+    from app.db import connect
+
+    conn = connect()
+    try:
+        rows = conn.execute(
+            """SELECT rn.agent AS name, COUNT(*) AS task_count,
+                      COUNT(*) FILTER (
+                        WHERE rn.status='running' AND wr.status='running'
+                          AND wr.current_node_key=rn.node_key
+                          AND rn.started_at >= now() - interval '30 minutes'
+                      ) AS running_count,
+                      COUNT(*) FILTER (
+                        WHERE rn.status='running' AND NOT (
+                          wr.status='running' AND wr.current_node_key=rn.node_key
+                          AND rn.started_at >= now() - interval '30 minutes'
+                        )
+                      ) AS stale_running_count,
+                      MAX(COALESCE(rn.finished_at, rn.started_at)) AS last_run
+               FROM run_nodes rn
+               JOIN workflow_runs wr ON wr.id=rn.run_id
+               JOIN project_members pm ON pm.project_id=wr.project_id
+               WHERE pm.user_id=%s AND rn.agent IS NOT NULL AND rn.agent!=''
+               GROUP BY rn.agent ORDER BY rn.agent""",
+            (user["id"],),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": [
+            {
+                "name": row["name"],
+                "status": "running" if row["running_count"] else (
+                    "stale" if row["stale_running_count"] else "idle"
+                ),
+                "task_count": int(row["task_count"]),
+                "last_run": str(row["last_run"]) if row["last_run"] else "--",
+            }
+            for row in rows
+        ],
+    }
+
+
 @router.get("/{agent_id}")
 def get_agent(agent_id: str, user=Depends(get_current_user)):
     """获取 Agent 详情"""
