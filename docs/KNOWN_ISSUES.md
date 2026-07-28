@@ -64,7 +64,7 @@
 
 ### KI-006 全页面视觉证据 —— 可用（2026-07-28）
 
-- 状态：**可用**（七页面完整桌面/手机截图集已产；富状态截图已有 ③/⑥ 证据；⑤ 富状态全链受 `write_polish` 节点 AI 输出格式失败阻断，见 KI-007）。
+- 状态：**可用**（七页面完整桌面/手机截图集已产；富状态截图已有 ③/⑥ 证据；⑤ 富状态全链 `write_polish` 修复已落地并单测通过，待生产 E2E 重跑取证，见 KI-007）。
 - 证据：
   - `STARLUME_CAPTURE_VISUAL=1 npx playwright test --grep "七页面"` → **passed (9.1s)**，生成 15 张截图（七页面 1280/390 + 404）。
   - `npx playwright test --grep-invert "小说主线⑤"` → **6 passed, 1 skipped**；含 ③-progress `protected-01-progress-running.png`（真实运行中节点）+ ⑥ 版本恢复闭环 `protected-07/08/09.png`。
@@ -74,14 +74,20 @@
 
 ### KI-007 `write_polish` 节点对 `deepseek-chat` 输出格式不稳定
 
-- 状态：**未开始**（问题定位完成，待修复 prompt/增加输出修复）。
+- 状态：**已接线**（代码修复已落地并通过单元测试；⑤ 富状态全链待生产 E2E 重跑取证后提升为已验收）。
 - 现象：真实 AI 全链 E2E（小说主线⑤）连续两次在 `write_polish` 节点返回 `invalid_output`，导致 run failed；切换模型前旧链路上也曾出现相同问题。
-- 根因：`_persist_chapter_polish` 期望 output 为 `{polished: {body: [...]}}` / `{chapter: {body: [...]}}` / `{body: [...]}` 结构，但 `deepseek-chat` 在此节点的输出未遵循 JSON/结构契约（可能返回了非 JSON、缺字段或字段类型错误）。
-- 影响：创作向导→人工定名→首章→审阅→导出的完整富状态路径无法稳定通过；该节点是 19 节点主链的倒数第 3 步，直接影响单本完成率。
+- 根因（已校正）：失败发生在 `gateway.validate_task_output` 的 Pydantic 契约校验（`_WritePolishOutput` 要求 `polished.body: list[str]` 且 `changes_summary: str`），而非 `_persist_chapter_polish`。`deepseek-chat` 在此节点返回了**结构松散但内容有效**的载荷：裸 `body`（无 `polished` 包裹）、`body` 为字符串而非段落列表、或缺失 `changes_summary`。重试循环只是对同一种漂移重新采样 3 次后放弃。
+- 修复（commit 见下方部署记录）：在 `gateway.validate_task_output` 前增加 `_normalize_bootstrap_output` 输出修复层（V3 Repair Engine 思路）：
+  1. 无 `polished` 包裹时，从裸 `body` / `chapter.body` / `text` 自动包装；
+  2. `body` 为字符串时按换行 + 分句兜底切分为段落列表；`body` 为 dict 列表时抽取 `text`；
+  3. 缺失 `changes_summary` 时由 `changes` 列表派生或填空；
+  4. `_split_into_paragraphs` 对单块长文本按句分组，保证段落数门槛不误伤真实长文。
+  修复后契约不被削弱——真正空 / 非叙事输出仍会被下游闸门拒绝。
+- 证据：
+  - `tests/test_write_polish_repair.py` **8 passed**（canonical / 裸 body / 字符串 body / 单块长文 / 缺 changes_summary / changes 列表 / dict 列表 / 空输出仍拒）。
 - 下一步：
-  1. 检查 `write_polish` 的 system prompt 是否明确要求纯 JSON、给出示例、禁止 markdown 包裹。
-  2. 在 `_run_agent_node` 或 `_parse_agent_output` 层增加 JSON repair / 二次追问（json_repair + 一次 retry）。
-  3. 重跑小说主线⑤ 取证，确认 KI-006 可提升为已验收。
+  1. 部署生产后重跑小说主线⑤，确认 `write_polish` 稳定通过。
+  2. ⑤ 通过后把 KI-006 / NOV-Q-002 提升为已验收。
 
 ## 非本轮目标但必须如实保留
 
