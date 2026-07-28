@@ -110,3 +110,34 @@ def run_author_style_learning(self, project_id: str = "") -> dict:
         return {"status": "ok", "project_id": project_id, "card": card}
     except Exception as exc:  # 不污染队列，记录失败返回
         return {"status": "error", "message": str(exc)[:120]}
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=10)
+def run_scene_direction(self, project_id: str = "", chapter_id: str = "") -> dict:
+    """V3-P3-⑪: Scene Director — 为指定章节规划场景分镜（异步，真实 Provider）。"""
+    if not project_id or not chapter_id:
+        return {"status": "error", "message": "project_id and chapter_id required"}
+    from app.db import connect, row_to_dict
+    from app.services import scene_director
+    from app.services.assembler import ContextAssembler
+    db = connect()
+    chapter = row_to_dict(db.execute("SELECT title, meta, parent_id FROM contents WHERE id = %s", (chapter_id,)).fetchone())
+    db.close()
+    if not chapter:
+        return {"status": "error", "message": "chapter not found"}
+    meta = chapter.get("meta") or {}
+    chapter_function = meta.get("function_type") or meta.get("chapter_function") or ""
+    novel_id = chapter.get("parent_id") or ""
+    arc_summary = recent_summary = ""
+    if novel_id:
+        asm = ContextAssembler(novel_id, chapter_id)
+        arc_summary = asm._arc_summary()
+        recent_summary = asm._recent_chapters()
+    try:
+        scenes = scene_director.direct_scenes(
+            project_id, chapter_id, chapter.get("title", "未命名章节"),
+            chapter_function, arc_summary, recent_summary,
+        )
+        return {"status": "ok", "chapter_id": chapter_id, "scene_count": len(scenes)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)[:120]}

@@ -263,6 +263,11 @@ class _BlueprintSceneBeatOutput(_LenientOutput):
     scene_beats: list[dict[str, Any]] = Field(min_length=3)
 
 
+class _ScenePlanOutput(_LenientOutput):
+    """V3-P3-⑪: Scene Director 输出的章节场景分镜。"""
+    scenes: list[dict[str, Any]] = Field(min_length=1)
+
+
 class _LenientChapterBody(_LenientOutput):
     title: str = Field(min_length=2)
     body: list[str] = Field(min_length=4)
@@ -521,6 +526,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "deai_polish": _DeaiLayerOutput,
     "deai_score": _DeaiScoreOutput,
     "style_imitation": _StyleImitationOutput,
+    "scene_direct": _ScenePlanOutput,
 }
 
 

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 import { PacingCurve } from "./PacingCurve";
+import { SceneBoard } from "./SceneBoard";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
@@ -10,7 +11,7 @@ type Content = { id: string; title: string; body: { content?: { text?: string }[
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -27,6 +28,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   deaiResult?: { original_score?: number; final_score?: number; layers?: Array<{ name: string; label: string; score_before: number; score_after: number; status: string }>; final_text?: string } | null;
   deaiLoading?: boolean;
   markLiked?: (text: string) => void;
+  projectId?: string;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
   const docText = (body: any) => body?.content?.map((item: any) => item?.text || "").join("\n\n") || "";
@@ -212,6 +214,11 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           {/* V3 §11.2: pacing curve over persisted per-chapter rhythm scores */}
           {(chapter?.parent_id || chapters[0]?.parent_id) ? (
             <PacingCurve novelId={(chapter?.parent_id || chapters[0]?.parent_id) as string} />
+          ) : null}
+
+          {/* V3-P3-⑪: Scene Director 分镜面板 */}
+          {chapter?.id ? (
+            <SceneBoard chapterId={chapter.id} projectId={projectId || (chapter?.parent_id as string)} />
           ) : null}
 
           {/* Chapter selector dropdown (compact, for large lists) */}

@@ -28,7 +28,8 @@ class ContextAssembler:
         ("foreshadowing_alerts", 300, 6),
         ("knowledge_recall", 1500, 7),
         ("chapter_outline", 700, 8),
-        ("author_style", 300, 9),       # V3-P3-⑩: Author Style Card 强化（最低优先级，预算小）
+        ("scene_plan", 400, 9),         # V3-P3-⑪: Scene Director 分镜（写入当前章前先编排）
+        ("author_style", 300, 10),      # V3-P3-⑩: Author Style Card 强化（最低优先级，预算小）
     ]
 
     def __init__(self, novel_id: str, chapter_id: str | None = None):
@@ -49,6 +50,7 @@ class ContextAssembler:
             "chapter_outline": self._chapter_outline(),
             "arc_summary": self._arc_summary(),
             "author_style": self._author_style_card(),
+            "scene_plan": self._scene_plan(),
         }
 
         sections = []
@@ -287,6 +289,23 @@ class ContextAssembler:
             lines.append("偏好表达：" + "、".join(card["liked_phrases"][:8]))
         return "\n".join(lines)
 
+    def _scene_plan(self) -> str:
+        """V3-P3-⑪: 注入当前章的场景分镜（无数据则降级为空）。"""
+        if not self.chapter_id:
+            return ""
+        from app.services import scene_director
+        scenes = scene_director.get_scenes(self.chapter_id)
+        if not scenes:
+            return ""
+        lines = ["[场景分镜 · Scene Director]"]
+        for sc in scenes:
+            lines.append(f"{sc['scene_index']}. 【{sc['beat']}】{sc['title']}（{sc['pov'] or '—'}）")
+            if sc.get("goal"):
+                lines.append(f"   目标：{sc['goal']}")
+            if sc.get("setting"):
+                lines.append(f"   场景：{sc['setting']}")
+        return "\n".join(lines)
+
     @staticmethod
     def _label(name: str) -> str:
         return {
@@ -299,4 +318,5 @@ class ContextAssembler:
             "knowledge_recall": "知识素材",
             "chapter_outline": "章节细纲",
             "author_style": "作者风格卡",
+            "scene_plan": "场景分镜",
         }.get(name, name)

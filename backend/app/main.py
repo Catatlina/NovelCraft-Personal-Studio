@@ -47,6 +47,7 @@ from .api.v1.knowledge import router as knowledge_router
 from .api.v1.hotspots import router as hotspots_router
 from .api.v1.imitation import router as imitation_router
 from .api.v1.author_style import router as author_style_router
+from .api.v1.scenes import router as scenes_router
 from .api.v1.platform_connections import router as platform_connections_router
 from .api.v1.publish_schedule import router as publish_schedule_router
 from .api.v1.overseas import router as overseas_router
@@ -96,6 +97,7 @@ app.include_router(knowledge_router)
 app.include_router(hotspots_router)
 app.include_router(imitation_router)
 app.include_router(author_style_router)
+app.include_router(scenes_router)
 app.include_router(platform_connections_router)
 app.include_router(publish_schedule_router)
 app.include_router(overseas_router)

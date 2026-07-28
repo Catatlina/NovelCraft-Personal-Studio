@@ -710,6 +710,27 @@ $plan_output
 
 输出 JSON: {"scene_beats":[{"scene":1,"pov":"视角人物","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"}]}"""),
 
+    # ═══ V3-P3-⑪ 场景层 Scene + Scene Director（章节级分镜） ═══
+    ("scene.direct", "1.0.0", "deepseek",
+     """你是场景导演（Scene Director）。请为接下来的章节《$chapter_title》规划「场景分镜表」，在写作前先设计好每个场景的推进。
+
+章节定位：$chapter_function
+故事弧进展：$arc_summary
+近章背景：$recent_summary
+
+要求：
+1. 把本章拆为 3-6 个场景，每个场景含：
+   - title（场景名，≤12字）
+   - beat（节拍类型：起势 / 发展 / 转折 / 高潮 / 落幕）
+   - goal（本场景要推进的目标/信息）
+   - setting（时间地点/环境氛围）
+   - pov（视角人物）
+2. 场景之间因果相连——上一场景的结果触发下一场景的目标
+3. 至少一个场景承担转折或高潮，避免"信息展示型"水字
+4. 末尾场景必须为下一章留下钩子（钩子写入最后一幕的 goal）
+
+输出 JSON: {"scenes":[{"title":"场景名","beat":"转折","goal":"目标","setting":"环境","pov":"视角人物"}]}"""),
+
     # ═══ V3 Story Arc（§4，单层实体化，不做阶段/场景层） ═══
     ("bootstrap.generate_story_arc", "1.0.0", "deepseek",
      """你是剧情架构师。请为《$selected_title》规划本书的「故事弧（Story Arc）」列表——每条弧是一条贯穿全书的叙事线索（如"第一次创业""父子和解""复仇布局"）。
@@ -1067,6 +1088,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "blueprint_volume_plan":  '{"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}',
     "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',
+    "scene.direct":            '{"scenes":[{"title":"场景一","beat":"起势","goal":"交代处境","setting":"夜雨客栈","pov":"主角"},{"title":"场景二","beat":"转折","goal":"遭遇变故","setting":"客栈后院","pov":"主角"},{"title":"场景三","beat":"落幕","goal":"埋下新线索","setting":"黎明山路","pov":"主角"}]}（scenes 至少 3 个，beat 取 起势/发展/转折/高潮/落幕）',
     "write_chapter_draft":    '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}}（body 至少 6 段，每段为完整叙事段落）',
     "write_self_review":      '{"overall":"总体评价","strengths":["优点1","优点2"],"weaknesses":["缺点1"],"suggestions":["建议1"],"self_score":80}',
     "write_polish":           '{"polished":{"title":"章名","body":["段落一","段落二","段落三","段落四","段落五","段落六"]},"changes_summary":"修改摘要"}（body 段落数与原文相当，至少 4 段）',
