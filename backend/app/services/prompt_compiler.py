@@ -94,6 +94,53 @@ def compile_strategy_directive(strategies: Any) -> str:
     return "\n".join(blocks)
 
 
+# ═══════════════════════════════════════════════════════
+# V3-P3-⑫: Prompt Compiler 通用引擎扩展
+
+def render_template(template: str, variables: dict[str, str]) -> str:
+    """安全替换模板中的 $variable 占位符。
+
+    Prompt Compiler 模块内使用；委托 prompt_registry.render_prompt 做注入清洗。
+    """
+    from app.prompt_registry import render_prompt
+    return render_prompt(template, variables)
+
+
+def compile_generic_prompt(
+    base_prompt: str,
+    layers: dict[str, str] | None = None,
+    priorities: dict[str, int] | None = None,
+) -> str:
+    """通用 Prompt 编译：将任意结构化层（layer→text）按优先级组装为最终 Prompt。
+
+    layers:
+        {"策略指引": "本章应含强钩子", "创作红线": "不碰历史虚无主义"}
+    priorities:
+        {"策略指引": 1, "创作红线": 3}  → 数字越小越优先（排前面）
+        未指定的层默认为 999（低优先）
+    Degrades gracefully: 无 layers 或全空则返回 base_prompt 不动。
+    """
+    if not layers:
+        return base_prompt
+    pri = dict(priorities) if priorities else {}
+
+    def _label(layer: str) -> str:
+        # 加【】包装但保留原有 raw key
+        return f"【{layer}】" if not layer.startswith("【") else layer
+
+    items: list[tuple[int, str]] = []
+    for name, text in (layers or {}).items():
+        content = text.strip() if isinstance(text, str) and text.strip() else ""
+        if not content:
+            continue
+        p = pri.get(name, 999)
+        items.append((p, f"{_label(name)}\n{content}"))
+    if not items:
+        return base_prompt
+    items.sort(key=lambda x: x[0])
+    return base_prompt.rstrip() + "\n\n" + "\n\n".join(i[1] for i in items)
+
+
 def compile_prompt(
     base_prompt: str,
     *,
@@ -101,8 +148,9 @@ def compile_prompt(
     novel_dna: Any = None,
     chapter_function: Any = None,
     skill_hints: Any = None,
+    extra_layers: dict[str, str] | None = None,
 ) -> str:
-    """Assemble the final Writer directive.
+    """Assemble the final Writer directive（兼容旧签名 + 通用层扩展）。
 
     Degrades gracefully: any missing/enabled layer is simply omitted; if nothing
     is added the base prompt is returned untouched.
@@ -130,6 +178,12 @@ def compile_prompt(
         hints = [str(h).strip() for h in skill_hints if str(h).strip()]
         if hints:
             extras.append("【技巧提示】" + "；".join(hints))
+    # ── V3-P3-⑫: 通用层扩展 ──
+    if extra_layers:
+        for name, text in extra_layers.items():
+            content = text.strip() if isinstance(text, str) and text.strip() else ""
+            if content:
+                extras.append(f"【{name}】\n{content}")
     if not extras:
         return base_prompt
     return base_prompt.rstrip() + "\n\n" + "\n\n".join(extras)

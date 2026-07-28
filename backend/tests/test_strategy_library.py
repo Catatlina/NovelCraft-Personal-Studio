@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services.prompt_compiler import (  # noqa: E402
+    compile_generic_prompt,
     select_strategies,
     compile_strategy_directive,
     compile_prompt,
@@ -85,3 +86,57 @@ def test_compile_prompt_appends_directive_and_dna_and_function():
 def test_skill_constants_exist():
     assert SKILL_GENERATE_CONFLICT == "generate_conflict"
     assert SKILL_GENERATE_HOOK == "generate_hook"
+
+
+# ═══ V3-P3-⑫: Prompt Compiler 通用引擎 ═══
+
+def test_compile_generic_prompt_no_layers_returns_base():
+    base = "base prompt"
+    assert compile_generic_prompt(base) == base
+    assert compile_generic_prompt(base, layers={}) == base
+
+
+def test_compile_generic_prompt_with_layers_and_priorities():
+    base = "write chapter"
+    layers = {
+        "策略指引": "本章要打脸",
+        "创作红线": "不碰历史虚无主义",
+        "风格要求": "网络小说口语化",
+    }
+    priorities = {"策略指引": 1, "风格要求": 2, "创作红线": 3}
+    out = compile_generic_prompt(base, layers, priorities)
+    # Priority 1 (策略指引) should appear before priority 3 (创作红线)
+    pos_strat = out.find("【策略指引】")
+    pos_style = out.find("【风格要求】")
+    pos_redline = out.find("【创作红线】")
+    assert pos_strat < pos_style < pos_redline, f"order mismatch: {pos_strat} < {pos_style} < {pos_redline}"
+    assert "打脸" in out
+    assert "网络小说" in out
+
+
+def test_compile_generic_prompt_empty_text_skipped():
+    base = "prompt"
+    layers = {"A": "", "B": "content"}
+    out = compile_generic_prompt(base, layers)
+    assert "【A】" not in out
+    assert "【B】" in out
+
+
+def test_compile_generic_prompt_unspecified_priority_defaults_last():
+    base = "x"
+    layers = {"低": "L", "高": "H"}
+    priorities = {"高": 1}
+    out = compile_generic_prompt(base, layers, priorities)
+    assert out.find("【高】") < out.find("【低】")
+
+
+def test_compile_prompt_extra_layers():
+    base = "write chapter"
+    out = compile_prompt(
+        base,
+        strategy_directive="策略来了",
+        extra_layers={"场景分镜": "场景1: 起势\n场景2: 高潮"},
+    )
+    assert "策略指引" in out
+    assert "场景分镜" in out
+    assert "场景1" in out

@@ -29,7 +29,7 @@
 |---|------|------|--------|------|
 | ⑩ | Author Style Card 强化 | 已接线 | 扩展 style_learn 学习源：编辑器 diff 信号(修改/删除/保留)+喜欢表达；Learning Agent(m3_tasks.run_author_style_learning)异步重建 style_card 并注入 assembler 第9层 | tests/test_author_style.py 9 passed；迁移 nc_v3_author_style；真实 AI 全链待全量验收 |
 | ⑪ | 场景层 Scene + Scene Director Agent | 已接线 | scenes 表 + gateway scene_direct 契约 + prompt scene.direct + Scene Director 服务(拆分/持久化/消费gateway) + celery run_scene_direction 异步 + 端点 + assembler 场景分镜层注入 + 前端 SceneBoard 面板 | tests/test_scene_director.py 7 passed；迁移 nc_v3_scene_layer；真实 AI 全链待全量验收 |
-| ⑫ | Prompt Compiler 通用引擎 | 未开始 | 依赖策略库效果数据 | 待做 |
+| ⑫ | Prompt Compiler 通用引擎 | 已接线 | 从MVP扩展：compile_generic_prompt（任意层+优先级排序）+ render_template（安全$变量替换）+ compile_prompt 兼容旧签名+extra_layers 通用层注入；可复用于任意 task_type | tests/test_strategy_library.py 14 passed（含5条通用场景）；真实 AI 全链待全量验收 |
 
 ## 提交记录
 - 2682f9d KI-007 修复（前序）
@@ -45,3 +45,5 @@
 - （本批）⑩ Author Style Card 强化：Alembic 迁移 nc_v3_author_style（author_style_signals 信号表 + style_cards 卡表，UNIQUE project_id）；services/author_style.py 纯函数 normalize_signals/summarize_signals（keep_ratio/deletion_ratio/edit_preference 三档：aggressive_editor≥0.5/moderate/faithful_keeper，liked_phrases 2-gram 提取）/merge_style_card/learn_from_signals（复用 style_learn.learn_style + 信号摘要，顶层暴露 liked_phrases 供 assembler 注入）；POST /api/v1/author-style/{pid}/signals（记录编辑diff段）+ /like（标记喜欢）+ /learn（触发 celery run_author_style_learning 异步重建）+ /card（读卡）；assembler 第9层 author_style 注入生成上下文（project_id→style_cards，无数据降级空）；m3_tasks.run_author_style_learning 异步消费信号+知识库样本持久化 card；前端 Editor 工具栏「标记喜欢」按钮 + App saveChapter 时 fire-and-forget 采集 diff 信号；tests/test_author_style.py 9 passed
 
 - （本批）⑪ 场景层 Scene + Scene Director：Alembic 迁移 nc_v3_scene_layer（scenes 表 chapter_id/project_id/scene_index/title/beat/goal/setting/pov/meta）；gateway 加 _ScenePlanOutput（scenes≥1）注册 scene_direct；prompt_registry 加 scene.direct 提示（章节级分镜：title/beat/goal/setting/pov，因果链+转折/高潮+钩子）+ fallback 同步；services/scene_director.py 纯函数 split_scenes（分隔线/空行确定性切分）+ normalize_scene（beat 非法降级发展）+ persist_scenes/get_scenes/direct_scenes（调用 gateway.complete 真实 Provider 落库）；celery run_scene_direction 异步（取章节 function + assembler arc/recent 摘要喂 Director）；端点 POST/GET /api/v1/chapters/{id}/scene-direct|/scenes（require_project_member 鉴权）；assembler 第9层 scene_plan 注入生成上下文（chapter_id 查 scenes）；前端 SceneBoard.tsx 折叠面板（生成分镜按钮 + 分镜列表）+ Editor 接线；tests/test_scene_director.py 7 passed
+
+- （本批）⑫ Prompt Compiler 通用引擎：prompt_compiler.py 扩展 render_template（委托 prompt_registry.render_prompt 安全替 $var）+ compile_generic_prompt(base, layers, priorities) 按优先级排序泛用组装 + compile_prompt 保持兼容旧签名并增 extra_layers 通用层注入；tests/test_strategy_library.py +5 通用测试（空层/优先级排序/空值跳过/默认低优先/extra_layers）；V3 全套 93 passed + tsc 0 错 + vitest 12 passed
