@@ -6,14 +6,22 @@
  */
 import { expect, Page, test } from "@playwright/test";
 
-async function registerFreshUser(page: Page): Promise<string> {
+async function registerFreshUser(page: Page, attempt = 0): Promise<string> {
   const email = `starlume-e2e-${Date.now()}-${Math.floor(Math.random() * 1e4)}@example.com`;
   await page.goto("/");
   await page.getByRole("button", { name: "没有账号？注册" }).click();
   await page.getByPlaceholder("name@example.com").fill(email);
   await page.getByPlaceholder("至少 8 位").fill("Starlume-e2e-1234");
   await page.getByRole("button", { name: "注册", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "小说首页", exact: true })).toBeVisible({ timeout: 15_000 });
+  try {
+    await expect(page.getByRole("heading", { name: "小说首页", exact: true })).toBeVisible({ timeout: 15_000 });
+  } catch (e) {
+    if (attempt >= 3) throw e;
+    // 注册限流 5 次/分钟：等待限流窗口过去后用新邮箱重试
+    console.warn(`[registerFreshUser] 注册后未出现首页（可能触发限流 429），第 ${attempt + 1} 次退避重试`);
+    await page.waitForTimeout(65_000);
+    return registerFreshUser(page, attempt + 1);
+  }
   return email;
 }
 
