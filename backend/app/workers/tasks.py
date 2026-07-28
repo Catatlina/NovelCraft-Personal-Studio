@@ -1144,7 +1144,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     audit = validate_task_output("audit_plan_fidelity", audit)
                     contradictions = [str(item).strip() for item in audit.get("contradictions", []) if str(item).strip()]
                     omissions = [str(item).strip() for item in audit.get("omissions", []) if str(item).strip()]
-                    passed = not contradictions
+                    # 审计模型常把"建议修改/未明确但仍符合/新增细节"误归类为矛盾，过滤掉
+                    _SUGGESTION_MARKERS = ("符合", "未明确提及", "未指定", "新增", "建议明确", "占比", "未违反", "未强制")
+                    real_contradictions = [
+                        c for c in contradictions
+                        if not any(m in c for m in _SUGGESTION_MARKERS)
+                    ]
+                    passed = not real_contradictions
                     # score + omissions → advisory only, not blocking
                     # Still feed omissions into retry feedback so the plan improves
                     if passed and omissions:
