@@ -8,6 +8,14 @@
 
 > 本轮按已确认的 Vibe Coding 任务契约执行：小说优先、非小说模块从 UI 隐藏但不删除数据/源码、用户可见品牌统一为 Starlume AI、关键 AI 结果必须人工确认、失败不得伪装成功。当前仍在开发中，不能宣称整条新 UI 小说链已完成或已部署。
 
+### 2026-07-28 protected 真实 AI 全链 E2E 首次通过（未完成顺序 item ①）
+
+- 注入真实 `DEEPSEEK_API_KEY`（gitignored `.env.local`，不入库）后，`npx playwright test e2e/main-chain.spec.ts --grep "protected"` → **1 passed (13.2m)**。
+- 过程中修复 3 个真实阻断：① `Wizard.tsx` HTML5 step 校验拒绝全部预设字数（min=5000/step=10000 不相容，改 min=10000）；② `scripts/e2e-backend.sh` 缺 Celery worker（任务入队无消费者，改双进程）；③ `novelcraft_dev` 迁移落后 6 版（`ai_calls` 缺 `user_id` 致预算断言崩溃，`alembic upgrade head`）。
+- 证据：run `8f1fd62b-5ad8-4208-8fd8-887f33425631` succeeded；19 条真实 `ai_calls`（¥0.1889，write_polish 实测 95.6s）；`waiting_human` 人工定名断点真实出现并点选；产物《午夜头条》第一章 2350 chars；截图 protected-02..06。
+- 状态提升（据 ACCEPTANCE_CRITERIA）：NOV-W-001/W-002/L-003/R-002 已接线 → **可用**；"已验收"仍需生产部署 smoke（KI-002）。
+- 默认无 Key 门禁不变：`test.skip` 保留，仍为 4 passed + skipped。
+
 ### 2026-07-28 AI 交接 checkpoint
 
 - 已新增 `docs/AI_HANDOFF.md`、`REQUIREMENTS_TRACEABILITY.md`、`KNOWN_ISSUES.md`、`ACCEPTANCE_CRITERIA.md`、`AI_CONTINUITY.md`，并把交接读写责任加入 `AGENTS.md`；项目状态不再只依赖聊天记录。

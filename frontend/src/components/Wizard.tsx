@@ -55,7 +55,7 @@ export function Wizard({
     if (idea.trim().length < 4) nextErrors.idea = "请至少用 4 个字描述你的故事";
     if (!genre.trim()) nextErrors.genre = "请选择小说题材";
     if (!style.trim()) nextErrors.style = "请描述希望保持的写作风格";
-    if (targetWords < 5000) nextErrors.targetWords = "目标字数不能少于 5,000";
+    if (targetWords < 10000) nextErrors.targetWords = "目标字数不能少于 10,000";
     if (targetWords > 5000000) nextErrors.targetWords = "目标字数不能超过 500 万";
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length === 0) startBootstrap();
@@ -160,7 +160,7 @@ export function Wizard({
             <input
               type="number"
               value={targetWords}
-              min={5000}
+              min={10000}
               max={5000000}
               step={10000}
               onChange={event => { setTargetWords(Number(event.target.value)); clearError("targetWords"); }}

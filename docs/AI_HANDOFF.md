@@ -31,15 +31,7 @@
 - 真实性门禁：`bash scripts/ai_development_gate.sh` → AST 真实性与 whitespace 通过；suspicion scan 按设计返回 3（宽泛告警）。逐条解释见 `KNOWN_ISSUES.md` KI-005（全部为测试 monkeypatch / UI placeholder / 反伪注释 / 合法空态 / 非小说历史兜底，非业务伪实现）。
 - 文档↔代码一致性：抽样确认 `Layout.tsx` 主导航恰为七项小说页面；`App.tsx` 未导入任何非小说页面组件（RankingCenter/Hotspot/PublishDashboard/Studio/Collaboration/IntelligenceAgent 等均未出现）；protected E2E 为真实 `test.skip` 而非伪通过。
 
-未完成顺序第一项（protected 真实 AI E2E）状态：**仍阻断**。本机 shell 与 `.env*` 均无 `DEEPSEEK_API_KEY`。按 KI-001，禁止删除 `test.skip`、使用 mock、写死书名或伪造完成。可在具备真实 Key 的受保护环境执行：
-
-```bash
-cd frontend
-DEEPSEEK_API_KEY=*** npx playwright test e2e/main-chain.spec.ts --grep "protected"
-# 或注入 .env.local 后 npm run test:e2e
-```
-
-执行后须保留 run ID、`ai_calls` 账本与关键截图，再据 `ACCEPTANCE_CRITERIA.md` 提升状态。
+未完成顺序第一项（protected 真实 AI E2E）状态：**✅ 已完成（2026-07-28，本地真实 Key 环境）**。执行 `npx playwright test e2e/main-chain.spec.ts --grep "protected"` → **1 passed (13.2m)**。证据：run `8f1fd62b-5ad8-4208-8fd8-887f33425631`（succeeded）、19 条真实 `ai_calls`（¥0.1889）、产物《午夜头条》+ 第一章 2350 chars、截图 protected-02..06。过程中修复 3 个真实阻断（Wizard step 校验 / e2e-backend 缺 Celery worker / dev 库迁移落后），详见 KI-001。`test.skip` 保留，无 Key 环境仍真实跳过。Key 存放于 gitignored `.env.local`，不入库。
 
 ## 2. 当前产品契约
 
@@ -139,7 +131,7 @@ npm run test:e2e
 
 ## 7. 当前未完成顺序
 
-1. 使用受保护的真实 DeepSeek Key 执行新 UI protected E2E，并保留 run、调用账本和截图证据。
+1. ~~使用受保护的真实 DeepSeek Key 执行新 UI protected E2E，并保留 run、调用账本和截图证据。~~ ✅ 完成（2026-07-28）：1 passed (13.2m)，run `8f1fd62b`，19 条 ai_calls，证据见 KI-001。
 2. 补 AI 编辑“生成 → 预览 → 放弃/应用 → 版本恢复”的真实浏览器 E2E。
 3. 补创作进度运行中、失败、重试、人工定名、19 节点完成态的浏览器证据。
 4. 完成七个页面的桌面/手机截图集与视觉回归。

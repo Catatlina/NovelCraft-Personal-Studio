@@ -148,19 +148,24 @@ test("小说主线⑤：真实 AI 向导→人工定名→首章→审阅→导�
   await expect(page.getByText("需要你的决定")).toBeVisible({ timeout: 360_000 });
   const candidates = page.locator(".title-candidate-grid button");
   await expect(candidates).not.toHaveCount(0);
+  await page.screenshot({ path: "artifacts/screenshots/protected-02-human-naming.png" });
   await candidates.first().click();
 
   await expect(page.getByText("创作完成", { exact: true })).toBeVisible({ timeout: 720_000 });
+  await page.screenshot({ path: "artifacts/screenshots/protected-03-complete.png" });
   await page.getByRole("navigation", { name: "小说创作主导航" })
     .getByRole("button", { name: "我的书库", exact: true }).click();
   const firstBook = page.locator(".library-page .card").first();
   await expect(firstBook).toBeVisible();
   await expect(firstBook.getByRole("button", { name: "导出TXT" })).toBeEnabled();
+  await page.screenshot({ path: "artifacts/screenshots/protected-04-library.png" });
   await firstBook.getByRole("button", { name: "进入编辑" }).click();
   await expect(page.locator(".ProseMirror")).not.toBeEmpty();
+  await page.screenshot({ path: "artifacts/screenshots/protected-05-editor.png" });
 
   await page.getByRole("navigation", { name: "小说创作主导航" })
     .getByRole("button", { name: "审阅与一致性", exact: true }).click();
   await expect(page.getByText("还没有可用的审阅结果")).toHaveCount(0);
   await expect(page.getByText("一致性维度")).toBeVisible();
+  await page.screenshot({ path: "artifacts/screenshots/protected-06-review.png" });
 });

@@ -4,14 +4,21 @@
 
 ## 阻断生产验收
 
-### KI-001 新 UI 真实 AI 全链尚未执行
+### KI-001 新 UI 真实 AI 全链尚未执行 —— ✅ 已解决（2026-07-28，可用）
 
-- 状态：已接线。
-- 现象：`frontend/e2e/main-chain.spec.ts` 第五条 protected 用例被跳过。
-- 原因：当前本机没有 `DEEPSEEK_API_KEY`。
-- 不可接受的处理：删除 `test.skip`、使用 Mock Provider、写死候选书名或伪造完成状态。
-- 正确下一步：在受保护环境注入真实 Key，执行该用例，保存 run ID、`ai_calls`、关键截图和导出正文断言。
-- 接手复验（2026-07-28）：`git rev-parse HEAD` = `876d826`（= `origin/main`，工作树干净）；`npm run test:e2e` 实测 **4 passed, 1 skipped**，第 5 条 `e2e/main-chain.spec.ts:134` 因 `test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY")` 真实跳过；本机 shell 与 `.env*` 均无任何 `DEEPSEEK_API_KEY`（仅 `.env.example` 含占位值）。结论：仍阻断，状态保持"已接线"，新 UI 不得宣称已验收。
+- 状态：**可用**（本地真实 Key 环境下全链通过；"已验收"需待生产部署 smoke 后由 KI-002 收口）。
+- 解决过程（2026-07-28，注入真实 `DEEPSEEK_API_KEY` 后连续定位并修复 3 个真实阻断）：
+  1. **Wizard 表单校验 bug**：`Wizard.tsx` 字数输入 `min={5000} step={10000}` 与全部预设值（100000/300000/…）不满足 HTML5 step 约束 → 浏览器静默拒绝提交，工作流从未启动。修复为 `min={10000}` 且 JS 校验同步 `targetWords < 10000`。
+  2. **E2E 编排缺 Celery worker**：`scripts/e2e-backend.sh` 只起 uvicorn，`execute_bootstrap` 入队后无消费者。修复为 worker(concurrency=2)+uvicorn 双进程并带退出清理。
+  3. **dev 库迁移落后**：`novelcraft_dev` 停在 `nc_versions_reason_text`，`ai_calls` 缺 `user_id` 列 → 网关预算断言 `UndefinedColumn`，节点重试 4 次后 run failed。执行 `alembic upgrade head`（补 6 个迁移至 `f932f2b0b3bb`）。
+- 通过证据（全部真实，无 mock）：
+  - E2E：`npx playwright test e2e/main-chain.spec.ts --grep "protected"` → **1 passed (13.2m)**。
+  - Celery 日志：`execute_bootstrap` 两段任务分别 254.4s（→ `waiting_human`，人工定名断点真实出现）与 527.7s（→ `succeeded`）。
+  - run ID：`8f1fd62b-5ad8-4208-8fd8-887f33425631`，status=succeeded。
+  - `ai_calls`：本次 run 窗口 **19 条**真实 DeepSeek 调用，合计 ¥0.1889（重节点实测 write_polish 95.6s / write_length_check 94.9s）。
+  - 产物：小说《午夜头条》+ 第一章「午夜浮现」（body 2350 chars），由测试在真实候选书名中点选定名。
+  - 截图：`frontend/artifacts/screenshots/protected-02..06.png`（人工定名/完成/书库/编辑器/审阅，5 张）。
+- 保留约束：`test.skip(!process.env.DEEPSEEK_API_KEY)` 未删除；无 Key 环境仍真实跳过，CI 门禁不受影响。
 
 ### KI-002 新 UI 已推送、尚未部署
 
