@@ -158,12 +158,20 @@ $chapter_text
 6. pace（节奏）：快慢交替是否得当？情绪曲线是否有起伏？
 7. foreshadowing（伏笔）：是否有可扩展的伏笔或钩子？
 
+读者体验维度（reader_experience，每项 0-100 分，站在追更读者视角打分）：
+
+- expectation（期待感）：本章是否制造了让读者想知道"接下来会怎样"的期待？
+- conflict（冲突感）：是否有实质冲突（人物对抗/目标受阻/两难），而非平铺直叙？
+- payoff（爽点）：是否有情绪释放点（打脸/反转/收获/揭示）？
+- emotion_shift（情绪变化）：读者情绪是否被带动起伏，而不是全程一个调？
+- worth_continuing（追读意愿）：读完本章，读者是否有动力点开下一章？
+
 铁律：
 - 低于 60 分的维度必须写具体问题，指出哪一段有问题
-- score 取 7 维平均，不要虚高
+- score 取 7 维平均，不要虚高；reader_experience 不计入 score，单独打分
 - 检测 AI 味：过于工整的句式、每段类似的结构、缺乏口语节奏
 
-输出 JSON: {"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题一","问题二"]}"""),
+输出 JSON: {"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题一","问题二"],"reader_experience":{"expectation":80,"conflict":75,"payoff":70,"emotion_shift":78,"worth_continuing":82}}"""),
 
     # ── Editor: oh-story deslop + 润色 ──
     ("editor.polish", "3.0.0", "deepseek",
@@ -1020,7 +1028,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_characters":       '{"characters":[{"name":"姓名","role":"角色","personality":"性格","arc":"弧线","motivation":"驱动力","relationship":"关系"}]}',
     "gen_outline":          '{"core_concept":{"premise":"","golden_finger_rules":[],"world_background":""},"business_roadmap":[],"volume_outlines":[],"chapter_plan":[]}',
     "gen_chapter1":         '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}} (body 至少 6 段)',
-    "review_7dim":          '{"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题"]}',
+    "review_7dim":          '{"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题"],"reader_experience":{"expectation":80,"conflict":75,"payoff":70,"emotion_shift":78,"worth_continuing":82}}',
     "review_ooc":           '{"ooc_count":0,"violations":[{"character":"人物","action":"行为","expected":"符合设定的行为"}]}',
     "review_consistency":   '{"contradictions":[{"type":"类型","this_chapter":"本章","previous":"前文"}]}',
     "review_rhythm":        '{"pacing_score":80,"sections":[{"range":"段1-3","label":"快/慢/适中","advice":"建议"}]}',

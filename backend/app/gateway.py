@@ -124,10 +124,22 @@ class _ReviewDimensions(_StrictOutput):
     foreshadowing: float = Field(ge=0, le=100)
 
 
+# V3 §11.1 reader-experience sub-dimensions, merged into the existing
+# review_7dim call (no new agent / call chain). Optional so legacy outputs
+# without the block still validate.
+class _ReaderExperience(_StrictOutput):
+    expectation: float = Field(ge=0, le=100)
+    conflict: float = Field(ge=0, le=100)
+    payoff: float = Field(ge=0, le=100)
+    emotion_shift: float = Field(ge=0, le=100)
+    worth_continuing: float = Field(ge=0, le=100)
+
+
 class _ReviewOutput(_StrictOutput):
     score: float = Field(ge=0, le=100)
     dimensions: _ReviewDimensions
     issues: list[str]
+    reader_experience: _ReaderExperience | None = None
 
 
 class _OocOutput(_StrictOutput):

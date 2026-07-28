@@ -2232,6 +2232,12 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         if length_issue:
             score = min(score, threshold - 1)
             issues.append(length_issue)
+        # V3 §11.1 reader experience: advisory only — surfaces weak dims as
+        # issues + durable meta, never changes score / never blocks the gate.
+        from app.services.reader_experience import (
+            reader_experience_issues, summarize_reader_experience)
+        rx_summary = summarize_reader_experience(review.get("reader_experience"))
+        issues.extend(reader_experience_issues(rx_summary))
         review_key = f"{generation_key}:review-record:{attempt}:v1"
         db = connect()
         db.execute(
@@ -2245,6 +2251,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         db.execute("""UPDATE contents SET status=%s,meta=meta || %s,updated_at=now() WHERE id=%s""",
                    (status, encode({"review_score": score, "review_issues": issues,
                                     "review_attempts": attempt + 1,
+                                    "reader_experience": rx_summary,
                                     "quality_status": "ai_review_passed" if score >= threshold else "draft_pending_review"}), chapter_id))
         db.commit(); db.close()
         if score >= threshold:
@@ -2785,6 +2792,14 @@ def patrol_check() -> dict:
              AND meta->'timeline_anchor_check'->>'status' = 'warning'"""
     ).fetchall()
 
+    # V3 Reader Experience (§11.1): chapters whose review-time reader
+    # experience summary flagged weak sub-dimensions (advisory only).
+    weak_reader_exp = db.execute(
+        """SELECT id, title FROM contents
+           WHERE type = 'chapter' AND is_deleted = FALSE
+             AND meta->'reader_experience'->>'status' = 'warning'"""
+    ).fetchall()
+
     db.close()
 
     issues = []
@@ -2800,6 +2815,8 @@ def patrol_check() -> dict:
         issues.append(f"{len(active_no_progress)} active arcs with no chapters in range")
     if anachronism_warns:
         issues.append(f"{len(anachronism_warns)} chapters with anachronism warnings")
+    if weak_reader_exp:
+        issues.append(f"{len(weak_reader_exp)} chapters with weak reader experience")
     backlog = check_queue_backlog()
     if backlog:
         issues.append(backlog)
