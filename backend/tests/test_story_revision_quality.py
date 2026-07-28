@@ -60,6 +60,7 @@ def test_humanize_quality_feedback_explains_retry_constraints():
 
     feedback = _humanize_quality_feedback(before, output)
 
-    assert "基于完整原文重新处理" in feedback
-    assert "75%" in feedback
+    assert "本次只有" in feedback
+    assert "本章必须至少输出" in feedback
+    assert "逐段等量改写" in feedback
     assert "60%" in feedback

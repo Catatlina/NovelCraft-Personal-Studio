@@ -194,6 +194,8 @@ def _assert_min_chapter_length(task_type: str, text: str) -> None:
 
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:
     paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
+    after_chars = len("\n".join(paragraphs).strip())
+    minimum_chars = max(MIN_CHAPTER_CHARS, math.ceil(len(before_text.strip()) * 0.75))
     try:
         _assert_story_revision_quality(
             task_type="final_humanize",
@@ -204,8 +206,9 @@ def _humanize_quality_feedback(before_text: str, output: dict) -> str:
         _assert_min_chapter_length("final_humanize", "\n".join(paragraphs))
     except OutputValidationError as exc:
         return (
-            f"{exc}. 请基于完整原文重新处理，保留至少 75% 正文和 60% 段落，"
-            f"不得少于 {MIN_CHAPTER_CHARS} 个正文字符。"
+            f"{exc}. 本次只有 {after_chars} 个字符；本章必须至少输出 {minimum_chars} 个字符。"
+            "请逐段等量改写完整原文，保留全部事件、动作、对话和细节，不得概括或删段；"
+            "自然分段数必须保留至少 60%。"
         )
     return ""
 
