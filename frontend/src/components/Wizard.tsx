@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Loader2, Play, AlertTriangle } from "lucide-react";
-import { api, getApiKey } from "../lib/api";
+import { api, apiRaw, getApiKey } from "../lib/api";
 
 const GENRES = ["都市","科幻","玄幻","仙侠","悬疑","历史","游戏","轻小说","短篇","其他"];
 
@@ -17,7 +17,7 @@ export function Wizard({ idea, setIdea, genre, setGenre, style, setStyle, target
   // BUG-07: warn before a keyless bootstrap dies at the first AI node.
   useEffect(() => {
     if (getApiKey()) { setKeyMissing(false); return; }
-    api<{ data?: { ai_key_configured?: boolean } }>("/api/v1/healthz")
+    apiRaw<{ data?: { ai_key_configured?: boolean } }>("/api/v1/healthz")
       .then(h => setKeyMissing(!(h?.data?.ai_key_configured)))
       .catch(() => setKeyMissing(false));
   }, []);

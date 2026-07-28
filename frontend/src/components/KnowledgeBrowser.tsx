@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Search, BookOpen, FileText } from "lucide-react";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
@@ -18,7 +18,7 @@ export function KnowledgeBrowser({ projectId }: { projectId: string }) {
     if (!query) return;
     const params = new URLSearchParams({ project_id: projectId, query });
     if (kind) params.set("kind", kind);
-    const r = await api<{ data: KnowledgeItem[] }>(`/api/v1/knowledge/search?${params}`, { method: "POST" });
+    const r = await apiRaw<{ data: KnowledgeItem[] }>(`/api/v1/knowledge/search?${params}`, { method: "POST" });
     setResults(r.data || []);
   }
 

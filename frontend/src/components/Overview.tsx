@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { BarChart3, Loader2, RefreshCw, AlertTriangle, TrendingUp } from "lucide-react";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 import { Pagination, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
@@ -156,7 +156,7 @@ export function Overview() {
   const load = useCallback(() => {
     setLoading(true);
     setError("");
-    api<ApiEnvelope<OverviewData>>("/api/v1/analytics/dashboard")
+    apiRaw<ApiEnvelope<OverviewData>>("/api/v1/analytics/dashboard")
       .then((resp) => {
         setData(resp?.data ?? null);
       })

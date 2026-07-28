@@ -1,7 +1,7 @@
 /** M5: Collaboration operations + member management */
 import React, { useState, useEffect } from "react";
 import { UserPlus, Shield, Trash2, Activity } from "lucide-react";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
@@ -15,8 +15,8 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
   const [inviteRole, setInviteRole] = useState("viewer");
 
   useEffect(() => {
-    api<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`).then(d => setMembers(d.data || []));
-    api<{ data: Log[] }>(`/api/v1/collaboration/logs?project_id=${projectId}`).then(d => setLogs(d.data || []));
+    apiRaw<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`).then(d => setMembers(d.data || []));
+    apiRaw<{ data: Log[] }>(`/api/v1/collaboration/logs?project_id=${projectId}`).then(d => setLogs(d.data || []));
   }, [projectId]);
 
   const membersPager = usePagination({ items: members, pageSize: 10, mode: "client" });
@@ -26,7 +26,7 @@ export function CollaborationPanel({ projectId }: { projectId: string }) {
     if (!inviteEmail) return;
     await api(`/api/v1/collaboration/invite?project_id=${projectId}&email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`, { method: "POST" });
     setInviteEmail("");
-    const d = await api<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`);
+    const d = await apiRaw<{ data: Member[] }>(`/api/v1/collaboration/members?project_id=${projectId}`);
     setMembers(d.data || []);
   }
 

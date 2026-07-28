@@ -22,21 +22,17 @@ export function LoginPage({ onLogin }: Props) {
     try {
       const path =
         mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
-      const data = await api<{
-        code: number;
-        message: string;
-        data?: { access_token: string };
-      }>(path, {
+      const data = await api<{ access_token: string }>(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      if (data.code === 0 && data.data?.access_token) {
-        const t = data.data.access_token;
+      if (data.access_token) {
+        const t = data.access_token;
         sessionStorage.setItem("nc_token", t);
         onLogin(t, email);
       } else {
-        setError(data.message || "操作失败");
+        setError("操作失败");
       }
     } catch {
       setError("网络错误，请检查后端是否运行");

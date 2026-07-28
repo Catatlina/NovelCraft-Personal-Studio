@@ -12,8 +12,8 @@ async function registerFreshUser(page: Page): Promise<string> {
   const email = `e2e-${Date.now()}-${Math.floor(Math.random() * 1e4)}@nc.dev`;
   await page.goto("/");
   await page.getByRole("button", { name: "没有账号？注册" }).click();
-  await page.getByPlaceholder("邮箱").fill(email);
-  await page.getByPlaceholder("密码").fill("e2e-test-1234");
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill("e2e-test-1234");
   await page.getByRole("button", { name: "注册", exact: false }).first().click();
   // 注册成功后进入应用外壳，默认落在扫榜中心
   await expect(page.getByRole("button", { name: "书库" })).toBeVisible({ timeout: 15_000 });
@@ -21,7 +21,8 @@ async function registerFreshUser(page: Page): Promise<string> {
 }
 
 async function importRankingCsv(page: Page) {
-  await page.getByRole("button", { name: "扫榜中心" }).click();
+  await page.getByRole("button", { name: "扫榜选书" }).click();
+  await page.getByRole("button", { name: "导入已有榜单文件" }).click();
   await page.getByLabel("选择榜单文件").setInputFiles(FIXTURE);
   const importButton = page.getByRole("button", { name: "导入榜单" });
   await expect(importButton).toBeEnabled({ timeout: 10_000 });
@@ -39,7 +40,7 @@ test("主链①：注册→导入榜单→快照落库→书库空态（无 AI�
 
   // 刷新后快照仍在（持久化，不是前端内存）
   await page.reload();
-  await page.getByRole("button", { name: "扫榜中心" }).click();
+  await page.getByRole("button", { name: "扫榜选书" }).click();
   await expect(
     page.locator("table tbody tr").filter({ hasText: "manual" }).first()
   ).toContainText("成功", { timeout: 15_000 });
@@ -57,13 +58,14 @@ test("主链①b：书库详情页可进入并展示核心区块（无 AI，确�
     headers: { Authorization: `Bearer ${token}` },
   });
   const projectId = (await projects.json()).data[0].id;
-  await page.request.post(`/api/v1/projects/${projectId}/novels`, {
+  const createNovel = await page.request.post(`/api/v1/projects/${projectId}/novels`, {
     headers: { Authorization: `Bearer ${token}` },
     data: { idea: "书库详情页确定性验收", genre: "科幻", style: "克制", target_words: 10000 },
   });
+  expect(createNovel.ok()).toBeTruthy();
 
   await page.getByRole("button", { name: "书库" }).click();
-  const firstBook = page.locator(".book-row").first();
+  const firstBook = page.locator(".card").filter({ hasText: "书库详情页确定性验收" }).first();
   await expect(firstBook).toBeVisible({ timeout: 10_000 });
   await firstBook.getByRole("button", { name: "查看详情" }).click({ force: true });
   await expect(page.getByRole("heading", { name: "简介" })).toBeVisible({ timeout: 10_000 });
@@ -88,10 +90,54 @@ test("主链①c：平台连接可视化填写并保存（无 AI，确定性）"
 
 test("主链①d：成本追踪页无白屏并展示预算与模型路由（无 AI，确定性）", async ({ page }) => {
   await registerFreshUser(page);
-  await page.getByRole("button", { name: "成本追踪" }).click();
-  await expect(page.getByRole("heading", { name: "预算" })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("heading", { name: "模型路由" })).toBeVisible();
+  await page.getByRole("button", { name: "成本", exact: true }).click();
+  await expect(page.getByText("预算", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("模型路由", { exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("TypeError");
+});
+
+test("主链①e：建书→导入章节→编辑→保存→重载持久化（无 AI，确定性）", async ({ page }) => {
+  await registerFreshUser(page);
+  const token = await page.evaluate(() => sessionStorage.getItem("nc_token"));
+  expect(token).toBeTruthy();
+  const headers = { Authorization: `Bearer ${token}` };
+  const projects = await page.request.get("/api/v1/projects", { headers });
+  const projectId = (await projects.json()).data[0].id;
+  const createNovel = await page.request.post(`/api/v1/projects/${projectId}/novels`, {
+    headers,
+    data: { idea: "章节保存端到端验收", genre: "悬疑", style: "克制", target_words: 10000 },
+  });
+  expect(createNovel.ok()).toBeTruthy();
+  const novelId = (await createNovel.json()).data.id;
+  const imported = await page.request.post(`/api/v1/novels/${novelId}/import-chapters`, {
+    headers,
+    data: { text: "第1章 雨夜来客" },
+  });
+  expect(imported.ok()).toBeTruthy();
+  expect((await imported.json()).data.imported).toBe(1);
+
+  await page.getByRole("button", { name: "书库" }).click();
+  const book = page.locator(".card").filter({ hasText: "章节保存端到端验收" }).first();
+  await expect(book).toBeVisible({ timeout: 10_000 });
+  await book.getByRole("button", { name: "进入编辑" }).click();
+  await expect(page.getByText("第1章 雨夜来客", { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+
+  const editor = page.locator(".ProseMirror");
+  await editor.fill("雨落在旧车站。门外的人敲了三下。");
+  const saveResponse = page.waitForResponse(response =>
+    response.url().includes("/api/v1/contents/") &&
+    response.request().method() === "PUT" &&
+    response.ok()
+  );
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await saveResponse;
+
+  await page.reload();
+  await page.getByRole("button", { name: "书库" }).click();
+  const reopenedBook = page.locator(".card").filter({ hasText: "章节保存端到端验收" }).first();
+  await expect(reopenedBook).toBeVisible({ timeout: 10_000 });
+  await reopenedBook.getByRole("button", { name: "进入编辑" }).click();
+  await expect(page.locator(".ProseMirror")).toContainText("雨落在旧车站。门外的人敲了三下。", { timeout: 10_000 });
 });
 
 test("主链②：AI 分析→原创选题→建书入库（protected，真实 Provider）", async ({ page }) => {

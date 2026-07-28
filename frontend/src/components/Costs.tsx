@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 
-// Backend envelope shape: { code, message, data } — lib/api returns the full
-// envelope, so callers unwrap `.data` manually.
+// Transitional full-envelope call used by the user-usage panel.
 interface ApiEnvelope<T> {
   code: number | string;
   message: string;
@@ -50,7 +49,7 @@ export function Costs({ aiCalls, budgets, routes }: {
     let active = true;
     setBillLoading(true);
     setBillErr("");
-    api<ApiEnvelope<TokenBill>>("/api/v1/analytics/usage?scope=user")
+    apiRaw<ApiEnvelope<TokenBill>>("/api/v1/analytics/usage?scope=user")
       .then((resp) => { if (active) setBill(resp.data); })
       .catch((e) => {
         if (!active) return;

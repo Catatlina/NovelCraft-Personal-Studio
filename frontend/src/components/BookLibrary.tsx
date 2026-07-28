@@ -9,8 +9,6 @@ type BookDetail = { book: Book; synopsis: string; genre: string; outline: unknow
 type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string; blocker_code?: string; cancel_requested?: boolean; updated_at?: string };
 type Completion = { total_chapters: number; reviewed_chapters: number; total_words: number; average_review_score: number; generation_percent?: number | null; review_percent?: number; continuity_flagged?: number; continuity_unchecked?: number; needs_rewrite_chapters?: number; quality_warnings?: string[]; ready_for_release?: boolean; exportable: boolean };
 type ImportPreview = { seq: string; title: string; raw: string };
-type Wrapped<T> = { data: T };
-
 function formatBookOutline(outline: unknown): string {
   if (typeof outline === "string") return outline.trim();
   if (!outline || typeof outline !== "object") return "";
@@ -70,12 +68,12 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
 
   const loadBookState = async (book: Book) => {
     const [completionResult, batchesResult] = await Promise.allSettled([
-      api<Wrapped<Completion>>(`/api/v1/novels/${book.id}/completion`),
-      api<Wrapped<Batch[] | { items?: Batch[]; data?: Batch[] }>>(`/api/v1/novels/${book.id}/generation-batches`),
+      api<Completion>(`/api/v1/novels/${book.id}/completion`),
+      api<Batch[] | { items?: Batch[]; data?: Batch[] }>(`/api/v1/novels/${book.id}/generation-batches`),
     ]);
-    if (completionResult.status === "fulfilled") setCompletions(previous => ({ ...previous, [book.id]: completionResult.value.data }));
+    if (completionResult.status === "fulfilled") setCompletions(previous => ({ ...previous, [book.id]: completionResult.value }));
     if (batchesResult.status === "fulfilled") {
-      const payload = batchesResult.value.data;
+      const payload = batchesResult.value;
       const items = Array.isArray(payload) ? payload : payload.items || payload.data || [];
       const latest = items[0];
       if (latest) {
@@ -88,8 +86,8 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const openDetail = async (book: Book) => {
     setBusy(book.id); setNotice("");
     try {
-      const result = await api<Wrapped<BookDetail>>(`/api/v1/library/books/${book.id}`);
-      setDetail(result.data);
+      const result = await api<BookDetail>(`/api/v1/library/books/${book.id}`);
+      setDetail(result);
     } catch (caught) {
       setNotice(`详情加载失败：${String(caught)}`);
     } finally {
@@ -99,8 +97,8 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
 
   useEffect(() => {
     setBooks([]); setError(""); setLoading(true);
-    api<Wrapped<Book[]>>(`/api/v1/library/books?project_id=${projectId}`).then(result => {
-      setBooks(result.data); setError(""); result.data.forEach(book => void loadBookState(book));
+    api<Book[]>(`/api/v1/library/books?project_id=${projectId}`).then(result => {
+      setBooks(result); setError(""); result.forEach(book => void loadBookState(book));
     }).catch(caught => setError(String(caught))).finally(() => setLoading(false));
     return () => { Object.values(pollers.current).forEach(id => window.clearInterval(id)); pollers.current = {}; };
   }, [projectId]);
@@ -109,9 +107,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     if (pollers.current[batchId]) return;
     pollers.current[batchId] = window.setInterval(async () => {
       try {
-        const result = await api<Wrapped<Batch>>(`/api/v1/generation-batches/${batchId}`);
-        setBatches(prev => ({ ...prev, [bookId]: result.data }));
-        if (["succeeded", "failed", "cancelled"].includes(result.data.status)) {
+        const result = await api<Batch>(`/api/v1/generation-batches/${batchId}`);
+        setBatches(prev => ({ ...prev, [bookId]: result }));
+        if (["succeeded", "failed", "cancelled"].includes(result.status)) {
           window.clearInterval(pollers.current[batchId]); delete pollers.current[batchId];
           const book = books.find(item => item.id === bookId);
           if (book) void loadBookState(book);
@@ -134,11 +132,11 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const startBatch = async (book: Book) => {
     setBusy(book.id); setNotice("");
     try {
-      const result = await api<Wrapped<{ batch_id: string }>>(`/api/v1/novels/${book.id}/chapters/batch`, {
+      const result = await api<{ batch_id: string }>(`/api/v1/novels/${book.id}/chapters/batch`, {
         method: "POST", body: JSON.stringify({ chapter_count: batchCount }),
       });
-      setBatches(prev => ({ ...prev, [book.id]: { id: result.data.batch_id, status: "pending", completed_count: 0, requested_count: batchCount } }));
-      pollBatch(book.id, result.data.batch_id);
+      setBatches(prev => ({ ...prev, [book.id]: { id: result.batch_id, status: "pending", completed_count: 0, requested_count: batchCount } }));
+      pollBatch(book.id, result.batch_id);
     } catch (caught) { setNotice(`批量生成失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
@@ -154,8 +152,8 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const cancelBatch = async (book: Book, batch: Batch) => {
     setBusy(book.id); setNotice("");
     try {
-      const result = await api<Wrapped<{ status: string }>>(`/api/v1/generation-batches/${batch.id}/cancel`, { method: "POST", body: "{}" });
-      setBatches(previous => ({ ...previous, [book.id]: { ...batch, status: result.data.status, cancel_requested: true } }));
+      const result = await api<{ status: string }>(`/api/v1/generation-batches/${batch.id}/cancel`, { method: "POST", body: "{}" });
+      setBatches(previous => ({ ...previous, [book.id]: { ...batch, status: result.status, cancel_requested: true } }));
       if (pollers.current[batch.id]) { window.clearInterval(pollers.current[batch.id]); delete pollers.current[batch.id]; }
       setNotice(`《${book.title}》批次已请求取消。`);
     } catch (caught) { setNotice(`取消失败：${String(caught)}`); } finally { setBusy(""); }
@@ -173,10 +171,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     if (!importPreview.length) { setNotice("没有识别到章节目录，请使用“第1章 标题”等格式。"); return; }
     setBusy(book.id); setNotice("");
     try {
-      const result = await api<Wrapped<{ imported?: number; count?: number; skipped?: number }>>(`/api/v1/novels/${book.id}/import-chapters`, {
+      const result = await api<{ imported?: number; count?: number; skipped?: number }>(`/api/v1/novels/${book.id}/import-chapters`, {
         method: "POST", body: JSON.stringify({ text: directoryText }),
       });
-      setNotice(`目录导入完成：新增 ${result.data.imported ?? result.data.count ?? 0} 章，跳过 ${result.data.skipped ?? 0} 章。`);
+      setNotice(`目录导入完成：新增 ${result.imported ?? result.count ?? 0} 章，跳过 ${result.skipped ?? 0} 章。`);
       setDirectoryText(""); setImportBookId(""); await loadBookState(book);
     } catch (caught) { setNotice(`目录导入失败：${String(caught)}`); } finally { setBusy(""); }
   };
@@ -184,9 +182,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const exportBook = async (book: Book, format: "txt" | "markdown") => {
     setBusy(book.id); setNotice("");
     try {
-      const result = await api<Wrapped<{ status: string; content?: string; message?: string }>>(`/api/v1/novels/${book.id}/export/${format}`);
-      if (result.data.status !== "ok" || !result.data.content) { setNotice(`导出失败：${result.data.message || "无内容"}`); return; }
-      const blob = new Blob([result.data.content], { type: "text/plain;charset=utf-8" });
+      const result = await api<{ status: string; content?: string; message?: string }>(`/api/v1/novels/${book.id}/export/${format}`);
+      if (result.status !== "ok" || !result.content) { setNotice(`导出失败：${result.message || "无内容"}`); return; }
+      const blob = new Blob([result.content], { type: "text/plain;charset=utf-8" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = `${book.title}.${format === "txt" ? "txt" : "md"}`;
@@ -199,9 +197,9 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const deleteBook = async (book: Book) => {
     setBusy(book.id); setNotice("");
     try {
-      const result = await api<Wrapped<{ deleted_book_id: string; deleted_chapters: number }>>(
+      const result = await api<{ deleted_book_id: string; deleted_chapters: number }>(
         `/api/v1/library/books/${book.id}`, { method: "DELETE" });
-      setNotice(`已删除《${book.title}》（含 ${result.data.deleted_chapters} 个章节）。`);
+      setNotice(`已删除《${book.title}》（含 ${result.deleted_chapters} 个章节）。`);
       setBooks(prev => prev.filter(b => b.id !== book.id));
       setSelectedBooks(prev => { const next = new Set(prev); next.delete(book.id); return next; });
     } catch (caught) { setNotice(`删除失败：${String(caught)}`); }
@@ -228,13 +226,13 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     if (decision === "reject" && !reason.trim()) return;
     setBusy(chapter.id); setNotice("");
     try {
-      const result = await api<Wrapped<{ status: string; task_id?: string }>>(`/api/v1/chapters/${chapter.id}/manual-review`, {
+      const result = await api<{ status: string; task_id?: string }>(`/api/v1/chapters/${chapter.id}/manual-review`, {
         method: "POST",
         body: JSON.stringify({ decision, reason }),
       });
       setNotice(decision === "approve"
         ? `《${chapter.title}》已通过人工审核并入库。`
-        : `《${chapter.title}》已拒绝，正在重新生成。任务 ${result.data.task_id || ""}`);
+        : `《${chapter.title}》已拒绝，正在重新生成。任务 ${result.task_id || ""}`);
       if (decision === "reject") {
         setRejectingChapterId("");
         setRejectReason("");

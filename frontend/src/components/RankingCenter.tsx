@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ApiError, api } from "../lib/api";
+import { ApiError, api, apiRaw } from "../lib/api";
 import { Pagination, Accordion, ConfirmDialog, EmptyState } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import { NovelAnalysisReport } from "./NovelAnalysisReport";
@@ -73,9 +73,9 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
   async function load() {
     const [s, p, t] = await Promise.allSettled([
-      api<Wrapped<Source[]>>(`/api/v1/ranking/sources?project_id=${projectId}`),
-      api<Wrapped<Snapshot[]>>(`/api/v1/ranking/snapshots?project_id=${projectId}`),
-      api<Wrapped<Topic[]>>(`/api/v1/ranking/topics?project_id=${projectId}`),
+      apiRaw<Wrapped<Source[]>>(`/api/v1/ranking/sources?project_id=${projectId}`),
+      apiRaw<Wrapped<Snapshot[]>>(`/api/v1/ranking/snapshots?project_id=${projectId}`),
+      apiRaw<Wrapped<Topic[]>>(`/api/v1/ranking/topics?project_id=${projectId}`),
     ]);
     if (s.status === "fulfilled") setSources(s.value.data);
     if (p.status === "fulfilled") setSnapshots(p.value.data);
@@ -89,7 +89,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function scan(source: Source) {
     setBusy(`scan:${source.source_key}`); setMessage("");
     try {
-      const result = await api<Wrapped<{ item_count: number }>>(`/api/v1/ranking/sources/${source.source_key}/scan?project_id=${projectId}`, { method: "POST", body: "{}" });
+      const result = await apiRaw<Wrapped<{ item_count: number }>>(`/api/v1/ranking/sources/${source.source_key}/scan?project_id=${projectId}`, { method: "POST", body: "{}" });
       setMessage(`${source.display_name}采集成功：${result.data.item_count} 本`); await load();
     } catch (error) { setMessage(`采集失败：${errorText(error)}`); await load(); }
     finally { setBusy(""); }
@@ -98,7 +98,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function scanAll() {
     setBusy("scan-all"); setMessage("一键采集所有平台中...");
     try {
-      const result = await api<Wrapped<{ scanned: string[], errors: Record<string,any>, succeeded: number, failed: number }>>(`/api/v1/ranking/scan-all?project_id=${projectId}`, { method: "POST", body: "{}" });
+      const result = await apiRaw<Wrapped<{ scanned: string[], errors: Record<string,any>, succeeded: number, failed: number }>>(`/api/v1/ranking/scan-all?project_id=${projectId}`, { method: "POST", body: "{}" });
       const { scanned, succeeded, failed } = result.data;
       setMessage(`一键采集完成：${succeeded}/${scanned.length + failed} 平台成功`);
       await load();
@@ -141,10 +141,10 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     setBusy("import"); setMessage("");
     try {
       const result = captureArtifact
-        ? await api<Wrapped<{ snapshot_id: string; item_count: number; capture_status?: string; status?: string }>>(`/api/v1/ranking/capture-import?project_id=${projectId}`, {
+        ? await apiRaw<Wrapped<{ snapshot_id: string; item_count: number; capture_status?: string; status?: string }>>(`/api/v1/ranking/capture-import?project_id=${projectId}`, {
             method: "POST", body: JSON.stringify({ ...captureArtifact, source_label: importSource.trim() }),
           })
-        : await api<Wrapped<{ snapshot_id: string; item_count: number; capture_status?: string; status?: string }>>(`/api/v1/ranking/import?project_id=${projectId}`, {
+        : await apiRaw<Wrapped<{ snapshot_id: string; item_count: number; capture_status?: string; status?: string }>>(`/api/v1/ranking/import?project_id=${projectId}`, {
             method: "POST", body: JSON.stringify({ source_label: importSource.trim(), items: importItems }),
           });
       const reviewHint = result.data.capture_status === "needs_review" ? "，低置信度条目需人工确认后才能分析" : "";
@@ -161,7 +161,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       // P0-T3: snapshot-level market analysis (ranking.py:560) is the source of
       // truth for the 选题→成书 flow — it returns `topic_candidates`, which the
       // old ten-layer /ranking/analyze endpoint never produced.
-      const result = await api<Wrapped<any>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, {
+      const result = await apiRaw<Wrapped<any>>(`/api/v1/ranking/snapshots/${snapshot.id}/analyze`, {
         method: "POST", body: "{}",
       });
       const data = result.data;
@@ -203,7 +203,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       const allCandidates: Topic[] = [];
       let lastSummary = "";
       for (const snap of succeeded) {
-        const res = await api<Wrapped<any>>(`/api/v1/ranking/snapshots/${snap.id}/analyze`, {
+        const res = await apiRaw<Wrapped<any>>(`/api/v1/ranking/snapshots/${snap.id}/analyze`, {
           method: "POST", body: "{}",
         });
         const d = res.data;
@@ -233,7 +233,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function retrySnapshot(snapshot: Snapshot) {
     setBusy(`retry:${snapshot.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<{ snapshot_id?: string; item_count?: number }>>(`/api/v1/ranking/snapshots/${snapshot.id}/retry`, { method: "POST", body: "{}" });
+      const result = await apiRaw<Wrapped<{ snapshot_id?: string; item_count?: number }>>(`/api/v1/ranking/snapshots/${snapshot.id}/retry`, { method: "POST", body: "{}" });
       setMessage(`重试成功：采集 ${result.data.item_count ?? 0} 本`);
       setOpenSnapshotId(result.data.snapshot_id || "");
       await load();
@@ -244,11 +244,11 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function validateMetadata(snapshot: Snapshot) {
     setBusy(`validate:${snapshot.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<{ checked: number; summary: Record<string, number>; status: string }>>(`/api/v1/ranking/snapshots/${snapshot.id}/validate-metadata`, {
+      const result = await apiRaw<Wrapped<{ checked: number; summary: Record<string, number>; status: string }>>(`/api/v1/ranking/snapshots/${snapshot.id}/validate-metadata`, {
         method: "POST", body: JSON.stringify({ provider: "open_library", force: false, limit: 20 }),
       });
       setMessage(`元数据交叉校验完成：检查 ${result.data.checked} 条；${Object.entries(result.data.summary).map(([key, value]) => `${key} ${value}`).join("，")}`);
-      const detail = await api<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
+      const detail = await apiRaw<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
       setSnapshotDetails(current => ({ ...current, [snapshot.id]: detail.data }));
       setOpenSnapshotId(snapshot.id); await load();
     } catch (error) { setMessage(`元数据校验失败：${errorText(error)}`); }
@@ -258,12 +258,12 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function confirmCapture(snapshot: Snapshot) {
     setBusy(`confirm:${snapshot.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<{ capture_status: string; status: string }>>(`/api/v1/ranking/snapshots/${snapshot.id}/confirm-capture`, {
+      const result = await apiRaw<Wrapped<{ capture_status: string; status: string }>>(`/api/v1/ranking/snapshots/${snapshot.id}/confirm-capture`, {
         method: "POST", body: "{}",
       });
       setMessage(`采集证据已确认：${result.data.capture_status}`);
       await load();
-      const detail = await api<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
+      const detail = await apiRaw<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
       setSnapshotDetails(current => ({ ...current, [snapshot.id]: detail.data }));
       setOpenSnapshotId(snapshot.id);
     } catch (error) { setMessage(`确认失败：${errorText(error)}`); }
@@ -276,7 +276,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     if (snapshot.status !== "succeeded" || snapshotDetails[snapshot.id]) return;
     setBusy(`detail:${snapshot.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
+      const result = await apiRaw<Wrapped<SnapshotDetail>>(`/api/v1/ranking/snapshots/${snapshot.id}`);
       setSnapshotDetails(current => ({ ...current, [snapshot.id]: result.data }));
     } catch (error) { setMessage(`快照详情加载失败：${errorText(error)}`); }
     finally { setBusy(""); }
@@ -285,7 +285,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   async function createBook(topic: Topic) {
     setBusy(`book:${topic.id}`); setMessage("");
     try {
-      const result = await api<Wrapped<{ novel_id: string; run_id?: string; status: string; warning?: string }>>(`/api/v1/ranking/topics/${topic.id}/generate-book`, {
+      const result = await apiRaw<Wrapped<{ novel_id: string; run_id?: string; status: string; warning?: string }>>(`/api/v1/ranking/topics/${topic.id}/generate-book`, {
         method: "POST", body: JSON.stringify({ auto_start: true, target_words: 800000, style: "克制、有画面感、适合网文平台阅读" }),
       });
       await onBookCreated(result.data.novel_id, result.data.run_id);
@@ -328,7 +328,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
   async function loadBookmarked() {
     try {
-      const result = await api<Wrapped<Topic[]>>(`/api/v1/ranking/topics/bookmarked?project_id=${projectId}`);
+      const result = await apiRaw<Wrapped<Topic[]>>(`/api/v1/ranking/topics/bookmarked?project_id=${projectId}`);
       setBookmarkedTopics(Array.isArray(result.data) ? result.data : (result.data as any)?.topics || []);
     } catch { /* ignore */ }
   }

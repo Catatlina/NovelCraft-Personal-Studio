@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Send, Globe, BarChart3, Users, UserPlus, AlertTriangle } from "lucide-react";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 import { Pagination, Accordion } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
@@ -28,18 +28,18 @@ export function PublishDashboard() {
   const logsPager = usePagination({ items: logs, pageSize: 10, mode: "client" });
 
   useEffect(() => {
-    api("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
+    apiRaw("/api/v1/publish/records").then(d=>setRecords(d.data||[]));
   }, [result]);
 
   useEffect(() => {
-    if (tab === "roi") api("/api/v1/analytics/dashboard").then(d=>setDashboard(d.data||null)).catch(()=>setDashboard(null));
+    if (tab === "roi") apiRaw("/api/v1/analytics/dashboard").then(d=>setDashboard(d.data||null)).catch(()=>setDashboard(null));
   }, [tab]);
 
   async function loadFeedback() {
     setFeedbackBusy(true); setFeedbackError("");
     try {
-      const projects = await api("/api/v1/projects");
-      const r = await api("/api/v1/analytics/feedback", { method: "POST",
+      const projects = await apiRaw("/api/v1/projects");
+      const r = await apiRaw("/api/v1/analytics/feedback", { method: "POST",
         body: JSON.stringify({ project_id: projects.data?.[0]?.id }) });
       setFeedback(r.data || null);
     } catch (caught) {
@@ -55,7 +55,7 @@ export function PublishDashboard() {
       return;
     }
     const settled = await Promise.allSettled(selected.map(platform =>
-      api(`/api/v1/publish?content_id=${contentId}&platform=${encodeURIComponent(platform)}`, {method:"POST"})
+      apiRaw(`/api/v1/publish?content_id=${contentId}&platform=${encodeURIComponent(platform)}`, {method:"POST"})
     ));
     setResult({ items: settled.map((item, index) => item.status === "fulfilled"
       ? { platform: selected[index], status: "queued", response: item.value }
@@ -64,13 +64,13 @@ export function PublishDashboard() {
 
   async function doTranslate() {
     if (!contentId) return;
-    const r = await api(`/api/v1/overseas/translate?content_id=${contentId}&target_lang=en`, {method:"POST"});
+    const r = await apiRaw(`/api/v1/overseas/translate?content_id=${contentId}&target_lang=en`, {method:"POST"});
     setTranslateResult(r);
   }
 
   async function checkSensitive(id: string): Promise<{ passed: boolean; blocked_words: string[] } | null> {
     try {
-      const r = await api<{ data: { passed: boolean; blocked_words: string[] } }>(`/api/v1/contents/${id}/check-sensitive`, { method: "POST" });
+      const r = await apiRaw<{ data: { passed: boolean; blocked_words: string[] } }>(`/api/v1/contents/${id}/check-sensitive`, { method: "POST" });
       setSensitiveResult(r.data);
       return r.data;
     } catch {
@@ -80,22 +80,22 @@ export function PublishDashboard() {
   }
 
   async function loadMembers() {
-    const r = await api("/api/v1/projects");
+    const r = await apiRaw("/api/v1/projects");
     const pid = r.data?.[0]?.id;
     if (pid) {
-      const m = await api(`/api/v1/collaboration/members?project_id=${pid}`);
+      const m = await apiRaw(`/api/v1/collaboration/members?project_id=${pid}`);
       setMembers(m.data||[]);
-      const l = await api(`/api/v1/collaboration/logs?project_id=${pid}`);
+      const l = await apiRaw(`/api/v1/collaboration/logs?project_id=${pid}`);
       setLogs(l.data||[]);
     }
   }
 
   async function inviteMember() {
     if (!inviteEmail) return;
-    const r = await api("/api/v1/projects");
+    const r = await apiRaw("/api/v1/projects");
     const pid = r.data?.[0]?.id;
     if (pid) {
-      await api(`/api/v1/collaboration/invite?project_id=${pid}&email=${inviteEmail}&role=${inviteRole}`, {method:"POST"});
+      await apiRaw(`/api/v1/collaboration/invite?project_id=${pid}&email=${inviteEmail}&role=${inviteRole}`, {method:"POST"});
       setInviteEmail(""); loadMembers();
     }
   }

@@ -49,6 +49,8 @@ jobs:
         run: python scripts/verify_ai_truthfulness.py
       - name: Verify delivery claims
         run: python scripts/verify_delivery_claims.py
+      - name: Verify frontend/API contract
+        run: python scripts/verify_frontend_api_contract.py
       - name: Validate prompt golden-case definitions
         run:           PYTHONPATH=backend python -c "from app.services.fusion_deep import run_golden_case_ci; r=run_golden_case_ci(); print(r); assert r['definition_invalid'] == 0 and r['provider_outputs_verified'] == 0"
 

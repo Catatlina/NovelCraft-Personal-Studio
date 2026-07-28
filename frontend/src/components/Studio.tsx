@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { BookOpen, Database, TrendingUp, Play, Loader2, CopyCheck } from "lucide-react";
-import { api } from "../lib/api";
+import { apiRaw } from "../lib/api";
 
 export function Studio() {
   const [tab, setTab] = useState<"short"|"knowledge"|"hotspot"|"imitation">("short");
@@ -27,8 +27,8 @@ export function Studio() {
   async function createShortStory() {
     setBusy(true); setMsg("");
     try {
-      const pid = (await api("/api/v1/projects")).data[0].id;
-      const r = await api(`/api/v1/projects/${pid}/short-stories`, {
+      const pid = (await apiRaw("/api/v1/projects")).data[0].id;
+      const r = await apiRaw(`/api/v1/projects/${pid}/short-stories`, {
         method:"POST", body: JSON.stringify({ idea, template, genre: "都市", style: "现代" }),
       });
       setResult(r);
@@ -41,18 +41,18 @@ export function Studio() {
   }
 
   async function searchKnowledge() {
-    const r = await api("/api/v1/projects");
+    const r = await apiRaw("/api/v1/projects");
     const pid = r.data[0].id;
     const params = new URLSearchParams({project_id: pid, query: kQuery});
     if (kKind) params.append("kind", kKind);
-    const res = await api(`/api/v1/knowledge/search?${params}`, {method:"POST"});
+    const res = await apiRaw(`/api/v1/knowledge/search?${params}`, {method:"POST"});
     setKResults(res.data || []);
   }
 
   async function fetchHotspots() {
-    const r = await api("/api/v1/projects");
+    const r = await apiRaw("/api/v1/projects");
     const pid = r.data[0].id;
-    const res = await api(`/api/v1/knowledge/daily-briefing?project_id=${pid}`, {method:"POST"});
+    const res = await apiRaw(`/api/v1/knowledge/daily-briefing?project_id=${pid}`, {method:"POST"});
     const data = res.data || {};
     setHotspots(data.topics || []);
     setBriefing(data);
@@ -61,9 +61,9 @@ export function Studio() {
   async function runImitation() {
     setBusy(true); setMsg("");
     try {
-      const r = await api("/api/v1/projects");
+      const r = await apiRaw("/api/v1/projects");
       const pid = r.data[0].id;
-      const res = await api("/api/v1/imitation", {
+      const res = await apiRaw("/api/v1/imitation", {
         method: "POST",
         body: JSON.stringify({ project_id: pid, source_text: sourceText, source_url: sourceUrl, instruction: imitateInstruction }),
       });

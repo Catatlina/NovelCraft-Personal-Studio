@@ -86,9 +86,9 @@ def test_owner_and_editor_import_real_chapter_contents(monkeypatch, role):
     db = _ImportDb(role=role)
     response = _call(monkeypatch, db, "第1章 初见\n第2章 迷雾")
 
-    assert response["data"]["imported"] == 2
-    assert response["data"]["skipped"] == 0
-    assert len(response["data"]["ids"]) == 2
+    assert response.data["imported"] == 2
+    assert response.data["skipped"] == 0
+    assert len(response.data["ids"]) == 2
     assert len(db.inserted) == 2
     assert [row["meta"]["seq"] for row in db.inserted] == [1, 2]
     assert db.committed and db.closed
@@ -117,10 +117,10 @@ def test_repeating_identical_import_is_idempotent(monkeypatch):
     first = _call(monkeypatch, db, text)
     second = _call(monkeypatch, db, text)
 
-    assert first["data"]["imported"] == 2
-    assert second["data"]["imported"] == 0
-    assert second["data"]["skipped"] == 2
-    assert second["data"]["ids"] == []
+    assert first.data["imported"] == 2
+    assert second.data["imported"] == 0
+    assert second.data["skipped"] == 2
+    assert second.data["ids"] == []
     assert len(db.inserted) == 2
 
 
@@ -132,7 +132,7 @@ def test_import_appends_after_existing_chapters_with_contiguous_order(monkeypatc
     db = _ImportDb(existing=existing)
     response = _call(monkeypatch, db, "第8章 新篇\n第20章 再会")
 
-    assert response["data"]["imported"] == 2
+    assert response.data["imported"] == 2
     assert [row["meta"]["seq"] for row in db.inserted] == [4, 5]
 
 
@@ -140,9 +140,9 @@ def test_empty_and_duplicate_titles_are_skipped_deterministically(monkeypatch):
     db = _ImportDb()
     response = _call(monkeypatch, db, "第1章   \n第2章 同名\n第3章 同名")
 
-    assert response["data"]["imported"] == 1
-    assert response["data"]["skipped"] == 2
-    assert len(response["data"]["ids"]) == 1
+    assert response.data["imported"] == 1
+    assert response.data["skipped"] == 2
+    assert len(response.data["ids"]) == 1
     assert len(db.inserted) == 1
 
 
@@ -159,7 +159,7 @@ def test_insert_failure_rolls_back_entire_import(monkeypatch):
 
 def test_response_always_contains_imported_skipped_and_ids(monkeypatch):
     db = _ImportDb()
-    data = _call(monkeypatch, db, "无有效章节行")["data"]
+    data = _call(monkeypatch, db, "无有效章节行").data
     assert set(data) >= {"imported", "skipped", "ids"}
     assert data["imported"] == 0
     assert data["ids"] == []

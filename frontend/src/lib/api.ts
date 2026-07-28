@@ -18,6 +18,12 @@ export class ApiError extends Error {
   }
 }
 
+export type ApiEnvelope<T> = {
+  code: number | string;
+  message?: string;
+  data: T;
+};
+
 export function getApiKey(): string { return sessionStorage.getItem(K_API_KEY) || ""; }
 export function setApiKey(key: string) { sessionStorage.setItem(K_API_KEY, key); }
 export function getApiUrl(): string { return sessionStorage.getItem(K_API_URL) || ""; }
@@ -56,8 +62,8 @@ async function tryRefreshToken(): Promise<boolean> {
   return refreshInFlight;
 }
 
-/** Unified fetch — injects X-Api-Key, X-Api-Url, X-Model, Authorization headers + resolves API base */
-export async function api<T = any>(url: string, init?: RequestInit): Promise<T> {
+/** Low-level request for callers that explicitly need response metadata. */
+export async function apiEnvelope<T = unknown>(url: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const headers: Record<string, string> = { ...(!isFormData ? { "Content-Type": "application/json" } : {}), ...(init?.headers as Record<string, string> || {}) };
   const key = getApiKey(); const apiUrl = getApiUrl(); const model = getModel();
@@ -77,9 +83,22 @@ export async function api<T = any>(url: string, init?: RequestInit): Promise<T> 
     headers["Authorization"] = `Bearer ${sessionStorage.getItem("nc_token") || ""}`;
     r = await fetch(fullUrl, { ...init, headers, credentials: "include" });
   }
-  const payload = await r.json();
+  const payload = await r.json() as ApiEnvelope<T>;
   if (!r.ok) throw new ApiError(r.status, payload);
   return payload;
+}
+
+/** Transitional escape hatch for code that intentionally consumes the full envelope. */
+export async function apiRaw<T = any>(url: string, init?: RequestInit): Promise<T> {
+  return apiEnvelope<unknown>(url, init) as Promise<T>;
+}
+
+/** Canonical application request: successful calls resolve to business data only. */
+type BusinessData<T> = T extends { data: unknown } ? never : T;
+
+export async function api<T = unknown>(url: string, init?: RequestInit): Promise<BusinessData<T>> {
+  const envelope = await apiEnvelope<T>(url, init);
+  return envelope.data as BusinessData<T>;
 }
 
 /** SSE streaming request — same auth headers as api(); onDelta fires per text

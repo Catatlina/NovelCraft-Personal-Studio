@@ -25,18 +25,35 @@ type Props = {
   onToggleNightMode?: () => void;
 };
 
+function toEditorHtml(value: string): string {
+  if (!value) return "";
+  if (value.trimStart().startsWith("<")) return value;
+  return value
+    .split(/\n{2,}/)
+    .map(paragraph => `<p>${paragraph
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")}</p>`)
+    .join("");
+}
+
 export function RichEditor({ value, onChange, onSelection, selection, onAiOp, aiReview, deaiResult, deaiLoading, deai, autoSavedAt, dirty, hideAiPanel, isFocusMode, isFullscreen, isNightMode, onToggleFocusMode, onToggleFullscreen, onToggleNightMode }: Props) {
   const [showAiBar, setShowAiBar] = useState(false);
   const [barPos, setBarPos] = useState({ x: 0, y: 0 });
+  const lastEmittedValue = useRef(value);
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       Placeholder.configure({ placeholder: "开始创作..." }),
     ],
-    content: value ? (value.startsWith("{") ? value : `<p>${value}</p>`) : "",
+    content: toEditorHtml(value),
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML());
+      // App.tsx persists a TipTap-like text document. Feeding getHTML() into
+      // that text field produced nested paragraph markup after reload.
+      const text = editor.getText({ blockSeparator: "\n\n" });
+      lastEmittedValue.current = text;
+      onChange(text);
     },
     onSelectionUpdate: ({ editor }) => {
       const { from, to, empty } = editor.state.selection;
@@ -56,8 +73,13 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
   });
 
   useEffect(() => {
-    if (editor && value !== editor.getHTML()) {
-      editor.commands.setContent(value.startsWith("{") ? value : `<p>${value}</p>`);
+    // React StrictMode may reconnect passive effects after Tiptap has already
+    // destroyed this editor instance. Calling getHTML() in that window reaches
+    // a disposed ProseMirror schema and crashes the entire editor route.
+    if (value === lastEmittedValue.current) return;
+    if (editor && !editor.isDestroyed && value !== editor.getText({ blockSeparator: "\n\n" })) {
+      editor.commands.setContent(toEditorHtml(value));
+      lastEmittedValue.current = value;
     }
   }, [value, editor]);
 

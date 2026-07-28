@@ -674,7 +674,7 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
                latest.title AS latest_chapter_title,
                latest.seq AS latest_chapter_seq,
                COALESCE(stats.chapter_count, 0) AS chapter_count,
-               COALESCE(stats.total_words, 0) AS total_words
+               COALESCE(stats.total_words, 0)::bigint AS total_words
         FROM contents n
         LEFT JOIN LATERAL (
             SELECT c.id,c.title,COALESCE((c.meta->>'seq')::int,0) AS seq

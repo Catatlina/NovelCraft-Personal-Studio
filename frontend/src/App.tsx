@@ -20,7 +20,7 @@ import { VersionTree } from "./components/VersionTree";
 import { ForeshadowingBoard } from "./components/ForeshadowingBoard";
 import { CollaborationPanel } from "./components/Collaboration";
 import { AgentConsole } from "./components/AgentConsole";
-import { ApiError, api as baseApi, apiStream } from "./lib/api";
+import { ApiError, api as baseApi, apiRaw, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
 import { Overview } from "./components/Overview";
@@ -47,10 +47,9 @@ type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wiz
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
 
-// Thin wrapper over lib/api.ts — adds key + auth, unwraps {data} from API response
+// Thin typed alias over the canonical data-unwrapping client.
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const fullResp = await baseApi<ApiResponse<T>>(path, init);
-  return fullResp.data;
+  return baseApi<T>(path, init);
 }
 
 function docToText(doc: TipTapDoc): string {
@@ -159,30 +158,46 @@ export default function App() {
 
   useEffect(() => {
     if (!novel || !project) return;
+    let active = true;
     const contentsKey = `contents:${novel.id}`;
     const knowledgeKey = `knowledge:${novel.id}`;
-    cacheGet<Content[]>(contentsKey).then(items => {
-      setChapters((items || []).filter(item => item.type === "chapter"));
-      const cachedChapter = items?.find(item => item.type === "chapter") ?? null;
+    // Preserve deterministic precedence: cached data can paint first, but a
+    // later server response must always win. Parallel promises previously let
+    // stale IndexedDB rows overwrite freshly saved chapter text after reload.
+    void (async () => {
+      const cachedItems = await cacheGet<Content[]>(contentsKey);
+      if (!active) return;
+      const cachedChapters = (cachedItems || []).filter(item => item.type === "chapter");
+      setChapters(cachedChapters);
+      const cachedChapter = cachedChapters[0] ?? null;
       if (cachedChapter) {
-        setChapter(cachedChapter); setEditorText(docToText(cachedChapter.body)); void loadVersions(cachedChapter.id);
-        cacheGet<Content>(`offline-content:${cachedChapter.id}`).then(offline => {
-          if (offline) { setChapter(offline); setEditorText(docToText(offline.body)); }
-        });
+        setChapter(cachedChapter);
+        setEditorText(docToText(cachedChapter.body));
+        void loadVersions(cachedChapter.id);
+        const offline = await cacheGet<Content>(`offline-content:${cachedChapter.id}`);
+        if (!active) return;
+        if (offline) { setChapter(offline); setEditorText(docToText(offline.body)); }
       }
-    });
+
+      try {
+        const items = await api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`);
+        if (!active) return;
+        void cacheSet(contentsKey, items);
+        const chapterItems = items.filter(i => i.type === "chapter").sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+        setChapters(chapterItems);
+        const current = chapterItems.find(item => item.id === chapter?.id) ?? chapterItems[0] ?? null;
+        setChapter(current);
+        setEditorText(current ? docToText(current.body) : "");
+        if (current) void loadVersions(current.id);
+      } catch {
+        // Cached chapters remain usable while offline.
+      }
+    })();
     cacheGet<Knowledge[]>(knowledgeKey).then(cached => { if (cached) setKnowledge(cached); });
-    api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`).then(items => {
-      void cacheSet(contentsKey, items);
-      const chapterItems = items.filter(i => i.type === "chapter").sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
-      setChapters(chapterItems);
-      const ch = chapterItems.find(item => item.id === chapter?.id) ?? chapterItems[0] ?? null;
-      setChapter(ch);
-      if (ch) { setEditorText(docToText(ch.body)); loadVersions(ch.id); }
-    }).catch(() => undefined);
     api<Knowledge[]>(`/api/v1/knowledge?project_id=${project.id}&content_id=${novel.id}`).then(items => {
       setKnowledge(items); void cacheSet(knowledgeKey, items);
     }).catch(() => undefined);
+    return () => { active = false; };
   }, [novel?.id, run?.status]);
 
   function selectChapter(chapterId: string) {
@@ -353,7 +368,7 @@ export default function App() {
       setOfflineQueueCount((await listMutations()).length);
       for (const mutation of mutations) {
         try {
-          const response = await baseApi<ApiResponse<any>>(mutation.url, {
+          const response = await apiRaw<ApiResponse<any>>(mutation.url, {
             method: mutation.method,
             body: JSON.stringify(mutation.body),
           });

@@ -219,6 +219,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         {/* CENTER: Novel prose editor */}
         <div className="ed-main" style={{ padding: 0, display: "flex", flexDirection: "column" }}>
           <RichEditor
+            key={`${chapter?.id ?? "empty"}:${(chapter as any)?.updated_at ?? ""}`}
             value={editorText}
             onChange={setEditorText}
             onSelection={setSelection}
@@ -355,6 +356,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           display: "flex", flexDirection: "column"
         }}>
           <RichEditor
+            key={`${chapter?.id ?? "empty"}:${(chapter as any)?.updated_at ?? ""}:fullscreen`}
             value={editorText}
             onChange={setEditorText}
             onSelection={setSelection}

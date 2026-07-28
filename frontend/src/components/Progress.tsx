@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ApiError, api } from "../lib/api";
+import { ApiError, api, apiRaw } from "../lib/api";
 import { StepTimeline } from "./ui";
 import type { TimelineStep, StepStatus } from "./ui";
 
@@ -227,7 +227,7 @@ export function Progress({
     setRetrying(node.node_key);
     setRetryMessage("");
     try {
-      await api<Wrapped<{ run_id: string; node_key: string }>>(
+      await apiRaw<Wrapped<{ run_id: string; node_key: string }>>(
         `/api/v1/runs/${run.id}/nodes/${node.node_key}/retry`,
         { method: "POST", body: "{}" },
       );

@@ -3,7 +3,7 @@ import {
   TrendingUp, Zap, Target, Plus, BookOpen, Trash2, Edit3,
   RefreshCw, Eye, X, Star, FileText,
 } from "lucide-react";
-import { api } from "../lib/api";
+import { apiRaw } from "../lib/api";
 import { Pagination, Accordion, ConfirmDialog, Spinner, EmptyState } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
@@ -103,7 +103,7 @@ export function HotspotDashboard() {
     setError("");
     try {
       const platformsParam = selectedPlatforms.length ? selectedPlatforms.join(",") : "";
-      const result = await api(`/api/v1/hotspots/paginated?platforms=${platformsParam}&page=${hotspotPager.page}&page_size=${hotspotPager.pageSize}`);
+      const result = await apiRaw(`/api/v1/hotspots/paginated?platforms=${platformsParam}&page=${hotspotPager.page}&page_size=${hotspotPager.pageSize}`);
       const data = result.data || {};
       setHotspots(data.items || []);
       setHotspotTotal(data.total || 0);
@@ -122,9 +122,9 @@ export function HotspotDashboard() {
   const loadOverview = async () => {
     setOverviewLoading(true);
     try {
-      const projects = await api("/api/v1/projects");
+      const projects = await apiRaw("/api/v1/projects");
       const projectId = projects.data?.[0]?.id || "";
-      const result = await api(`/api/v1/hotspots/overview?project_id=${projectId}`);
+      const result = await apiRaw(`/api/v1/hotspots/overview?project_id=${projectId}`);
       setOverview(result.data || null);
     } catch (caught) {
       setError(`总览加载失败：${String(caught)}`);
@@ -143,7 +143,7 @@ export function HotspotDashboard() {
   const loadArticles = async () => {
     setArticleLoading(true);
     try {
-      const result = await api(`/api/v1/articles?page=${articlePager.page}&page_size=${articlePager.pageSize}`);
+      const result = await apiRaw(`/api/v1/articles?page=${articlePager.page}&page_size=${articlePager.pageSize}`);
       const data = result.data || {};
       setArticles(data.articles || []);
       setArticleTotal(data.total || 0);
@@ -167,10 +167,10 @@ export function HotspotDashboard() {
     setNotice("");
     setError("");
     try {
-      const projects = await api("/api/v1/projects");
+      const projects = await apiRaw("/api/v1/projects");
       const projectId = projects.data?.[0]?.id;
       if (!projectId) { setError("请先创建项目"); return; }
-      const result = await api("/api/v1/hotspots/generate", {
+      const result = await apiRaw("/api/v1/hotspots/generate", {
         method: "POST",
         body: JSON.stringify({
           project_id: projectId,
@@ -201,7 +201,7 @@ export function HotspotDashboard() {
   // ── Article view / edit / delete ─────────────────────────────
   const viewArticle = async (id: string) => {
     try {
-      const result = await api(`/api/v1/articles/${id}`);
+      const result = await apiRaw(`/api/v1/articles/${id}`);
       setArticleDetail(result.data || null);
     } catch (caught) {
       setError(`文章详情加载失败：${String(caught)}`);
@@ -210,7 +210,7 @@ export function HotspotDashboard() {
 
   const deleteArticle = async (id: string, title: string) => {
     try {
-      await api(`/api/v1/articles/${id}`, { method: "DELETE" });
+      await apiRaw(`/api/v1/articles/${id}`, { method: "DELETE" });
       setNotice(`✅ 已删除《${title}》`);
       void loadArticles();
     } catch (caught) {
@@ -225,7 +225,7 @@ export function HotspotDashboard() {
   const saveEdit = async () => {
     if (!editArticle) return;
     try {
-      await api(`/api/v1/articles/${editArticle.id}`, {
+      await apiRaw(`/api/v1/articles/${editArticle.id}`, {
         method: "PUT",
         body: JSON.stringify({ title: editArticle.title, body: editArticle.body }),
       });

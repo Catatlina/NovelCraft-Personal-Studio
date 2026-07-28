@@ -64,12 +64,12 @@ export function DagEditor({ projectId = "", novelId = "" }: { projectId?: string
     initRef.current = true;
     let cancelled = false;
     setLoadingWf(true);
-    api<{ code: number | string; message: string; data: SavedWorkflow[] }>(
+    api<SavedWorkflow[]>(
       `/api/v1/admin/workflows?project_id=${encodeURIComponent(projectId)}`,
     )
       .then((resp) => {
         if (cancelled) return;
-        const list = resp?.data;
+        const list = resp;
         if (!Array.isArray(list) || list.length === 0) return;
         const wf = list.find((w) => w.name === "custom-dag") ?? list[0];
         const loaded = extractWorkflowNodes(wf);
@@ -109,11 +109,11 @@ export function DagEditor({ projectId = "", novelId = "" }: { projectId?: string
     if (!projectId) { setSaveMsg("❌ 缺少项目，无法执行"); setTimeout(() => setSaveMsg(""), 2500); return; }
     if (!novelId) { setSaveMsg("⚠️ 请先在编辑器中打开一部小说再执行"); setTimeout(() => setSaveMsg(""), 2500); return; }
     try {
-      const resp = await api<{ code: number | string; message: string; data: { run_id?: string; status?: string } }>(
+      const resp = await api<{ run_id?: string; status?: string }>(
         "/api/v1/admin/workflows/custom-dag/execute",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId, novel_id: novelId }) },
       );
-      const runId = resp?.data?.run_id;
+      const runId = resp?.run_id;
       setSaveMsg(runId ? `✅ 已提交执行（run_id: ${runId}）` : "✅ 已提交执行");
     } catch (e: any) {
       const detail = e?.payload?.detail || e?.payload?.message || e?.message || "执行未成功";

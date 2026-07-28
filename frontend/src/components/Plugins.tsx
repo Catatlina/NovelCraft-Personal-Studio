@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Puzzle, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Download, Power, Ban } from "lucide-react";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
@@ -86,7 +86,7 @@ export function Plugins() {
   const load = useCallback(() => {
     setLoading(true);
     setError("");
-    api<ApiEnvelope<SkillsData>>("/api/v1/skills/community")
+    apiRaw<ApiEnvelope<SkillsData>>("/api/v1/skills/community")
       .then((resp) => {
         setData(resp?.data ?? null);
       })

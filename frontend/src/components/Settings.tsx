@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap } from "lucide-react";
-import { api } from "../lib/api";
+import { apiRaw } from "../lib/api";
 
 type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
 type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string,unknown>; fallback_json: any[] };
@@ -46,24 +46,24 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   }, []);
 
   useEffect(() => {
-    api("/api/v1/admin/providers").then(d=>setProviders(d.data||[]));
-    api("/api/v1/admin/model-routes").then(d=>setRoutes(d.data||[]));
-    api("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
-    api("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
-    api("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
+    apiRaw("/api/v1/admin/providers").then(d=>setProviders(d.data||[]));
+    apiRaw("/api/v1/admin/model-routes").then(d=>setRoutes(d.data||[]));
+    apiRaw("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
+    apiRaw("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
+    apiRaw("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
     loadConnections();
-    api("/api/v1/stats/overview").then(d=>setStats(d.data||null)).catch(()=>setStats(null));
+    apiRaw("/api/v1/stats/overview").then(d=>setStats(d.data||null)).catch(()=>setStats(null));
   }, []);
 
   async function loadConnections() {
-    const specs = await api("/api/v1/platform-connections/specs");
+    const specs = await apiRaw("/api/v1/platform-connections/specs");
     const specData = specs.data || {};
     setConnectionSpecs(specData);
     if (!connectionPlatform) {
       const first = Object.entries(specData).find(([, spec]: any) => spec.category === connectionCategory)?.[0] || Object.keys(specData)[0] || "";
       setConnectionPlatform(first);
     }
-    const rows = await api("/api/v1/platform-connections");
+    const rows = await apiRaw("/api/v1/platform-connections");
     setConnections(rows.data || []);
   }
 
@@ -73,7 +73,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
   async function saveConnection() {
     if (!connectionPlatform) return;
-    await api("/api/v1/platform-connections", {
+    await apiRaw("/api/v1/platform-connections", {
       method: "POST",
       body: JSON.stringify({ platform: connectionPlatform, account_name: connectionAccount || "default", credentials: connectionCreds }),
     });
@@ -83,33 +83,33 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   }
 
   async function deleteConnection(id: string) {
-    await api(`/api/v1/platform-connections/${id}`, { method: "DELETE" });
+    await apiRaw(`/api/v1/platform-connections/${id}`, { method: "DELETE" });
     setMsg("平台连接已删除");
     await loadConnections();
   }
 
   async function testConnection(platform: string) {
-    const result = await api(`/api/v1/platform-connections/${platform}/test`, { method: "POST" });
+    const result = await apiRaw(`/api/v1/platform-connections/${platform}/test`, { method: "POST" });
     setMsg(`检测结果：${result.data?.status || "unknown"}`);
   }
 
   async function saveRoute() {
     if (!editRoute) return;
-    await api(`/api/v1/admin/model-routes/${editRoute.task_type}`, {
+    await apiRaw(`/api/v1/admin/model-routes/${editRoute.task_type}`, {
       method: "PUT", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({provider:editRoute.provider, model:editRoute.model, params:editRoute.params, fallbacks:editRoute.fallback_json||[]}),
     });
     setMsg("路由已保存"); setEditRoute(null);
-    const r = await api("/api/v1/admin/model-routes");
+    const r = await apiRaw("/api/v1/admin/model-routes");
     setRoutes(r.data||[]);
   }
 
   async function saveBudget() {
     if (!editBudget) return;
-    await api(`/api/v1/admin/budgets/${editBudget.pid}/${encodeURIComponent(editBudget.scope)}`, {
+    await apiRaw(`/api/v1/admin/budgets/${editBudget.pid}/${encodeURIComponent(editBudget.scope)}`, {
       method: "PUT", body: JSON.stringify({ limit_cny: editBudget.limit }),
     });
-    const refreshed = await api("/api/v1/admin/budgets");
+    const refreshed = await apiRaw("/api/v1/admin/budgets");
     setBudgets(refreshed.data || []);
     setEditBudget(null);
   }
@@ -123,12 +123,12 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
 
   async function saveSetting() {
     if (!editSetting) return;
-    await api(`/api/v1/admin/settings/${editSetting.key}`, {
+    await apiRaw(`/api/v1/admin/settings/${editSetting.key}`, {
       method:"PUT", body: JSON.stringify({value: editSetting.value}),
     });
     setMsg(`${editSetting.key} 已保存`);
     setEditSetting(null);
-    const r = await api("/api/v1/admin/settings");
+    const r = await apiRaw("/api/v1/admin/settings");
     setAppSettings(r.data||[]);
   }
 
@@ -311,7 +311,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               <input type="file" accept=".txt,.md,.json,.jsonl,.pdf,.docx" disabled={!projectId} onChange={async e=>{
                 const f=e.target.files?.[0]; if(!f)return;
                 const form = new FormData(); form.append("file", f);
-                await api(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
+                await apiRaw(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
                 alert("导入成功");
               }} />
               {!projectId && <small className="muted">请先选择项目再导入。</small>}
@@ -320,7 +320,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               <h3>导出知识库</h3>
               <button onClick={async()=>{
                 if (!projectId) { alert("请先选择项目"); return; }
-                const r=await api(`/api/v1/knowledge?project_id=${projectId}`);
+                const r=await apiRaw(`/api/v1/knowledge?project_id=${projectId}`);
                 const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
                 const a=document.createElement("a");a.href=URL.createObjectURL(blob);
                 a.download="novelcraft_knowledge.json";a.click();
@@ -345,7 +345,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
             <button disabled={!pwOld || pwNew.length < 8} onClick={async()=>{
               setPwMsg("");
               try {
-                await api("/api/v1/auth/change-password",{method:"POST",body:JSON.stringify({old_password:pwOld,new_password:pwNew})});
+                await apiRaw("/api/v1/auth/change-password",{method:"POST",body:JSON.stringify({old_password:pwOld,new_password:pwNew})});
                 setPwOld(""); setPwNew(""); setPwMsg("密码已修改，其他设备的登录已失效。");
               } catch (err:any) {
                 const detail = err?.payload?.detail;

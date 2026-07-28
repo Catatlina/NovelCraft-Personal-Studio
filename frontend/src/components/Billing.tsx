@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw, AlertTriangle, Crown, Check } from "lucide-react";
-import { ApiError, api } from "../lib/api";
+import { ApiError, api, apiRaw } from "../lib/api";
 
 // Backend envelope shape: { code, message, data } — lib/api returns the full
 // envelope, so callers unwrap `.data` manually.
@@ -120,8 +120,8 @@ export function Billing() {
     setLoading(true);
     setError("");
     Promise.allSettled([
-      api<ApiEnvelope<Subscription>>("/api/v1/billing/subscription"),
-      api<ApiEnvelope<Plan[]>>("/api/v1/billing/plans"),
+      apiRaw<ApiEnvelope<Subscription>>("/api/v1/billing/subscription"),
+      apiRaw<ApiEnvelope<Plan[]>>("/api/v1/billing/plans"),
     ])
       .then(([subRes, plansRes]) => {
         if (subRes.status === "fulfilled") setSubscription(subRes.value?.data ?? null);
@@ -142,7 +142,7 @@ export function Billing() {
     setUpgrading(planId);
     setError("");
     try {
-      await api<ApiEnvelope<unknown>>("/api/v1/billing/subscription/upgrade", {
+      await apiRaw<ApiEnvelope<unknown>>("/api/v1/billing/subscription/upgrade", {
         method: "POST",
         body: JSON.stringify({ plan_id: planId }),
       });

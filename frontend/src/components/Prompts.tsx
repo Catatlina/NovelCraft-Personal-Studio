@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { FlaskConical, Loader2, RefreshCw, AlertTriangle, Play, FileText } from "lucide-react";
-import { api } from "../lib/api";
+import { api, apiRaw } from "../lib/api";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 
@@ -114,7 +114,7 @@ export function Prompts({ prompts, projectId }: { prompts: any[]; projectId: str
   const load = useCallback(() => {
     setLoading(true);
     setError("");
-    api<ApiEnvelope<PromptRow[]> | PromptRow[]>("/api/v1/admin/prompts")
+    apiRaw<ApiEnvelope<PromptRow[]> | PromptRow[]>("/api/v1/admin/prompts")
       .then((resp) => {
         setList(asPromptList(resp));
       })

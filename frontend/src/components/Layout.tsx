@@ -59,13 +59,14 @@ function NavSection({ section, tab, setTab }: { section: NavSection; tab: Tab; s
       {open && (
         <div className="nav-items">
           {section.items.map(item => (
-            <div
+            <button
+              type="button"
               key={item.id}
               className={`nav-item${tab === item.id ? ' active' : ''}`}
               onClick={() => setTab(item.id)}
             >
               {item.label}
-            </div>
+            </button>
           ))}
         </div>
       )}
