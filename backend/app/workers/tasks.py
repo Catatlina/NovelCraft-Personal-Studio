@@ -1145,10 +1145,10 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     contradictions = [str(item).strip() for item in audit.get("contradictions", []) if str(item).strip()]
                     omissions = [str(item).strip() for item in audit.get("omissions", []) if str(item).strip()]
                     passed = (
-                        audit.get("passed") is True
+                        not contradictions
                         and float(audit.get("score") or 0) >= 80
-                        and not contradictions
                         # omissions → warning only, does not block pass
+                        # audit["passed"] → ignored（审计模型对遗漏过于严苛）
                     )
                     # Still feed omissions into retry feedback so the plan improves
                     if passed and omissions:

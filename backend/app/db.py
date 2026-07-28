@@ -18,14 +18,21 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
         _pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=2, maxconn=20, dsn=DB_URL,
+            minconn=4, maxconn=40, dsn=DB_URL,
         )
     return _pool
 
 
 def connect() -> DB:
-    """Get a connection from the pool."""
-    conn = _get_pool().getconn()
+    """Get a connection from the pool.
+
+    Raises RuntimeError when pool is exhausted (all connections in use) instead
+    of blocking indefinitely in production Traefik / gunicorn-worker scenarios.
+    """
+    try:
+        conn = _get_pool().getconn()
+    except psycopg2.pool.PoolError:
+        raise RuntimeError("db pool exhausted — retry later")
     conn.autocommit = False
     db = DB(conn)
     db._pool = _get_pool()
