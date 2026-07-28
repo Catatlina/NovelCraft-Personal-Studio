@@ -221,8 +221,26 @@ class _BlueprintVolumePlanOutput(_LenientOutput):
     volumes: list[dict[str, Any]] = Field(min_length=1)
 
 
+class _BlueprintChapterOutlineItem(_LenientOutput):
+    """One chapter outline. V3 Chapter Function fields (function_type /
+    chapter_goal / reader_expectation) are required — a missing field fails
+    schema validation and the generation is retried (打回重新细纲), per the
+    V3 fusion doc §5, instead of silently producing a water-filling outline."""
+
+    volume: int | None = None
+    seq: int | None = None
+    title: str = Field(default="")
+    outline: str = Field(default="")
+    beats: list[str] = Field(default_factory=list)
+    foreshadow_plant: list[str] = Field(default_factory=list)
+    foreshadow_reap: list[str] = Field(default_factory=list)
+    function_type: str = Field(min_length=1)
+    chapter_goal: str = Field(min_length=1)
+    reader_expectation: str = Field(min_length=1)
+
+
 class _BlueprintChapterOutlineOutput(_LenientOutput):
-    chapter_outlines: list[dict[str, Any]] = Field(min_length=3)
+    chapter_outlines: list[_BlueprintChapterOutlineItem] = Field(min_length=3)
 
 
 class _BlueprintSceneBeatOutput(_LenientOutput):

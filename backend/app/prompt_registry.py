@@ -670,8 +670,13 @@ $plan_output
 3. 每 2-3 章安排一个小爽点、第 9-10 章安排第一个中型高潮
 4. 严格核对年代顺序：重生前事件必须发生在用户指定的未来年份，醒来后才进入过去年份；不得把两个年代混写
 5. 每一章只承担自己的细纲内容，不得提前把后续多章剧情塞进第一章
+6. 【V3 Chapter Function 必填】每章额外明确三项功能约束，避免"有事件无作用"的水字：
+   - function_type：本章功能类型，取值之一（开篇吸引/信息展示/人物成长/关系推进/冲突升级/爽点释放/伏笔埋设/伏笔回收/转折/高潮）
+   - chapter_goal：本章必须达成的目标（如"父亲开始认可主角"）
+   - reader_expectation：读者读完本章应有的期待（如"想知道主角如何赚钱"）
+   连续多章不得全部是同一 function_type（如连续 5 章都是"信息展示"会被判定节奏问题）。
 
-输出 JSON: {"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1","节拍2","节拍3"],"foreshadow_plant":[],"foreshadow_reap":[]}]}"""),
+输出 JSON: {"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1","节拍2","节拍3"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"主角发现文字成真","reader_expectation":"想知道能力代价是什么"}]}"""),
 
     ("bootstrap.blueprint_scene_beat", "1.0.0", "deepseek",
      """你是场景节拍设计师。请为《$selected_title》第一章生成场景节拍表。
@@ -699,6 +704,7 @@ $plan_output
 世界观：$_worldview_text
 本章细纲：$_chapter_outline
 场景节拍表：$scene_beats
+【V3 Chapter Function 约束】细纲 JSON 中含 function_type / chapter_goal / reader_expectation 三项本章功能约束。生成时本章所有事件必须服务于 chapter_goal（本章目标），并在章末满足 reader_expectation（读者期待）；禁止"有事件无作用"的水字——若某段不推进 function_type 对应的功能，必须删去或改写。
 前文上下文：$_context_window
 上次长度门禁反馈：$length_retry_feedback
 
@@ -979,7 +985,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "plan_character_system":  '{"characters":[{"name":"姓名一","role":"主角","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]},{"name":"姓名二","role":"反派","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]},{"name":"姓名三","role":"挚友","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]}]}（characters 至少 3 人）',
     "plan_conflict_map":      '{"conflicts":[{"type":"external","between":["A","B"],"stakes":"赌注","escalation":"升级路径"}]}',
     "blueprint_volume_plan":  '{"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}',
-    "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[]},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[]},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[]}]}（chapter_outlines 至少 3 章）',
+    "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',
     "write_chapter_draft":    '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}}（body 至少 6 段，每段为完整叙事段落）',
     "write_self_review":      '{"overall":"总体评价","strengths":["优点1","优点2"],"weaknesses":["缺点1"],"suggestions":["建议1"],"self_score":80}',

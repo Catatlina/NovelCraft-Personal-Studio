@@ -192,6 +192,55 @@ def _assert_min_chapter_length(task_type: str, text: str) -> None:
         raise OutputValidationError(f"{task_type} chapter too short: {chars}/{MIN_CHAPTER_CHARS} chars")
 
 
+# V3 Chapter Function (§5): pacing gate reads the function_type sequence across
+# the whole outline and flags monotonous runs (water-filling risk). Deterministic
+# — not an LLM call — so it is reliable and cheap to run on every chapter.
+CHAPTER_FUNCTION_TYPES = {
+    "开篇吸引", "信息展示", "人物成长", "关系推进", "冲突升级",
+    "爽点释放", "伏笔埋设", "伏笔回收", "转折", "高潮",
+}
+# A run of this many identical consecutive function_type is a real pacing problem.
+CHAPTER_FUNCTION_MONOTONY_THRESHOLD = 5
+
+
+def _check_chapter_function_pacing(outlines: Any) -> dict[str, Any]:
+    """Return a {status, issues} check for the chapter-function rhythm.
+
+    Only considers outlines that actually carry a function_type, so books whose
+    outlines were produced before V3 (or via the expand_outline path) degrade
+    gracefully instead of being penalised.
+    """
+    seq: list[str] = []
+    if isinstance(outlines, list):
+        for o in outlines:
+            if isinstance(o, dict):
+                ft = str(o.get("function_type", "")).strip()
+                if ft:
+                    seq.append(ft)
+    if not seq:
+        return {"status": "pass", "issues": [], "sampled": 0}
+    longest_run = run = 1
+    run_type = seq[0]
+    for i in range(1, len(seq)):
+        if seq[i] == seq[i - 1]:
+            run += 1
+            if run > longest_run:
+                longest_run = run
+                run_type = seq[i]
+        else:
+            run = 1
+    if longest_run >= CHAPTER_FUNCTION_MONOTONY_THRESHOLD:
+        return {
+            "status": "fail",
+            "issues": [
+                f"连续 {longest_run} 章 function_type 重复（{run_type}），疑似节奏单调/水字"
+            ],
+            "sampled": len(seq),
+            "longest_run": longest_run,
+        }
+    return {"status": "pass", "issues": [], "sampled": len(seq), "longest_run": longest_run}
+
+
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:
     paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
     after_chars = len("\n".join(paragraphs).strip())
@@ -228,7 +277,7 @@ def _draft_length_feedback(output: dict) -> str:
     return ""
 
 
-def _quality_evidence_payload(output: dict, self_review: dict | None = None) -> dict:
+def _quality_evidence_payload(output: dict, self_review: dict | None = None, pacing: dict | None = None) -> dict:
     """Build the durable seven-dimension provenance stored on a chapter."""
     score_by_status = {"pass": 90, "warning": 65, "fail": 35}
     checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
@@ -236,6 +285,11 @@ def _quality_evidence_payload(output: dict, self_review: dict | None = None) -> 
         name: score_by_status.get(str(check.get("status", "")), 0)
         for name, check in checks.items() if isinstance(check, dict)
     }
+    # V3 Chapter Function: surface the pacing gate as a 节奏检测 dimension so the
+    # seven-dimension score includes rhythm, without ever blocking the gate
+    # (pacing is computed/stored separately from the consistency `checks`).
+    if pacing and isinstance(pacing, dict) and pacing.get("sampled"):
+        dimensions["节奏检测"] = score_by_status.get(str(pacing.get("status", "")), 0)
     self_review = self_review if isinstance(self_review, dict) else {}
     score = self_review.get("self_score")
     if score is None and dimensions:
@@ -245,7 +299,7 @@ def _quality_evidence_payload(output: dict, self_review: dict | None = None) -> 
         "score": float(score or 0),
         "dimensions": dimensions,
         "issues": issues,
-        "source": "write_self_review+final_consistency_check",
+        "source": "write_self_review+final_consistency_check+chapter_function_pacing",
     }
 
 
@@ -1313,6 +1367,10 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
         context[task_type] = output
         if task_type == "final_consistency_check":
             checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
+            # V3 Chapter Function: pacing gate over the whole outline's
+            # function_type sequence. Stored as a dimension, never blocks the
+            # consistency gate itself.
+            pacing = _check_chapter_function_pacing(context.get("chapter_outlines"))
             failed_checks = {
                 name: check for name, check in checks.items()
                 if not isinstance(check, dict)
@@ -1324,7 +1382,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 if cid:
                     db.execute(
                         "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
-                        (encode({"quality_gate": {"status": "failed", "checks": checks}}), cid),
+                        (encode({"quality_gate": {"status": "failed", "checks": checks}, "pacing_check": pacing}), cid),
                     )
                 db.commit()
                 db.close()
@@ -1337,7 +1395,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                     "UPDATE contents SET meta = meta || %s, updated_at = now() WHERE id = %s",
                     (encode({
                         "final_consistency_check": output,
-                        "review_7dim": _quality_evidence_payload(output, context.get("self_review")),
+                        "pacing_check": pacing,
+                        "review_7dim": _quality_evidence_payload(output, context.get("self_review"), pacing),
                     }), cid),
                 )
         if task_type == "final_continuity_audit":
