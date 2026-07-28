@@ -318,6 +318,201 @@ def _strategy_directive_for_chapter(run_context: dict) -> tuple[str, list[str]]:
     return compile_strategy_directive(matched), skill_hints_for_strategies(matched)
 
 
+# V3 Repair Engine (§8): three-tier repair classification. Pure, deterministic.
+# Maps a failed consistency check to the least-invasive repair that can fix it.
+_REPAIR_LEVEL_KEYWORDS = {
+    # most severe first — the classifier returns the highest level hit
+    "plot": ["剧情", "结构", "规划", "人设偏离", "偏离大纲", "崩坏", "节奏崩", "黄金三章缺失"],
+    "chapter": ["逻辑", "连续性", "事实", "一致性", "矛盾", "时间线", "OOC", "穿帮", "设定冲突"],
+    "paragraph": ["冗长", "啰嗦", "机械句式", "表达", "拖沓", "水字", "重复", "节奏单调"],
+    "sentence": ["错字", "错别字", "标点", "格式", "用词", "语病", "文字问题", "typo"],
+}
+# Repair action per level (per §8.2 / §8.4):
+#   sentence/paragraph -> local repair (in-place, no version branch)
+#   chapter            -> whole-chapter rewrite (reuse existing)
+#   plot               -> send back to Planner for re-planning (new branch)
+REPAIR_LEVEL_ACTION = {
+    "sentence": "repair_local",
+    "paragraph": "repair_local",
+    "chapter": "rewrite_chapter",
+    "plot": "replan_chapter",
+}
+
+
+def _classify_repair_level(checks_output: Any) -> dict[str, Any]:
+    """Classify the most severe repair level needed from a consistency check.
+
+    Returns {level, action, reason, failed_dimensions}. `level` is one of
+    sentence/paragraph/chapter/plot, or "none" when nothing failed. The action
+    maps to the §8.2 repair strategy (local repair / rewrite / replan).
+    """
+    if not isinstance(checks_output, dict):
+        return {"level": "none", "action": None, "reason": "", "failed_dimensions": []}
+    checks = checks_output.get("checks") if isinstance(checks_output.get("checks"), dict) else {}
+    failed: list[str] = []
+    issue_text = ""
+    for name, check in checks.items():
+        if not isinstance(check, dict):
+            continue
+        if check.get("status") == "fail" or bool(check.get("issues")):
+            failed.append(name)
+            issue_text += " " + name + " " + " ".join(str(i) for i in (check.get("issues") or []))
+    issue_text = issue_text.lower()
+    if not failed:
+        return {"level": "none", "action": None, "reason": "", "failed_dimensions": []}
+    # severity order: plot > chapter > paragraph > sentence
+    for level in ("plot", "chapter", "paragraph", "sentence"):
+        kws = _REPAIR_LEVEL_KEYWORDS.get(level, [])
+        if any(kw.lower() in issue_text for kw in kws):
+            return {
+                "level": level,
+                "action": REPAIR_LEVEL_ACTION.get(level),
+                "reason": f"命中 {level} 级修复关键词",
+                "failed_dimensions": failed,
+            }
+    # failed but no keyword matched -> safest default is chapter rewrite
+    return {
+        "level": "chapter",
+        "action": "rewrite_chapter",
+        "reason": "未命中具体关键词，默认章级重写",
+        "failed_dimensions": failed,
+    }
+
+
+# V3 Repair Engine (§8): sentence/paragraph-level local repair. Applies only the
+# listed replacements in-place — never rewrites the chapter, never creates a new
+# version branch (per §8.4: local fixes are incremental records on the same node).
+def _apply_replacements(body: Any, replacements: list[dict]) -> tuple[Any, list[str], list[str]]:
+    if not isinstance(replacements, list) or not replacements:
+        return body, [], []
+    applied: list[str] = []
+    skipped: list[str] = []
+    if isinstance(body, list):
+        new_body = []
+        for part in body:
+            seg = part if isinstance(part, str) else str(part.get("text", "") if isinstance(part, dict) else part)
+            for r in replacements:
+                anchor = str(r.get("anchor", ""))
+                repl = str(r.get("replacement", ""))
+                if anchor and anchor in seg:
+                    seg = seg.replace(anchor, repl)
+                    if anchor not in applied:
+                        applied.append(anchor)
+            new_body.append(seg)
+        return new_body, applied, skipped
+    text = body if isinstance(body, str) else extract_body_text(body)
+    seg = text
+    for r in replacements:
+        anchor = str(r.get("anchor", ""))
+        repl = str(r.get("replacement", ""))
+        if anchor and anchor in seg:
+            seg = seg.replace(anchor, repl)
+            applied.append(anchor)
+        else:
+            skipped.append(anchor)
+    return seg, applied, skipped
+
+
+def _repair_local(chapter_id: str, novel_id: str, project_id: str, issues_text: str) -> dict[str, Any]:
+    """Run sentence/paragraph-level local repair on a chapter (§8.2).
+
+    Persists as an in-place incremental record (meta.repair_log), does NOT create
+    a new version branch. Returns applied/skipped anchors for audit.
+    """
+    db = connect()
+    chapter = db.execute(
+        "SELECT id, title, body, meta, parent_id, project_id FROM contents WHERE id=%s",
+        (chapter_id,),
+    ).fetchone()
+    if chapter is None:
+        db.close()
+        return {"error": "chapter not found"}
+    body = chapter.get("body")
+    meta = chapter.get("meta") if isinstance(chapter.get("meta"), dict) else {}
+    outline = meta.get("outline") or {}
+    db.close()
+
+    output = complete(
+        run_id=None, node_key="repair_local", project_id=project_id,
+        task_type="repair_local", prompt_name="bootstrap.repair_local",
+        variables={
+            "chapter_text": extract_body_text(body),
+            "repair_issues": issues_text,
+            "_chapter_outline": json.dumps(outline, ensure_ascii=False),
+        },
+        client_mutation_id=f"repair_local:{chapter_id}:{int(time.time())}:v1",
+    )
+    output = validate_task_output("repair_local", output)
+    replacements = output.get("replacements", []) if isinstance(output, dict) else []
+    new_body, applied, skipped = _apply_replacements(body, replacements)
+
+    db = connect()
+    log = list((meta.get("repair_log") or []))
+    log.append({
+        "level": "local",
+        "applied": applied,
+        "skipped": skipped,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    db.execute(
+        "UPDATE contents SET body=%s, meta=meta || %s, updated_at=now() WHERE id=%s",
+        (encode(new_body), encode({"repair_log": log}), chapter_id),
+    )
+    db.commit()
+    db.close()
+    return {"applied": applied, "skipped": skipped, "level": "local"}
+
+
+def _replan_chapter(chapter_id: str, novel_id: str, project_id: str, issues_text: str) -> dict[str, Any]:
+    """Plot-level repair (§8.4): send the chapter back to the Planner for a
+    revised outline. Records the revised plan in meta.replan_log (incremental,
+    no version branch) and returns it for downstream re-generation."""
+    db = connect()
+    chapter = db.execute(
+        "SELECT id, title, body, meta, parent_id, project_id FROM contents WHERE id=%s",
+        (chapter_id,),
+    ).fetchone()
+    db.close()
+    if chapter is None:
+        return {"error": "chapter not found"}
+    meta = chapter.get("meta") if isinstance(chapter.get("meta"), dict) else {}
+    outline = meta.get("outline") or {}
+    assembler = ContextAssembler(novel_id)
+    context = assembler.build()
+    book_state = context.get("book_state", "")
+    arc_summary = context.get("arc_summary", "")
+
+    output = complete(
+        run_id=None, node_key="replan_chapter", project_id=project_id,
+        task_type="replan_chapter", prompt_name="bootstrap.replan_chapter",
+        variables={
+            "_chapter_outline": json.dumps(outline, ensure_ascii=False),
+            "repair_issues": issues_text,
+            "book_state": book_state,
+            "arc_summary": arc_summary,
+        },
+        client_mutation_id=f"replan_chapter:{chapter_id}:{int(time.time())}:v1",
+    )
+    output = validate_task_output("replan_chapter", output)
+    revised = output.get("revised_outline", {}) if isinstance(output, dict) else {}
+    rationale = str(output.get("rationale", "")) if isinstance(output, dict) else ""
+
+    db = connect()
+    log = list((meta.get("replan_log") or []))
+    log.append({
+        "revised_outline": revised,
+        "rationale": rationale,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    db.execute(
+        "UPDATE contents SET meta=meta || %s, updated_at=now() WHERE id=%s",
+        (encode({"replan_log": log, "outline": revised}), chapter_id),
+    )
+    db.commit()
+    db.close()
+    return {"revised_outline": revised, "rationale": rationale, "level": "plot"}
+
+
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:
     paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
     after_chars = len("\n".join(paragraphs).strip())
@@ -1550,10 +1745,17 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             if output.get("overall_status") != "pass" or failed_checks:
                 cid = context.get("chapter_id", "")
                 if cid:
+                    # V3 Repair Engine (§8): classify the least-invasive repair
+                    # and record the recommendation. sentence/paragraph ->
+                    # repair_local (in-place); plot -> replan_chapter. The existing
+                    # needs_rewrite path is preserved (chapter rewrite remains the
+                    # safe default fallback).
+                    repair_rec = _classify_repair_level(output)
                     db.execute(
                         "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
                         (encode({"quality_gate": {"status": "failed", "checks": checks},
-                                  "pacing_check": pacing, "arc_check": arc_check}), cid),
+                                  "pacing_check": pacing, "arc_check": arc_check,
+                                  "repair_recommendation": repair_rec}), cid),
                     )
                 db.commit()
                 db.close()

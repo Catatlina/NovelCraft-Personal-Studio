@@ -432,6 +432,22 @@ class _GenerateStoryArcOutput(_LenientOutput):
     story_arcs: list[_StoryArcItem] = Field(min_length=1, max_length=12)
 
 
+class _ReplacementItem(_LenientOutput):
+    anchor: str = Field(min_length=2, description="需要替换的原文片段（精确匹配）")
+    replacement: str = Field(min_length=1, description="替换后的文本")
+
+
+class _RepairLocalOutput(_LenientOutput):
+    """Sentence/paragraph-level local repair (§8): in-place fixes, no full rewrite."""
+    replacements: list[_ReplacementItem] = Field(min_length=1, max_length=60)
+
+
+class _ReplanChapterOutput(_LenientOutput):
+    """Plot-level repair (§8.4): send back to Planner for re-planning."""
+    revised_outline: dict[str, Any] = Field(min_length=1)
+    rationale: str = Field(min_length=10)
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -465,6 +481,8 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "final_consistency_check": _FinalConsistencyCheckOutput,
     "final_continuity_audit": _FinalContinuityAuditOutput,
     "final_humanize": _FinalHumanizeOutput,
+    "repair_local": _RepairLocalOutput,
+    "replan_chapter": _ReplanChapterOutput,
     "book_analysis": _BookAnalysisOutput,
     "gen_daily_brief": _HotspotContentOutput,
     "hm_daily_brief": _DailyBriefOutput,

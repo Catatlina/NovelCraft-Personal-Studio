@@ -773,6 +773,38 @@ $skill_hints
 输出 JSON: {"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}}
 body 至少 12 段，每段为完整叙事段落，总字数不得低于 3000 字；低于 3000 字视为失败。"""),
 
+    # ═══ V3 Repair Engine (§8): 句/段级局部修复（不重写整章） ═══
+    ("bootstrap.repair_local", "1.0.0", "deepseek",
+     """你是修理工编辑，只做**最小局部替换**，绝不重写整章。
+
+章节正文：$chapter_text
+需要修复的问题定位：$repair_issues
+本章细纲：$_chapter_outline
+
+规则：
+1. 只针对明确指出的问题（错字/语病/啰嗦段落/机械句式）做局部替换。
+2. anchor 必须是正文里**逐字精确存在**的片段（长度 4-80 字）；replacement 替换后语义连贯、人设风格不变。
+3. 一次可修多处，但每处都必须是真实问题，不得借机改写无关内容。
+4. 绝不新增剧情、绝不改变事件走向、绝不删除有效叙事。
+
+输出 JSON: {"replacements":[{"anchor":"需要替换的原文片段","replacement":"替换后的文本"},{"anchor":"第二处原文","replacement":"第二处替换"}]}"""),
+
+    # ═══ V3 Repair Engine (§8.4): 打回规划（剧情级问题，重新规划该章） ═══
+    ("bootstrap.replan_chapter", "1.0.0", "deepseek",
+     """你是剧情策划（Planner）。本章被 Reviewer 判定为**剧情/结构级**问题，需要重新规划细纲，但不重写已完成的正常章节。
+
+当前章细纲：$_chapter_outline
+失败原因（剧情/结构级）：$repair_issues
+全书状态：$book_state
+故事弧：$arc_summary
+
+要求：
+1. 保留合理的既有设定与伏笔；只修正导致失败的结构/剧情问题。
+2. 重新输出该章细纲（含 function_type/chapter_goal/reader_expectation/beats）。
+3. rationale 说明修改理由（50 字以上）。
+
+输出 JSON: {"revised_outline":{"volume":1,"seq":1,"title":"章名","outline":"梗概","function_type":"","chapter_goal":"","reader_expectation":"","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[]},"rationale":"修改理由"}"""),
+
     ("bootstrap.write_self_review", "1.0.0", "deepseek",
      """你是本章作者，现在切换到冷静的自审视角。请审阅刚写完的章节。
 
