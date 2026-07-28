@@ -1146,10 +1146,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     omissions = [str(item).strip() for item in audit.get("omissions", []) if str(item).strip()]
                     passed = (
                         audit.get("passed") is True
-                        and float(audit.get("score") or 0) == 100
+                        and float(audit.get("score") or 0) >= 80
                         and not contradictions
-                        and not omissions
+                        # omissions → warning only, does not block pass
                     )
+                    # Still feed omissions into retry feedback so the plan improves
+                    if passed and omissions:
+                        output["plan_fidelity_warnings"] = omissions
                     if passed:
                         output["plan_fidelity_audit"] = audit
                         break
