@@ -74,7 +74,7 @@ export function Layout({
             type="button"
             className="brand-mark"
             aria-label="返回小说首页"
-            onClick={() => setTab("dashboard")}
+            onClick={() => { setTab("dashboard"); setHovered(false); }}
           >
             <Sparkles size={20} />
           </button>
@@ -98,7 +98,7 @@ export function Layout({
               aria-current={tab === item.id ? "page" : undefined}
               aria-label={item.label}
               title={!expanded ? item.label : undefined}
-              onClick={() => setTab(item.id)}
+              onClick={() => { setTab(item.id); setHovered(false); }}
             >
               {item.icon}
               <span>{item.label}</span>
@@ -128,7 +128,7 @@ export function Layout({
         </div>
       </aside>
 
-      <main className="app-main">
+      <main className={`app-main${collapsed ? "" : " sidebar-pinned"}`}>
         <header className="app-header">
           <div className="app-header-title">
             <h1>{title}</h1>

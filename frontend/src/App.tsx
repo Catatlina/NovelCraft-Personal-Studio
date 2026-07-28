@@ -95,7 +95,7 @@ export default function App() {
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [idea, setIdea] = useState("一个写作者发现自己删掉的章节正在现实里发生。");
-  const [genre, setGenre] = useState("都市奇幻");
+  const [genre, setGenre] = useState("都市");
   const [style, setStyle] = useState("克制、悬疑、强画面感");
   const [targetWords, setTargetWords] = useState(800000);
   const [editorText, setEditorText] = useState("");
@@ -113,9 +113,19 @@ export default function App() {
 
   useEffect(() => {
     const syncRoute = () => {
+      const requested = window.location.hash.replace(/^#\/?/, "").split(/[/?]/)[0]
+        || new URLSearchParams(window.location.search).get("tab")
+        || "dashboard";
       const route = routeFromLocation();
       setTabState(route.tab);
       setRouteNotFound(route.notFound);
+      if (LEGACY_TAB_REDIRECTS[requested]) {
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${window.location.search}#/${route.tab}`,
+        );
+      }
     };
     window.addEventListener("hashchange", syncRoute);
     window.addEventListener("popstate", syncRoute);

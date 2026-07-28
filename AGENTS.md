@@ -6,10 +6,18 @@ human developer working in this repository.
 Before changing code, reviewing progress, claiming completion, committing, or
 pushing, you must read and follow:
 
-1. `docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md`
-2. `PROJECT_PROGRESS.md`
-3. The active task document, currently `docs/NovelCraft-开发文档/37-新增需求任务分解-20260713.md`
-4. The latest audit report provided by the user, if any
+1. `docs/AI_HANDOFF.md`
+2. `docs/REQUIREMENTS_TRACEABILITY.md`
+3. `docs/KNOWN_ISSUES.md`
+4. `docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md`
+5. `PROJECT_PROGRESS.md`
+6. The active task document, currently `docs/NovelCraft-开发文档/37-新增需求任务分解-20260713.md`
+7. The latest audit report provided by the user, if any
+
+If work stops before the active objective is accepted, update
+`docs/AI_HANDOFF.md`, `docs/REQUIREMENTS_TRACEABILITY.md`, and
+`docs/KNOWN_ISSUES.md` with the exact Git state, executed gates, remaining
+work, and blockers. Never leave the only copy of project state in chat history.
 
 Mandatory gate:
 
@@ -55,4 +63,3 @@ Required final report format:
 - 原因：
 - 当前只能标记为：
 ```
-

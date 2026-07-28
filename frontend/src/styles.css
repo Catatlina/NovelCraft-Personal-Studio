@@ -432,6 +432,7 @@ button:active:not(:disabled) { transform: scale(.96); }
 }
 
 .app-main { min-height: 100vh; margin-left: 72px; }
+.app-main.sidebar-pinned { margin-left: 260px; }
 .app-header {
   position: sticky;
   top: 0;
@@ -937,6 +938,7 @@ button:active:not(:disabled) { transform: scale(.96); }
 .ai-edit-preview-actions button { min-height: 38px; border-radius: 10px; }
 
 @media (max-width: 1024px) {
+  .app-main.sidebar-pinned { margin-left: 72px; }
   .app-sidebar.expanded { width: 72px; box-shadow: none; }
   .app-sidebar.expanded .nav-item span,
   .app-sidebar.expanded .logo,

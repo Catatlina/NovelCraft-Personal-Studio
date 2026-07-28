@@ -24,7 +24,11 @@ export default defineConfig({
       url: `http://127.0.0.1:${BACKEND_PORT}/api/v1/healthz`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { ...process.env, E2E_BACKEND_PORT: String(BACKEND_PORT) },
+      env: {
+        ...process.env,
+        E2E_BACKEND_PORT: String(BACKEND_PORT),
+        NOVELCRAFT_JWT_SECRET: "starlume-e2e-only-secret-key-32-bytes-minimum",
+      },
     },
     {
       command: `npm run dev -- --port ${FRONTEND_PORT} --strictPort`,

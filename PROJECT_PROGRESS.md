@@ -8,6 +8,14 @@
 
 > 本轮按已确认的 Vibe Coding 任务契约执行：小说优先、非小说模块从 UI 隐藏但不删除数据/源码、用户可见品牌统一为 Starlume AI、关键 AI 结果必须人工确认、失败不得伪装成功。当前仍在开发中，不能宣称整条新 UI 小说链已完成或已部署。
 
+### 2026-07-28 AI 交接 checkpoint
+
+- 已新增 `docs/AI_HANDOFF.md`、`REQUIREMENTS_TRACEABILITY.md`、`KNOWN_ISSUES.md`、`ACCEPTANCE_CRITERIA.md`、`AI_CONTINUITY.md`，并把交接读写责任加入 `AGENTS.md`；项目状态不再只依赖聊天记录。
+- 最新前端证据：`npm test` 为 **11 passed**；`npm run build` 通过；`npm run test:e2e` 为 **4 passed, 1 skipped**。确定性真库链已覆盖注册/七入口、旧路由/404/手机导航、建书/详情/章节导入/编辑保存/刷新持久化、审阅无伪分和小说设置。
+- protected 新 UI 真实 DeepSeek 链因本机没有 `DEEPSEEK_API_KEY` 被明确跳过，不能计入通过；后端既有 19/19 生产 run 不能替代新 UI 浏览器验收。
+- 修复同轮浏览器发现的交互缺陷：侧栏悬浮导航后会收起；用户固定展开时正文区让位 260px，不再遮挡书库首卡片。
+- 当前 Starlume 新 UI 尚未推送、尚未部署；生产仍不得作为本轮新 UI 证据。
+
 | 范围 | 状态 | 本轮证据 | 未完成门禁 |
 |---|---|---|---|
 | 品牌、浅深色主题、桌面/平板/手机导航 | 可用 | `ThemeProvider.test.tsx`；1280×720 与 390×844 浏览器视觉检查；系统主题、手动切换与记忆已接线 | 全页面截图集、生产验收 |
