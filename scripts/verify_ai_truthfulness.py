@@ -56,6 +56,7 @@ AI_WRAPPER_CALLS = {
 ALLOWLIST: dict[str, str] = {
     "backend/app/main.py:batch_generate_chapters": "API dispatcher; queues batch_generate_chapters_task, no generated output",
     "backend/app/main.py:_chapter_review_context": "DB context assembler for review UI, no generated output",
+    "backend/app/main.py:manual_review_chapter": "human approval/rejection endpoint; rejected chapters are dispatched to the gateway-backed worker",
     "backend/app/workers/tasks.py:batch_generate_chapters_task": "Celery orchestration; generation occurs in _generate_next_chapter_unlocked via gateway",
     "backend/app/services/hotspot_collector.py:_safe_score": "numeric normalization of collected source scores",
     "backend/app/services/hotspot_collector.py:compute_freshness_score": "deterministic recency score from timestamps",
@@ -71,6 +72,25 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/api/v1/complete_api.py:analyze_book": "endpoint delegates to AI wrapper book_analysis_workbench",
     "backend/app/api/v1/batch_endpoints.py:get_layered_plan": "read-only outline view endpoint",
     "backend/app/api/v1/ranking.py:generate_book": "book creation endpoint; AI generation is dispatched by worker after persistence",
+    "backend/app/api/v1/ranking.py:analyze_rankings": "endpoint delegates AI layers to TenLayerAnalyzer._call_ai, which calls gateway.complete",
+    "backend/app/api/v1/billing.py:_public_plan_row": "database plan-row serializer; plan is a billing noun, not AI planning",
+    "backend/app/api/v1/deai.py:get_deai_score": "endpoint delegates AI scoring to deai_score, which calls gateway.complete",
+    "backend/app/api/v1/deai.py:quick_score": "explicitly labelled heuristic-only score endpoint",
+    "backend/app/services/deai_pipeline.py:quick_deai_score": "explicitly labelled local heuristic metric, never presented as model output",
+    "backend/app/services/ten_layer_analysis.py:analyze_book_profile": "deterministic metadata normalization layer",
+    "backend/app/services/ten_layer_analysis.py:analyze_genre_report": "deterministic frequency aggregation layer",
+    "backend/app/services/ten_layer_analysis.py:analyze_selling_points": "deterministic regex classification layer",
+    "backend/app/services/ten_layer_analysis.py:analyze_golden_3_chapter": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze_plot_rhythm": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze_characters": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze_world_building": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze_style_report": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze_reader_report": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze_ai_insight": "delegates to _call_ai, which calls gateway.complete",
+    "backend/app/services/ten_layer_analysis.py:analyze": "orchestrator combining deterministic layers and gateway-backed AI layers",
+    "backend/app/services/ten_layer_analysis.py:_generate_heat_map": "deterministic report aggregation over completed layer data",
+    "backend/app/services/ten_layer_analysis.py:_generate_keyword_cloud": "deterministic keyword frequency aggregation",
+    "backend/app/services/ten_layer_analysis.py:_generate_trend_report": "deterministic report assembly over layer results",
 }
 
 

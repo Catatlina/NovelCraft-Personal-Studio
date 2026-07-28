@@ -1981,6 +1981,7 @@ def batch_generate_chapters_task(
     api_key: str = "",
     api_url: str = "",
     model: str = "",
+    api_key_ref: str = "",
 ) -> dict:
     """Fan out a persisted batch: dispatch one ``gen_next_chapter_task`` per
     pending ordinal (P2-T5 / Q11). The per-novel lock inside that task keeps

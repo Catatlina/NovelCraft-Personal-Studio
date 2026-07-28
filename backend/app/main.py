@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
 from .core.byok import stash_byok_key
+from .core.errors import public_message
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
 from .gateway import (
     BudgetExceeded,
@@ -85,7 +86,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="星禾AI工作台 API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="星禾AI工作台 API", version="2.2.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(config_router)
 app.include_router(short_story_router)

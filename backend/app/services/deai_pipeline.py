@@ -1,13 +1,12 @@
-"""De-AI pipeline — 7-layer heuristic + optional LLM, designed to never raise.
+"""De-AI pipeline with explicit provider-failure semantics.
 
 This module is the missing implementation referenced by ``app/api/v1/deai.py``.
 It powers the "remove AI taste" feature used by the review screen.
 
 Design guarantees (per system design §3.3 / Bug②):
   * ``quick_deai_score(text)`` — pure heuristic 0-100, no network.
-  * ``deai_score(project_id, text)`` — LLM first, heuristic+30 fallback.
-  * ``DeaiPipeline.run(text)`` — ALWAYS returns a dict and never raises; any
-    unexpected failure degrades to a safe fallback so the API returns 200, not 500.
+  * ``deai_score(project_id, text)`` — LLM-backed score; provider failures raise.
+  * ``DeaiPipeline.run(text)`` — LLM-backed rewrite; provider failures raise.
 """
 from __future__ import annotations
 
@@ -63,33 +62,27 @@ def quick_deai_score(text: str) -> int:
             if w in text:
                 score += 3
         return max(0, min(100, score))
-    except Exception:
+    except (TypeError, ValueError):
         return 0
 
 
 def deai_score(project_id: str, text: str) -> int:
-    """先 LLM 评分，失败回退 ``quick_deai_score + 30``。
-
-    Returns an int 0-100 even when the LLM is unavailable.
-    """
-    try:
-        from app.gateway import complete
-        out = complete(
-            run_id=None,
-            node_key=None,
-            project_id=project_id,
-            task_type="deai_score",
-            prompt_name="deai.score",
-            variables={"text": text[:4000]},
-            client_mutation_id=f"deai-score:{project_id}:{abs(hash(text)) % 10 ** 8}",
-        )
-        raw = str(out.get("score") if isinstance(out, dict) else out or "")
-        m = re.search(r"\d{1,3}", raw)
-        if m:
-            return max(0, min(100, int(m.group(0))))
-    except Exception as exc:
-        logger.warning("LLM deai score failed, fallback heuristic: %s", exc)
-    return min(100, quick_deai_score(text) + 30)
+    """Return an LLM-backed score, failing explicitly on an invalid response."""
+    from app.gateway import OutputValidationError, complete
+    out = complete(
+        run_id=None,
+        node_key=None,
+        project_id=project_id,
+        task_type="deai_score",
+        prompt_name="deai.score",
+        variables={"text": text[:4000]},
+        client_mutation_id=f"deai-score:{project_id}:{abs(hash(text)) % 10 ** 8}",
+    )
+    raw = str(out.get("score") if isinstance(out, dict) else out or "")
+    match = re.search(r"\d{1,3}", raw)
+    if not match:
+        raise OutputValidationError("deai score response did not contain a numeric score")
+    return max(0, min(100, int(match.group(0))))
 
 
 def _heuristic_polish(text: str) -> str:
@@ -102,7 +95,7 @@ def _heuristic_polish(text: str) -> str:
 
 
 class DeaiPipeline:
-    """7-layer de-AI pipeline. ``run`` is guaranteed not to raise."""
+    """Seven-layer de-AI pipeline backed by the configured model gateway."""
 
     def __init__(self, project_id: str, content_id: str, chapter_title: str = ""):
         self.project_id = project_id or ""
@@ -110,12 +103,11 @@ class DeaiPipeline:
         self.chapter_title = chapter_title or ""
 
     def run(self, text: str) -> dict:
-        """Run the pipeline; always returns a dict, never raises.
+        """Run the pipeline.
 
         Returns keys: original_score, final_score, layers, final_text, (warning?).
         """
-        try:
-            if not text or not text.strip():
+        if not text or not text.strip():
                 return {
                     "original_score": 0,
                     "final_score": 0,
@@ -123,25 +115,19 @@ class DeaiPipeline:
                     "final_text": text or "",
                 }
 
-            original_score = quick_deai_score(text)
-            layers: list[dict] = []
-            polished = text
+        original_score = quick_deai_score(text)
+        layers: list[dict] = []
+        polished = text
 
-            for name, note in _LAYER_NAMES:
-                try:
-                    if name == "词汇去机器味":
-                        polished = _heuristic_polish(polished)
-                    layers.append({"name": name, "note": note, "applied": True})
-                except Exception as exc:
-                    logger.warning("deai layer %s skipped: %s", name, exc)
-                    layers.append({"name": name, "note": note, "applied": False})
+        for name, note in _LAYER_NAMES:
+            if name == "词汇去机器味":
+                polished = _heuristic_polish(polished)
+            layers.append({"name": name, "note": note, "applied": True})
 
-            final_score = max(0, original_score - 25)
+        final_score = max(0, original_score - 25)
 
-            # 若 LLM 可用则尝试进一步优化 final_text
-            try:
-                from app.gateway import complete
-                out = complete(
+        from app.gateway import OutputValidationError, complete
+        out = complete(
                     run_id=None,
                     node_key=None,
                     project_id=self.project_id,
@@ -149,26 +135,16 @@ class DeaiPipeline:
                     prompt_name="deai.rewrite",
                     variables={"text": text[:4000], "title": self.chapter_title},
                     client_mutation_id=f"deai:{self.content_id}:{abs(hash(text)) % 10 ** 8}",
-                )
-                rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
-                if rewritten and len(rewritten) > 20:
-                    polished = rewritten
-                    final_score = max(0, original_score - 45)
-            except Exception as exc:
-                logger.info("deai LLM rewrite unavailable, using heuristic polish: %s", exc)
+        )
+        rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
+        if len(rewritten.strip()) <= 20:
+            raise OutputValidationError("deai rewrite response was empty or too short")
+        polished = rewritten
+        final_score = max(0, original_score - 45)
 
-            return {
-                "original_score": original_score,
-                "final_score": final_score,
-                "layers": layers,
-                "final_text": polished,
-            }
-        except Exception as exc:
-            logger.exception("DeaiPipeline.run unexpected error, returning safe fallback")
-            return {
-                "original_score": 0,
-                "final_score": 0,
-                "layers": [{"name": n, "note": d, "applied": False} for n, d in _LAYER_NAMES],
-                "final_text": text or "",
-                "warning": f"deai pipeline degraded: {exc}",
-            }
+        return {
+            "original_score": original_score,
+            "final_score": final_score,
+            "layers": layers,
+            "final_text": polished,
+        }

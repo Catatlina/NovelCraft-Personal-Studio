@@ -17,7 +17,7 @@
 | 5 | 去AI味 | 🧪 | deai_pipeline.py(223行)七层管线 + deai.py API(165行)。未真实DeepSeek验证 |
 | 6 | 热点多平台 | 🧪 | 8平台fallback URL。B站API实测通过。头条/小红书/抖音需代理 |
 | 7 | 热点文库 | 🧪 | articles CRUD在hotspots.py + HotspotDashboard文库Tab |
-| 8 | 书库删除 | ✅ | 7端点(单本/批量/章节删除) + 前端checkbox/确认弹窗。前端bundle确认 |
+| 8 | 书库删除 | ✅ | 7端点(单本/批量/章节删除) + 前端checkbox/确认弹窗；前端测试与 bundle 实测 |
 | 9 | 十层分析 | 🧪 | ten_layer_analysis.py(793行) + /ranking/analyze端点。platforms自动去重 |
 | 10 | 选题池 | 🧪 | bookmark/delete/batch-delete端点 |
 
@@ -26,13 +26,13 @@
 | 功能 | 文件 | 状态 |
 |------|------|:--:|
 | DashboardV2 首页 | DashboardV2.tsx(613行) | ✅ |
-| 全局玻璃拟态主题 | global-v2.css(413行) + ThemeProvider | ✅ |
+| 全局玻璃拟态主题 | global-v2.css(413行) + ThemeProvider；前端构建测试通过 | ✅ |
 | 仿写HTML提取 | imitation.py _extract_text() | ✅ |
 | 一键采集所有平台 | ranking.py /scan-all + 前端按钮 | ✅ |
 | 多平台聚合分析 | ranking.py /analyze + 前端UI | 🧪 |
 | 新平台: SF轻小说 | ranking_adapter.py fetch_sfacg_ranking() 43本 | ✅ |
 | 新平台: 潇湘书院 | ranking_adapter.py fetch_xxsy_ranking() 41本 | ✅ |
-| 平台替换: QQ阅读/晋江 | 替换七猫/17K/刺猬猫(JS-SPA不可采) | ✅ |
+| 平台替换: QQ阅读/晋江 | 替换七猫/17K/刺猬猫(JS-SPA不可采)；适配器测试覆盖 | ✅ |
 
 ### 验证基线
 

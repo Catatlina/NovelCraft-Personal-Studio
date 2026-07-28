@@ -10,6 +10,7 @@ from app.core.security import get_current_user
 from app.db import connect
 from app.services.deai_pipeline import DeaiPipeline, deai_score, quick_deai_score
 from app.core.authz import ok
+from app.core.errors import public_message
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +88,7 @@ def run_deai_pipeline(
 ) -> dict:
     """Run the full 7-layer de-AI pipeline on a chapter.
 
-    Hardened (Bug②): any unexpected error degrades to a 200 ``ok({warning})``
-    instead of 500. ``HTTPException`` (e.g. 404 not-found) is re-raised to keep
-    its semantics; only generic failures are swallowed.
+    Provider and pipeline failures are surfaced explicitly as 502 responses.
     """
     try:
         project_id, title = _get_content_project(content_id)
@@ -114,14 +113,8 @@ def run_deai_pipeline(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("DeAI pipeline degraded for content %s", content_id)
-        return ok({
-            "original_score": 0,
-            "final_score": 0,
-            "layers": [],
-            "final_text": "",
-            "warning": f"deai pipeline degraded: {exc}",
-        })
+        logger.exception("DeAI pipeline failed for content %s", content_id)
+        raise HTTPException(502, public_message(exc, "去 AI 化服务暂时不可用")) from exc
 
 
 # ── GET /contents/{content_id}/deai/score ──────────────────────────────────
@@ -133,8 +126,8 @@ def get_deai_score(
 ) -> dict:
     """Get AI-taste score for a chapter (heuristic + LLM).
 
-    Hardened (Bug②): never returns 500. ``HTTPException`` (e.g. 404) propagates;
-    generic failures degrade to a safe 0-score response.
+    Provider failures are surfaced explicitly; heuristic data is not relabelled
+    as an AI score.
     """
     try:
         project_id, _ = _get_content_project(content_id)
@@ -149,11 +142,7 @@ def get_deai_score(
 
         heuristic = quick_deai_score(text)
 
-        try:
-            score = deai_score(project_id, text)
-        except Exception as exc:
-            logger.warning("LLM deai scoring failed: %s — using heuristic only", exc)
-            score = heuristic + 30
+        score = deai_score(project_id, text)
 
         return ok({
             "score": min(score, 100),
@@ -163,13 +152,8 @@ def get_deai_score(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("DeAI score degraded for content %s", content_id)
-        return ok({
-            "score": 0,
-            "heuristic_score": 0,
-            "text_preview": "",
-            "warning": f"deai score degraded: {exc}",
-        })
+        logger.exception("DeAI score failed for content %s", content_id)
+        raise HTTPException(502, public_message(exc, "AI 痕迹评分服务暂时不可用")) from exc
 
 
 # ── POST /contents/{content_id}/deai/quick-score ──────────────────────────

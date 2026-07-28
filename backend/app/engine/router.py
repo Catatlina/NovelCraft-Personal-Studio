@@ -3,11 +3,13 @@
 """
 
 import json
-from fastapi import APIRouter, Depends, Request, Body
+from fastapi import APIRouter, Depends, Request, Body, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..core.authz import get_current_user
+from ..core.errors import public_message
+from ..config import settings
 from .. import gateway as gw
 
 router = APIRouter(prefix="/api/v1/engine", tags=["AI Engine"])
@@ -45,15 +47,16 @@ async def chat(request: ChatRequest, user=Depends(get_current_user)):
 @router.get("/models")
 def list_models(user=Depends(get_current_user)):
     """列出可用AI模型"""
+    configured = bool(settings.deepseek_api_key)
     return {
         "code": "SUCCESS",
         "data": {
             "models": [
-                {"id": "deepseek-chat", "provider": "deepseek", "status": "active"},
-                {"id": "deepseek-v4-pro", "provider": "deepseek", "status": "active"},
-                {"id": "claude-sonnet-4-20250514", "provider": "claude", "status": "active"},
-                {"id": "gpt-4o", "provider": "openai", "status": "active"},
-                {"id": "gemini-2.5-pro", "provider": "gemini", "status": "active"},
+                {
+                    "id": settings.deepseek_model,
+                    "provider": "deepseek",
+                    "status": "available" if configured else "unconfigured",
+                },
             ]
         },
     }
@@ -62,6 +65,7 @@ def list_models(user=Depends(get_current_user)):
 @router.get("/usage")
 def get_usage(user=Depends(get_current_user)):
     """获取Token使用统计"""
+    db = None
     try:
         from ..db import connect
         db = connect(); cur = db.cursor()
@@ -73,16 +77,26 @@ def get_usage(user=Depends(get_current_user)):
         row = cur.fetchone(); cur.close()
         total_tokens = int(row[0]) if row else 0
         total_cost = float(row[1]) if row else 0
-        cur2 = connect().cursor()
+        cur2 = db.cursor()
         cur2.execute("SELECT monthly_budget_cny FROM subscriptions s JOIN plans p ON s.plan_id=p.id WHERE s.user_id=%s AND s.status='active'", (user["id"],))
         budget_row = cur2.fetchone(); cur2.close()
         budget = float(budget_row[0]) if budget_row else 0
         return {"code": "SUCCESS", "data": {"used_tokens": total_tokens, "used_cost_cny": round(total_cost, 4), "budget_cny": budget}}
-    except Exception:
-        return {"code": "SUCCESS", "data": {"used_tokens": 0, "used_cost_cny": 0, "budget_cny": 0}}
+    except Exception as exc:
+        raise HTTPException(503, public_message(exc, "用量统计暂时不可用")) from exc
+    finally:
+        if db is not None:
+            db.close()
 
 
 @router.get("/healthz")
 def engine_health():
     """健康检查"""
-    return {"code": "SUCCESS", "data": {"status": "ok", "providers": ["deepseek", "claude", "openai", "gemini"]}}
+    configured = bool(settings.deepseek_api_key)
+    return {
+        "code": "SUCCESS",
+        "data": {
+            "status": "ok" if configured else "degraded",
+            "providers": [{"id": "deepseek", "configured": configured}],
+        },
+    }
