@@ -442,7 +442,11 @@ $instruction
 
     # ── Review: 扩展审核维度 ──
     ("review.ooc", "3.0.0", "deepseek",
-     '审查角色 OOC（行为是否违背人设）。\n$body\n角色档案: $characters\n输出 JSON: {"ooc_count":0,"violations":[{"character":"名","action":"行为","expected":"应该怎样"}]}'),
+     '审查角色 OOC（行为是否违背人设）。\n$body\n角色档案: $characters\n'
+     '额外规则（V3 认知分层穿帮）：若角色档案的 known_info 中标记了某信息为其"未知/误解"，'
+     '但正文里该角色却使用了该信息（仿佛已知），标记为认知穿帮（cognitive_leak）。\n'
+     '输出 JSON: {"ooc_count":0,"violations":[{"character":"名","action":"行为","expected":"应该怎样"}],'
+     '"cognitive_leaks":[{"character":"名","leaked_info":"角色不该知道却使用了的信息"}]}'),
     ("review.consistency", "3.0.0", "deepseek",
      '审查前后一致性（时间/地点/人物状态矛盾）。\n本章: $body\n前文摘要: $summary\n输出 JSON: {"contradictions":[{"type":"时间/地点/人物","this_chapter":"本章","previous":"前文"}]}'),
     ("review.rhythm", "3.0.0", "deepseek",

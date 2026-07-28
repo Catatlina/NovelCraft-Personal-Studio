@@ -19,7 +19,7 @@
 ## 第二阶段（提升百万字能力）
 | # | 功能 | 状态 | 挂载点 | 验收 |
 |---|------|------|--------|------|
-| ⑥ | 人物认知分层 | 未开始 | entity_state.known_info 拆 5 层 + 穿帮 OOC 检测并入现有 OOC | 待做 |
+| ⑥ | 人物认知分层 | **已接线** | `entity_states` 加 `known_info JSONB` 列（Alembic 迁移 nc_v3_entity_known_info）；`entity_tracker.split_known_info` 纯函数拆 5 层（world_facts/reader_known/protagonist_known/character_known/misunderstandings，dict 可带 layer/misunderstood 标志，默认 world_facts）；`extract_and_store` 写入 known_info 列；assembler `_entity_states` 渲染 5 层认知标签（世界事实/读者已知/主角已知/该角色已知/该角色误解）注入上下文；`review.ooc` 提示扩 cognitive_leaks 规则（角色误用未知/误解信息→认知穿帮，并入现有 OOC 检测不加调用） | `tests/test_cognition_layering.py` 6 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
 | ⑦ | 时间线真实锚点 | 未开始 | timeline_event 加 real_world_anchor/anachronism_check（现实向启用） | 待做 |
 | ⑧ | 读者体验审核维度 | 未开始 | 并入七维评分（读 Chapter Function 序列） | 待做 |
 | ⑨ | Pacing Engine 可视化 | 未开始 | 节奏可视化 | 待做 |
@@ -37,4 +37,5 @@
 - （本批）② Novel DNA：gateway _PlanIdeaOutput 加 commercial_positioning/story_promise/forbidden_deviations；prompt_registry plan_idea 提示+契约示例+草稿注入；tasks _check_novel_dna_consistency + plan_idea 持久化（顶层 meta 键 + novel_dna 嵌套）；tests/test_novel_dna.py
 - （本批）③ Story Arc：gateway _GenerateStoryArcOutput（_StoryArcItem，status 默认 planning）；tasks 蓝图阶段加 generate_story_arc 节点 + _enrich_blueprint_context 注入 _volume_plan；persist 存 story_arc 实体；assembler 插 arc_summary 层；patrol_check 加弧完整性/进度校验；final_consistency_check 加 _check_story_arc_coverage（确定性偏移检测→warning）+ 弧线追踪维度；tests/test_story_arc.py 6 passed
 - （本批）④ 网文策略库 MVP：Alembic 迁移 nc_v3_strategy（strategy 表）+ init_db 幂等建表与预置3策略（黄金三章/打脸策略/身份反转）；app/services/prompt_compiler.py（select_strategies/compile_strategy_directive/compile_prompt/skill_hints_for_strategies + _STRATEGY_SKILL_MAP 映射 generate_conflict/generate_hook 为中文技巧提示）；write_chapter_draft 模板加 $strategy_directive/$skill_hints 占位，节点注入匹配 directive+skill；覆盖不到优雅降级；tests/test_strategy_library.py 9 passed
+- （本批）⑥ 人物认知分层：Alembic 迁移 nc_v3_entity_known_info（entity_states.known_info JSONB）；entity_tracker KNOWN_INFO_LAYERS + split_known_info 纯函数 5 层拆分；assembler _entity_states 渲染 5 层认知标签；review.ooc 提示扩 cognitive_leaks（认知穿帮并入 OOC，不增调用）；tests/test_cognition_layering.py 6 passed
 - （本批）⑤ Repair Engine 三级版：_classify_repair_level（纯逻辑分级：剧情>逻辑>表达>文字优先级，映射 repair_local/rewrite/replan）；repair_local 节点（prompt+ _RepairLocalOutput 契约 + _apply_replacements 局部替换 + meta.repair_log 原地增量不建版本分支，符合§8.4）；replan_chapter 节点（prompt + _ReplanChapterOutput 契约 + meta.replan_log）；final_consistency_check 失败路径写 repair_recommendation（分级推荐，保留 needs_rewrite 兜底）；db.py task_types 加 repair_local/replan_chapter 路由；tests/test_repair_engine.py 10 passed

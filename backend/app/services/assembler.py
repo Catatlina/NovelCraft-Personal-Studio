@@ -142,25 +142,48 @@ class ContextAssembler:
         db = connect()
         if self.chapter_id:
             rows = db.execute(
-                "SELECT entity_type, entity_name, location FROM entity_states WHERE chapter_id = %s ORDER BY entity_name LIMIT 10",
+                "SELECT entity_type, entity_name, location, known_info FROM entity_states WHERE chapter_id = %s ORDER BY entity_name LIMIT 10",
                 (self.chapter_id,),
             ).fetchall()
         else:
             rows = []
         if not rows:
             rows = db.execute(
-                "SELECT entity_type, entity_name, location FROM entity_states WHERE chapter_id IN (SELECT id FROM contents WHERE parent_id = %s) ORDER BY updated_at DESC LIMIT 10",
+                "SELECT entity_type, entity_name, location, known_info FROM entity_states WHERE chapter_id IN (SELECT id FROM contents WHERE parent_id = %s) ORDER BY updated_at DESC LIMIT 10",
                 (self.novel_id,),
             ).fetchall()
         db.close()
         if not rows and self.chapter_id:
             db2 = connect()
             rows = db2.execute(
-                "SELECT kind as entity_type, title as entity_name, '' as location FROM knowledge_items WHERE content_id = %s AND kind='character'",
+                "SELECT kind as entity_type, title as entity_name, '' as location, '{}'::jsonb as known_info FROM knowledge_items WHERE content_id = %s AND kind='character'",
                 (self.novel_id,),
             ).fetchall()
             db2.close()
-        return "\n".join(f"- [{r['entity_type']}] {r['entity_name']}: {r.get('location','未知')}" for r in rows) if rows else "[无实体状态]"
+        if not rows:
+            return "[无实体状态]"
+        lines = []
+        for r in rows:
+            loc = r.get("location", "未知")
+            line = f"- [{r['entity_type']}] {r['entity_name']}: {loc}"
+            ki = r.get("known_info") if isinstance(r.get("known_info"), dict) else {}
+            if ki:
+                parts = []
+                label_map = {
+                    "world_facts": "世界事实",
+                    "reader_known": "读者已知",
+                    "protagonist_known": "主角已知",
+                    "character_known": "该角色已知",
+                    "character_misunderstood": "该角色误解",
+                }
+                for layer, label in label_map.items():
+                    vals = ki.get(layer) or []
+                    if vals:
+                        parts.append(f"{label}: {'；'.join(str(v) for v in vals)}")
+                if parts:
+                    line += " | 认知分层: " + "；".join(parts)
+            lines.append(line)
+        return "\n".join(lines)
 
     def _foreshadowing_alerts(self) -> str:
         db = connect()
