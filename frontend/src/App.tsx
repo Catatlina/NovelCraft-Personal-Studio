@@ -10,6 +10,7 @@ import { BookLibrary } from "./components/BookLibrary";
 import { ApiError, api as baseApi, apiRaw, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
+import { RankingCenter } from "./components/RankingCenter";
 import { NotFoundPage } from "./components/NotFoundPage";
 import { buildAiEditPreview } from "./lib/editorPreview";
 
@@ -31,14 +32,13 @@ type Tab = AppTab;
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
-const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings"]);
+const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings", "ranking"]);
 const LEGACY_TAB_REDIRECTS: Record<string, Tab> = {
   home: "dashboard",
   overview: "dashboard",
   workspace: "dashboard",
   create: "wizard",
   inspiration: "wizard",
-  ranking: "wizard",
   books: "library",
   "book-library": "library",
   run: "progress",
@@ -586,6 +586,16 @@ export default function App() {
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
+      {tab === "ranking" && project && (
+        <RankingCenter
+          projectId={project.id}
+          onBookCreated={async (novelId, runId) => {
+            const book = await api<Content>(`/api/v1/contents/${novelId}`);
+            setNovel(book);
+            setTab(runId ? "progress" : "library");
+          }}
+        />
+      )}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
       {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}

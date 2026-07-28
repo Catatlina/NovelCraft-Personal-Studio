@@ -26,6 +26,7 @@ export type AppTab =
 const NAV_ITEMS: Array<{ id: AppTab; label: string; icon: React.ReactNode }> = [
   { id: "dashboard", label: "小说首页", icon: <Sparkles size={19} /> },
   { id: "wizard", label: "创作向导", icon: <WandSparkles size={19} /> },
+  { id: "ranking", label: "扫榜选书", icon: <Search size={19} /> },
   { id: "library", label: "我的书库", icon: <Library size={19} /> },
   { id: "progress", label: "创作进度", icon: <CircleCheckBig size={19} /> },
   { id: "editor", label: "章节编辑器", icon: <FilePenLine size={19} /> },
