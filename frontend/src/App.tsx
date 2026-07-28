@@ -11,6 +11,7 @@ import { ApiError, api as baseApi, apiRaw, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
 import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
 import { NotFoundPage } from "./components/NotFoundPage";
+import { buildAiEditPreview } from "./lib/editorPreview";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
@@ -19,6 +20,13 @@ type RunNode = { node_key: string; kind: string; agent: string | null; title: st
 type Run = { id: string; project_id: string; novel_id: string; status: string; current_node_key: string | null; context: Record<string, unknown>; nodes: RunNode[] };
 type AiCall = { id: string; provider: string; model: string; prompt_name: string; task_type: string; prompt_tokens: number; completion_tokens: number; cost_cny: number; latency_ms: number; status: string; created_at: string };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
+type PendingAiEdit = {
+  op: string;
+  originalText: string;
+  proposedText: string;
+  nextText: string;
+  sourceMutationId?: string;
+};
 type Tab = AppTab;
 
 const API = "";
@@ -96,6 +104,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [offlineNotice, setOfflineNotice] = useState("");
   const [streamPreview, setStreamPreview] = useState("");
+  const [pendingAiEdit, setPendingAiEdit] = useState<PendingAiEdit | null>(null);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
@@ -324,8 +333,16 @@ export default function App() {
 
   async function runEditorOp(op: string) {
     if (!chapter) return;
-    const selectedText = op === "rewrite_chapter" ? editorText : selection;
-    if (!selectedText.trim()) return;
+    const sourceText = editorTextRef.current;
+    const selectedText = op === "rewrite_chapter"
+      ? sourceText
+      : selection || (op === "continue" ? sourceText : "");
+    if (!selectedText.trim()) {
+      setError(op === "continue" ? "当前章节没有可续写内容" : "请先在正文中选择需要处理的文字");
+      return;
+    }
+    setError("");
+    setPendingAiEdit(null);
     const mutationId = crypto.randomUUID();
     const url = `/api/v1/contents/${chapter.id}/ai/${op}`;
     const body = { selection: selectedText, instruction: op === "rewrite_chapter" ? "整章重写，保留核心剧情，优化小说平台阅读体验" : "保持当前风格", client_mutation_id: mutationId };
@@ -341,7 +358,8 @@ export default function App() {
         const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
           delta => setStreamPreview(previous => previous + delta));
         setStreamPreview("");
-        setEditorText(current => current.replace(selectedText, text)); setSelection("");
+        const nextText = buildAiEditPreview(sourceText, selectedText, text, op, Boolean(selection));
+        setPendingAiEdit({ op, originalText: selectedText, proposedText: text, nextText });
         if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
         return;
       }
@@ -356,7 +374,8 @@ export default function App() {
     }
     try {
       const output = await api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) });
-      setEditorText(current => op === "rewrite_chapter" ? output.text : current.replace(selectedText, output.text)); setSelection("");
+      const nextText = buildAiEditPreview(sourceText, selectedText, output.text, op, Boolean(selection));
+      setPendingAiEdit({ op, originalText: selectedText, proposedText: output.text, nextText });
       setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
       if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
     } catch (caught) {
@@ -402,9 +421,16 @@ export default function App() {
           } else if (mutation.kind === "ai_operation") {
             const selectedText = String(mutation.body.selection || "");
             if (chapter?.id && mutation.url.includes(chapter.id) && editorTextRef.current.includes(selectedText)) {
-              setEditorText(current => current.replace(selectedText, response.data.text || ""));
-              await deleteMutation(mutation.id);
-              setOfflineNotice("离线 AI 操作已执行并应用");
+              const proposedText = String(response.data.text || "");
+              setPendingAiEdit({
+                op: mutation.url.split("/").at(-1) || "ai",
+                originalText: selectedText,
+                proposedText,
+                nextText: editorTextRef.current.replace(selectedText, proposedText),
+                sourceMutationId: mutation.id,
+              });
+              await updateMutation(mutation.id, { status: "completed", result: response.data });
+              setOfflineNotice("离线 AI 操作已完成，请预览后决定是否应用");
             } else {
               await updateMutation(mutation.id, { status: "completed", result: response.data });
               setOfflineNotice("离线 AI 操作已完成，结果保留在队列中");
@@ -455,12 +481,32 @@ export default function App() {
 
   async function applyOfflineAiResult(id: string, text: string) {
     if (!text) return;
-    setEditorText(current => `${current}\n\n${text}`.trim());
-    await deleteMutation(id);
-    const allMutations = await listMutations();
-    setOfflineQueueCount(allMutations.length);
-    setOfflineAiResults(results => results.filter(result => result.id !== id));
-    setOfflineNotice("离线 AI 结果已追加到编辑器，请确认后保存");
+    setPendingAiEdit({
+      op: "offline_ai",
+      originalText: "",
+      proposedText: text,
+      nextText: `${editorTextRef.current}\n\n${text}`.trim(),
+      sourceMutationId: id,
+    });
+    setOfflineNotice("离线 AI 结果已载入预览，正文尚未改变");
+  }
+
+  async function applyPendingAiEdit() {
+    if (!pendingAiEdit) return;
+    setEditorText(pendingAiEdit.nextText);
+    setSelection("");
+    if (pendingAiEdit.sourceMutationId) {
+      await deleteMutation(pendingAiEdit.sourceMutationId);
+      setOfflineAiResults(results => results.filter(result => result.id !== pendingAiEdit.sourceMutationId));
+      setOfflineQueueCount((await listMutations()).length);
+    }
+    setPendingAiEdit(null);
+    setOfflineNotice("AI 建议已应用到草稿，自动保存会创建可恢复版本");
+  }
+
+  function discardPendingAiEdit() {
+    setPendingAiEdit(null);
+    setOfflineNotice("已放弃 AI 建议，原文保持不变");
   }
 
   async function loadVersions(contentId: string) {
@@ -533,25 +579,10 @@ export default function App() {
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
       {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
-      {tab === "editor" && <div className="editor-pro">
-        <div className="editor-left">
-          <div style={{fontSize:11,textTransform:'uppercase',color:'var(--text-muted)',marginBottom:8,letterSpacing:'.5px'}}>章节</div>
-          {chapters.map(ch => <div key={ch.id} className={`editor-chapter-item${chapter?.id===ch.id?' active':''}`} onClick={()=>selectChapter(ch.id)}>{ch.title||'未命名'}</div>)}
-        </div>
-        <div className="editor-center">
+      {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit }} />
           </React.Suspense>
-        </div>
-        <div className="editor-right">
-          <div style={{fontSize:11,textTransform:'uppercase',color:'var(--text-muted)',marginBottom:8,letterSpacing:'.5px'}}>AI 助手</div>
-          <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("continue")}>续写</button>
-            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("polish")}>润色</button>
-            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("expand")}>扩写</button>
-            <button className="btn-sm btn-ghost" onClick={()=>runEditorOp("deai")}>去AI味</button>
-          </div>
-        </div>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
       </>}

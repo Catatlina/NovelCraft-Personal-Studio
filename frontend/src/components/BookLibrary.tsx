@@ -265,7 +265,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       volume_plan: book.meta?.volume_plan,
       chapter_outlines: book.meta?.chapter_outlines,
     });
-    return <section className="panel book-detail">
+    return <section className="library-page book-detail page-enter">
       <button className="btn-ghost" onClick={() => setDetail(null)}><ArrowLeft size={14} />返回书库</button>
       {notice && <div className="muted" role="status">{notice}</div>}
       <div className="book-detail-head">
@@ -338,10 +338,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     </section>;
   }
 
-  return <section className="panel">
+  return <section className="library-page page-enter">
     <div className="page-head">
       <div>
-        <h1>统一书库</h1>
+        <h1>我的书库</h1>
         <p>{filtered.length} 本 · {books.length} 本总计</p>
       </div>
       <div className="head-actions">
@@ -377,7 +377,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <option value="chapters">按章节数</option>
       </select>
     </div>
-    {!loading && !books.length && !error ? <EmptyState icon={<BookOpen size={26} />} title="书库为空" description="可以从扫榜中心或灵感入口创建小说，开始你的创作之旅。" /> : <>
+    {!loading && !books.length && !error ? <EmptyState icon={<BookOpen size={26} />} title="书库为空" description="从创作向导创建第一本小说，或导入已有章节目录。" /> : <>
       <div className="grid grid-3">{bookPager.pageData.map((book, index) => {
         const batch = batches[book.id];
         const completion = completions[book.id];

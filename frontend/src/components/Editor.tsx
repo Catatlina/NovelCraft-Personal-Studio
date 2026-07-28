@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Save, RotateCcw, Wand2, Sparkles, Bot, RefreshCcw, Send } from "lucide-react";
+import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
@@ -7,8 +7,9 @@ import "../styles/novel-prose.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
+type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, deaiResult, deaiLoading }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -19,6 +20,9 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   applyOfflineAiResult?: (id: string, text: string) => void;
   streamPreview?: string;
   editorAiReview?: { review?: any; next?: any } | null;
+  pendingAiEdit?: PendingAiEdit | null;
+  applyPendingAiEdit?: () => Promise<void>;
+  discardPendingAiEdit?: () => void;
   deaiResult?: { original_score?: number; final_score?: number; layers?: Array<{ name: string; label: string; score_before: number; score_after: number; status: string }>; final_text?: string } | null;
   deaiLoading?: boolean;
 }) {
@@ -37,28 +41,6 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   const [isFullscreen, setFullscreen] = useState(false);
   const [isNightMode, setNightMode] = useState(false);
   const [isFocusMode, setFocusMode] = useState(false);
-
-  // ── AI chat state ──
-  const [aiChatInput, setAiChatInput] = useState("");
-  // 初始为空数组：不再伪造"AI 已分析"的问候语（审计 P2-1）。
-  // 真实结果由 editorAiReview 回填 / 用户提问后追加；空态由下方引导文案承接。
-  const [aiChatMessages, setAiChatMessages] = useState<Array<{ role: "system" | "user"; text: string }>>([]);
-
-  const sendAiMessage = () => {
-    const text = aiChatInput.trim();
-    if (!text) return;
-    setAiChatMessages(prev => [...prev, { role: "user", text }]);
-    setAiChatInput("");
-    runEditorOp("polish"); // trigger AI operation; the result will feed back via editorAiReview
-  };
-
-  // ── Feed AI review into chat ──
-  useEffect(() => {
-    if (editorAiReview?.review?.issues?.length) {
-      const msgs = editorAiReview.review.issues.map((issue: string) => `• ${issue}`).join("\n");
-      setAiChatMessages(prev => [...prev, { role: "system", text: `七维审查结果：\n${msgs}` }]);
-    }
-  }, [editorAiReview?.review?.issues]);
 
   // ── Keyboard shortcut: Escape to exit fullscreen ──
   useEffect(() => {
@@ -104,6 +86,17 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     return text.replace(/\s/g, "").length;
   }, [editorText]);
 
+  if (!chapter) {
+    return (
+      <section className="editor-empty">
+        <span><FilePenLine size={25} /></span>
+        <p className="eyebrow">CHAPTER EDITOR</p>
+        <h2>还没有可以编辑的章节。</h2>
+        <p>先从创作向导生成首章，或在书库中打开一本已有章节的小说。这里不会创建一段假的示例正文。</p>
+      </section>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)" }}>
       {/* ── Minimal toolbar ── */}
@@ -130,10 +123,28 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
 
       {/* ── Stream preview ── */}
       {streamPreview ? (
-        <div className="card" style={{ maxHeight: 160, overflowY: "auto", fontSize: 13, whiteSpace: "pre-wrap", marginBottom: 12, padding: 12 }}>
-          <small style={{ color: "var(--cyan)" }}>AI 生成中…</small>
+        <div className="ai-stream-preview">
+          <small><span className="spinner" /> AI 正在生成预览，正文尚未改变</small>
           <div style={{ marginTop: 4 }}>{streamPreview}</div>
         </div>
+      ) : null}
+
+      {pendingAiEdit ? (
+        <section className="ai-edit-preview" aria-live="polite">
+          <div className="ai-edit-preview-head">
+            <div><p className="eyebrow">PREVIEW BEFORE APPLY</p><h3>AI 建议已生成，等待你的确认</h3></div>
+            <span>{pendingAiEdit.op}</span>
+          </div>
+          <div className="ai-edit-compare">
+            <label><span>原文</span><textarea readOnly value={pendingAiEdit.originalText || "（追加操作，无替换原文）"} /></label>
+            <label><span>AI 建议</span><textarea readOnly value={pendingAiEdit.proposedText} /></label>
+          </div>
+          <p>应用后只会更新当前草稿，自动保存时会创建可恢复版本；放弃则原文保持不变。</p>
+          <div className="ai-edit-preview-actions">
+            <button type="button" onClick={discardPendingAiEdit}><X size={16} /> 放弃建议</button>
+            <button type="button" className="primary" onClick={() => void applyPendingAiEdit?.()}><Check size={16} /> 应用到草稿</button>
+          </div>
+        </section>
       ) : null}
 
       {/* ── Offline notice ── */}
@@ -250,19 +261,21 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             AI 写作助手
           </div>
 
-          {/* AI chat messages */}
           <div style={{ flex: 1, overflowY: "auto", marginBottom: 8 }}>
-            {aiChatMessages.length === 0 ? (
-              <div style={{ color: "var(--text-3)", fontSize: 13, lineHeight: 1.7, padding: "8px 4px" }}>
-                向 AI 助手提问，或选中文本用浮动工具栏润色 / 续写。
+            <p className="editor-ai-help">选中正文后可润色、改写或去 AI 味；续写与整章重写可直接运行。所有结果都会先进入预览，不会直接覆盖正文。</p>
+            <div className="editor-ai-tools">
+              <button type="button" onClick={() => runEditorOp("continue")}><Bot size={15} /><span><strong>续写本章</strong><small>沿当前正文继续</small></span></button>
+              <button type="button" onClick={() => runEditorOp("rewrite_chapter")}><RefreshCcw size={15} /><span><strong>整章重写</strong><small>保留核心剧情</small></span></button>
+              <button type="button" disabled={!selection.trim()} onClick={() => runEditorOp("polish")}><Wand2 size={15} /><span><strong>润色选区</strong><small>{selection.trim() ? `${selection.length} 字已选择` : "请先选择文字"}</small></span></button>
+              <button type="button" disabled={!selection.trim()} onClick={() => runEditorOp("deai")}><RefreshCcw size={15} /><span><strong>去 AI 味</strong><small>{selection.trim() ? "处理已选文字" : "请先选择文字"}</small></span></button>
+            </div>
+
+            {editorAiReview?.review?.issues?.length ? (
+              <div className="ai-msg">
+                <strong>本次建议的审阅问题</strong>
+                {editorAiReview.review.issues.map((issue: string, index: number) => <div key={`${issue}-${index}`}>• {issue}</div>)}
               </div>
-            ) : (
-              aiChatMessages.map((msg, i) => (
-                <div key={i} className={`ai-msg${msg.role === "user" ? " user" : ""}`}>
-                  {msg.text}
-                </div>
-              ))
-            )}
+            ) : null}
 
             {/* De-AI results display */}
             {deaiResult && (
@@ -287,18 +300,6 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             )}
           </div>
 
-          {/* AI prompt input */}
-          <div className="ai-prompt" style={{ marginTop: "auto" }}>
-            <input
-              placeholder="向 AI 助手提问…"
-              value={aiChatInput}
-              onChange={e => setAiChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") sendAiMessage(); }}
-            />
-            <button className="btn-sm btn-primary" style={{ width: "auto", height: 38 }} onClick={sendAiMessage}>
-              <Send size={14} /> 发送
-            </button>
-          </div>
         </div>
       </div>
 

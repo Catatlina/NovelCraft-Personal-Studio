@@ -1,360 +1,174 @@
-import React, { useEffect, useState } from "react";
-import { Key, Cpu, DollarSign, Save, RefreshCw, Code2, Settings2, Check, X, PlugZap } from "lucide-react";
-import { apiRaw } from "../lib/api";
+import { ChangeEvent, useEffect, useState } from "react";
+import { BarChart3, Check, Database, Eye, EyeOff, KeyRound, Lock, Save, Upload } from "lucide-react";
+import {
+  api,
+  getApiKey,
+  getApiUrl,
+  getModel,
+  setApiKey,
+  setApiUrl,
+  setModel,
+} from "../lib/api";
 
-type Provider = { name: string; key_configured: boolean; base_url: string; default_model: string };
-type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string,unknown>; fallback_json: any[] };
-type Budget = { id: string; project_id: string; scope: string; limit_cny: number; spent_cny: number };
-type Prompt = { id: string; name: string; version: string; model: string; template: string };
-type AppSetting = { key: string; value: string; description: string; updated_at: string };
-type ConnectionField = { key: string; label: string; type: string; required?: boolean };
-type ConnectionSpec = { category: string; display_name: string; help?: string; fields: ConnectionField[] };
-type ConnectionItem = { id: string; platform: string; account_name: string; display_name: string; category: string; configured_fields: string[]; missing_required: string[]; updated_at: string };
+type SettingsTab = "ai" | "data" | "account";
+type Stats = { ai_calls: number; contents: number; db_size: string };
 
 export function Settings({ projectId = "" }: { projectId?: string }) {
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [routes, setRoutes] = useState<ModelRoute[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
-  const [settings, setAppSettings] = useState<AppSetting[]>([]);
-  const [connectionSpecs, setConnectionSpecs] = useState<Record<string, ConnectionSpec>>({});
-  const [connections, setConnections] = useState<ConnectionItem[]>([]);
-  const [connectionCategory, setConnectionCategory] = useState("hotspot");
-  const [connectionPlatform, setConnectionPlatform] = useState("");
-  const [connectionAccount, setConnectionAccount] = useState("default");
-  const [connectionCreds, setConnectionCreds] = useState<Record<string,string>>({});
-  const [subtab, setSubtab] = useState<"providers"|"routes"|"budgets"|"prompts"|"appsettings"|"connections"|"data"|"account">("appsettings");
-  const [pwOld, setPwOld] = useState("");
-  const [pwNew, setPwNew] = useState("");
-  const [pwMsg, setPwMsg] = useState("");
+  const [tab, setTab] = useState<SettingsTab>("ai");
+  const [apiKey, setApiKeyValue] = useState(getApiKey);
+  const [apiUrl, setApiUrlValue] = useState(getApiUrl);
+  const [model, setModelValue] = useState(getModel);
   const [showKey, setShowKey] = useState(false);
-  const [apiKey, setApiKeyLocal] = useState("");
-  const [apiUrl, setApiUrlLocal] = useState("");
-  const [model, setModelLocal] = useState("");
-  const [saved, setSaved] = useState(true);
-  const [editRoute, setEditRoute] = useState<ModelRoute|null>(null);
-  const [editBudget, setEditBudget] = useState<{pid:string;scope:string;limit:number}|null>(null);
-  const [editSetting, setEditSetting] = useState<{key:string;value:string;description:string}|null>(null);
-  const [msg, setMsg] = useState("");
-  const [stats, setStats] = useState<{ ai_calls: number; contents: number; db_size: string } | null>(null);
-
-  // Load saved API config on mount
-  useEffect(() => {
-    import("../lib/api").then(({ getApiKey, getApiUrl, getModel }) => {
-      setApiKeyLocal(getApiKey()); setApiUrlLocal(getApiUrl()); setModelLocal(getModel());
-    });
-  }, []);
+  const [configDirty, setConfigDirty] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [statsError, setStatsError] = useState("");
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    apiRaw("/api/v1/admin/providers").then(d=>setProviders(d.data||[]));
-    apiRaw("/api/v1/admin/model-routes").then(d=>setRoutes(d.data||[]));
-    apiRaw("/api/v1/admin/budgets").then(d=>setBudgets(d.data||[]));
-    apiRaw("/api/v1/admin/prompts").then(d=>setPrompts(d.data||[]));
-    apiRaw("/api/v1/admin/settings").then(d=>setAppSettings(d.data||[]));
-    loadConnections();
-    apiRaw("/api/v1/stats/overview").then(d=>setStats(d.data||null)).catch(()=>setStats(null));
-  }, []);
+    if (tab !== "data") return;
+    setStatsError("");
+    api<Stats>("/api/v1/stats/overview")
+      .then(setStats)
+      .catch(caught => setStatsError(caught instanceof Error ? caught.message : String(caught)));
+  }, [tab]);
 
-  async function loadConnections() {
-    const specs = await apiRaw("/api/v1/platform-connections/specs");
-    const specData = specs.data || {};
-    setConnectionSpecs(specData);
-    if (!connectionPlatform) {
-      const first = Object.entries(specData).find(([, spec]: any) => spec.category === connectionCategory)?.[0] || Object.keys(specData)[0] || "";
-      setConnectionPlatform(first);
+  function saveAiConfig() {
+    setApiKey(apiKey.trim());
+    setApiUrl(apiUrl.trim());
+    setModel(model.trim());
+    setConfigDirty(false);
+    setNotice({ kind: "success", text: "AI 配置已保存在当前浏览器会话，后续创作请求会立即使用。" });
+  }
+
+  async function exportKnowledge() {
+    if (!projectId) {
+      setNotice({ kind: "error", text: "当前没有可导出的小说项目。" });
+      return;
     }
-    const rows = await apiRaw("/api/v1/platform-connections");
-    setConnections(rows.data || []);
+    setBusy("export");
+    setNotice(null);
+    try {
+      const rows = await api<unknown[]>(`/api/v1/knowledge?project_id=${encodeURIComponent(projectId)}`);
+      const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json;charset=utf-8" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `starlume-knowledge-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(href);
+      setNotice({ kind: "success", text: `已导出 ${rows.length} 条知识数据。` });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `导出失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setBusy("");
+    }
   }
 
-  const platformsForCategory = Object.entries(connectionSpecs)
-    .filter(([, spec]) => spec.category === connectionCategory);
-  const activeSpec = connectionSpecs[connectionPlatform];
-
-  async function saveConnection() {
-    if (!connectionPlatform) return;
-    await apiRaw("/api/v1/platform-connections", {
-      method: "POST",
-      body: JSON.stringify({ platform: connectionPlatform, account_name: connectionAccount || "default", credentials: connectionCreds }),
-    });
-    setMsg("平台连接已保存（敏感字段已加密，不会回显）");
-    setConnectionCreds({});
-    await loadConnections();
+  async function importKnowledge(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !projectId) return;
+    setBusy("import");
+    setNotice(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const result = await api<{ imported?: number; count?: number }>(`/api/v1/knowledge/import?project_id=${encodeURIComponent(projectId)}`, { method: "POST", body: form });
+      setNotice({ kind: "success", text: `知识数据导入完成：${result.imported ?? result.count ?? 0} 条。` });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `导入失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setBusy("");
+    }
   }
 
-  async function deleteConnection(id: string) {
-    await apiRaw(`/api/v1/platform-connections/${id}`, { method: "DELETE" });
-    setMsg("平台连接已删除");
-    await loadConnections();
-  }
-
-  async function testConnection(platform: string) {
-    const result = await apiRaw(`/api/v1/platform-connections/${platform}/test`, { method: "POST" });
-    setMsg(`检测结果：${result.data?.status || "unknown"}`);
-  }
-
-  async function saveRoute() {
-    if (!editRoute) return;
-    await apiRaw(`/api/v1/admin/model-routes/${editRoute.task_type}`, {
-      method: "PUT", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({provider:editRoute.provider, model:editRoute.model, params:editRoute.params, fallbacks:editRoute.fallback_json||[]}),
-    });
-    setMsg("路由已保存"); setEditRoute(null);
-    const r = await apiRaw("/api/v1/admin/model-routes");
-    setRoutes(r.data||[]);
-  }
-
-  async function saveBudget() {
-    if (!editBudget) return;
-    await apiRaw(`/api/v1/admin/budgets/${editBudget.pid}/${encodeURIComponent(editBudget.scope)}`, {
-      method: "PUT", body: JSON.stringify({ limit_cny: editBudget.limit }),
-    });
-    const refreshed = await apiRaw("/api/v1/admin/budgets");
-    setBudgets(refreshed.data || []);
-    setEditBudget(null);
-  }
-
-  async function saveApiConfig() {
-    const { setApiKey, setApiUrl, setModel } = await import("../lib/api");
-    setApiKey(apiKey); setApiUrl(apiUrl); setModel(model);
-    setSaved(true);
-    setMsg("API 配置已保存");
-  }
-
-  async function saveSetting() {
-    if (!editSetting) return;
-    await apiRaw(`/api/v1/admin/settings/${editSetting.key}`, {
-      method:"PUT", body: JSON.stringify({value: editSetting.value}),
-    });
-    setMsg(`${editSetting.key} 已保存`);
-    setEditSetting(null);
-    const r = await apiRaw("/api/v1/admin/settings");
-    setAppSettings(r.data||[]);
+  async function changePassword() {
+    setBusy("password");
+    setNotice(null);
+    try {
+      await api("/api/v1/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+      });
+      setOldPassword("");
+      setNewPassword("");
+      setNotice({ kind: "success", text: "密码已修改，其他设备上的旧会话将失效。" });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `修改失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setBusy("");
+    }
   }
 
   return (
-    <div style={{display:"grid",gridTemplateColumns:"200px 1fr",gap:16,minHeight:400}}>
-      <div className="panel" style={{display:"flex",flexDirection:"column",gap:4}}>
-        <button className={subtab==="appsettings"?"active":""} onClick={()=>setSubtab("appsettings")} style={{justifyContent:"flex-start"}}><Settings2 size={16}/> 全局配置</button>
-        <button className={subtab==="providers"?"active":""} onClick={()=>setSubtab("providers")} style={{justifyContent:"flex-start"}}><Key size={16}/> Providers</button>
-        <button className={subtab==="routes"?"active":""} onClick={()=>setSubtab("routes")} style={{justifyContent:"flex-start"}}><Cpu size={16}/> 模型路由</button>
-        <button className={subtab==="budgets"?"active":""} onClick={()=>setSubtab("budgets")} style={{justifyContent:"flex-start"}}><DollarSign size={16}/> 预算</button>
-        <button className={subtab==="connections"?"active":""} onClick={()=>setSubtab("connections")} style={{justifyContent:"flex-start"}}><PlugZap size={16}/> 平台连接</button>
-        <button className={subtab==="prompts"?"active":""} onClick={()=>setSubtab("prompts")} style={{justifyContent:"flex-start"}}><Code2 size={16}/> Prompts</button>
-        <button className={subtab==="data"?"active":""} onClick={()=>setSubtab("data")} style={{justifyContent:"flex-start"}}><Save size={16}/> 数据</button>
-        <button className={subtab==="account"?"active":""} onClick={()=>setSubtab("account")} style={{justifyContent:"flex-start"}}><Key size={16}/> 账号</button>
-      </div>
+    <div className="novel-settings page-enter">
+      <section className="settings-heading">
+        <p className="eyebrow">NOVEL SETTINGS</p>
+        <h2>小说设置</h2>
+        <p>只保留与个人小说创作直接相关的连接、数据与账号设置。</p>
+      </section>
 
-      <div className="panel" style={{overflow:"auto"}}>
-        {msg && <div className="error" style={{background:"#1a3a28",color:"var(--success)",border:"1px solid var(--success)",marginBottom:8}}>{msg}<button onClick={()=>setMsg("")} style={{float:"right",border:"none",background:"none",color:"var(--success)"}}>×</button></div>}
+      {notice && <div className={`settings-notice ${notice.kind}`} role="status">{notice.kind === "success" ? <Check size={16} /> : <Lock size={16} />}{notice.text}</div>}
 
-        {subtab==="appsettings" && (
-          <div>
-            <h3>全局系统配置</h3>
-            <p style={{fontSize:12,color:"var(--text-muted)"}}>下方 API 配置仅保存在当前浏览器会话（BYOK），会作为 X-Api-Key / X-Api-Base-Url / X-Model 传给当前请求；DeepSeek、Claude、OpenAI、Gemini 的交互式调用都可使用。定时任务和 Worker 请通过环境变量配置并重启服务。</p>
-            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-              <input type={showKey ? "text" : "password"} placeholder="当前路由 Provider API Key（DeepSeek/Claude/OpenAI/Gemini）" value={apiKey}
-                autoComplete="off"
-                onChange={e => { setApiKeyLocal(e.target.value); setSaved(false); }}
-                style={{flex:1}} />
-              <button type="button" onClick={() => setShowKey(v => !v)} style={{whiteSpace:"nowrap"}}>
-                {showKey ? "隐藏" : "显示"}
-              </button>
-            </div>
-            <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <input placeholder="API 地址，例 https://api.deepseek.com/v1 或 OpenAI/Claude/Gemini endpoint" value={apiUrl}
-                onChange={e => { setApiUrlLocal(e.target.value); setSaved(false); }}
-                style={{flex:1,fontSize:13}} />
-              <input placeholder="模型名，例 deepseek-chat / gpt-4o / claude-sonnet-4-20250514" value={model}
-                onChange={e => { setModelLocal(e.target.value); setSaved(false); }}
-                style={{flex:1,fontSize:13}} />
-            </div>
-            <div style={{marginBottom:12}}>
-              <button className="primary" onClick={saveApiConfig} disabled={saved} style={{justifyContent:"center"}}>
-                {saved ? "✅ 已保存" : "💾 保存 API 配置"}
-              </button>
-            </div>
-            <table><thead><tr><th>配置项</th><th>值</th><th>说明</th><th>操作</th></tr></thead>
-            <tbody>
-              {settings.map((s:AppSetting) => (
-                <tr key={s.key}>
-                  <td style={{fontSize:13,fontWeight:600}}>{s.key}</td>
-                  <td style={{fontSize:12,color:"var(--text-muted)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis"}}>{s.value}</td>
-                  <td style={{fontSize:12,color:"var(--text-secondary)"}}>{s.description}</td>
-                  <td><button onClick={()=>setEditSetting({key:s.key,value:s.value.replace(/[*]+/g,""),description:s.description})} style={{fontSize:12}}>编辑</button></td>
-                </tr>
-              ))}
-            </tbody></table>
-            {editSetting && (
-              <div className="panel" style={{marginTop:12}}>
-                <h3>编辑: {editSetting.key}</h3>
-                <p style={{fontSize:12,color:"var(--text-muted)"}}>{editSetting.description}</p>
-                <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:8}}>
-                  <label>值
-                    <input value={editSetting.value}
-                      type={editSetting.key.includes("api_key")?"password":"text"}
-                      onChange={e=>setEditSetting({...editSetting,value:e.target.value})}
-                      style={{width:"100%"}} />
-                  </label>
-                  <div style={{display:"flex",gap:8}}>
-                    <button className="primary" onClick={saveSetting}><Save size={14}/>保存</button>
-                    <button onClick={()=>setEditSetting(null)}>取消</button>
-                  </div>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="小说设置分类">
+          <button type="button" className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}><KeyRound size={18} /><span>AI 连接</span></button>
+          <button type="button" className={tab === "data" ? "active" : ""} onClick={() => setTab("data")}><Database size={18} /><span>创作数据</span></button>
+          <button type="button" className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><Lock size={18} /><span>账号安全</span></button>
+        </nav>
+
+        <main className="settings-content starlume-card">
+          {tab === "ai" && (
+            <section className="settings-section">
+              <div><p className="eyebrow">BYOK</p><h3>AI 连接</h3><p>配置只保存在当前浏览器会话，并通过请求头交给后端；不会写进仓库或显示在页面其他位置。</p></div>
+              <label className="settings-field">
+                <span>Provider API Key</span>
+                <div className="secret-field">
+                  <input type={showKey ? "text" : "password"} autoComplete="off" placeholder="输入 DeepSeek / OpenAI / Claude / Gemini Key" value={apiKey} onChange={event => { setApiKeyValue(event.target.value); setConfigDirty(true); }} />
+                  <button type="button" aria-label={showKey ? "隐藏 API Key" : "显示 API Key"} onClick={() => setShowKey(value => !value)}>{showKey ? <EyeOff size={17} /> : <Eye size={17} />}</button>
                 </div>
+              </label>
+              <div className="settings-fields-row">
+                <label className="settings-field"><span>API 地址</span><input placeholder="例如 https://api.deepseek.com/v1" value={apiUrl} onChange={event => { setApiUrlValue(event.target.value); setConfigDirty(true); }} /></label>
+                <label className="settings-field"><span>模型</span><input placeholder="例如 deepseek-chat" value={model} onChange={event => { setModelValue(event.target.value); setConfigDirty(true); }} /></label>
               </div>
-            )}
-          </div>
-        )}
-
-        {subtab==="providers" && (
-          <table><thead><tr><th>Provider</th><th>API Key</th><th>Base URL</th><th>默认模型</th></tr></thead>
-          <tbody>{providers.map(p=><tr key={p.name}><td><strong>{p.name}</strong></td><td>{p.key_configured?"✅ 已配置":"⚠️ 未配置"}</td><td style={{fontSize:12,color:"var(--text-muted)"}}>{p.base_url}</td><td>{p.default_model}</td></tr>)}</tbody></table>
-        )}
-
-        {subtab==="routes" && (
-          <div>
-            <table><thead><tr><th>任务类型</th><th>Provider</th><th>模型</th><th>操作</th></tr></thead>
-            <tbody>{routes.map(r=><tr key={r.id}><td style={{fontSize:13}}>{r.task_type}</td><td>{r.provider}</td><td style={{fontSize:13}}>{r.model}</td><td><button onClick={()=>setEditRoute({...r})}><RefreshCw size={14}/> 编辑</button></td></tr>)}</tbody></table>
-            {editRoute && (
-              <div className="panel" style={{marginTop:12}}>
-                <h3>编辑: {editRoute.task_type}</h3>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <label>Provider <select value={editRoute.provider} onChange={e=>setEditRoute({...editRoute,provider:e.target.value})}>{["deepseek","claude","openai","gemini"].map(p=><option key={p}>{p}</option>)}</select></label>
-                  <label>模型 <input value={editRoute.model} onChange={e=>setEditRoute({...editRoute,model:e.target.value})} /></label>
-                  <div style={{display:"flex",gap:8}}><button className="primary" onClick={saveRoute}><Save size={14}/>保存</button><button onClick={()=>setEditRoute(null)}>取消</button></div>
-                </div>
+              <div className="settings-callout">
+                <KeyRound size={18} />
+                <div><strong>{apiKey ? "当前会话已配置个人 Key" : "当前会话未配置个人 Key"}</strong><p>未配置时会使用服务器全局 Provider；如果两处都未配置，创作向导会明确阻止启动。</p></div>
               </div>
-            )}
-          </div>
-        )}
+              <button type="button" className="settings-save" disabled={!configDirty} onClick={saveAiConfig}><Save size={17} /> {configDirty ? "保存 AI 配置" : "配置已保存"}</button>
+            </section>
+          )}
 
-        {subtab==="budgets" && (
-          <div>
-            <table><thead><tr><th>项目</th><th>范围</th><th>已用</th><th>限额</th><th>操作</th></tr></thead>
-            <tbody>{budgets.map(b=><tr key={b.id}><td style={{fontSize:12}}>{b.project_id?.slice(0,8)}</td><td>{b.scope}</td><td>¥{Number(b.spent_cny).toFixed(4)}</td><td>¥{Number(b.limit_cny).toFixed(2)}</td><td><button onClick={()=>setEditBudget({pid:b.project_id,scope:b.scope,limit:Number(b.limit_cny)})}><RefreshCw size={14}/> 调整</button></td></tr>)}</tbody></table>
-            {editBudget && (
-              <div className="panel" style={{marginTop:12}}>
-                <h3>调整预算: {editBudget.scope}</h3>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <label>限额(¥) <input type="number" value={editBudget.limit} onChange={e=>setEditBudget({...editBudget,limit:Number(e.target.value)})} step={0.5} min={0} /></label>
-                  <div style={{display:"flex",gap:8}}><button className="primary" onClick={saveBudget}><Save size={14}/>保存</button><button onClick={()=>setEditBudget(null)}>取消</button></div>
-                </div>
+          {tab === "data" && (
+            <section className="settings-section">
+              <div><p className="eyebrow">YOUR DATA</p><h3>创作数据</h3><p>导入与导出都使用当前真实项目，不会生成演示数据。</p></div>
+              <div className="settings-stats">
+                {statsError ? <div className="settings-data-error">{statsError}</div> : stats ? <>
+                  <div><BarChart3 size={18} /><span>AI 调用</span><strong>{stats.ai_calls.toLocaleString("zh-CN")}</strong></div>
+                  <div><Database size={18} /><span>内容条目</span><strong>{stats.contents.toLocaleString("zh-CN")}</strong></div>
+                  <div><Database size={18} /><span>数据库</span><strong>{stats.db_size}</strong></div>
+                </> : <div className="settings-data-loading"><span className="spinner" /> 正在读取真实统计…</div>}
               </div>
-            )}
-          </div>
-        )}
-
-        {subtab==="connections" && (
-          <div style={{display:"grid",gap:16}}>
-            <div>
-              <h3>平台连接配置</h3>
-              <p className="muted">所有需要真实平台账号、API、Cookie、热点源 URL 或人工填写的地方都在这里配置。敏感字段加密入库，列表只显示“已配置/缺失”，不回显明文。</p>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-                {["hotspot","publish","ops"].map(cat => <button key={cat} className={connectionCategory===cat?"active":""} onClick={() => {
-                  setConnectionCategory(cat);
-                  const first = Object.entries(connectionSpecs).find(([, spec]) => spec.category === cat)?.[0] || "";
-                  setConnectionPlatform(first); setConnectionCreds({});
-                }}>{cat === "hotspot" ? "热点源" : cat === "publish" ? "发布平台" : "运维告警"}</button>)}
+              <div className="data-actions">
+                <label className={projectId ? "" : "disabled"}><Upload size={18} /><span><strong>导入知识数据</strong><small>支持 TXT、Markdown、JSON、PDF、DOCX</small></span><input type="file" accept=".txt,.md,.json,.jsonl,.pdf,.docx" disabled={!projectId || busy === "import"} onChange={event => void importKnowledge(event)} /></label>
+                <button type="button" disabled={!projectId || Boolean(busy)} onClick={() => void exportKnowledge()}><Database size={18} /><span><strong>{busy === "export" ? "正在导出…" : "导出知识数据"}</strong><small>下载当前项目的 JSON 备份</small></span></button>
               </div>
-              <div className="panel" style={{display:"grid",gap:10}}>
-                <label>平台
-                  <select value={connectionPlatform} onChange={e => { setConnectionPlatform(e.target.value); setConnectionCreds({}); }} style={{width:"100%"}}>
-                    {platformsForCategory.map(([key, spec]) => <option key={key} value={key}>{spec.display_name}</option>)}
-                  </select>
-                </label>
-                {activeSpec?.help && <small className="muted">{activeSpec.help}</small>}
-                <label>账号/连接名
-                  <input value={connectionAccount} onChange={e=>setConnectionAccount(e.target.value)} placeholder="default" />
-                </label>
-                {activeSpec?.fields?.map(field => (
-                  <label key={field.key}>{field.label}{field.required ? " *" : ""}
-                    <input
-                      type={field.type === "secret" ? "password" : field.type === "url" ? "url" : "text"}
-                      value={connectionCreds[field.key] || ""}
-                      onChange={e=>setConnectionCreds({...connectionCreds, [field.key]: e.target.value})}
-                      autoComplete="off"
-                      placeholder={field.type === "secret" ? "保存后不回显" : ""}
-                    />
-                  </label>
-                ))}
-                <button className="primary" onClick={saveConnection} disabled={!connectionPlatform}><Save size={14}/>保存连接</button>
-              </div>
-            </div>
-            <div>
-              <h3>已配置连接</h3>
-              <table><thead><tr><th>平台</th><th>连接名</th><th>状态</th><th>字段</th><th>操作</th></tr></thead>
-                <tbody>{connections.map(item => <tr key={item.id}>
-                  <td>{item.display_name}</td>
-                  <td>{item.account_name}</td>
-                  <td>{item.missing_required?.length ? `缺少 ${item.missing_required.join(", ")}` : "已配置"}</td>
-                  <td style={{fontSize:12,color:"var(--text-muted)"}}>{item.configured_fields.join(", ") || "—"}</td>
-                  <td style={{display:"flex",gap:6}}>
-                    <button onClick={()=>testConnection(item.platform)}>检测</button>
-                    <button onClick={()=>deleteConnection(item.id)}><X size={12}/>删除</button>
-                  </td>
-                </tr>)}</tbody>
-              </table>
-              {!connections.length && <p className="muted">暂无平台连接。选择上方平台并保存后，热点采集、发布、告警等功能会优先使用这里的配置。</p>}
-            </div>
-          </div>
-        )}
+            </section>
+          )}
 
-        {subtab==="prompts" && (
-          <table><thead><tr><th>名称</th><th>版本</th><th>模型</th><th>模板(前80字)</th></tr></thead>
-          <tbody>{prompts.slice(0,30).map(p=><tr key={p.id}><td style={{fontSize:13}}>{p.name}</td><td>{p.version}</td><td>{p.model}</td><td style={{fontSize:12,color:"var(--text-muted)",maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.template?.slice(0,80)}</td></tr>)}</tbody></table>
-        )}
-
-        {subtab==="data" && (
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div>
-              <h3>导入知识库</h3>
-              <input type="file" accept=".txt,.md,.json,.jsonl,.pdf,.docx" disabled={!projectId} onChange={async e=>{
-                const f=e.target.files?.[0]; if(!f)return;
-                const form = new FormData(); form.append("file", f);
-                await apiRaw(`/api/v1/knowledge/import?project_id=${projectId}`,{method:"POST",body:form});
-                alert("导入成功");
-              }} />
-              {!projectId && <small className="muted">请先选择项目再导入。</small>}
-            </div>
-            <div>
-              <h3>导出知识库</h3>
-              <button onClick={async()=>{
-                if (!projectId) { alert("请先选择项目"); return; }
-                const r=await apiRaw(`/api/v1/knowledge?project_id=${projectId}`);
-                const blob=new Blob([JSON.stringify(r.data||[],null,2)],{type:"application/json"});
-                const a=document.createElement("a");a.href=URL.createObjectURL(blob);
-                a.download="novelcraft_knowledge.json";a.click();
-              }}>导出 JSON</button>
-            </div>
-            <div>
-              <h3>数据统计</h3>
-              <table><tbody>
-                {[{label:"AI 调用次数",value:stats?stats.ai_calls:"加载中…"},{label:"内容条数",value:stats?stats.contents:"加载中…"},{label:"数据库大小",value:stats?stats.db_size:"加载中…"}].map((m,i)=>
-                  <tr key={i}><td>{m.label}</td><td style={{fontWeight:600}}>{m.value}</td></tr>
-                )}
-              </tbody></table>
-            </div>
-          </div>
-        )}
-
-        {subtab==="account" && (
-          <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:420}}>
-            <h3>修改密码</h3>
-            <input type="password" placeholder="当前密码" value={pwOld} onChange={e=>setPwOld(e.target.value)} />
-            <input type="password" placeholder="新密码（至少 8 位）" value={pwNew} onChange={e=>setPwNew(e.target.value)} />
-            <button disabled={!pwOld || pwNew.length < 8} onClick={async()=>{
-              setPwMsg("");
-              try {
-                await apiRaw("/api/v1/auth/change-password",{method:"POST",body:JSON.stringify({old_password:pwOld,new_password:pwNew})});
-                setPwOld(""); setPwNew(""); setPwMsg("密码已修改，其他设备的登录已失效。");
-              } catch (err:any) {
-                const detail = err?.payload?.detail;
-                setPwMsg(typeof detail==="string" ? detail : "修改失败，请检查当前密码。");
-              }
-            }}>更新密码</button>
-            {pwMsg && <small className="muted">{pwMsg}</small>}
-          </div>
-        )}
+          {tab === "account" && (
+            <section className="settings-section settings-account">
+              <div><p className="eyebrow">SECURITY</p><h3>修改密码</h3><p>修改成功后，其他设备上的旧登录会话会失效。</p></div>
+              <label className="settings-field"><span>当前密码</span><input type="password" autoComplete="current-password" value={oldPassword} onChange={event => setOldPassword(event.target.value)} /></label>
+              <label className="settings-field"><span>新密码</span><input type="password" autoComplete="new-password" placeholder="至少 8 位" value={newPassword} onChange={event => setNewPassword(event.target.value)} /></label>
+              <button type="button" className="settings-save" disabled={!oldPassword || newPassword.length < 8 || busy === "password"} onClick={() => void changePassword()}><Lock size={17} /> {busy === "password" ? "正在更新…" : "更新密码"}</button>
+            </section>
+          )}
+        </main>
       </div>
     </div>
   );
