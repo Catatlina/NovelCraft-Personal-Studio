@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X } from "lucide-react";
 import { RichEditor } from "./RichEditor";
+import { PacingCurve } from "./PacingCurve";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import "../styles/novel-prose.css";
 
-type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown> };
+type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown>; parent_id?: string | null };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
@@ -206,6 +207,11 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onPageSizeChange={chapterTreePager.setPageSize}
             pageSizeOptions={[10, 20, 50, 100]}
           />
+
+          {/* V3 §11.2: pacing curve over persisted per-chapter rhythm scores */}
+          {(chapter?.parent_id || chapters[0]?.parent_id) ? (
+            <PacingCurve novelId={(chapter?.parent_id || chapters[0]?.parent_id) as string} />
+          ) : null}
 
           {/* Chapter selector dropdown (compact, for large lists) */}
           {chapters.length > 0 && (

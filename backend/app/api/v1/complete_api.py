@@ -233,6 +233,15 @@ def get_novel_completion_endpoint(novel_id: str, user: dict = Depends(get_curren
     return ok(get_novel_completion_status(novel_id))
 
 
+@router.get("/novels/{novel_id}/pacing-series")
+def get_pacing_series_endpoint(novel_id: str, user: dict = Depends(get_current_user)):
+    """V3 §11.2: per-chapter rhythm time series (review pace / pacing gate /
+    reader experience) for the frontend pacing curve."""
+    from app.services.pacing_series import get_pacing_series
+    require_novel_member(novel_id, user)
+    return ok(get_pacing_series(novel_id))
+
+
 @router.post("/novels/{novel_id}/completion")
 def generate_novel_continuation(novel_id: str, user: dict = Depends(get_current_user), payload: dict | None = None):
     """Generate continuation (mode=continue) or polish (mode=polish) text for a novel's latest chapter."""
