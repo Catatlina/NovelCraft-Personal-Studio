@@ -24,6 +24,13 @@
 - 证据：run9 两次真实 `ai_calls`（deepseek-v4-pro，succeeded）；截图 protected-07/08/09；恢复后 `content.body` 经 API 取证确为 `[{text:"档案室..."}]`，编辑器 DOM `<p>档案室...</p>`。
 - 状态提升：NOV-E-002、NOV-E-004 已接线 → **可用**；KI-003 收口为可用；"已验收"仍需生产部署 smoke（KI-002）。NOV-E-003（AI 失败不覆盖原文）仍为已接线，待失败注入 E2E。
 
+### 2026-07-28 创作进度真实节点浏览器证据（未完成顺序 item ③）
+
+- 新增聚焦 E2E `小说主线③：创作进度运行中真实节点浏览器证据（protected）`：启动 run 后轮询到「生成中」节点/「创作中」状态即截图，约 3.4s 命中，生成 `protected-01-progress-running.png`（真实浏览器，运行中节点 + 完成度文案 + 真实节点标题）。该用例与既有 `小说主线③：建书→详情→导入章节→编辑→保存→重载持久化`（非 protected）同批通过。
+- `Progress.test.tsx` 补失败/重试单测：失败节点显示失败原因与「重试此步骤」按钮，点击后 `apiRaw` 打到 `/api/v1/runs/{id}/nodes/{key}/retry`（POST）；另保留空态与人工定名单测。单测 11 → **12 passed**。
+- 浏览器证据汇总：运行中(protected-01) + 人工定名(protected-02) + 19 节点完成态(protected-03，19 ai_calls) 来自 KI-001 run 8f1fd62b；失败/重试由单测 + 重试端点覆盖（真实浏览器失败注入需强制节点失败，留作后续）。
+- 状态提升：NOV-P-001 已接线 → **可用**；"已验收"仍需生产部署 smoke（KI-002）。
+
 ### 2026-07-28 AI 交接 checkpoint
 
 - 已新增 `docs/AI_HANDOFF.md`、`REQUIREMENTS_TRACEABILITY.md`、`KNOWN_ISSUES.md`、`ACCEPTANCE_CRITERIA.md`、`AI_CONTINUITY.md`，并把交接读写责任加入 `AGENTS.md`；项目状态不再只依赖聊天记录。

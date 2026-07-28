@@ -12,7 +12,7 @@
 | NOV-H-001 | 首页显示真实书籍和运行状态 | `WorkspaceDashboard.tsx` | `/library/books`、`/runs/latest` | 可用 | 单测、E2E 空状态 | 有书/有运行生产证据 |
 | NOV-W-001 | 输入创意、题材、风格、篇幅并启动 | `Wizard.tsx` | Bootstrap API、真实 Gateway | 可用 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；修复 step 校验 bug | 生产 smoke |
 | NOV-W-002 | AI 策划后必须人工确认书名 | `Progress.tsx` | `human_confirm_title` 节点 | 可用 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；waiting_human 真实出现并点选定名 | 生产 smoke |
-| NOV-P-001 | 展示真实节点、产物、失败和重试 | `Progress.tsx` | Runs、nodes、retry API | 已接线 | 单测、真实字段渲染 | 运行中/失败/完成 E2E |
+| NOV-P-001 | 展示真实节点、产物、失败和重试 | `Progress.tsx` | Runs、nodes、retry API | 可用 | 单测(Progress.test.tsx：空态、人工定名、失败原因+重试打到 `/runs/{id}/nodes/{key}/retry`)；protected E2E 小说主线③ 运行中真实节点截图(protected-01)；小说主线⑤ 人工定名(protected-02)/19 节点完成(protected-03, 19 ai_calls) | 生产 smoke |
 | NOV-L-001 | 书库加载、搜索、筛选、排序 | `BookLibrary.tsx` | `/library/books` | 可用 | 真实空态与建书 E2E | 分页/筛选 E2E |
 | NOV-L-002 | 详情、章节目录和导入 | `BookLibrary.tsx` | novel/detail/import API | 可用 | E2E 主线③ | 生产 smoke |
 | NOV-L-003 | TXT/MD 导出 | `BookLibrary.tsx` | export API | 可用 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；导出正文断言通过 | 生产 smoke |

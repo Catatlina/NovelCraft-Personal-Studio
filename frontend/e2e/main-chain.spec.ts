@@ -227,6 +227,37 @@ test("小说主线⑥：真实 AI 编辑 生成→预览→放弃/应用→版�
   void proposalMark; // 首次建议仅用于放弃分支断言
 });
 
+test("小说主线③：创作进度运行中真实节点浏览器证据（protected）", async ({ page }) => {
+  test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY");
+  test.setTimeout(240_000);
+
+  await registerFreshUser(page);
+  await page.getByRole("navigation", { name: "小说创作主导航" })
+    .getByRole("button", { name: "创作向导", exact: true }).click();
+  await page.getByRole("textbox", { name: /用几句话描述你的故事/ }).fill(
+    "一位城市档案修复师发现，被删除的旧报纸会在午夜预告第二天的失踪案。",
+  );
+  await page.getByRole("combobox", { name: "小说题材" }).selectOption("悬疑");
+  await page.getByRole("button", { name: /短篇/ }).click();
+  await page.getByRole("button", { name: "开始生成小说" }).click();
+
+  // 进度页自动出现；轮询直到至少有一个节点处于「生成中」或整体状态为创作中
+  await expect(page.locator(".node-list")).toBeVisible({ timeout: 120_000 });
+  const runningDeadline = Date.now() + 120_000;
+  let sawRunning = false;
+  while (Date.now() < runningDeadline) {
+    if (await page.locator(".node-list button.running").count() > 0) { sawRunning = true; break; }
+    const runState = page.locator(".progress-run-state").first();
+    if (await runState.count() > 0 && (await runState.textContent())?.includes("创作中")) { sawRunning = true; break; }
+    await page.waitForTimeout(1000);
+  }
+  expect(sawRunning, "应出现至少一个生成中节点或创作中状态").toBe(true);
+  // 进度页渲染真实节点标题与完成度文案
+  await expect(page.getByText(/\d+ 个真实节点/)).toBeVisible();
+  await expect(page.locator(".progress-overview")).toBeVisible();
+  await page.screenshot({ path: "artifacts/screenshots/protected-01-progress-running.png" });
+});
+
 test("小说主线⑤：真实 AI 向导→人工定名→首章→审阅→导出（protected）", async ({ page }) => {
   test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY");
   test.setTimeout(900_000);
