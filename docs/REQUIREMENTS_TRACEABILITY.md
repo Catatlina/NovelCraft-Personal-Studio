@@ -25,7 +25,7 @@
 | NOV-S-001 | BYOK 只保存在当前会话 | `Settings.tsx` | 请求 Header 优先 | 可用 | E2E 主线④ | 生产请求验证 |
 | NOV-S-002 | 创作知识导入、导出和统计 | `Settings.tsx` | knowledge/stats API | 已接线 | 页面/API 接线 | 真库数据操作 E2E |
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
-| NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 可用 | 11/11；build；4/4 E2E | CI 同版本全绿 |
+| NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 可用 | 11/11；build；4 passed, 1 skipped（protected 真实 AI 全链因本机无 Key 跳过） | CI 同版本全绿 |
 | NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 已接线 | 后端旧版生产 19/19 | 新 UI protected E2E |
 | NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 未开始 | 新 UI 尚未推送 | CI 全绿→部署→生产 smoke |
 

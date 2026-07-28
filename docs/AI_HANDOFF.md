@@ -13,14 +13,33 @@
 
 - GitHub：<https://github.com/Catatlina/NovelCraft-Personal-Studio>
 - 当前分支：`main`
-- 交接前远端基线：`origin/main @ e5174c4`
-- 已提交但尚未推送：
-  - `bdd20f0 feat: establish Starlume novel workspace`
-  - `c3e0af8 feat: secure the novel editing and review flow`
+- 交接前远端基线（历史）：`origin/main @ e5174c4`
+- 接手实测（2026-07-28）：`git rev-parse HEAD` = `876d826` = `origin/main`，工作树干净；`bdd20f0`、`c3e0af8` 已随 `876d826`（docs: checkpoint Starlume rescue handoff）推送，原"尚未推送"已过时。
 - 生产地址：<https://novel.xyjin.xyz>
-- 重要：当前 Starlume 新 UI 尚未推送、尚未部署；生产站不能作为新 UI 已验收证据。
+- 重要：当前 Starlume 新 UI 已推送至 `origin/main`（`876d826`），但**尚未部署**；生产站 `https://novel.xyjin.xyz` 仍运行旧构建，不能作为新 UI 已验收证据。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
+
+## 1.1 接手复验 checkpoint（2026-07-28）
+
+下一位 AI（2026-07-28 接手）按 `AI_CONTINUITY` 强制闭环实测，仅恢复真实状态，未改动产品代码：
+
+- 实时 Git：`git status` 干净；`git branch --show-current` = `main`；`git log` HEAD = `876d826`（= `origin/main`）；`git diff --check` 通过。
+- 单元：`cd frontend && npm test` → **11 passed**（5 文件），与第 6 节一致。
+- 构建：`npm run build` → TypeScript + Vite 通过；仅保留 `api.ts` 动静态混合导入与空 `react` chunk 的既有警告。
+- E2E：`npm run test:e2e` → **4 passed, 1 skipped**；第 5 条 `e2e/main-chain.spec.ts:134`（protected 真实 AI 全链）因本机无 `DEEPSEEK_API_KEY` 被 `test.skip` 真实跳过，未计入通过。
+- 真实性门禁：`bash scripts/ai_development_gate.sh` → AST 真实性与 whitespace 通过；suspicion scan 按设计返回 3（宽泛告警）。逐条解释见 `KNOWN_ISSUES.md` KI-005（全部为测试 monkeypatch / UI placeholder / 反伪注释 / 合法空态 / 非小说历史兜底，非业务伪实现）。
+- 文档↔代码一致性：抽样确认 `Layout.tsx` 主导航恰为七项小说页面；`App.tsx` 未导入任何非小说页面组件（RankingCenter/Hotspot/PublishDashboard/Studio/Collaboration/IntelligenceAgent 等均未出现）；protected E2E 为真实 `test.skip` 而非伪通过。
+
+未完成顺序第一项（protected 真实 AI E2E）状态：**仍阻断**。本机 shell 与 `.env*` 均无 `DEEPSEEK_API_KEY`。按 KI-001，禁止删除 `test.skip`、使用 mock、写死书名或伪造完成。可在具备真实 Key 的受保护环境执行：
+
+```bash
+cd frontend
+DEEPSEEK_API_KEY=*** npx playwright test e2e/main-chain.spec.ts --grep "protected"
+# 或注入 .env.local 后 npm run test:e2e
+```
+
+执行后须保留 run ID、`ai_calls` 账本与关键截图，再据 `ACCEPTANCE_CRITERIA.md` 提升状态。
 
 ## 2. 当前产品契约
 
