@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { Sparkles, Mail, Lock, Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
+import { FormEvent, useState } from "react";
+import { ArrowRight, Eye, EyeOff, Lock, Mail, Moon, Sparkles, Sun } from "lucide-react";
 import { api } from "../lib/api";
+import { useTheme } from "./ThemeProvider";
 
 type Props = { onLogin: (token: string, email: string) => void };
 
@@ -10,182 +11,100 @@ export function LoginPage({ onLogin }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [showPw, setShowPw] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const { theme, setTheme } = useTheme();
 
-  async function submit() {
+  async function submit(event?: FormEvent) {
+    event?.preventDefault();
     if (!email.includes("@") || password.length < 8) {
-      setError(mode === "register" ? "密码至少8位" : "请输入正确邮箱和密码");
+      setError(mode === "register" ? "请输入有效邮箱，密码至少 8 位" : "请输入正确的邮箱和密码");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const path =
-        mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
+      const path = mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
       const data = await api<{ access_token: string }>(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      if (data.access_token) {
-        const t = data.access_token;
-        sessionStorage.setItem("nc_token", t);
-        onLogin(t, email);
-      } else {
-        setError("操作失败");
-      }
-    } catch {
-      setError("网络错误，请检查后端是否运行");
+      if (!data.access_token) throw new Error("服务未返回登录凭证");
+      sessionStorage.setItem("nc_token", data.access_token);
+      sessionStorage.setItem("starlume_user_email", email);
+      onLogin(data.access_token, email);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "登录失败，请稍后重试");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
-    <div style={{ height: "100vh", position: "relative", overflow: "hidden" }}>
-      {/* Ambient background layers */}
-      <div className="bg-ambient" />
-      <div className="bg-grid" />
+    <main className="auth-page">
+      <header className="auth-header">
+        <button type="button" className="auth-brand" aria-label="Starlume AI 首页">
+          <span><Sparkles size={20} /></span> Starlume AI
+        </button>
+        <button
+          type="button"
+          className="auth-theme"
+          aria-label={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        >
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+      </header>
 
-      {/* Login wrapper */}
-      <div
-        className="login-wrap"
-        style={{ display: "flex", height: "100%", position: "relative", zIndex: 1 }}
-      >
-        <div className="login-card">
-          {/* Brand lockup */}
-          <div className="brand-lockup">
-            <div className="brand-icon">
-              <Sparkles />
-            </div>
-            <span className="brand-text">NovelCraft</span>
+      <section className="auth-content">
+        <div className="auth-intro">
+          <p className="eyebrow">AI NOVEL STUDIO</p>
+          <h1>让故事，<br />从灵感走到终章。</h1>
+          <p>专注小说创作的个人工作台。构思、生成、编辑、审阅与导出，在一条安静而清晰的链路里完成。</p>
+          <div className="auth-proof">
+            <span><Sparkles size={15} /> 创作过程可控</span>
+            <span><Lock size={15} /> 版本安全保留</span>
+          </div>
+        </div>
+
+        <form className="auth-card" onSubmit={submit}>
+          <div>
+            <p className="eyebrow">{mode === "login" ? "欢迎回来" : "开始创作"}</p>
+            <h2>{mode === "login" ? "登录 Starlume" : "创建你的账号"}</h2>
+            <p>{mode === "login" ? "回到你的故事与创作进度。" : "建立属于你的小说创作空间。"}</p>
           </div>
 
-          <h1>欢迎回来</h1>
-          <p className="login-sub">AI 驱动的个人创作工作台</p>
+          {error && <div className="auth-error" role="alert">{error}</div>}
 
-          {/* Error message */}
-          {error && (
-            <div
-              className="badge red"
-              style={{
-                width: "100%",
-                justifyContent: "center",
-                marginBottom: 16,
-                padding: "8px 14px",
-                borderRadius: "var(--r-sm)",
-                fontSize: 13,
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          {/* Email */}
-          <div className="form-group">
-            <label className="form-label">邮箱</label>
-            <div style={{ position: "relative" }}>
-              <Mail
-                size={16}
-                style={{
-                  position: "absolute",
-                  left: 14,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--text-3)",
-                  pointerEvents: "none",
-                }}
-              />
-              <input
-                className="form-input"
-                type="email"
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={{ paddingLeft: 40 }}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div className="form-group">
-            <label className="form-label">密码</label>
-            <div className="pw-wrap">
-              <Lock
-                size={16}
-                style={{
-                  position: "absolute",
-                  left: 14,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--text-3)",
-                  pointerEvents: "none",
-                  zIndex: 1,
-                }}
-              />
-              <input
-                className="form-input"
-                type={showPw ? "text" : "password"}
-                placeholder="输入密码"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{ paddingLeft: 40, paddingRight: 44 }}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-              />
-              <button
-                type="button"
-                className="eye-btn"
-                onClick={() => setShowPw(!showPw)}
-              >
-                {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+          <label className="auth-field">
+            <span>邮箱</span>
+            <div><Mail size={17} /><input type="email" autoComplete="email" placeholder="name@example.com" value={email} onChange={event => setEmail(event.target.value)} /></div>
+          </label>
+          <label className="auth-field">
+            <span>密码</span>
+            <div>
+              <Lock size={17} />
+              <input type={showPassword ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="至少 8 位" value={password} onChange={event => setPassword(event.target.value)} />
+              <button type="button" aria-label={showPassword ? "隐藏密码" : "显示密码"} onClick={() => setShowPassword(value => !value)}>
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
               </button>
             </div>
-          </div>
+          </label>
 
-          {/* Submit button */}
-          <button
-            className="btn-primary"
-            onClick={submit}
-            disabled={busy}
-          >
-            {busy ? (
-              "处理中..."
-            ) : (
-              <>
-                <LogIn size={18} />
-                {mode === "login" ? "登录" : "注册"}
-              </>
-            )}
+          <button type="submit" className="auth-submit" disabled={busy}>
+            {busy ? <><span className="spinner" /> 处理中…</> : <>{mode === "login" ? "登录" : "注册"} <ArrowRight size={17} /></>}
           </button>
-
-          {/* Divider */}
-          <div className="divider">
-            <span>或</span>
-          </div>
-
-          {/* Toggle register/login */}
           <button
-            className="btn-secondary"
-            onClick={() => {
-              setMode(mode === "login" ? "register" : "login");
-              setError("");
-            }}
-            style={{ marginTop: 0 }}
+            type="button"
+            className="auth-switch"
+            onClick={() => { setMode(value => value === "login" ? "register" : "login"); setError(""); }}
           >
-            {mode === "login" ? (
-              <>
-                <UserPlus size={16} />
-                没有账号？注册
-              </>
-            ) : (
-              <>
-                <LogIn size={16} />
-                已有账号？登录
-              </>
-            )}
+            {mode === "login" ? "没有账号？注册" : "已有账号？登录"}
           </button>
-        </div>
-      </div>
-    </div>
+        </form>
+      </section>
+
+      <footer className="auth-footer">Starlume AI · 你的故事只属于你</footer>
+    </main>
   );
 }

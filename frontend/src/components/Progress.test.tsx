@@ -1,0 +1,40 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { Progress } from "./Progress";
+
+describe("创作进度门禁", () => {
+  it("没有运行时展示真实空状态", () => {
+    render(<Progress run={null} novel={null} onConfirm={vi.fn()} onRegenerateTitles={vi.fn()} />);
+
+    expect(screen.getByText("还没有正在运行的创作。")).toBeTruthy();
+    expect(screen.queryByText("预计完成")).toBeNull();
+  });
+
+  it("人工节点等待时必须由用户确认书名", async () => {
+    const confirm = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Progress
+        run={{
+          id: "run-1",
+          status: "waiting_human",
+          current_node_key: "human_confirm_title",
+          context: { title_candidates: ["星潮未眠", "长夜有光"] },
+          nodes: [{
+            node_key: "human_confirm_title",
+            kind: "human",
+            agent: null,
+            title: "选定书名",
+            status: "waiting_human",
+          }],
+        }}
+        novel={null}
+        onConfirm={confirm}
+        onRegenerateTitles={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("确认前流程会停在这里，不会替你擅自决定。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "星潮未眠" }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith("星潮未眠"));
+  });
+});

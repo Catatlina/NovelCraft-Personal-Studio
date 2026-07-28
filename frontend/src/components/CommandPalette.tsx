@@ -22,7 +22,11 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
   useEffect(() => {
     const open = () => setOpen(true);
     window.addEventListener("novelcraft:open-command-palette", open);
-    return () => window.removeEventListener("novelcraft:open-command-palette", open);
+    window.addEventListener("starlume:open-command-palette", open);
+    return () => {
+      window.removeEventListener("novelcraft:open-command-palette", open);
+      window.removeEventListener("starlume:open-command-palette", open);
+    };
   }, []);
 
   const filtered = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));

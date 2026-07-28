@@ -1,13 +1,17 @@
-import React, { useState } from "react";
-import { ApiError, api, apiRaw } from "../lib/api";
-import { StepTimeline } from "./ui";
-import type { TimelineStep, StepStatus } from "./ui";
-
-/* ============================ Types ============================ */
+import { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
+import { ApiError, apiRaw } from "../lib/api";
 
 type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string }> };
-
-/** Mirrors App.tsx's `Content` shape so the `novel` prop accepts it structurally. */
 type Content = {
   id: string;
   project_id: string;
@@ -18,9 +22,7 @@ type Content = {
   meta: Record<string, unknown>;
   status: string;
   updated_at: string;
-  sync_status?: "applied" | "conflict";
 };
-
 type RunNode = {
   node_key: string;
   kind: string;
@@ -33,12 +35,6 @@ type RunNode = {
   started_at?: string | null;
   finished_at?: string | null;
 };
-
-/**
- * Aligned with the real Run produced by App/backend: the live object also
- * carries `status` and `current_node_key` (see App.tsx), so we widen the type
- * to avoid type errors when reading `run.status` / `run.current_node_key`.
- */
 type Run = {
   id: string;
   nodes: RunNode[];
@@ -47,70 +43,71 @@ type Run = {
   current_node_key?: string | null;
 };
 
-type Wrapped<T> = { data: T };
-
-/* ===================== Constants / helpers ===================== */
-
+const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
+const RETRYABLE_STATUSES = new Set(["failed", "pending_budget"]);
 const PLANNING_NODES = new Set([
-  // V2 four-stage keys
   "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
   "plan_world_architecture", "plan_character_system", "plan_conflict_map",
   "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
-  // legacy runs
   "n3", "n4", "n5", "n6",
 ]);
-const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
-const RETRYABLE_STATUSES = new Set(["failed", "pending_budget"]);
+const STATUS_LABELS: Record<string, string> = {
+  pending: "等待中",
+  queued: "已排队",
+  running: "生成中",
+  waiting_human: "等待确认",
+  succeeded: "已完成",
+  failed: "失败",
+  pending_budget: "预算阻塞",
+  skipped: "已跳过",
+};
+const RUN_LABELS: Record<string, string> = {
+  pending: "等待开始",
+  running: "创作中",
+  waiting_human: "等待确认",
+  succeeded: "已完成",
+  failed: "需要处理",
+};
 
-/** Map a node status to its semantic badge class (doc12-aligned). */
-function statusBadge(status: string): string {
-  const map: Record<string, string> = {
-    succeeded: "green",
-    running: "cyan",
-    failed: "red",
-    waiting_human: "orange",
-    pending_budget: "orange",
-    pending: "gray",
-    queued: "gray",
-    skipped: "gray",
-  };
-  return map[status] ?? "gray";
-}
-
-/** Map the overall run status to a Chinese label + badge class for 《创作总览》. */
-function runStatusZh(status?: string): { label: string; badge: string } {
-  switch (status) {
-    case "running":   return { label: "进行中", badge: "cyan" };
-    case "succeeded": return { label: "已完成", badge: "green" };
-    case "failed":    return { label: "失败",   badge: "red" };
-    default:          return { label: "草稿",   badge: "gray" };
-  }
+function formatTime(value?: string | null): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
 }
 
 function readableLabel(key: string): string {
   const labels: Record<string, string> = {
-    synopsis: "简介", selling_points: "核心卖点", worldview: "世界观", characters: "人物卡",
-    outline: "大纲", name: "名称", rules: "规则", title: "标题", arc: "人物弧",
+    synopsis: "简介",
+    selling_points: "核心卖点",
+    worldview: "世界观",
+    characters: "人物卡",
+    outline: "大纲",
+    title: "标题",
+    arc: "人物弧",
+    rules: "规则",
+    name: "名称",
   };
   return labels[key] || key.replaceAll("_", " ");
 }
 
-/** Recursively renders an arbitrary agent output tree. */
 function OutputValue({ value }: { value: unknown }) {
-  if (value === null || value === undefined || value === "") {
-    return <span style={{ color: "var(--text-muted)" }}>未产出</span>;
-  }
+  if (value === null || value === undefined || value === "") return <span className="muted-output">未产出</span>;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return <span>{String(value)}</span>;
   }
   if (Array.isArray(value)) {
     return value.length
       ? <ul>{value.map((item, index) => <li key={index}><OutputValue value={item} /></li>)}</ul>
-      : <span style={{ color: "var(--text-muted)" }}>未产出</span>;
+      : <span className="muted-output">未产出</span>;
   }
   if (typeof value === "object") {
     return (
-      <div style={{ display: "grid", gap: 6 }}>
+      <div className="output-tree">
         {Object.entries(value as Record<string, unknown>).map(([key, item]) => (
           <div key={key}><strong>{readableLabel(key)}：</strong><OutputValue value={item} /></div>
         ))}
@@ -119,29 +116,6 @@ function OutputValue({ value }: { value: unknown }) {
   }
   return <span>{String(value)}</span>;
 }
-
-function formatTime(value?: string | null): string {
-  return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
-}
-
-/** Compact key/value tile used in the 《创作总览》 detailed-data row. */
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        background: "var(--bg-subtle)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-md)",
-        padding: "var(--space-3)",
-      }}
-    >
-      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: "var(--text-base)", fontWeight: 600, color: "var(--text-primary)", wordBreak: "break-word" }}>{value}</div>
-    </div>
-  );
-}
-
-/* ============================ Progress ============================ */
 
 export function Progress({
   run,
@@ -154,321 +128,204 @@ export function Progress({
   onConfirm: (title: string) => Promise<void>;
   onRegenerateTitles: (feedback: string) => Promise<void>;
 }) {
-  const nodes = run?.nodes ?? [];
-  const human = nodes.find((n) => HUMAN_NODE_KEYS.has(n.node_key));
-  const titles = (run?.context?.title_candidates as string[]) ?? [];
-  const selectedTitle = typeof run?.context?.selected_title === "string" ? run.context.selected_title : "";
+  const nodes = run?.nodes || [];
+  const currentKey = run?.current_node_key || String(run?.context?.current_node_key || "");
+  const human = nodes.find(node => HUMAN_NODE_KEYS.has(node.node_key));
+  const titles = Array.isArray(run?.context?.title_candidates) ? run?.context?.title_candidates as string[] : [];
+  const selectedTitle = String(run?.context?.selected_title || human?.output?.selected_title || "");
+  const [selectedNodeKey, setSelectedNodeKey] = useState("");
   const [customTitle, setCustomTitle] = useState("");
   const [titleFeedback, setTitleFeedback] = useState("");
   const [titleBusy, setTitleBusy] = useState(false);
   const [retrying, setRetrying] = useState("");
-  const [retryMessage, setRetryMessage] = useState("");
-  const [selectedNodeKey, setSelectedNodeKey] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
-  // 《创作总览》field sources ------------------------------------------------
-  const titleCandidates = run?.context?.title_candidates as string[] | undefined;
-  const novelName: string =
-    novel?.title ??
-    (run?.context?.selected_title as string | undefined) ??
-    titleCandidates?.[0] ??
-    "未命名作品";
-
-  const statusInfo = runStatusZh(run?.status);
-
-  const succeededCount = nodes.filter((n) => n.status === "succeeded").length;
-  const total = nodes.length;
-  const percent = total === 0 ? 0 : Math.round((succeededCount / total) * 100);
-
-  const currentKey = run?.current_node_key ?? (run?.context?.current_node_key as string | undefined);
-  const hasActiveFlow = run?.status === "running" || nodes.some((n) => n.status === "running" || n.node_key === currentKey);
-
-  // ETA is a frontend weighted estimate (90s/non-succeeded node), NOT real data.
-  let eta = "—";
-  if (hasActiveFlow && total > succeededCount) {
-    const remaining = total - succeededCount;
-    const etaDate = new Date(Date.now() + remaining * 90 * 1000);
-    eta = "预计 " + etaDate.toLocaleString("zh-CN", { hour12: false });
-  }
-
-  const recentNode = nodes
-    .filter((n) => n.status === "succeeded")
-    .sort((a, b) => new Date(b.finished_at ?? 0).getTime() - new Date(a.finished_at ?? 0).getTime())[0];
-  const recentTitle = recentNode?.title ?? "—";
-
-  const nextNode =
-    nodes.find((n) => n.status === "running" || n.node_key === currentKey) ??
-    nodes.find((n) => n.status !== "succeeded");
-  const nextTitle = nextNode?.title ?? "等待流程推进";
-
-  // nodes -> TimelineStep[] mapping -----------------------------------------
-  const steps: TimelineStep[] = nodes.map((n) => {
-    const stepStatus: StepStatus =
-      n.status === "succeeded"
-        ? "done"
-        : n.status === "running" || n.node_key === currentKey
-          ? "active"
-          : "waiting";
-    return {
-      key: n.node_key,
-      label: n.title,
-      status: stepStatus,
-      detail: <NodeDetail node={n} onRetry={retry} />,
-    };
-  });
-
-  // Preserve the original selection logic: explicit key -> context current -> running -> first.
-  const selectedNode =
-    nodes.find((n) => n.node_key === (selectedNodeKey || (run?.context?.current_node_key as string | undefined))) ??
-    nodes.find((n) => n.status === "running") ??
-    nodes[0];
+  const selectedNode = useMemo(
+    () => nodes.find(node => node.node_key === selectedNodeKey)
+      || nodes.find(node => node.node_key === currentKey)
+      || nodes.find(node => node.status === "running")
+      || nodes[0],
+    [nodes, selectedNodeKey, currentKey],
+  );
+  const succeededCount = nodes.filter(node => node.status === "succeeded").length;
+  const percent = nodes.length ? Math.round((succeededCount / nodes.length) * 100) : 0;
+  const activeNode = nodes.find(node => node.status === "running" || node.node_key === currentKey);
+  const failedCount = nodes.filter(node => node.status === "failed" || node.status === "pending_budget").length;
+  const planningNodes = nodes.filter(node => PLANNING_NODES.has(node.node_key));
+  const novelName = novel?.title || selectedTitle || titles[0] || "未命名小说";
 
   async function retry(node: RunNode) {
     if (!run) return;
     setRetrying(node.node_key);
-    setRetryMessage("");
+    setNotice(null);
     try {
-      await apiRaw<Wrapped<{ run_id: string; node_key: string }>>(
-        `/api/v1/runs/${run.id}/nodes/${node.node_key}/retry`,
-        { method: "POST", body: "{}" },
-      );
-      setRetryMessage(`${node.title} 已重新进入队列，状态将自动刷新。`);
-    } catch (error) {
-      const detail = error instanceof ApiError ? JSON.stringify(error.payload) : String(error);
-      setRetryMessage(`${node.title} 重试失败：${detail}`);
+      await apiRaw(`/api/v1/runs/${run.id}/nodes/${node.node_key}/retry`, { method: "POST", body: "{}" });
+      setNotice({ kind: "success", text: `“${node.title}”已重新排队，页面会自动刷新状态。` });
+    } catch (caught) {
+      const detail = caught instanceof ApiError ? caught.message : String(caught);
+      setNotice({ kind: "error", text: `重试失败：${detail}` });
     } finally {
       setRetrying("");
     }
   }
 
-  async function regenerateTitles() {
+  async function confirmTitle(title: string) {
+    if (!title.trim()) return;
     setTitleBusy(true);
-    setRetryMessage("");
+    setNotice(null);
     try {
-      await onRegenerateTitles(titleFeedback.trim());
-      setTitleFeedback("");
-      setRetryMessage("已生成一组新的书名候选，请选择或直接填写书名。");
-    } catch (error) {
-      const detail = error instanceof ApiError ? JSON.stringify(error.payload) : String(error);
-      setRetryMessage(`重新生成书名失败：${detail}`);
+      await onConfirm(title.trim());
+      setCustomTitle("");
+      setNotice({ kind: "success", text: `已确认书名《${title.trim()}》，创作流程将继续。` });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `书名确认失败：${caught instanceof Error ? caught.message : String(caught)}` });
     } finally {
       setTitleBusy(false);
     }
   }
 
-  // Node detail, reused both inside the timeline step and the left column card.
-  // Defined inline so it closes over `retrying` for the per-node "重试中…" label.
-  function NodeDetail({ node, onRetry }: { node: RunNode; onRetry: (n: RunNode) => void }) {
+  async function regenerateTitles() {
+    setTitleBusy(true);
+    setNotice(null);
+    try {
+      await onRegenerateTitles(titleFeedback.trim());
+      setTitleFeedback("");
+      setNotice({ kind: "success", text: "新的书名候选已生成，请继续选择。" });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `重新生成失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setTitleBusy(false);
+    }
+  }
+
+  if (!run) {
     return (
-      <div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <strong style={{ fontSize: 15, color: "var(--text-primary)" }}>{node.title}</strong>
-            <div><code style={{ color: "var(--text-secondary)", fontSize: 12 }}>{node.node_key}</code></div>
-          </div>
-          <span className={`badge ${statusBadge(node.status)}`}>{node.status}</span>
-        </div>
-        <p style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 4 }}>
-          {node.agent ?? node.kind} · 尝试 {node.attempt ?? 0} 次
-        </p>
-        <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-          开始 {formatTime(node.started_at)} · 完成 {formatTime(node.finished_at)}
-        </p>
-        {node.error && <div style={{ color: "var(--danger)", fontSize: 13, marginTop: 8 }}>{node.error}</div>}
-        {RETRYABLE_STATUSES.has(node.status) && (
-          <button
-            className="btn-sm btn-primary"
-            style={{ width: "auto", marginTop: 12 }}
-            disabled={!!retrying}
-            onClick={() => void onRetry(node)}
-          >
-            {retrying === node.node_key ? "重试中…" : "重试此节点"}
-          </button>
-        )}
-        <h3 style={{ fontSize: 14, fontWeight: 600, marginTop: 16, marginBottom: 8, color: "var(--text-primary)" }}>输出</h3>
-        {node.output && Object.keys(node.output).length ? (
-          <OutputValue value={node.output} />
-        ) : (
-          <p style={{ color: "var(--text-muted)", fontSize: 13 }}>该节点尚未产出可展示内容。</p>
-        )}
-      </div>
+      <section className="progress-empty page-enter">
+        <span><Sparkles size={25} /></span>
+        <p className="eyebrow">CREATION PROGRESS</p>
+        <h2>还没有正在运行的创作。</h2>
+        <p>从「创作向导」启动一本小说后，AI 的每一步真实状态、产物和失败原因都会显示在这里。</p>
+      </section>
     );
   }
 
   return (
-    <div className="grid">
-      {/* Page head */}
-      <div className="page-head">
+    <div className="progress-page page-enter">
+      <section className="progress-heading">
         <div>
-          <h1>策划与首章生成</h1>
-          <p>本工作流交付书名、简介卖点、世界观、人物卡、大纲和第一章；整书续写属于后续章节生产流程。</p>
+          <p className="eyebrow">CREATION PROGRESS</p>
+          <h2>{novelName}</h2>
+          <p>
+            {activeNode ? `正在执行：${activeNode.title}` : failedCount ? "流程遇到问题，请查看失败步骤。" : run.status === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
+          </p>
         </div>
-        {retryMessage && (
-          <span className={`badge ${retryMessage.includes("失败") ? "red" : "green"}`}>{retryMessage}</span>
-        )}
-      </div>
+        <span className={`progress-run-state ${run.status || "pending"}`}>{RUN_LABELS[run.status || "pending"] || run.status}</span>
+      </section>
 
-      {/* 《创作总览》 */}
-      <div className="card">
-        <div className="card-head">
-          <div className="card-title">创作总览</div>
-          <span className="badge purple">{nodes.length} 节点</span>
+      {notice && <div className={`progress-notice ${notice.kind}`} role="status">{notice.kind === "error" ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}{notice.text}</div>}
+
+      <section className="progress-overview starlume-card">
+        <div className="progress-number">
+          <strong>{percent}%</strong>
+          <span>整体完成度</span>
         </div>
+        <div className="progress-track-wrap">
+          <div><span>{succeededCount} / {nodes.length} 个步骤完成</span><span>{failedCount ? `${failedCount} 个步骤需处理` : "状态自动保存"}</span></div>
+          <div className="progress-track" aria-label={`创作流程完成 ${percent}%`}><span style={{ width: `${percent}%` }} /></div>
+        </div>
+        <div className="progress-fact">
+          <span>当前步骤</span>
+          <strong>{activeNode?.title || (human?.status === "waiting_human" ? "确认书名" : "—")}</strong>
+        </div>
+      </section>
 
-        {/* 顶部核心数据概览 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", marginBottom: 4 }}>小说名</div>
-              <h2 style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--text-primary)", wordBreak: "break-word" }}>{novelName}</h2>
-            </div>
-            <span className={`badge ${statusInfo.badge}`}>{statusInfo.label}</span>
+      {human?.status === "waiting_human" && (
+        <section className="title-gate starlume-card">
+          <div className="title-gate-heading">
+            <span><Sparkles size={20} /></span>
+            <div><p className="eyebrow">需要你的决定</p><h3>选择小说书名</h3><p>确认前流程会停在这里，不会替你擅自决定。</p></div>
           </div>
-
-          <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>完成度</span>
-              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", fontWeight: 600 }}>{percent}%</span>
+          {titles.length ? (
+            <div className="title-candidate-grid">
+              {titles.map(title => (
+                <button type="button" key={title} disabled={titleBusy} onClick={() => void confirmTitle(title)}>
+                  <span>{title}</span><Check size={16} />
+                </button>
+              ))}
             </div>
-            <div style={{ height: "var(--space-2)", background: "var(--bg-subtle)", borderRadius: "var(--radius-full)", overflow: "hidden" }}>
-              <div
-                style={{
-                  width: `${percent}%`,
-                  height: "100%",
-                  background: "var(--brand-500)",
-                  borderRadius: "var(--radius-full)",
-                  transition: "width var(--dur-base) var(--ease-standard)",
-                }}
-              />
-            </div>
+          ) : <div className="title-loading"><Loader2 className="spin" size={18} /> 等待书名候选写入…</div>}
+          <div className="title-custom-grid">
+            <label>
+              <span>使用自己的书名</span>
+              <div><input maxLength={120} placeholder="输入你确定的书名" value={customTitle} onChange={event => setCustomTitle(event.target.value)} /><button type="button" disabled={titleBusy || !customTitle.trim()} onClick={() => void confirmTitle(customTitle)}>确认使用</button></div>
+            </label>
+            <label>
+              <span>让 AI 重新生成</span>
+              <div><input maxLength={500} placeholder="可选：告诉 AI 想强调什么" value={titleFeedback} onChange={event => setTitleFeedback(event.target.value)} /><button type="button" disabled={titleBusy} onClick={() => void regenerateTitles()}>{titleBusy ? "生成中…" : "重新生成"}</button></div>
+            </label>
           </div>
+        </section>
+      )}
+
+      <section className="progress-workspace">
+        <div className="node-list starlume-card">
+          <div className="node-list-heading"><h3>创作步骤</h3><span>{nodes.length} 个真实节点</span></div>
+          {nodes.map((node, index) => {
+            const active = selectedNode?.node_key === node.node_key;
+            return (
+              <button type="button" key={node.node_key} className={`${active ? "active" : ""} ${node.status}`} onClick={() => setSelectedNodeKey(node.node_key)}>
+                <span className="node-order">
+                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" ? <AlertTriangle size={15} /> : <Circle size={13} />}
+                </span>
+                <span className="node-name"><strong>{node.title}</strong><small>{STATUS_LABELS[node.status] || node.status}</small></span>
+                <span className="node-index">{String(index + 1).padStart(2, "0")}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* 中部主流程 */}
-        <div style={{ marginBottom: 20 }}>
-          <StepTimeline steps={steps} />
-        </div>
-
-        {/* 底部详细数据 */}
-        <div className="grid grid-4" style={{ gap: 12 }}>
-          <DetailItem label="已完成阶段数" value={`${succeededCount} / ${total}`} />
-          <DetailItem label="预计完成" value={eta} />
-          <DetailItem label="最近任务" value={recentTitle} />
-          <DetailItem label="下一步" value={nextTitle} />
-        </div>
-      </div>
-
-      {/* Two-column: node detail + title confirmation */}
-      <div className="layout-2">
-        {/* Node detail card */}
-        <div className="card">
-          <div className="card-head">
-            <div className="card-title">节点详情</div>
-          </div>
+        <article className="node-detail starlume-card">
           {selectedNode ? (
-            <NodeDetail node={selectedNode} onRetry={retry} />
-          ) : (
-            <p style={{ color: "var(--text-muted)", fontSize: 13 }}>暂无节点。</p>
-          )}
-        </div>
+            <>
+              <div className="node-detail-heading">
+                <div><p className="eyebrow">{selectedNode.node_key}</p><h3>{selectedNode.title}</h3></div>
+                <span className={`node-status ${selectedNode.status}`}>{STATUS_LABELS[selectedNode.status] || selectedNode.status}</span>
+              </div>
+              <div className="node-meta">
+                <span><Clock3 size={14} /> 开始 {formatTime(selectedNode.started_at)}</span>
+                <span>完成 {formatTime(selectedNode.finished_at)}</span>
+                <span>尝试 {selectedNode.attempt || 0} 次</span>
+              </div>
+              {selectedNode.error && <div className="node-error"><AlertTriangle size={17} /><div><strong>执行失败</strong><p>{selectedNode.error}</p></div></div>}
+              {RETRYABLE_STATUSES.has(selectedNode.status) && (
+                <button type="button" className="retry-node" disabled={Boolean(retrying)} onClick={() => void retry(selectedNode)}>
+                  {retrying === selectedNode.node_key ? <><Loader2 className="spin" size={16} /> 正在重新排队…</> : <><RefreshCw size={16} /> 重试此步骤</>}
+                </button>
+              )}
+              <div className="node-output">
+                <h4>节点产物</h4>
+                {selectedNode.output && Object.keys(selectedNode.output).length
+                  ? <OutputValue value={selectedNode.output} />
+                  : <p className="muted-output">该步骤尚未产出内容。这里不会显示模拟结果。</p>}
+              </div>
+            </>
+          ) : <p className="muted-output">暂无可查看步骤。</p>}
+        </article>
+      </section>
 
-        {/* Title confirmation card */}
-        <div className="card">
-          <div className="card-head">
-            <div className="card-title">书名确认</div>
-            {human?.status && human.status !== "waiting_human" && (
-              <span className={`badge ${statusBadge(human.status)}`}>{human.status}</span>
-            )}
+      {planningNodes.length > 0 && (
+        <section className="planning-section">
+          <div className="section-heading"><div><p className="eyebrow">STORY BLUEPRINT</p><h3>策划产物</h3></div></div>
+          <div className="planning-grid">
+            {planningNodes.map(node => (
+              <details className="starlume-card" key={node.node_key}>
+                <summary><span>{node.title}</span><small>{STATUS_LABELS[node.status] || node.status}</small></summary>
+                <div>{node.output && Object.keys(node.output).length ? <OutputValue value={node.output} /> : <p className="muted-output">尚未产出</p>}</div>
+              </details>
+            ))}
           </div>
-          {human?.status === "waiting_human" ? (
-            <div className="grid">
-              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>请从 {titles.length} 个候选中选择；没有合适的可重新生成，或直接填写自己的书名。</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {titles.map((t) => (
-                  <button
-                    key={t}
-                    className="btn-ghost"
-                    style={{ textAlign: "left", justifyContent: "flex-start" }}
-                    disabled={titleBusy}
-                    onClick={() => void onConfirm(t)}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-              <div className="field">
-                <label className="form-label">自定义书名</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="form-input"
-                    maxLength={120}
-                    placeholder="自己填写书名"
-                    value={customTitle}
-                    onChange={(event) => setCustomTitle(event.target.value)}
-                  />
-                  <button
-                    className="btn-sm btn-primary"
-                    style={{ width: "auto", flexShrink: 0 }}
-                    disabled={titleBusy || !customTitle.trim()}
-                    onClick={() => void onConfirm(customTitle.trim())}
-                  >
-                    使用
-                  </button>
-                </div>
-              </div>
-              <div className="field">
-                <label className="form-label">反馈给 AI 重新生成</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="form-input"
-                    maxLength={500}
-                    placeholder="告诉 AI 新书名应强调什么"
-                    value={titleFeedback}
-                    onChange={(event) => setTitleFeedback(event.target.value)}
-                  />
-                  <button
-                    className="btn-sm btn-primary"
-                    style={{ width: "auto", flexShrink: 0 }}
-                    disabled={titleBusy}
-                    onClick={() => void regenerateTitles()}
-                  >
-                    {titleBusy ? "生成中…" : "重新生成"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
-              {human?.status === "succeeded" ? (
-                <>已确认书名：<strong>{selectedTitle || String(human?.output?.selected_title || "已确认")}</strong></>
-              ) : (
-                "等待书名候选生成..."
-              )}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Planning artifacts (kept untouched for Wave D accordion refactor) */}
-      <div className="card">
-        <div className="card-head">
-          <div className="card-title">策划产物</div>
-        </div>
-        <div className="grid grid-3">
-          {nodes.filter((node) => PLANNING_NODES.has(node.node_key)).map((node) => (
-            <div className="card" key={node.node_key}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <strong>{node.title}</strong>
-                <span className={`badge ${statusBadge(node.status)}`}>{node.status}</span>
-              </div>
-              {node.output && Object.keys(node.output).length ? (
-                <OutputValue value={node.output} />
-              ) : (
-                <p style={{ color: "var(--text-3)", fontSize: 13 }}>该节点尚未产出可展示内容。</p>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+        </section>
+      )}
     </div>
   );
 }

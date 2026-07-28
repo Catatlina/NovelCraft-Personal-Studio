@@ -58,7 +58,7 @@ export function AgentConsole() {
 
   return (
     <div>
-      <div className="breadcrumb"><b>星禾AI</b> › 智能体</div>
+      <div className="breadcrumb"><b>Starlume AI</b> › 智能体</div>
       <div className="page-head">
         <div>
           <h1>Agent 中心</h1>

@@ -66,7 +66,7 @@ export function AIChat() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 100px)" }}>
-      <div className="breadcrumb"><b>星禾AI</b> › AI 对话</div>
+      <div className="breadcrumb"><b>Starlume AI</b> › AI 对话</div>
       <div className="page-head">
         <h1>AI 对话</h1>
         <p>通用 AI 助手，支持多模型对话</p>

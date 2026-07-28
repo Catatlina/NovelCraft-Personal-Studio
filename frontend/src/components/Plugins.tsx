@@ -111,7 +111,7 @@ export function Plugins() {
     <div>
       {/* Breadcrumb */}
       <div className="breadcrumb">
-        <b>NovelCraft</b> › 插件管理
+        <b>Starlume AI</b> › 插件管理
       </div>
 
       {/* Page head */}

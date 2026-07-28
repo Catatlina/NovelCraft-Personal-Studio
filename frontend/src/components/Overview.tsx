@@ -188,7 +188,7 @@ export function Overview() {
     <div>
       {/* Breadcrumb */}
       <div className="breadcrumb">
-        <b>NovelCraft</b> › 数据概览
+        <b>Starlume AI</b> › 数据概览
       </div>
 
       {/* Page head */}

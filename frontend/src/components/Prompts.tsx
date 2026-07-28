@@ -193,7 +193,7 @@ export function Prompts({ prompts, projectId }: { prompts: any[]; projectId: str
     <div>
       {/* Breadcrumb */}
       <div className="breadcrumb">
-        <b>NovelCraft</b> › Prompt 管理
+        <b>Starlume AI</b> › Prompt 管理
       </div>
 
       {/* Page head */}

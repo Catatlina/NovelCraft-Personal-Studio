@@ -4,15 +4,17 @@
     <script>
       // Set theme before first paint to avoid a flash of the wrong theme (FOUC).
       // Mirrors ThemeProvider's init logic so the very first frame is correct.
-      document.documentElement.dataset.theme =
-        localStorage.getItem('nc-theme') ||
-        (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      const savedTheme = localStorage.getItem('starlume-theme') || localStorage.getItem('nc-theme') || 'system';
+      document.documentElement.dataset.theme = savedTheme === 'system'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : savedTheme;
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#5b66db" />
     <link rel="manifest" href="/manifest.json" />
-    <title>NovelCraft Personal Studio</title>
+    <meta name="description" content="Starlume AI — 专注小说创作的个人工作台" />
+    <title>Starlume AI · 小说创作工作台</title>
   </head>
   <body>
     <div id="root"></div>

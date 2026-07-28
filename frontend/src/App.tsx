@@ -1,36 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Layout } from "./components/Layout";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Layout, type AppTab } from "./components/Layout";
 import { Wizard } from "./components/Wizard";
 import { Progress } from "./components/Progress";
 import { Review } from "./components/Review";
-import { Costs } from "./components/Costs";
-import { Billing } from "./components/Billing";
 import { CommandPalette } from "./components/CommandPalette";
-import { DagEditor } from "./components/DagEditor";
 import { Settings } from "./components/Settings";
-import { Studio } from "./components/Studio";
-import { PublishDashboard } from "./components/PublishDashboard";
 import { LoginPage } from "./components/LoginPage";
-import { RankingCenter } from "./components/RankingCenter";
 import { BookLibrary } from "./components/BookLibrary";
-import { HotspotDashboard } from "./components/HotspotDashboard";
-import { KnowledgeBrowser } from "./components/KnowledgeBrowser";
-import { FanoutMatrix } from "./components/FanoutMatrix";
-import { VersionTree } from "./components/VersionTree";
-import { ForeshadowingBoard } from "./components/ForeshadowingBoard";
-import { CollaborationPanel } from "./components/Collaboration";
-import { AgentConsole } from "./components/AgentConsole";
 import { ApiError, api as baseApi, apiRaw, apiStream } from "./lib/api";
 import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listMutations, updateMutation } from "./lib/offlineCache";
-import { Code2, LogOut, Settings as SettingsIcon, Workflow, Layers, Rocket } from "lucide-react";
-import { Overview } from "./components/Overview";
 import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
-import { Plugins } from "./components/Plugins";
-import { Marketplace } from "./components/Marketplace";
-import { SkillManager } from "./components/SkillManager";
-import { AIChat } from "./components/AIChat";
-import { Prompts } from "./components/Prompts";
-import { ThemeProvider } from "./components/ThemeProvider";
+import { NotFoundPage } from "./components/NotFoundPage";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
@@ -38,14 +18,38 @@ type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string 
 type RunNode = { node_key: string; kind: string; agent: string | null; title: string; status: string; output: Record<string, unknown> };
 type Run = { id: string; project_id: string; novel_id: string; status: string; current_node_key: string | null; context: Record<string, unknown>; nodes: RunNode[] };
 type AiCall = { id: string; provider: string; model: string; prompt_name: string; task_type: string; prompt_tokens: number; completion_tokens: number; cost_cny: number; latency_ms: number; status: string; created_at: string };
-type Knowledge = { id: string; kind: string; title: string; body: string; meta: Record<string, unknown> };
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
-type Budget = { id: string; scope: string; limit_cny: number; spent_cny: number };
-type ModelRoute = { id: string; task_type: string; provider: string; model: string; params: Record<string, unknown> };
-type Tab = "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard" | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag" | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout" | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins" | "skills" | "chat" | "marketplace";
+type Tab = AppTab;
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
+const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings"]);
+const LEGACY_TAB_REDIRECTS: Record<string, Tab> = {
+  home: "dashboard",
+  overview: "dashboard",
+  workspace: "dashboard",
+  create: "wizard",
+  inspiration: "wizard",
+  ranking: "wizard",
+  books: "library",
+  "book-library": "library",
+  run: "progress",
+  workflow: "progress",
+  write: "editor",
+  chapters: "editor",
+  quality: "review",
+  config: "settings",
+};
+
+function routeFromLocation(): { tab: Tab; notFound: boolean } {
+  const hashValue = window.location.hash.replace(/^#\/?/, "").split(/[/?]/)[0];
+  const queryValue = new URLSearchParams(window.location.search).get("tab") || "";
+  const requested = hashValue || queryValue;
+  if (!requested) return { tab: "dashboard", notFound: false };
+  if (PUBLIC_TABS.has(requested as Tab)) return { tab: requested as Tab, notFound: false };
+  if (LEGACY_TAB_REDIRECTS[requested]) return { tab: LEGACY_TAB_REDIRECTS[requested], notFound: false };
+  return { tab: "dashboard", notFound: true };
+}
 
 // Thin typed alias over the canonical data-unwrapping client.
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -61,9 +65,17 @@ function textToDoc(text: string): TipTapDoc {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const initialRoute = useMemo(routeFromLocation, []);
+  const [tab, setTabState] = useState<Tab>(initialRoute.tab);
+  const [routeNotFound, setRouteNotFound] = useState(initialRoute.notFound);
+  const setTab = useCallback((nextTab: Tab) => {
+    const publicTab = PUBLIC_TABS.has(nextTab) ? nextTab : LEGACY_TAB_REDIRECTS[nextTab] || "dashboard";
+    setTabState(publicTab);
+    setRouteNotFound(false);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/${publicTab}`);
+  }, []);
   const [token, setToken] = useState(() => sessionStorage.getItem("nc_token") || "");
-  const [userEmail, setUserEmail] = useState("");
+  const [userEmail, setUserEmail] = useState(() => sessionStorage.getItem("starlume_user_email") || "");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
   const [characters, setCharacters] = useState<any[]>([]);
@@ -72,11 +84,8 @@ export default function App() {
   const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
   const restoringRun = useRef(false);
-  const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [routes, setRoutes] = useState<ModelRoute[]>([]);
   const [idea, setIdea] = useState("一个写作者发现自己删掉的章节正在现实里发生。");
   const [genre, setGenre] = useState("都市奇幻");
   const [style, setStyle] = useState("克制、悬疑、强画面感");
@@ -92,6 +101,30 @@ export default function App() {
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const route = routeFromLocation();
+      setTabState(route.tab);
+      setRouteNotFound(route.notFound);
+    };
+    window.addEventListener("hashchange", syncRoute);
+    window.addEventListener("popstate", syncRoute);
+    return () => {
+      window.removeEventListener("hashchange", syncRoute);
+      window.removeEventListener("popstate", syncRoute);
+    };
+  }, []);
+
+  useEffect(() => {
+    const requested = window.location.hash.replace(/^#\/?/, "").split(/[/?]/)[0]
+      || new URLSearchParams(window.location.search).get("tab")
+      || "";
+    const canonicalTab = LEGACY_TAB_REDIRECTS[requested];
+    if (canonicalTab) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/${canonicalTab}`);
+    }
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -160,7 +193,6 @@ export default function App() {
     if (!novel || !project) return;
     let active = true;
     const contentsKey = `contents:${novel.id}`;
-    const knowledgeKey = `knowledge:${novel.id}`;
     // Preserve deterministic precedence: cached data can paint first, but a
     // later server response must always win. Parallel promises previously let
     // stale IndexedDB rows overwrite freshly saved chapter text after reload.
@@ -193,10 +225,6 @@ export default function App() {
         // Cached chapters remain usable while offline.
       }
     })();
-    cacheGet<Knowledge[]>(knowledgeKey).then(cached => { if (cached) setKnowledge(cached); });
-    api<Knowledge[]>(`/api/v1/knowledge?project_id=${project.id}&content_id=${novel.id}`).then(items => {
-      setKnowledge(items); void cacheSet(knowledgeKey, items);
-    }).catch(() => undefined);
     return () => { active = false; };
   }, [novel?.id, run?.status]);
 
@@ -209,14 +237,6 @@ export default function App() {
   }
 
   useEffect(() => { if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls); }, [run?.id, run?.status]);
-  useEffect(() => {
-    if (!project) return;
-    // NOTE: api<T>() already unwraps the envelope once, so the resolved value
-    // is the bare array. The previous `response.data` was always undefined.
-    api<Budget[] | { data?: Budget[] }>(`/api/v1/admin/budgets?project_id=${project.id}`).then(r => setBudgets(Array.isArray(r) ? r : (r.data ?? [])));
-    api<ModelRoute[] | { data?: ModelRoute[] }>("/api/v1/admin/model-routes").then(r => setRoutes(Array.isArray(r) ? r : (r.data ?? [])));
-  }, [project?.id, run?.status]);
-
   useEffect(() => {
     if (!token) return;
     const replay = () => { void replayOfflineMutations(); };
@@ -469,34 +489,19 @@ export default function App() {
     final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
   }) as any;
 
-  const titles: Record<Tab, string> = { dashboard: "工作台", overview: "数据概览", workspace: "工作区", ranking: "扫榜选书", library: "书库管理", wizard: "灵感创作", progress: "创作进度", review: "质量审阅", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "系统设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话", marketplace: "模块市场" };
-  const [prompts, setPrompts] = useState<any[]>([]);
-
-  useEffect(() => { api<any[]>("/api/v1/admin/prompts").then(setPrompts).catch(() => {}); }, [run?.status]);
+  const titles: Record<Tab, string> = { dashboard: "小说首页", overview: "数据概览", workspace: "小说首页", ranking: "扫榜选书", library: "我的书库", wizard: "创作向导", progress: "创作进度", review: "审阅与一致性", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "小说设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话", marketplace: "模块市场" };
   const cmdActions = [
-    { id: "ranking", label: "扫榜中心 → 自动生成小说", action: () => setTab("ranking") },
-    { id: "library", label: "统一书库", action: () => setTab("library") },
-    { id: "wizard", label: "创作向导 → 新建小说", action: () => setTab("wizard") },
-    { id: "progress", label: "生成进度 → 查看工作流", action: () => setTab("progress") },
-    { id: "editor", label: "编辑器 → 写章节", action: () => setTab("editor") },
-    { id: "review", label: "审阅 → 查看审核", action: () => setTab("review") },
-    { id: "costs", label: "成本追踪 → AI 调用", action: () => setTab("costs") },
-    { id: "billing", label: "订阅套餐 → 套餐/用量", action: () => setTab("billing") },
-    { id: "prompts", label: "Prompt 管理", action: () => setTab("prompts") },
-    { id: "dag", label: "工作流编排 → DAG 编辑器", action: () => setTab("dag") },
-    { id: "settings", label: "系统设置 → AI配置/预算", action: () => setTab("settings") },
-    { id: "studio", label: "内容工作室 → 短篇/自媒体/热点", action: () => setTab("studio") },
-    { id: "publish", label: "发布看板 → 出海/数据", action: () => setTab("publish") },
-    { id: "hotspot", label: "热点仪表盘 → 实时热点", action: () => setTab("hotspot") },
-    { id: "knowledge", label: "知识库浏览器 → 检索知识", action: () => setTab("knowledge") },
-    { id: "fanout", label: "多平台分发 → 一键分发", action: () => setTab("fanout") },
-    { id: "versions", label: "版本树 → 版本历史", action: () => setTab("versions") },
-    { id: "foreshadowing", label: "伏笔看板 → 伏笔追踪", action: () => setTab("foreshadowing") },
-    { id: "collaboration", label: "协作管理 → 团队协作", action: () => setTab("collaboration") },
-    { id: "agents", label: "智能体控制台 → Agent 状态", action: () => setTab("agents") },
+    { id: "dashboard", label: "小说首页", action: () => setTab("dashboard") },
+    { id: "wizard", label: "创作向导 · 新建小说", action: () => setTab("wizard") },
+    { id: "library", label: "我的书库 · 管理小说", action: () => setTab("library") },
+    { id: "progress", label: "创作进度 · 查看 AI 工作流", action: () => setTab("progress") },
+    { id: "editor", label: "章节编辑器 · 继续写作", action: () => setTab("editor") },
+    { id: "review", label: "审阅与一致性 · 检查小说", action: () => setTab("review") },
+    { id: "settings", label: "小说设置 · AI 与创作偏好", action: () => setTab("settings") },
   ];
 
   function handleLogin(t: string, email: string) {
+    sessionStorage.setItem("starlume_user_email", email);
     setToken(t); setUserEmail(email);
   }
 
@@ -512,6 +517,7 @@ export default function App() {
       sessionStorage.removeItem("nc_api_key");
       sessionStorage.removeItem("nc_api_url");
       sessionStorage.removeItem("nc_model");
+      sessionStorage.removeItem("starlume_user_email");
       setToken("");
       setUserEmail("");
       setProject(null);
@@ -519,11 +525,10 @@ export default function App() {
   };
 
   return (
-    <ThemeProvider>
-    <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status}>
+    <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status} userEmail={userEmail}>
       {error && <div className="error">{error}</div>}
-      {tab === "dashboard" && <WorkspaceDashboard onNavigate={setTab} />}
-      {tab === "ranking" && project && <RankingCenter projectId={project.id} onBookCreated={async (novelId, runId) => { const book = await api<Content>(`/api/v1/contents/${novelId}`); setNovel(book); if (runId) { setTab("progress"); await refreshRun(runId); } else setTab("library"); }} />}
+      {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
+      {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
       {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
@@ -548,28 +553,9 @@ export default function App() {
           </div>
         </div>
       </div>}
-      {tab === "costs" && <Costs aiCalls={aiCalls} budgets={budgets} routes={routes} />}
-      {tab === "billing" && <Billing />}
-      {tab === "prompts" && <Prompts prompts={prompts} projectId={project?.id || ""} />}
-      {tab === "dag" && <DagEditor projectId={project?.id || ""} novelId={novel?.id || ""} />}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
-      {tab === "studio" && <Studio />}
-      {tab === "publish" && <PublishDashboard />}
-      {tab === "hotspot" && <HotspotDashboard />}
-      {tab === "knowledge" && project && <KnowledgeBrowser projectId={project.id} />}
-      {tab === "fanout" && <FanoutMatrix contentId={novel?.id || ""} />}
-      {tab === "versions" && chapter && <VersionTree contentId={chapter.id} versions={versions} onRestore={restoreVersion} />}
-      {tab === "foreshadowing" && novel && <ForeshadowingBoard novelId={novel.id} />}
-      {tab === "collaboration" && project && <CollaborationPanel projectId={project.id} />}
-      {tab === "agents" && <AgentConsole />}
-      {tab === "overview" && <Overview />}
-      {tab === "workspace" && <WorkspaceDashboard onNavigate={setTab} />}
-      {tab === "plugins" && <Plugins />}
-      {tab === "marketplace" && <Marketplace />}
-      {tab === "skills" && <SkillManager />}
-      {tab === "chat" && <AIChat />}
+      </>}
       <CommandPalette commands={cmdActions} />
     </Layout>
-    </ThemeProvider>
   );
 }

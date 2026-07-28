@@ -161,7 +161,7 @@ export function Billing() {
   return (
     <div>
       <div className="breadcrumb">
-        <b>NovelCraft</b> › 订阅与套餐
+        <b>Starlume AI</b> › 订阅与套餐
       </div>
 
       <div className="page-head">
