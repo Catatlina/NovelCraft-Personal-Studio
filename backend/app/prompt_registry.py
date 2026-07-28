@@ -1028,6 +1028,11 @@ def _stringify(value: Any) -> str:
 # User-origin fields that must always be scrubbed of prompt-injection patterns
 # before interpolation, regardless of value type (P2-7 / Q13).
 _USER_FIELD_TOKENS = ("idea", "selection", "instruction")
+_LONG_INTERNAL_CONTEXT_LIMITS = {
+    "_chapter_body": 12000,
+    "_context_window": 12000,
+    "_chapter_outline": 6000,
+}
 
 
 def render_prompt(template: str, variables: dict[str, Any]) -> str:
@@ -1044,6 +1049,14 @@ def render_prompt(template: str, variables: dict[str, Any]) -> str:
         if any(token in str(key).lower() for token in _USER_FIELD_TOKENS):
             # Explicit, type-agnostic injection scrub for user-origin fields.
             safe_values[key] = sanitize_untrusted(value)
+        elif key in _LONG_INTERNAL_CONTEXT_LIMITS:
+            # These values are assembled from persisted, project-scoped novel
+            # data. Keep injection filtering while allowing complete chapters
+            # and bounded context windows to reach long-form tasks.
+            safe_values[key] = sanitize_untrusted(
+                value,
+                limit=_LONG_INTERNAL_CONTEXT_LIMITS[key],
+            )
         else:
             safe_values[key] = _stringify(value)
     return Template(template).safe_substitute(safe_values)
