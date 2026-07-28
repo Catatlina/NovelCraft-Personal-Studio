@@ -192,6 +192,24 @@ def _assert_min_chapter_length(task_type: str, text: str) -> None:
         raise OutputValidationError(f"{task_type} chapter too short: {chars}/{MIN_CHAPTER_CHARS} chars")
 
 
+def _humanize_quality_feedback(before_text: str, output: dict) -> str:
+    paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
+    try:
+        _assert_story_revision_quality(
+            task_type="final_humanize",
+            before_text=before_text,
+            after_paragraphs=paragraphs,
+            min_ratio=0.75,
+        )
+        _assert_min_chapter_length("final_humanize", "\n".join(paragraphs))
+    except OutputValidationError as exc:
+        return (
+            f"{exc}. 请基于完整原文重新处理，保留至少 75% 正文和 60% 段落，"
+            f"不得少于 {MIN_CHAPTER_CHARS} 个正文字符。"
+        )
+    return ""
+
+
 def _draft_length_feedback(output: dict) -> str:
     """Return a concrete retry instruction when a draft misses the hard length gate."""
     chapter = output.get("chapter") if isinstance(output, dict) else None
@@ -809,10 +827,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         + "；".join(fidelity_feedback[:8])
                     )
             else:
-                length_feedback = ""
-                quality_attempts = 3 if task_type == "write_chapter_draft" else 1
+                quality_feedback = ""
+                quality_attempts = 3 if task_type in {"write_chapter_draft", "final_humanize"} else 1
                 for quality_attempt in range(1, quality_attempts + 1):
-                    variables = {**run_context, "length_retry_feedback": length_feedback}
+                    variables = {
+                        **run_context,
+                        "length_retry_feedback": quality_feedback,
+                        "quality_retry_feedback": quality_feedback,
+                    }
                     output = complete(
                         run_id=run_id,
                         node_key=node_key,
@@ -826,15 +848,21 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         ),
                     )
                     output = validate_task_output(task_type or "", output)
-                    if task_type != "write_chapter_draft":
+                    if task_type == "write_chapter_draft":
+                        quality_feedback = _draft_length_feedback(output)
+                    elif task_type == "final_humanize":
+                        quality_feedback = _humanize_quality_feedback(
+                            str(run_context.get("_chapter_body") or ""),
+                            output,
+                        )
+                    else:
                         break
-                    length_feedback = _draft_length_feedback(output)
-                    if not length_feedback:
+                    if not quality_feedback:
                         break
                 else:
                     raise OutputValidationError(
-                        f"write_chapter_draft failed length gate after {quality_attempts} real generations: "
-                        f"{length_feedback}"
+                        f"{task_type} failed quality gate after {quality_attempts} real generations: "
+                        f"{quality_feedback}"
                     )
         except BudgetExceeded:
             _mark_node(run_id, node_key, "pending_budget", "budget exceeded")

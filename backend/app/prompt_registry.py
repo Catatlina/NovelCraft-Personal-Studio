@@ -836,6 +836,7 @@ body 至少 12 段，每段为完整叙事段落，总字数不得低于 3000 �
 章节内容：$_chapter_body
 不可变事实：$source_facts
 禁止改动：$forbidden_changes
+上次质量门禁反馈：$quality_retry_feedback
 
 处理规则：
 1. 检测并替换高频套话（命运的齿轮/心猛地一沉/眼神复杂/踏上新的旅程）

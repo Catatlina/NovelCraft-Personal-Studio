@@ -1,7 +1,7 @@
 import pytest
 
 from app.gateway import OutputValidationError
-from app.workers.tasks import _assert_story_revision_quality
+from app.workers.tasks import _assert_story_revision_quality, _humanize_quality_feedback
 
 
 def _paragraphs(count: int, *, chars: int = 140) -> list[str]:
@@ -52,3 +52,14 @@ def test_story_revision_quality_allows_story_deslop_medium_pass_boundary():
         after_paragraphs=after,
         min_ratio=0.75,
     )
+
+
+def test_humanize_quality_feedback_explains_retry_constraints():
+    before = "\n".join(_paragraphs(12, chars=100))
+    output = {"humanized_text": "\n".join(_paragraphs(7, chars=50))}
+
+    feedback = _humanize_quality_feedback(before, output)
+
+    assert "基于完整原文重新处理" in feedback
+    assert "75%" in feedback
+    assert "60%" in feedback
