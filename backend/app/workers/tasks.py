@@ -17,6 +17,7 @@ Features:
 from __future__ import annotations
 
 import json
+import math
 import time
 from datetime import datetime, timezone
 from functools import wraps
@@ -174,7 +175,11 @@ def _assert_story_revision_quality(
         raise OutputValidationError(
             f"{task_type} shortened chapter too much: {after_chars}/{before_chars} chars"
         )
-    if before_paragraph_count >= 6 and len(after_paragraphs) < before_paragraph_count - 2:
+    # Polishing may legitimately merge adjacent paragraphs.  Use a proportional
+    # structural floor instead of requiring almost the same paragraph count; the
+    # character-ratio gate above remains the primary protection against deletion.
+    min_paragraph_count = math.ceil(before_paragraph_count * 0.60)
+    if before_paragraph_count >= 6 and len(after_paragraphs) < min_paragraph_count:
         raise OutputValidationError(
             f"{task_type} dropped too many paragraphs: {len(after_paragraphs)}/{before_paragraph_count}"
         )
