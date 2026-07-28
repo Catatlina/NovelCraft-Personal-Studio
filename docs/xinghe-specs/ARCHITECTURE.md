@@ -263,4 +263,4 @@ AI调用记录 → 属于engine（跨App共享）
 
 ---
 
-> **下一步**：阅读 [DEVELOPMENT_RULES.md](./DEVELOPMENT_RULES.md) 了解开发纪律
+> **开发纪律**：以仓库根目录 `AGENTS.md` 和真实性规范为准。
