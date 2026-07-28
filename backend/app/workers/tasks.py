@@ -30,6 +30,9 @@ from app.core.context_budget import cap_context_tokens
 from app.core.byok import resolve_byok_key, stash_byok_key
 from app.core.concurrency import acquire_ai_slot, release_ai_slot
 from app.services.novel_export import extract_body_text
+from app.services.prompt_compiler import (select_strategies, compile_strategy_directive,
+                                           compile_prompt, skill_hints_for_strategies,
+                                           SKILL_GENERATE_CONFLICT, SKILL_GENERATE_HOOK)
 
 from .celery_app import celery_app
 
@@ -288,6 +291,31 @@ def _check_story_arc_coverage(arcs: Any, chapter_seq: int, outline_participants:
     if issues:
         return {"status": "warning", "issues": issues, "sampled": len(arcs), "covered": covered}
     return {"status": "pass", "issues": [], "sampled": len(arcs), "covered": covered}
+
+
+# V3 Strategy Library (§6): build the Writer directive + skill hints for the
+# current chapter. Reads the active strategies, matches them against the
+# chapter's seq + function_type, and compiles a Chinese directive + the Writer
+# skill hints it triggers. Both degrade to "" / [] when nothing matches, so the
+# Writer prompt is never blocked.
+def _strategy_directive_for_chapter(run_context: dict) -> tuple[str, list[str]]:
+    seq = int(run_context.get("chapter_seq") or 1)
+    outlines = run_context.get("chapter_outlines") or []
+    function_type = ""
+    if isinstance(outlines, list):
+        for o in outlines:
+            if isinstance(o, dict) and int(o.get("seq") or 0) == seq:
+                function_type = str(o.get("function_type", ""))
+                break
+    db = connect()
+    rows = db.execute(
+        "SELECT name, category, stages, applicable_conditions, description "
+        "FROM strategy WHERE status = 'active'"
+    ).fetchall()
+    db.close()
+    strats = [dict(r) for r in rows]
+    matched = select_strategies(strats, seq, function_type)
+    return compile_strategy_directive(matched), skill_hints_for_strategies(matched)
 
 
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:
@@ -945,6 +973,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         "length_retry_feedback": quality_feedback,
                         "quality_retry_feedback": quality_feedback,
                     }
+                    # V3 Strategy Library (§6): inject the matched strategy
+                    # directive + Writer skill hints into the prompt. Missing
+                    # strategy degrades to "" / [] (no-op), so generation is
+                    # never blocked.
+                    if task_type == "write_chapter_draft":
+                        directive, skill_hints = _strategy_directive_for_chapter(run_context)
+                        variables["strategy_directive"] = directive
+                        variables["skill_hints"] = "；".join(skill_hints) if skill_hints else ""
                     output = complete(
                         run_id=run_id,
                         node_key=node_key,

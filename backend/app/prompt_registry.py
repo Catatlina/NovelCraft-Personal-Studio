@@ -760,6 +760,9 @@ $plan_output
 禁止改动：$forbidden_changes
 Novel DNA 禁止偏离（题材/人设红线，强约束）：$forbidden_deviations
 
+$strategy_directive
+$skill_hints
+
 严禁：
 - 网文套话（命运的齿轮开始转动/心猛地一沉/眼神复杂）
 - 章末总结体（这一切都说明/他终于明白）

@@ -276,6 +276,56 @@ def init_db() -> None:
             "INSERT INTO sensitive_words (id, word, category) VALUES (%s, %s, %s) ON CONFLICT(word) DO NOTHING",
             (new_id(), word, "通用"),
         )
+    # V3 web-novel strategy library MVP (§6): create table (idempotent safety
+    # net in case Alembic has not run) and seed built-in strategies.
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS strategy (
+            id VARCHAR(36) PRIMARY KEY,
+            category VARCHAR(50) NOT NULL,
+            name VARCHAR(200) NOT NULL,
+            description TEXT,
+            stages JSONB NOT NULL DEFAULT '[]',
+            applicable_conditions JSONB NOT NULL DEFAULT '[]',
+            is_builtin BOOLEAN DEFAULT TRUE,
+            status VARCHAR(20) DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    STRATEGY_SEEDS = [
+        {
+            "id": "stg_golden_three",
+            "category": "开篇",
+            "name": "黄金三章",
+            "description": "前3章必须立人设、抛悬念、给甜头，禁止拖剧情。",
+            "stages": ["立人设", "抛悬念", "给甜头", "埋长线"],
+            "applicable_conditions": ["章节序号 <= 3", "或 function_type 为 开篇/立规矩"],
+        },
+        {
+            "id": "stg_face_slap",
+            "category": "爽点",
+            "name": "打脸策略",
+            "description": "先压后扬的爽点结构：隐藏实力被误解轻视，事件触发后能力展示，群体态度反转。",
+            "stages": ["压制", "误解", "隐藏实力", "事件触发", "能力展示", "群体态度变化", "新的目标"],
+            "applicable_conditions": ["function_type 为 爽点/冲突/打脸", "存在隐藏实力类人设"],
+        },
+        {
+            "id": "stg_identity_reversal",
+            "category": "爽点",
+            "name": "身份反转",
+            "description": "铺垫平凡被轻视，线索浮现后引爆真实身份，重构人物关系。",
+            "stages": ["铺垫平凡", "误会轻视", "线索浮现", "真相引爆", "关系重构"],
+            "applicable_conditions": ["function_type 为 身份反转", "或本章含反转转折"],
+        },
+    ]
+    for s in STRATEGY_SEEDS:
+        db.execute(
+            """INSERT INTO strategy (id, category, name, description, stages, applicable_conditions, is_builtin, status)
+               SELECT %s, %s, %s, %s, %s, %s, TRUE, 'active'
+               WHERE NOT EXISTS (SELECT 1 FROM strategy WHERE name = %s)""",
+            (s["id"], s["category"], s["name"], s["description"],
+             encode(s["stages"]), encode(s["applicable_conditions"]), s["name"]),
+        )
     db.commit()
     db.close()
 
