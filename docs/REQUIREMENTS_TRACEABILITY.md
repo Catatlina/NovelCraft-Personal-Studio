@@ -26,7 +26,7 @@
 | NOV-S-002 | 创作知识导入、导出和统计 | `Settings.tsx` | knowledge/stats API | 已接线 | 页面/API 接线 | 真库数据操作 E2E |
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
 | NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 已验收 | 12/12；build；6 passed, 1 skipped（⑤ 富状态 retry 中） | CI 同版本全绿 |
-| NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 已验收 | protected E2E 6 passed, 1 skipped（①②③④⑥⑦，真实 Key）；小说主线⑤ retry 中 | — |
+| NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected E2E 6 passed, 1 skipped（①②③④⑥⑦，真实 Key）；小说主线⑤ 因 `write_polish` invalid_output 未稳定通过（KI-007） | 修复 KI-007 后重跑 ⑤ |
 | NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 已验收 | 已部署 `novel.xyjin.xyz` commit `91bcf9b`，healthz 全绿 | — |
 
 ## 更新规则

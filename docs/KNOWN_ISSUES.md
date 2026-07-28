@@ -62,13 +62,26 @@
   3. **硬编码 active/wired 自报告** 仅 `api/v1/billing.py:82` `UPDATE ... status='active'`——订阅付费成功后的真实状态写库，由真实支付/更新驱动，非能力自报告。
   - 结论：全部命中为非业务伪实现；按《23》§10 用 `GATE_ALLOW_WARNINGS=1` 复验仅表示"已确认良性"，不等于修复告警，也不能据此外推全项目完成。
 
-### KI-006 全页面视觉证据 —— 可用（2026-07-28，富状态待最终稳定）
+### KI-006 全页面视觉证据 —— 可用（2026-07-28）
 
-- 状态：**可用**（七页面完整桌面/手机截图集已产；富状态截图已有 ③/⑥ 证据；⑤ 富状态全链受 `write_polish` 节点 AI 输出格式偶发失败影响，正在重试取证）。
+- 状态：**可用**（七页面完整桌面/手机截图集已产；富状态截图已有 ③/⑥ 证据；⑤ 富状态全链受 `write_polish` 节点 AI 输出格式失败阻断，见 KI-007）。
 - 证据：
   - `STARLUME_CAPTURE_VISUAL=1 npx playwright test --grep "七页面"` → **passed (9.1s)**，生成 15 张截图（七页面 1280/390 + 404）。
   - `npx playwright test --grep-invert "小说主线⑤"` → **6 passed, 1 skipped**；含 ③-progress `protected-01-progress-running.png`（真实运行中节点）+ ⑥ 版本恢复闭环 `protected-07/08/09.png`。
-  - 小说主线⑤（人工定名→完成→书库→编辑器→审阅富状态）首次跑因 `write_polish` 节点返回 `invalid_output` 失败，Playwright 正在 retry；该问题属 AI 输出契约遵循度，非功能缺失。
+  - 小说主线⑤（人工定名→完成→书库→编辑器→审阅富状态）连续两次因 `write_polish` 节点返回 `invalid_output` 失败，已停止重试；该问题已单独记录为 KI-007。
+
+## 新发现的线上/生产稳定性问题
+
+### KI-007 `write_polish` 节点对 `deepseek-chat` 输出格式不稳定
+
+- 状态：**未开始**（问题定位完成，待修复 prompt/增加输出修复）。
+- 现象：真实 AI 全链 E2E（小说主线⑤）连续两次在 `write_polish` 节点返回 `invalid_output`，导致 run failed；切换模型前旧链路上也曾出现相同问题。
+- 根因：`_persist_chapter_polish` 期望 output 为 `{polished: {body: [...]}}` / `{chapter: {body: [...]}}` / `{body: [...]}` 结构，但 `deepseek-chat` 在此节点的输出未遵循 JSON/结构契约（可能返回了非 JSON、缺字段或字段类型错误）。
+- 影响：创作向导→人工定名→首章→审阅→导出的完整富状态路径无法稳定通过；该节点是 19 节点主链的倒数第 3 步，直接影响单本完成率。
+- 下一步：
+  1. 检查 `write_polish` 的 system prompt 是否明确要求纯 JSON、给出示例、禁止 markdown 包裹。
+  2. 在 `_run_agent_node` 或 `_parse_agent_output` 层增加 JSON repair / 二次追问（json_repair + 一次 retry）。
+  3. 重跑小说主线⑤ 取证，确认 KI-006 可提升为已验收。
 
 ## 非本轮目标但必须如实保留
 
