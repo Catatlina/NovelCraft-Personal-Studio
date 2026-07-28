@@ -698,6 +698,33 @@ $plan_output
 
 输出 JSON: {"scene_beats":[{"scene":1,"pov":"视角人物","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"}]}"""),
 
+    # ═══ V3 Story Arc（§4，单层实体化，不做阶段/场景层） ═══
+    ("bootstrap.generate_story_arc", "1.0.0", "deepseek",
+     """你是剧情架构师。请为《$selected_title》规划本书的「故事弧（Story Arc）」列表——每条弧是一条贯穿全书的叙事线索（如"第一次创业""父子和解""复仇布局"）。
+
+原始创作需求/用户灵感：$idea
+创作圣经：$creative_bible
+不可变事实：$source_facts
+分卷规划：$_volume_plan
+
+要求：
+1. 产出 3-6 条故事弧，覆盖全书主干；每条弧含：
+   - name（弧名，如"第一次创业"）
+   - goal（这条弧要达成的目标）
+   - start_state（起始状态）/ end_state（结束状态）
+   - participants（参与人物，关联人物名列表）
+   - core_conflict（核心冲突）
+   - key_events（关键事件列表，自由文本，暂不拆独立事件）
+   - payoff_points（爽点列表）
+   - foreshadowing_refs（关联伏笔列表，可空）
+   - outcome_impact（结果对整个故事的影响）
+   - status（固定 "planning"）
+   - chapter_range（弧覆盖的章节序号范围 [起, 止]，依据分卷规划估算；不确定可留空数组）
+2. 弧与弧之间要有因果/递进关系，避免互相独立；爽点（payoff_points）要落在弧的 end_state 之前或之上
+3. 不得新增 forbidden_changes 禁止的事实漂移；弧必须忠实于 $source_facts
+
+输出 JSON: {"story_arcs":[{"name":"第一次创业","goal":"主角从零建立公司","start_state":"失业负债","end_state":"公司走上正轨","participants":["主角","合伙人"],"core_conflict":"资金与对手打压","key_events":["凑启动资金","首个订单"],"payoff_points":["首笔大单落地"],"foreshadowing_refs":[],"outcome_impact":"奠定后续资本局","status":"planning","chapter_range":[5,40]}]}"""),
+
     # ═══ V2 写作阶段（5 节点，oh-story Phase 4-5 写作铁律 + show-me-the-story 事实链） ═══
     ("bootstrap.write_chapter_draft", "1.0.0", "deepseek",
      """你是资深网文作家。请写《$selected_title》第 $_chapter_seq 章正文。

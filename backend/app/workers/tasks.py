@@ -52,6 +52,7 @@ BOOTSTRAP_STAGES = {
         "label": "蓝图阶段",
         "nodes": [
             ("blueprint_volume_plan",     "agent", "StoryArchitect", "分卷规划",          "blueprint_volume_plan"),
+            ("generate_story_arc",        "agent", "StoryArchitect", "故事弧生成",        "generate_story_arc"),
             ("blueprint_chapter_outline", "agent", "StoryArchitect", "逐章细纲",          "blueprint_chapter_outline"),
             ("blueprint_scene_beat",      "agent", "StoryArchitect", "场景节拍表",        "blueprint_scene_beat"),
         ],
@@ -261,6 +262,34 @@ def _check_novel_dna_consistency(dna: Any) -> dict[str, Any]:
     return {"status": status, "issues": issues, "checked": True}
 
 
+# V3 Story Arc (§4): deterministic coverage/drift check. A chapter that falls
+# inside an active arc's declared chapter_range must involve at least one of the
+# arc's participants; total non-overlap is a warning (not a hard block), so the
+# writer is nudged back onto the arc without killing the run. Books without arcs
+# degrade gracefully (pass).
+def _check_story_arc_coverage(arcs: Any, chapter_seq: int, outline_participants: Any) -> dict[str, Any]:
+    if not isinstance(arcs, list) or not arcs or not chapter_seq:
+        return {"status": "pass", "issues": [], "sampled": 0, "covered": False}
+    issues: list[str] = []
+    covered = False
+    for arc in arcs:
+        if not isinstance(arc, dict):
+            continue
+        rng = arc.get("chapter_range") or []
+        if len(rng) == 2 and rng[0] <= chapter_seq <= rng[1]:
+            covered = True
+            arc_parts = {str(p).strip() for p in (arc.get("participants") or []) if str(p).strip()}
+            chap_parts = {str(p).strip() for p in (outline_participants or []) if str(p).strip()}
+            if arc_parts and not (arc_parts & chap_parts):
+                issues.append(
+                    f"第 {chapter_seq} 章落在弧线「{arc.get('name', '')}」区间 {rng} 内，"
+                    f"但本章参与者与弧线参与者无交集，疑似弧线被忽略"
+                )
+    if issues:
+        return {"status": "warning", "issues": issues, "sampled": len(arcs), "covered": covered}
+    return {"status": "pass", "issues": [], "sampled": len(arcs), "covered": covered}
+
+
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:
     paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
     after_chars = len("\n".join(paragraphs).strip())
@@ -297,7 +326,8 @@ def _draft_length_feedback(output: dict) -> str:
     return ""
 
 
-def _quality_evidence_payload(output: dict, self_review: dict | None = None, pacing: dict | None = None) -> dict:
+def _quality_evidence_payload(output: dict, self_review: dict | None = None,
+                          pacing: dict | None = None, arc_check: dict | None = None) -> dict:
     """Build the durable seven-dimension provenance stored on a chapter."""
     score_by_status = {"pass": 90, "warning": 65, "fail": 35}
     checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
@@ -310,6 +340,9 @@ def _quality_evidence_payload(output: dict, self_review: dict | None = None, pac
     # (pacing is computed/stored separately from the consistency `checks`).
     if pacing and isinstance(pacing, dict) and pacing.get("sampled"):
         dimensions["节奏检测"] = score_by_status.get(str(pacing.get("status", "")), 0)
+    # V3 Story Arc (§4): surface the arc-coverage check as an 弧线追踪 dimension.
+    if arc_check and isinstance(arc_check, dict) and arc_check.get("sampled"):
+        dimensions["弧线追踪"] = score_by_status.get(str(arc_check.get("status", "")), 0)
     self_review = self_review if isinstance(self_review, dict) else {}
     score = self_review.get("self_score")
     if score is None and dimensions:
@@ -319,7 +352,7 @@ def _quality_evidence_payload(output: dict, self_review: dict | None = None, pac
         "score": float(score or 0),
         "dimensions": dimensions,
         "issues": issues,
-        "source": "write_self_review+final_consistency_check+chapter_function_pacing",
+        "source": "write_self_review+final_consistency_check+chapter_function_pacing+story_arc_coverage",
     }
 
 
@@ -1048,6 +1081,16 @@ def _enrich_blueprint_context(context: dict, novel_id: str) -> dict:
         enriched["_worldview_text"] = worldview[:3000]
     if characters_text:
         enriched["_characters_text"] = characters_text[:3000]
+    # V3 Story Arc (§4): expose the volume plan to blueprint-stage nodes
+    # (including generate_story_arc) so arcs can estimate chapter_range.
+    _db2 = connect()
+    meta_row = _db2.execute("SELECT meta FROM contents WHERE id = %s", (novel_id,)).fetchone()
+    _db2.close()
+    if meta_row:
+        _m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
+        _vp = _m.get("volume_plan")
+        if _vp:
+            enriched["_volume_plan"] = json.dumps(_vp, ensure_ascii=False)[:2000]
     return enriched
 def _enrich_finalization_context(context: dict, novel_id: str) -> dict:
     """Enrich context for finalization with full chapter body + entity states."""
@@ -1383,6 +1426,44 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
     elif task_type == "blueprint_scene_beat":
         context["scene_beat_sheet"] = output
+    elif task_type == "generate_story_arc":
+        # V3 Story Arc (§4): persist each arc as an independent content entity
+        # (type='story_arc'), parent_id = novel, backward compatible (old novels
+        # without arcs simply have no story_arc rows). Active arcs feed the
+        # 7-layer context assembler and the per-chapter Arc-deviation check.
+        arcs = output.get("story_arcs", []) if isinstance(output, dict) else []
+        if isinstance(arcs, list):
+            for idx, arc in enumerate(arcs):
+                if not isinstance(arc, dict):
+                    continue
+                arc_id = new_id()
+                arc_meta = {
+                    "goal": str(arc.get("goal", "")),
+                    "start_state": str(arc.get("start_state", "")),
+                    "end_state": str(arc.get("end_state", "")),
+                    "participants": list(arc.get("participants", []) or []),
+                    "core_conflict": str(arc.get("core_conflict", "")),
+                    "key_events": list(arc.get("key_events", []) or []),
+                    "payoff_points": list(arc.get("payoff_points", []) or []),
+                    "foreshadowing_refs": list(arc.get("foreshadowing_refs", []) or []),
+                    "outcome_impact": str(arc.get("outcome_impact", "")),
+                    "status": str(arc.get("status", "planning")),
+                    "chapter_range": list(arc.get("chapter_range", []) or []),
+                    "arc_index": idx,
+                }
+                db.execute(
+                    """INSERT INTO contents
+                       (id, project_id, parent_id, type, title, status, meta, created_at)
+                       VALUES (%s, %s, %s, 'story_arc', %s, 'planning', %s, now())""",
+                    (arc_id, _project_id, _novel_id, str(arc.get("name", f"故事弧{idx+1}")), encode(arc_meta)),
+                )
+            # Also keep the full list on the novel meta for quick access / audits.
+            meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (_novel_id,)).fetchone()
+            if meta_row:
+                m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
+                m["story_arcs"] = arcs
+                db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
+            context["story_arcs"] = arcs
     elif task_type == "write_chapter_draft":
         _persist_chapter_draft(db, run, node_key, output, context, _novel_id, _project_id, run_id,
                                knowledge_ids_to_reindex)
@@ -1408,6 +1489,22 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             # function_type sequence. Stored as a dimension, never blocks the
             # consistency gate itself.
             pacing = _check_chapter_function_pacing(context.get("chapter_outlines"))
+            # V3 Story Arc (§4): deterministic arc-coverage check for the current
+            # chapter. db is still open here, so read active arcs + the chapter's
+            # seq/outline participants in one shot.
+            arc_check: dict[str, Any] = {"status": "pass", "issues": [], "sampled": 0, "covered": False}
+            _cid = context.get("chapter_id", "")
+            if _cid:
+                _row = db.execute("SELECT seq, meta FROM contents WHERE id=%s", (_cid,)).fetchone()
+                if _row:
+                    _seq = int(_row.get("seq") or (_row.get("meta") or {}).get("seq") or 0)
+                    _arc_rows = db.execute(
+                        "SELECT meta FROM contents WHERE parent_id=%s AND type='story_arc' AND is_deleted=FALSE",
+                        (_novel_id,),
+                    ).fetchall()
+                    _arcs = [r["meta"] for r in _arc_rows if isinstance(r.get("meta"), dict)]
+                    _outline = _chapter_outline_for_seq(context, _seq) or {}
+                    arc_check = _check_story_arc_coverage(_arcs, _seq, _outline.get("participants") or [])
             failed_checks = {
                 name: check for name, check in checks.items()
                 if not isinstance(check, dict)
@@ -1419,7 +1516,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 if cid:
                     db.execute(
                         "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
-                        (encode({"quality_gate": {"status": "failed", "checks": checks}, "pacing_check": pacing}), cid),
+                        (encode({"quality_gate": {"status": "failed", "checks": checks},
+                                  "pacing_check": pacing, "arc_check": arc_check}), cid),
                     )
                 db.commit()
                 db.close()
@@ -1433,7 +1531,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                     (encode({
                         "final_consistency_check": output,
                         "pacing_check": pacing,
-                        "review_7dim": _quality_evidence_payload(output, context.get("self_review"), pacing),
+                        "arc_check": arc_check,
+                        "review_7dim": _quality_evidence_payload(output, context.get("self_review"), pacing, arc_check),
                     }), cid),
                 )
         if task_type == "final_continuity_audit":
@@ -2388,6 +2487,31 @@ def patrol_check() -> dict:
         "SELECT id, title FROM contents WHERE type='chapter' AND parent_id IS NULL AND is_deleted = FALSE"
     ).fetchall()
 
+    # V3 Story Arc (§4.4): Arc progress / integrity check. Flag active or
+    # completed arcs whose trajectory fields are empty (data-integrity drift)
+    # and active arcs with no chapters produced within their chapter_range.
+    weak_arcs = db.execute(
+        """SELECT c.id, c.title, c.meta
+           FROM contents c
+           WHERE c.type = 'story_arc' AND c.is_deleted = FALSE
+             AND c.status IN ('active', 'completed')
+             AND (c.meta->>'goal' IS NULL OR c.meta->>'goal' = ''
+                  OR c.meta->>'end_state' IS NULL OR c.meta->>'end_state' = '')"""
+    ).fetchall()
+    active_no_progress = db.execute(
+        """SELECT c.id, c.title, c.meta
+           FROM contents c
+           WHERE c.type = 'story_arc' AND c.is_deleted = FALSE AND c.status = 'active'
+             AND jsonb_array_length(COALESCE(c.meta->'chapter_range', '[0,0]')::jsonb) = 2
+             AND (
+               SELECT COUNT(*) FROM contents ch
+               WHERE ch.parent_id = c.parent_id AND ch.type = 'chapter'
+                 AND ch.is_deleted = FALSE
+                 AND (ch.meta->>'seq')::int BETWEEN (c.meta->'chapter_range'->>0)::int
+                                               AND (c.meta->'chapter_range'->>1)::int
+             ) = 0"""
+    ).fetchall()
+
     db.close()
 
     issues = []
@@ -2397,6 +2521,10 @@ def patrol_check() -> dict:
         issues.append(f"{len(needs_rewrite)} chapters need rewrite")
     if orphans:
         issues.append(f"{len(orphans)} orphan chapters")
+    if weak_arcs:
+        issues.append(f"{len(weak_arcs)} story arcs with empty goal/end_state")
+    if active_no_progress:
+        issues.append(f"{len(active_no_progress)} active arcs with no chapters in range")
     backlog = check_queue_backlog()
     if backlog:
         issues.append(backlog)

@@ -12,7 +12,7 @@
 |---|------|------|--------|------|
 | ① | Chapter Function | **已接线** | 细纲 Schema 加 function_type/chapter_goal/reader_expectation（必填，缺→打回重生成）；草稿提示强制围绕功能；Reviewer 七维增「节奏检测」维度（不阻塞门禁） | `tests/test_chapter_function.py` 5 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
 | ② | Novel DNA | **已接线** | plan_idea 同一次调用产出 commercial_positioning/story_promise/forbidden_deviations（不增调用）；存为书 meta 顶层键 + novel_dna 嵌套；草稿提示注入 `$forbidden_deviations` 强约束；`_check_novel_dna_consistency` 自洽校验（红线与定位/承诺矛盾→fail，存 meta） | `tests/test_novel_dna.py` 4 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ③ | Story Arc 单层实体化 | 未开始 | 故事弧 entity_type=story_arc（parent_id 挂书）；Planner Agent 新增节点调度 | 待做 |
+| ③ | Story Arc 单层实体化 | **已接线** | 故事弧 entity_type=story_arc（parent_id 挂书，旧书无弧优雅降级）；蓝图阶段新增 `generate_story_arc` 节点（StoryArchitect 调度，非 Story Architect 直接调用）；7层装配插 `arc_summary` 层（优先级在 volume 与 recent 之间）；每10章巡检加弧完整性/进度校验；final_consistency_check 加 `_check_story_arc_coverage` 确定性偏移检测（章在弧区间内但参与者零交集→warning，不阻塞门禁），并入 Reviewer 七维「弧线追踪」维度 | `tests/test_story_arc.py` 6 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
 | ④ | 网文策略库 MVP | 未开始 | 新 strategy 表（非versioned）；Prompt Compiler 组装函数注入 Writer；Skill 仅 generate_conflict/generate_hook | 待做 |
 | ⑤ | Repair Engine 三级版 | 未开始 | 句/段级局部修复 + 章级复用 + 打回规划；局部修复原地增量（不分支） | 待做 |
 
@@ -35,3 +35,4 @@
 - 2682f9d KI-007 修复（前序）
 - （本批）① Chapter Function：gateway _BlueprintChapterOutlineItem 必填字段 + 提示扩展；tasks _check_chapter_function_pacing + 节奏检测维度；tests/test_chapter_function.py
 - （本批）② Novel DNA：gateway _PlanIdeaOutput 加 commercial_positioning/story_promise/forbidden_deviations；prompt_registry plan_idea 提示+契约示例+草稿注入；tasks _check_novel_dna_consistency + plan_idea 持久化（顶层 meta 键 + novel_dna 嵌套）；tests/test_novel_dna.py
+- （本批）③ Story Arc：gateway _GenerateStoryArcOutput（_StoryArcItem，status 默认 planning）；tasks 蓝图阶段加 generate_story_arc 节点 + _enrich_blueprint_context 注入 _volume_plan；persist 存 story_arc 实体；assembler 插 arc_summary 层；patrol_check 加弧完整性/进度校验；final_consistency_check 加 _check_story_arc_coverage（确定性偏移检测→warning）+ 弧线追踪维度；tests/test_story_arc.py 6 passed

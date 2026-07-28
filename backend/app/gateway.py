@@ -412,6 +412,26 @@ class _StyleImitationOutput(_LenientOutput):
     text: str = Field(min_length=800)
 
 
+class _StoryArcItem(_LenientOutput):
+    """V3 Story Arc (§4) — one narrative arc entity, single layer (no phase/scene)."""
+    name: str = Field(min_length=2)
+    goal: str = Field(min_length=5)
+    start_state: str = Field(default="")
+    end_state: str = Field(default="")
+    participants: list[str] = Field(default_factory=list)
+    core_conflict: str = Field(default="")
+    key_events: list[str] = Field(default_factory=list)
+    payoff_points: list[str] = Field(default_factory=list)
+    foreshadowing_refs: list[str] = Field(default_factory=list)
+    outcome_impact: str = Field(default="")
+    status: str = Field(default="planning")  # planning / active / completed
+    chapter_range: list[int] = Field(default_factory=list)  # [start_seq, end_seq]
+
+
+class _GenerateStoryArcOutput(_LenientOutput):
+    story_arcs: list[_StoryArcItem] = Field(min_length=1, max_length=12)
+
+
 BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_synopsis": _SynopsisOutput,
     "gen_worldview": _WorldviewOutput,
@@ -436,6 +456,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "blueprint_volume_plan": _BlueprintVolumePlanOutput,
     "blueprint_chapter_outline": _BlueprintChapterOutlineOutput,
     "blueprint_scene_beat": _BlueprintSceneBeatOutput,
+    "generate_story_arc": _GenerateStoryArcOutput,
     "write_chapter_draft": _WriteChapterDraftOutput,
     "write_self_review": _WriteSelfReviewOutput,
     "write_polish": _WritePolishOutput,
