@@ -424,7 +424,7 @@ $instruction
     ("narrative.expand_outline", "3.0.0", "deepseek",
      '将卷纲展开为逐章细纲。卷纲：$volume\n每卷 $chapters_per_volume 章。每章要有目标/冲突/转折/钩子。\n输出 JSON: {"chapters":[{"title":"","outline":""}]}'),
     ("narrative.extract_timeline", "3.0.0", "deepseek",
-     '提取本章时间线事件（按发生顺序，含时间标记）。$instructions\n$body\n输出 JSON: {"events":[{"event":"事件描述"}]}'),
+     '提取本章时间线事件（按发生顺序，含时间标记）。若文中出现明确的真实世界时间点（如"2010年""1998年冬"），在该事件上附加 real_world_anchor 字段；无法确定时省略该字段，不要编造。$instructions\n$body\n输出 JSON: {"events":[{"event":"事件描述","real_world_anchor":"2010年（可选）"}]}'),
     ("narrative.extract_arcs", "3.0.0", "deepseek",
      '提取人物弧线进展。\n$instructions\n$body\n输出 JSON: {"arcs":[{"character":"人物名","stage":"弧线阶段","goal":"目标"}]}'),
     ("narrative.extract_entities", "3.0.0", "deepseek",

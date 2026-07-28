@@ -1736,6 +1736,31 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                     _arcs = [r["meta"] for r in _arc_rows if isinstance(r.get("meta"), dict)]
                     _outline = _chapter_outline_for_seq(context, _seq) or {}
                     arc_check = _check_story_arc_coverage(_arcs, _seq, _outline.get("participants") or [])
+            # V3 Timeline Anchor (§10): deterministic anachronism check.
+            # Only enabled when Novel DNA marks the book as reality-based
+            # (现实向); fantasy books degrade to pass. Warning-only dimension —
+            # like pacing/arc it is recorded but never blocks the gate on its
+            # own (keyword table cannot be a hard blocker).
+            anchor_check: dict[str, Any] = {"status": "pass", "issues": [], "anchor_year": None}
+            if _cid:
+                from app.services.timeline import (
+                    check_anachronisms, is_reality_based, parse_year_anchor,
+                )
+                _nrow = db.execute("SELECT meta FROM contents WHERE id=%s", (_novel_id,)).fetchone()
+                _dna = ((_nrow or {}).get("meta") or {}).get("novel_dna") \
+                    if isinstance((_nrow or {}).get("meta"), dict) else None
+                if is_reality_based(_dna):
+                    _ev_rows = db.execute(
+                        "SELECT real_world_anchor FROM timeline_events "
+                        "WHERE chapter_id=%s AND real_world_anchor IS NOT NULL",
+                        (_cid,),
+                    ).fetchall()
+                    _years = [y for y in (parse_year_anchor(r["real_world_anchor"]) for r in _ev_rows) if y]
+                    _body_row = db.execute("SELECT body FROM contents WHERE id=%s", (_cid,)).fetchone()
+                    _body_text = extract_body_text(_body_row["body"]) if _body_row else ""
+                    if not _years:  # 章内事件无锚点时回退到正文年份标记
+                        _years = [y for y in [parse_year_anchor(_body_text[:3000])] if y]
+                    anchor_check = check_anachronisms(min(_years) if _years else None, _body_text)
             failed_checks = {
                 name: check for name, check in checks.items()
                 if not isinstance(check, dict)
@@ -1755,6 +1780,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                         "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
                         (encode({"quality_gate": {"status": "failed", "checks": checks},
                                   "pacing_check": pacing, "arc_check": arc_check,
+                                  "timeline_anchor_check": anchor_check,
                                   "repair_recommendation": repair_rec}), cid),
                     )
                 db.commit()
@@ -1770,6 +1796,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                         "final_consistency_check": output,
                         "pacing_check": pacing,
                         "arc_check": arc_check,
+                        "timeline_anchor_check": anchor_check,
                         "review_7dim": _quality_evidence_payload(output, context.get("self_review"), pacing, arc_check),
                     }), cid),
                 )
@@ -2750,6 +2777,14 @@ def patrol_check() -> dict:
              ) = 0"""
     ).fetchall()
 
+    # V3 Timeline Anchor (§10): chapters whose deterministic anachronism check
+    # produced a warning (reality-based books only; others never write it).
+    anachronism_warns = db.execute(
+        """SELECT id, title FROM contents
+           WHERE type = 'chapter' AND is_deleted = FALSE
+             AND meta->'timeline_anchor_check'->>'status' = 'warning'"""
+    ).fetchall()
+
     db.close()
 
     issues = []
@@ -2763,6 +2798,8 @@ def patrol_check() -> dict:
         issues.append(f"{len(weak_arcs)} story arcs with empty goal/end_state")
     if active_no_progress:
         issues.append(f"{len(active_no_progress)} active arcs with no chapters in range")
+    if anachronism_warns:
+        issues.append(f"{len(anachronism_warns)} chapters with anachronism warnings")
     backlog = check_queue_backlog()
     if backlog:
         issues.append(backlog)
