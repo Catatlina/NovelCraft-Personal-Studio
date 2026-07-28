@@ -32,7 +32,7 @@ _request_user_id: ContextVar[str | None] = ContextVar("request_user_id", default
 
 # Default model when no route exists. Must be a model that actually exists on
 # the DeepSeek API — a fictional name here fails every unrouted task at call time.
-MODEL = "deepseek-v4-pro"
+MODEL = "deepseek-chat"
 PROVIDER = "deepseek"
 
 LONG_FORM_TASKS = {

@@ -11,7 +11,9 @@ class Settings:
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     # Verified against the official /models endpoint on 2026-07-16.
-    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+    # deepseek-v4-pro is not available on all account tiers; use the
+    # generally-available deepseek-chat as the safe default.
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "180"))
     # DEPRECATED (P1-T2): the per-project "bootstrap" budget is no longer
     # enforced. Monthly spend is derived from the active plan's

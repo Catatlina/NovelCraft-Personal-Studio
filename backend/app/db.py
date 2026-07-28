@@ -256,13 +256,14 @@ def init_db() -> None:
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT(task_type) DO NOTHING
             """,
-            (new_id(), task_type, "deepseek", "deepseek-v4-pro", encode({"temperature": temperature}), encode([])),
+            (new_id(), task_type, "deepseek", "deepseek-chat", encode({"temperature": temperature}), encode([])),
         )
-    # Keep DeepSeek routes on the currently verified quality model. Flash is
-    # intentionally not used for long-form writing or acceptance audits.
+    # Repair any routes that were seeded or edited to models not available on
+    # the current DeepSeek account tier (deepseek-v4-pro / deepseek-v4-flash).
+    # This is a one-way safety fix; once routes are on deepseek-chat they stay.
     db.execute(
-        "UPDATE model_routes SET model = 'deepseek-v4-pro' "
-        "WHERE provider = 'deepseek' AND model IN ('deepseek-chat','deepseek-reasoner','deepseek-v4-flash')"
+        "UPDATE model_routes SET model = 'deepseek-chat' "
+        "WHERE provider = 'deepseek' AND model IN ('deepseek-v4-pro','deepseek-v4-flash','deepseek-reasoner')"
     )
     # Seed sensitive word list
     SENSITIVE_WORDS = ["政治敏感", "色情", "暴力恐怖", "赌博", "毒品", "枪支", "诈骗", "传销", "邪教", "违禁内容",
