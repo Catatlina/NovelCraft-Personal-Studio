@@ -17,9 +17,9 @@
 | NOV-L-002 | 详情、章节目录和导入 | `BookLibrary.tsx` | novel/detail/import API | 可用 | E2E 主线③ | 生产 smoke |
 | NOV-L-003 | TXT/MD 导出 | `BookLibrary.tsx` | export API | 可用 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；导出正文断言通过 | 生产 smoke |
 | NOV-E-001 | 编辑章节并真实持久化 | `Editor.tsx`、`RichEditor.tsx` | `PUT /contents/{id}`、versions | 可用 | E2E 主线③刷新持久化 | 生产 smoke |
-| NOV-E-002 | AI 编辑先预览再应用或放弃 | `Editor.tsx`、`editorPreview.ts` | content AI API、版本保存 | 已接线 | 3 条单测 | 真实 AI 浏览器 E2E |
+| NOV-E-002 | AI 编辑先预览再应用或放弃 | `Editor.tsx`、`editorPreview.ts` | content AI API、版本保存 | 可用 | 3 条单测；protected E2E 1 passed (2026-07-28, run9, 2 ai_calls)：续写→预览→放弃后原文不变→应用→版本恢复 | 生产 smoke |
 | NOV-E-003 | AI 失败不覆盖原文 | `App.tsx`、`Editor.tsx` | Gateway 显式失败 | 已接线 | 代码与单测边界 | 浏览器失败注入 E2E |
-| NOV-E-004 | 版本查看与恢复 | 编辑器版本区 | versions API | 已接线 | API/页面既有接线 | 浏览器恢复后持久化 |
+| NOV-E-004 | 版本查看与恢复 | 编辑器版本区 | versions API | 可用 | protected E2E 1 passed (2026-07-28, run9)：按版本 id 恢复后正文 A 回归、AI 建议消失、DB content.body 确为 [A] | 生产 smoke |
 | NOV-R-001 | 无审阅证据时不伪造评分 | `Review.tsx` | run review outputs | 可用 | E2E 主线④ | 生产空态 smoke |
 | NOV-R-002 | 展示七维、一致性、连续性和问题证据 | `Review.tsx` | review/consistency nodes | 可用 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；protected-06 截图 | 生产 smoke |
 | NOV-S-001 | BYOK 只保存在当前会话 | `Settings.tsx` | 请求 Header 优先 | 可用 | E2E 主线④ | 生产请求验证 |

@@ -311,7 +311,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {versionsPager.pageData.map(v => (
-              <button key={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
+              <button key={v.id} data-version-id={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
                 <RotateCcw size={12} /> {v.label}
                 <small style={{ color: "var(--text-3)", marginLeft: 4 }}>{new Date(v.created_at).toLocaleString()}</small>
               </button>

@@ -27,11 +27,17 @@
 - `origin/main` 现为 `876d826`，但生产站 `https://novel.xyjin.xyz` 仍运行旧构建，不能代表当前 Starlume UI。
 - 下一步：本批交接 checkpoint 提交并推送 → 等待 GitHub Actions 全绿 → 按 `docs/NovelCraft-开发文档/14-部署与运维手册.md` 部署 → 生产 smoke。
 
-### KI-003 AI 编辑与版本恢复缺真实浏览器闭环
+### KI-003 AI 编辑与版本恢复真实浏览器闭环 —— ✅ 已解决（2026-07-28，可用）
 
-- 状态：已接线。
-- 已有：差异预览单测、应用/放弃 UI、保存版本接线。
-- 缺少：真实 Provider 结果、放弃后原文不变、应用后刷新持久、旧版本恢复。
+- 状态：**可用**（真实 `DEEPSEEK_API_KEY` 下 E2E 全链通过；"已验收"需待生产部署 smoke 后由 KI-002 收口）。
+- 修复（2026-07-28）：E2E 选中错误版本导致恢复后正文变空。根因为测试用脆弱的 `nth(index)` 点击，在版本历史 UI 列表尚未刷新时点到 `body={}` 的 `offline_save` 版本；应用恢复逻辑本身正确（`restore_version` 写回目标快照 body）。修复：恢复按钮加 `data-version-id={v.id}`（`frontend/src/components/Editor.tsx`），测试按真实版本 id 点击并 `waitFor` 按钮可见。
+- 通过证据（全部真实，无 mock）：
+  - E2E：`npx playwright test e2e/main-chain.spec.ts --grep "小说主线⑥"` → **1 passed (29.2s)**。
+  - 真实 AI：run9 两次 `editor.continue` 真实 DeepSeek 调用（deepseek-v4-pro，succeeded，含 prompt/completion tokens 与成本）。
+  - 闭环：续写→预览可见且正文不变→放弃后原文不变→再次续写→应用到草稿正文含 AI 建议→按版本 id 恢复后原文 A 回归、AI 建议消失。
+  - 截图：`frontend/artifacts/screenshots/protected-07..09.png`（AI 预览 / 应用后 / 版本恢复后）。
+  - 取证：`restore->content.body` 恢复后确为 `{content:[{text:"档案室..."}]}`，编辑器 DOM `<p>档案室...</p>`。
+- 保留约束：`test.skip(!process.env.DEEPSEEK_API_KEY)` 未删除；无 Key 环境仍真实跳过。
 
 ## 文档和门禁问题
 

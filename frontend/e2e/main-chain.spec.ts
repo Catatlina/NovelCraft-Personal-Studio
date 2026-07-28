@@ -131,6 +131,102 @@ test("小说主线④：审阅不伪造分数，小说设置只保留创作相�
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("nc_model"))).toBe("deepseek-chat");
 });
 
+test("小说主线⑥：真实 AI 编辑 生成→预览→放弃/应用→版本恢复（protected）", async ({ page }) => {
+  test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY");
+  test.setTimeout(480_000);
+
+  await registerFreshUser(page);
+  const titleSeed = `AI编辑闭环验收-${Date.now()}`;
+  await createBookWithChapter(page, titleSeed);
+
+  // 打开章节编辑器并写入确定性的原文 A
+  await page.getByRole("navigation", { name: "小说创作主导航" })
+    .getByRole("button", { name: "我的书库", exact: true }).click();
+  const bookCard = page.locator(".library-page .card").filter({ hasText: titleSeed });
+  await bookCard.getByRole("button", { name: "进入编辑" }).click();
+  const editor = page.locator(".ProseMirror");
+  await expect(editor).toBeVisible({ timeout: 10_000 });
+  const originalText = "档案室的灯在午夜第三次闪烁，她终于看清了报纸上自己的名字。";
+  await editor.fill(originalText);
+  const firstSave = await page.waitForResponse(r => r.url().includes("/api/v1/contents/") && r.request().method() === "PUT" && r.ok());
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await firstSave;
+  // 从保存响应 URL 取出 content id（/api/v1/contents/{id}）
+  const contentId = new URL(firstSave.url()).pathname.split("/").filter(Boolean).pop()!;
+
+  // ① 真实 AI 续写 → 预览出现，正文未变
+  await page.getByRole("button", { name: "续写", exact: true }).click();
+  const previewPane = page.locator(".ai-edit-preview");
+  await expect(previewPane).toBeVisible({ timeout: 240_000 });
+  const proposedText = await previewPane.locator(".ai-edit-compare textarea").nth(1).inputValue();
+  expect(proposedText.trim().length).toBeGreaterThan(20);
+  const proposalMark = proposedText.trim().slice(0, 15);
+  await expect(editor).toHaveText(originalText); // 预览阶段正文不变
+  await page.screenshot({ path: "artifacts/screenshots/protected-07-ai-preview.png" });
+
+  // ② 放弃 → 预览关闭，原文保持不变
+  await previewPane.getByRole("button", { name: "放弃建议" }).click();
+  await expect(previewPane).toHaveCount(0);
+  await expect(editor).toHaveText(originalText);
+
+  // ③ 再次续写 → 应用到草稿 → 正文包含 AI 建议
+  await page.getByRole("button", { name: "续写", exact: true }).click();
+  await expect(previewPane).toBeVisible({ timeout: 240_000 });
+  const proposedText2 = await previewPane.locator(".ai-edit-compare textarea").nth(1).inputValue();
+  const proposalMark2 = proposedText2.trim().slice(0, 15);
+  await previewPane.getByRole("button", { name: "应用到草稿" }).click();
+  await expect(previewPane).toHaveCount(0);
+  await expect(editor).toContainText(originalText.slice(0, 12));
+  await expect(editor).toContainText(proposalMark2);
+  await page.screenshot({ path: "artifacts/screenshots/protected-08-ai-applied.png" });
+
+  // ④ 应用 AI 后轮询版本 API，直到出现「应用前正文 A」的可恢复版本（见下方）
+
+  // ⑤ 恢复「应用前正文 A」对应的版本（快照=A）→ AI 建议消失，原文回归
+  //    关键：applyPendingAiEdit 会立即触发一次 PUT（ai_edit 版本，只存算子元数据、无 body），
+  //    可恢复的正文版本来自 ~3s 后的 debounced 自动保存（offline_save，快照=应用前正文 A）。
+  //    因此轮询版本 API 直到出现快照正文等于 A 的版本，再按 DESC 顺序精确点击对应恢复按钮。
+  const versionsCard = page.locator(".card").filter({ hasText: "版本历史" });
+  await expect(versionsCard).toBeVisible();
+  const token = await page.evaluate(() => sessionStorage.getItem("nc_token"));
+  const bodyText = (body: any): string => {
+    if (!body || !Array.isArray(body.content)) return "";
+    return body.content.map((n: any) =>
+      typeof n === "string" ? n :
+      (n && typeof n.text === "string" ? n.text : (n && Array.isArray(n.content) ? bodyText({ content: n.content }) : ""))
+    ).join("");
+  };
+  const listVersions = async (): Promise<Array<{ id: string; label: string; snapshot?: { body?: any } }>> => {
+    const r = await page.request.get(`/api/v1/contents/${contentId}/versions`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok()) return [];
+    return (await r.json()).data as Array<{ id: string; label: string; snapshot?: { body?: any } }>;
+  };
+  let targetIdx = -1;
+  let versionsList: Array<{ id: string; label: string; snapshot?: { body?: any } }> = [];
+  const pollDeadline = Date.now() + 40_000;
+  while (Date.now() < pollDeadline) {
+    versionsList = await listVersions();
+    // 定位「label=offline_save 且快照正文等于原文 A」的版本（autosave）；
+    // 跳过 ai_edit 版本（只存算子元数据、无 body）与步骤③显式保存（快照为空）。
+    targetIdx = versionsList.findIndex(v => v.label === "offline_save" && bodyText(v.snapshot?.body) === originalText);
+    if (targetIdx >= 0) break;
+    await page.waitForTimeout(1000);
+  }
+  expect(targetIdx, "应存在快照等于原文 A 的可恢复版本").toBeGreaterThanOrEqual(0);
+  // 按版本真实 id 点击恢复按钮，避免 UI 版本列表顺序/陈旧导致的错位
+  // （autosave 创建 [A] 版本后 UI 可能尚未刷新，nth(index) 会点到错误版本）。
+  const targetId = versionsList[targetIdx].id;
+  const targetBtn = versionsCard.locator(`button[data-version-id="${targetId}"]`);
+  await targetBtn.waitFor({ state: "visible", timeout: 15_000 });
+  const restoreResponse = page.waitForResponse(r => r.url().includes("/versions/restore") && r.ok());
+  await targetBtn.click();
+  await restoreResponse;
+  await expect(editor).toHaveText(originalText, { timeout: 15_000 });
+  await expect(editor).not.toContainText(proposalMark2);
+  await page.screenshot({ path: "artifacts/screenshots/protected-09-version-restored.png" });
+  void proposalMark; // 首次建议仅用于放弃分支断言
+});
+
 test("小说主线⑤：真实 AI 向导→人工定名→首章→审阅→导出（protected）", async ({ page }) => {
   test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY");
   test.setTimeout(900_000);

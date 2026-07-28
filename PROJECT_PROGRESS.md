@@ -16,6 +16,14 @@
 - 状态提升（据 ACCEPTANCE_CRITERIA）：NOV-W-001/W-002/L-003/R-002 已接线 → **可用**；"已验收"仍需生产部署 smoke（KI-002）。
 - 默认无 Key 门禁不变：`test.skip` 保留，仍为 4 passed + skipped。
 
+### 2026-07-28 AI 编辑真实浏览器闭环 E2E 通过（未完成顺序 item ②）
+
+- 注入真实 `DEEPSEEK_API_KEY` 后，`npx playwright test e2e/main-chain.spec.ts --grep "小说主线⑥"` → **1 passed (29.2s)**。
+- 闭环覆盖：续写（真实 DeepSeek `editor.continue`）→ 预览出现且正文不变 → 放弃建议后原文保持不变 → 再次续写 → 应用到草稿（正文含 AI 建议）→ 按版本 id 恢复「应用前原文 A」版本 → 原文回归、AI 建议消失。
+- 过程中定位并修复真实缺陷：E2E 用脆弱的 `nth(index)` 点击，在版本历史 UI 列表未刷新时点到 `body={}` 的 `offline_save` 版本，恢复后编辑器变空。修复：`Editor.tsx` 恢复按钮加 `data-version-id={v.id}`，测试改为按真实版本 id 点击并 `waitFor` 按钮可见。`restore_version` 应用逻辑本身正确（db.py 解码快照 body 为 `[{text:"A"}]`，写回 content.body）。
+- 证据：run9 两次真实 `ai_calls`（deepseek-v4-pro，succeeded）；截图 protected-07/08/09；恢复后 `content.body` 经 API 取证确为 `[{text:"档案室..."}]`，编辑器 DOM `<p>档案室...</p>`。
+- 状态提升：NOV-E-002、NOV-E-004 已接线 → **可用**；KI-003 收口为可用；"已验收"仍需生产部署 smoke（KI-002）。NOV-E-003（AI 失败不覆盖原文）仍为已接线，待失败注入 E2E。
+
 ### 2026-07-28 AI 交接 checkpoint
 
 - 已新增 `docs/AI_HANDOFF.md`、`REQUIREMENTS_TRACEABILITY.md`、`KNOWN_ISSUES.md`、`ACCEPTANCE_CRITERIA.md`、`AI_CONTINUITY.md`，并把交接读写责任加入 `AGENTS.md`；项目状态不再只依赖聊天记录。
