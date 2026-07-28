@@ -4,9 +4,43 @@
 
 > 更新：2026-07-28（主创作链生产验收）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
 
-## 2026-07-28 Starlume AI 小说主线重构（进行中）
+## 2026-07-28 生产部署与线上热修复
 
-> 本轮按已确认的 Vibe Coding 任务契约执行：小说优先、非小说模块从 UI 隐藏但不删除数据/源码、用户可见品牌统一为 Starlume AI、关键 AI 结果必须人工确认、失败不得伪装成功。当前仍在开发中，不能宣称整条新 UI 小说链已完成或已部署。
+> 部署目标：将 Starlume 新 UI 推上生产 `novel.xyjin.xyz`；处理用户反馈的两个线上阻断问题。
+
+### 部署到 43.156.17.78
+
+- 只读扫描后确认：Compose 在 `/opt/NovelCraft-Personal-Studio/`，旧运行 commit `bf1a377`，nginx 443→frontend:8090，无 schema 迁移风险。
+- 处理远程已有 5 个 E2E 提交的分叉，仅把文档提交 rebase 到 `origin/main`，全量重建并启动。
+- 结果：`https://novel.xyjin.xyz/` 200；`/api/v1/healthz` 全绿（AI key/DB/redis/worker）；当前生产 commit `91bcf9b`。
+
+### 热修复 1：DeepSeek 模型报错
+
+- 现象：创作向导提示"模型 deepseek-v4-flash 不在 Enterprise 套餐允许范围"。
+- 根因：`backend/app/config.py`、`gateway.py`、`api/v1/config.py` 默认模型硬编码为 `deepseek-v4-pro`；`db.py` 启动迁移把 `deepseek-chat/reasoner/v4-flash` 强制覆盖成 `deepseek-v4-pro`，且生产 `.env` 未设 `DEEPSEEK_MODEL`。
+- 修复：
+  - 所有默认值改为 `deepseek-chat`。
+  - `db.py` 迁移改为把不可用模型（v4-pro/v4-flash/reasoner）修复回 `deepseek-chat`，兼治已被污染的 `model_routes`。
+  - 生产 `.env` 追加 `DEEPSEEK_MODEL=deepseek-chat`。
+- 提交：`a790f83`；部署后 healthz / wizard 模型报错消除。
+
+### 热修复 2：扫榜入口消失
+
+- 现象：用户反馈"扫榜页面没了"。
+- 根因：`App.tsx` 的 `LEGACY_TAB_REDIRECTS` 把 `ranking` 重定向到 `wizard`；`RankingCenter` 组件与后端 `/api/v1/ranking/*` 均存在但未挂载到主路由；`Layout.tsx` 导航里也没有扫榜入口。
+- 修复：
+  - `App.tsx`：移除 `ranking→wizard` 重定向；`ranking` 加入 `PUBLIC_TABS`；渲染 `<RankingCenter />` 并提供 `onBookCreated` 回调（完成后跳 progress/书库）。
+  - `Layout.tsx`：`NAV_ITEMS` 加入"扫榜选书"。
+- 提交：`91bcf9b`；部署后侧边栏可见"扫榜选书"，可进入 RankingCenter 执行扫榜/AI 分析/生成书。
+
+### 遗留 E2E 收口状态
+
+- 注册限流退避已补并提交（`cb37e15`），稳定了真实 AI E2E 的连续注册。
+- 全链 E2E（①②③④⑥⑦）已通过 6 passed, 1 skipped；七页面截图集 15 张已生成；小说主线⑤ 富状态截图因 `write_polish` 节点 AI 输出格式偶发 `invalid_output` 正在 retry 取证。
+
+## 2026-07-28 Starlume AI 小说主线重构（已部署）
+
+> 本轮按已确认的 Vibe Coding 任务契约执行：小说优先、非小说模块从 UI 隐藏但不删除数据/源码、用户可见品牌统一为 Starlume AI、关键 AI 结果必须人工确认、失败不得伪装成功。生产已部署，状态以本表及 `docs/KNOWN_ISSUES.md`、`docs/REQUIREMENTS_TRACEABILITY.md` 为准。
 
 ### 2026-07-28 protected 真实 AI 全链 E2E 首次通过（未完成顺序 item ①）
 

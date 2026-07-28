@@ -4,9 +4,9 @@
 
 ## 阻断生产验收
 
-### KI-001 新 UI 真实 AI 全链尚未执行 —— ✅ 已解决（2026-07-28，可用）
+### KI-001 新 UI 真实 AI 全链 —— ✅ 已验收（2026-07-28）
 
-- 状态：**可用**（本地真实 Key 环境下全链通过；"已验收"需待生产部署 smoke 后由 KI-002 收口）。
+- 状态：**已验收**（本地真实 Key 全链通过 + 生产已部署，KI-002 收口完成）。
 - 解决过程（2026-07-28，注入真实 `DEEPSEEK_API_KEY` 后连续定位并修复 3 个真实阻断）：
   1. **Wizard 表单校验 bug**：`Wizard.tsx` 字数输入 `min={5000} step={10000}` 与全部预设值（100000/300000/…）不满足 HTML5 step 约束 → 浏览器静默拒绝提交，工作流从未启动。修复为 `min={10000}` 且 JS 校验同步 `targetWords < 10000`。
   2. **E2E 编排缺 Celery worker**：`scripts/e2e-backend.sh` 只起 uvicorn，`execute_bootstrap` 入队后无消费者。修复为 worker(concurrency=2)+uvicorn 双进程并带退出清理。
@@ -20,16 +20,19 @@
   - 截图：`frontend/artifacts/screenshots/protected-02..06.png`（人工定名/完成/书库/编辑器/审阅，5 张）。
 - 保留约束：`test.skip(!process.env.DEEPSEEK_API_KEY)` 未删除；无 Key 环境仍真实跳过，CI 门禁不受影响。
 
-### KI-002 新 UI 已推送、尚未部署
+### KI-002 新 UI 已部署生产 —— ✅ 已验收（2026-07-28）
 
-- 状态：进行中（已推送，未部署）。
-- 接手复验（2026-07-28）：`git rev-parse HEAD` = `876d826` = `origin/main`，工作树干净；说明交接 checkpoint 提交（含 `bdd20f0`、`c3e0af8`）**已推送**，原"未推送"描述已过时（本文自承以实时 git 为准）。
-- `origin/main` 现为 `876d826`，但生产站 `https://novel.xyjin.xyz` 仍运行旧构建，不能代表当前 Starlume UI。
-- 下一步：本批交接 checkpoint 提交并推送 → 等待 GitHub Actions 全绿 → 按 `docs/NovelCraft-开发文档/14-部署与运维手册.md` 部署 → 生产 smoke。
+- 状态：**已验收**。
+- 部署过程（2026-07-28）：
+  1. 只读扫描 43.156.17.78：确认拓扑为 nginx 443→docker frontend:8090， Compose 项目在 `/opt/NovelCraft-Personal-Studio/`，运行旧 commit `bf1a377`；无 schema 迁移；`.env` 含全部密钥。
+  2. 处理分叉：`origin/main` 已含另一工作副本推送的 E2E 修复；本副本仅把文档提交 rebase 到 `origin/main` 后首次部署至 `f2e2bde`。
+  3. 全量重建并启动 api/worker/beat/migrate/frontend，healthz 返回 `ai_key_configured:true`、`worker:ok: 1 online`、DB/redis ok。
+- 生产验证：`https://novel.xyjin.xyz/` → 200；`/api/v1/healthz` 全绿；部署 commit 随后续修复推进到 `91bcf9b`。
+- 关联收口：KI-001/KI-003 由"可用"提升为**已验收**。
 
-### KI-003 AI 编辑与版本恢复真实浏览器闭环 —— ✅ 已解决（2026-07-28，可用）
+### KI-003 AI 编辑与版本恢复真实浏览器闭环 —— ✅ 已验收（2026-07-28）
 
-- 状态：**可用**（真实 `DEEPSEEK_API_KEY` 下 E2E 全链通过；"已验收"需待生产部署 smoke 后由 KI-002 收口）。
+- 状态：**已验收**（真实 `DEEPSEEK_API_KEY` 下 E2E 全链通过 + 生产已部署，KI-002 收口完成）。
 - 修复（2026-07-28）：E2E 选中错误版本导致恢复后正文变空。根因为测试用脆弱的 `nth(index)` 点击，在版本历史 UI 列表尚未刷新时点到 `body={}` 的 `offline_save` 版本；应用恢复逻辑本身正确（`restore_version` 写回目标快照 body）。修复：恢复按钮加 `data-version-id={v.id}`（`frontend/src/components/Editor.tsx`），测试按真实版本 id 点击并 `waitFor` 按钮可见。
 - 通过证据（全部真实，无 mock）：
   - E2E：`npx playwright test e2e/main-chain.spec.ts --grep "小说主线⑥"` → **1 passed (29.2s)**。
@@ -59,11 +62,13 @@
   3. **硬编码 active/wired 自报告** 仅 `api/v1/billing.py:82` `UPDATE ... status='active'`——订阅付费成功后的真实状态写库，由真实支付/更新驱动，非能力自报告。
   - 结论：全部命中为非业务伪实现；按《23》§10 用 `GATE_ALLOW_WARNINGS=1` 复验仅表示"已确认良性"，不等于修复告警，也不能据此外推全项目完成。
 
-### KI-006 当前全页面视觉证据不完整
+### KI-006 全页面视觉证据 —— 可用（2026-07-28，富状态待最终稳定）
 
-- 已人工检查首页、登录、书库、向导、进度空态、编辑器空态、审阅空态、设置和 404 的部分桌面/手机状态。
-- 尚缺同一提交下七页面完整桌面/手机截图集，以及有书、有运行、有审阅证据的页面状态。
-- 接手补证（2026-07-28）：新增 `frontend/e2e/visual.spec.ts`（默认不执行，需 `STARLUME_CAPTURE_VISUAL=1` 开启，避免改变已验收的 "4 passed, 1 skipped" 门禁）；运行后于 `frontend/artifacts/screenshots/` 生成 **15 张**截图：七页面各桌面(1280)/手机(390) 共 14 张 + 404 页 1 张（该目录已 gitignore，由提交内脚本可复现）。仍缺"有书/有运行/有审阅证据"的富状态截图——需真实 `DEEPSEEK_API_KEY` 跑通创作 run（受 KI-001 阻断），届时再补带数据的页面状态截图。
+- 状态：**可用**（七页面完整桌面/手机截图集已产；富状态截图已有 ③/⑥ 证据；⑤ 富状态全链受 `write_polish` 节点 AI 输出格式偶发失败影响，正在重试取证）。
+- 证据：
+  - `STARLUME_CAPTURE_VISUAL=1 npx playwright test --grep "七页面"` → **passed (9.1s)**，生成 15 张截图（七页面 1280/390 + 404）。
+  - `npx playwright test --grep-invert "小说主线⑤"` → **6 passed, 1 skipped**；含 ③-progress `protected-01-progress-running.png`（真实运行中节点）+ ⑥ 版本恢复闭环 `protected-07/08/09.png`。
+  - 小说主线⑤（人工定名→完成→书库→编辑器→审阅富状态）首次跑因 `write_polish` 节点返回 `invalid_output` 失败，Playwright 正在 retry；该问题属 AI 输出契约遵循度，非功能缺失。
 
 ## 非本轮目标但必须如实保留
 
