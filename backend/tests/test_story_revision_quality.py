@@ -40,3 +40,15 @@ def test_story_revision_quality_rejects_destructive_shortening():
             before_text=before,
             after_paragraphs=_paragraphs(10, chars=10),
         )
+
+
+def test_story_revision_quality_allows_story_deslop_medium_pass_boundary():
+    before = "\n".join(_paragraphs(12, chars=100))
+    after = _paragraphs(8, chars=114)
+
+    _assert_story_revision_quality(
+        task_type="final_humanize",
+        before_text=before,
+        after_paragraphs=after,
+        min_ratio=0.75,
+    )

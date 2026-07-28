@@ -1338,7 +1338,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                         task_type=task_type,
                         before_text=before_text,
                         after_paragraphs=paragraphs,
-                        min_ratio=0.80,
+                        # story-deslop's medium pass permits up to 25% removal.
+                        min_ratio=0.75,
                     )
                     _assert_min_chapter_length(task_type, "\n".join(paragraphs))
                 except OutputValidationError:
