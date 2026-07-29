@@ -4,6 +4,16 @@
 
 > 更新：2026-07-29（V3 真实 20 节点链与上下文装配修复）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
 
+## 2026-07-29 V3 真实调用与持久化审计
+
+- 新 protected 全链：run `955d4719-8e21-4043-8a3e-2352c06c0ce2`，20/20 运行节点、22 条真实 succeeded `ai_calls`，Playwright **1 passed (5.2m)**。
+- Prompt Compiler 已进入 Writer 真实请求；最终一致性真实产出五维读者体验并持久化，Pacing 曲线可读取。
+- 真实扩展场景：7 个实体/15 条认知事实、5 条时间线事件、1 条作者偏好信号与重建风格卡、5 个 Scene Director 场景；对应装配层均有实际证据。
+- 修复事务假接线：Author Style 信号/卡片、Scene Director 场景此前关闭连接即回滚，现显式提交；作者反馈后会调度 Learning Agent。
+- 修复契约与隔离：人物提取强制认知事实层；`get_states` 按小说过滤，避免跨书串数据；场景轮询读取本次返回结果。
+- 本地门禁：后端 `775 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；确定性 E2E `4 passed, 4 skipped`；交付声明、前后端契约、AI 真实性和差异检查通过。
+- 当前状态：**已接线**（实测：run `955d4719-8e21-4043-8a3e-2352c06c0ce2`；追踪：`docs/V3-FUSION-TRACEABILITY.md`）。Repair Engine 尚无“预览后应用”的产品入口，不能宣称 V3 12 项整体可用或已验收。
+
 ## 2026-07-29 V3 真实 20 节点链与上下文装配修复
 
 - 真实 Provider：protected “小说主线⑤” **1 passed (3.3m)**；run `a416b8a8-2bcb-4ad1-8f3d-d50c0956ba4d` 为 20/20 节点 succeeded、20 条真实 succeeded `ai_calls`。
@@ -12,7 +22,7 @@
 - 保真门禁：润色最多 3 次真实生成；必须保留至少 75% 内容；只有内容完整但段落过密时才按句末标点不改字重新分段，否则真实失败。
 - 契约修复：故事弧提示输出字段与 Gateway schema 统一；`chapter_text` 长上下文上限调整为 12000，避免模型只看到章首。
 - 本地门禁：后端 `771 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；迁移库为 `b324f6c7a7f1 (head)`；确定性 E2E `4 passed, 4 skipped`。
-- 当前状态：**可用**。本批尚待独立提交、推送和同提交 CI；生产仍为历史提交 `91bcf9b`。
+- 当前状态：**已验收**（提交 `391ef3b`、Actions `30443223990` 已验证该批）；生产仍为历史提交 `91bcf9b`。
 
 ## 2026-07-29 V3 接手复验与 CI 修复
 

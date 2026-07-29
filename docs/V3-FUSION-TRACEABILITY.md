@@ -3,6 +3,7 @@
 > 来源：`docs/NovelCraft-V3-融合需求与开发文档.md` 第 13 章。状态四档：未开始 / 已接线 / 可用 / 已验收。
 > 每条均按文档 §14 提交格式落地：真实 Provider 场景 + 自动化测试（纳入回归套件），禁止 mock / 空页面 / 只建字段不接 AI 流程。
 > 决策（已与用户确认）：Repair Engine 局部修复**不新建版本分支、原地增量记录**；全量验收 = 回归全绿 + 真实 AI 全链（⑤⑦）+ 每 V3 功能真实 AI 场景。
+> 2026-07-29 真实性复核：run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 为 20/20 节点、22 条真实 AI 调用；扩展场景另验证认知/时间线/作者风格/场景导演。Repair Engine 仍缺预览后应用闭环，因此 12 项整体仍为**已接线**。
 
 ## 第零阶段（前置验证）
 - [ ] 现有防崩体系百万字量级验证（7层上下文装配 + 每10章巡检 + 卷级复盘门禁）—— 待做
@@ -10,26 +11,26 @@
 ## 第一阶段（提升生成质量）
 | # | 功能 | 状态 | 挂载点 | 验收 |
 |---|------|------|--------|------|
-| ① | Chapter Function | **已接线** | 细纲 Schema 加 function_type/chapter_goal/reader_expectation（必填，缺→打回重生成）；草稿提示强制围绕功能；Reviewer 七维增「节奏检测」维度（不阻塞门禁） | `tests/test_chapter_function.py` 5 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ② | Novel DNA | **已接线** | plan_idea 同一次调用产出 commercial_positioning/story_promise/forbidden_deviations（不增调用）；存为书 meta 顶层键 + novel_dna 嵌套；草稿提示注入 `$forbidden_deviations` 强约束；`_check_novel_dna_consistency` 自洽校验（红线与定位/承诺矛盾→fail，存 meta） | `tests/test_novel_dna.py` 4 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ③ | Story Arc 单层实体化 | **已接线** | 故事弧 entity_type=story_arc（parent_id 挂书，旧书无弧优雅降级）；蓝图阶段新增 `generate_story_arc` 节点（StoryArchitect 调度，非 Story Architect 直接调用）；7层装配插 `arc_summary` 层（优先级在 volume 与 recent 之间）；每10章巡检加弧完整性/进度校验；final_consistency_check 加 `_check_story_arc_coverage` 确定性偏移检测（章在弧区间内但参与者零交集→warning，不阻塞门禁），并入 Reviewer 七维「弧线追踪」维度 | `tests/test_story_arc.py` 6 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ④ | 网文策略库 MVP | **已接线** | 新 `strategy` 表（Alembic 迁移 nc_v3_strategy + init_db 幂等双保险）；预置3策略（黄金三章/打脸策略/身份反转）；`app/services/prompt_compiler.py`：`select_strategies`（按 seq/function_type 匹配）+ `compile_strategy_directive`（拼阶段节奏）+ `compile_prompt`（含 Novel DNA 红线/Chapter Function/技巧降级）；write_chapter_draft 节点注入 `$strategy_directive`+`$skill_hints`；Skill 层 `generate_conflict`/`generate_hook` 经 `_STRATEGY_SKILL_MAP` 编译成中文技巧提示；覆盖不到优雅降级（directive/skill 为空不阻塞生成） | `tests/test_strategy_library.py` 9 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
+| ① | Chapter Function | **可用** | 细纲 Schema 加 function_type/chapter_goal/reader_expectation（必填，缺→打回重生成）；草稿提示强制围绕功能；Reviewer 七维增「节奏检测」维度（不阻塞门禁） | run `955d4719` 的细纲、Writer 输入和章 meta 均有真实证据；自动化回归通过 |
+| ② | Novel DNA | **可用** | plan_idea 同一次调用产出 commercial_positioning/story_promise/forbidden_deviations（不增调用）；存为书 meta 顶层键 + novel_dna 嵌套；草稿提示注入 `$forbidden_deviations` 强约束；`_check_novel_dna_consistency` 自洽校验（红线与定位/承诺矛盾→fail，存 meta） | run `955d4719` 真实产出并持久化 DNA，Writer 编译指令含创作红线 |
+| ③ | Story Arc 单层实体化 | **可用** | 故事弧 entity_type=story_arc（parent_id 挂书，旧书无弧优雅降级）；蓝图阶段新增 `generate_story_arc` 节点；装配器插 `arc_summary`；终审做弧线追踪 | run `955d4719` 的 `generate_story_arc` 和故事弧实体真实成功；提交 `391ef3b` CI 全绿 |
+| ④ | 网文策略库 MVP | **可用** | strategy 表 + 3 个策略；Writer 按章序/功能匹配策略和 Skill 提示；Prompt Compiler 合并策略、DNA 红线和 Chapter Function | run `955d4719` Writer 请求含 246 字符编译指令，三层标签均真实存在；产品路径回归通过 |
 | ⑤ | Repair Engine 三级版 | **已接线** | `_classify_repair_level`（纯逻辑分级：sentence/paragraph→repair_local，chapter→章级重写复用现有，plot→replan_chapter；按剧情>逻辑>表达>文字优先级）；`repair_local` 节点（prompt+契约 _RepairLocalOutput：replacements 列表，`_apply_replacements` 局部替换，存 meta.repair_log **原地增量不建版本分支**，符合§8.4）；`replan_chapter` 节点（prompt+契约 _ReplanChapterOutput：revised_outline+rationale，存 meta.replan_log）；final_consistency_check 失败路径写入 `repair_recommendation`（分级推荐，保留现有 needs_rewrite 兜底） | `tests/test_repair_engine.py` 10 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
 
 ## 第二阶段（提升百万字能力）
 | # | 功能 | 状态 | 挂载点 | 验收 |
 |---|------|------|--------|------|
-| ⑥ | 人物认知分层 | **已接线** | `entity_states` 加 `known_info JSONB` 列（Alembic 迁移 nc_v3_entity_known_info）；`entity_tracker.split_known_info` 纯函数拆 5 层（world_facts/reader_known/protagonist_known/character_known/misunderstandings，dict 可带 layer/misunderstood 标志，默认 world_facts）；`extract_and_store` 写入 known_info 列；assembler `_entity_states` 渲染 5 层认知标签（世界事实/读者已知/主角已知/该角色已知/该角色误解）注入上下文；`review.ooc` 提示扩 cognitive_leaks 规则（角色误用未知/误解信息→认知穿帮，并入现有 OOC 检测不加调用） | `tests/test_cognition_layering.py` 6 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ⑦ | 时间线真实锚点 | **已接线** | `timeline_events` 加 `real_world_anchor`/`anachronism_check` 列（Alembic 迁移 nc_v3_timeline_anchor）；extract_timeline 提示扩可选 real_world_anchor（无法确定不编造）并持久化锚点+自动规则；timeline.py 纯函数 `is_reality_based`（DNA commercial_positioning 含"现实向"等标记才启用，架空/玄幻不启用）/`parse_year_anchor`/`check_anachronisms`（产品问世年份表确定性检测）/`anchor_rule_for`；final_consistency_check 加 `timeline_anchor_check` 维度（warning 记录不阻断，无锚点回退正文年份，非现实向直接 pass）；patrol_check 巡检年代错乱告警章节数 | `tests/test_timeline_anchor.py` 9 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ⑧ | 读者体验审核维度 | **已接线** | 复用现有 `review_7dim` 调用不新增链路（§11.1）：gateway `_ReaderExperience` 可选契约（expectation/conflict/payoff/emotion_shift/worth_continuing 5 维 0-100，旧输出无该块仍通过校验）；`bootstrap.review_7dim` 提示扩读者体验 5 维定义（不计入 score 单独打分）+ JSON 示例与 fallback 同步；`services/reader_experience.py` 纯函数 `normalize_reader_experience`（未知键/非数值过滤+clamp）/`summarize_reader_experience`（<60 分为弱维→warning，纯 advisory 不阻断门禁）/`reader_experience_issues`（中文弱维 issue 渲染）；章审核节点持久化 `meta.reader_experience` 摘要 + 弱维并入 review issues（不改 score）；patrol_check 巡检弱体验章节计数 | `tests/test_reader_experience.py` 11 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
-| ⑨ | Pacing Engine 可视化 | **已接线** | 后端 `services/pacing_series.py`：`build_pacing_series` 纯函数（逐章聚合 review pace/pacing_check 状态映射 90-65-35/reader_experience 分数/review_score，clamp+容错）+ `get_pacing_series`（chapters 按 seq 排序 + reviews 最新 pace 子查询，关联 chapter_id 可查询时间序列，§11.2 数据已持久化于 meta/reviews 不新增写路径）；端点 `GET /novels/{id}/pacing-series`（require_novel_member 鉴权）；前端 `PacingCurve.tsx` 纯 SVG 折线（节奏/读者体验/评分三线，无新图表依赖）挂 Editor 三栏工作台左栏章节目录下（折叠式，无数据优雅提示） | `tests/test_pacing_series.py` 5 passed；前端 tsc 0 错 + vitest 12 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
+| ⑥ | 人物认知分层 | **可用** | `known_info JSONB` + 五层拆分、持久化、装配和认知穿帮提示；人物提取现强制至少一条分层认知事实；`get_states` 按 novel 隔离 | 真实 `extract_entities`：7 实体/15 认知事实，装配文本出现“认知分层”；契约回归通过 |
+| ⑦ | 时间线真实锚点 | **可用** | 时间线锚点字段、真实提取、确定性年代检测、终审和巡检 | 真实 `extract_timeline` 产出并持久化 5 条事件；自动化回归通过 |
+| ⑧ | 读者体验审核维度 | **可用** | Bootstrap 最终一致性强制返回五维读者体验并持久化；续写 `review_7dim` 同样消费，弱维只告警不伪造硬失败 | run `955d4719` 真实五维为 82/78/76/80/84，持久化平均 80 |
+| ⑨ | Pacing Engine 可视化 | **可用** | 后端真库时间序列 + 鉴权端点 + Editor SVG 三线曲线 | run `955d4719` 的真实章节返回 1 个曲线点且包含读者体验；前端 12 tests/build 通过 |
 
 ## 第三阶段（护城河，依赖前两阶段数据）
 | # | 功能 | 状态 | 挂载点 | 验收 |
 |---|------|------|--------|------|
-| ⑩ | Author Style Card 强化 | 已接线 | 扩展 style_learn 学习源：编辑器 diff 信号(修改/删除/保留)+喜欢表达；Learning Agent(m3_tasks.run_author_style_learning)异步重建 style_card 并注入 assembler 第9层 | tests/test_author_style.py 9 passed；迁移 nc_v3_author_style；真实 AI 全链待全量验收 |
-| ⑪ | 场景层 Scene + Scene Director Agent | 已接线 | scenes 表 + gateway scene_direct 契约 + prompt scene.direct + Scene Director 服务(拆分/持久化/消费gateway) + celery run_scene_direction 异步 + 端点 + assembler 场景分镜层注入 + 前端 SceneBoard 面板 | tests/test_scene_director.py 7 passed；迁移 nc_v3_scene_layer；真实 AI 全链待全量验收 |
-| ⑫ | Prompt Compiler 通用引擎 | 已接线 | 从MVP扩展：compile_generic_prompt（任意层+优先级排序）+ render_template（安全$变量替换）+ compile_prompt 兼容旧签名+extra_layers 通用层注入；可复用于任意 task_type | tests/test_strategy_library.py 14 passed（含5条通用场景）；真实 AI 全链待全量验收 |
+| ⑩ | Author Style Card 强化 | **可用** | 编辑器 diff/喜欢信号真实提交事务；反馈 API 自动调度 Learning Agent；卡片持久化后注入 ContextAssembler | 真库记录 1 条信号并重建卡片，装配文本出现作者风格层；事务/调度回归通过 |
+| ⑪ | 场景层 Scene + Scene Director Agent | **可用** | scenes 表、真实 Provider、Celery/API、事务持久化、装配层和 Editor SceneBoard；轮询使用本次结果 | 真实 `scene_direct` 生成并持久化 5 场，装配文本出现分镜层；提交 `391ef3b` 已修复事务并 CI 全绿 |
+| ⑫ | Prompt Compiler 通用引擎 | **可用** | compile_prompt/compile_generic_prompt 现由 Bootstrap Writer 产品路径实际调用，组装策略、DNA 与章功能 | run `955d4719` 的 ai_call 输入存在真实编译指令；产品路径回归通过 |
 
 ## 提交记录
 - 2682f9d KI-007 修复（前序）

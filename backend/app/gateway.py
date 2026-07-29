@@ -164,6 +164,34 @@ class _LenientOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class _KnownInfoItem(_LenientOutput):
+    layer: str = Field(
+        pattern=r"^(world_facts|reader_known|protagonist_known|character_known|character_misunderstood)$"
+    )
+    text: str = Field(min_length=1)
+
+
+class _ExtractEntityItem(_LenientOutput):
+    type: str = Field(pattern=r"^(character|location|item)$")
+    name: str = Field(min_length=1)
+    state: str = ""
+    location: str = ""
+    known_info: list[_KnownInfoItem] = Field(min_length=1)
+
+
+class _ExtractEntitiesOutput(_LenientOutput):
+    entities: list[_ExtractEntityItem] = Field(min_length=1)
+
+
+class _ExtractTimelineEvent(_LenientOutput):
+    event: str = Field(min_length=1)
+    real_world_anchor: str | None = None
+
+
+class _ExtractTimelineOutput(_LenientOutput):
+    events: list[_ExtractTimelineEvent] = Field(min_length=1)
+
+
 class _PlanIdeaOutput(_LenientOutput):
     idea_expanded: str = Field(min_length=20)
     core_hook: str = Field(min_length=5)
@@ -321,6 +349,7 @@ class _FinalConsistencyCheckOutput(_LenientOutput):
     checks: _FinalConsistencyDimensions
     overall_status: str = Field(pattern=r"^(pass|warning|fail)$")
     warning_count: int = Field(ge=0)
+    reader_experience: _ReaderExperience
 
 
 class _ContinuityAuditBody(_LenientOutput):
@@ -478,6 +507,8 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_chapter1": _ChapterOutput,
     "gen_next_chapter": _ChapterOutput,
     "review_7dim": _ReviewOutput,
+    "extract_entities": _ExtractEntitiesOutput,
+    "extract_timeline": _ExtractTimelineOutput,
     "review_ooc": _OocOutput,
     "review_consistency": _ConsistencyOutput,
     "review_rhythm": _RhythmOutput,

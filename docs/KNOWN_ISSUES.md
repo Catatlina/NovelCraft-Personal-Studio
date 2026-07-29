@@ -93,7 +93,7 @@
   5. Bootstrap 首章装配器此前把字符串当字典并静默吞错，现已真实注入装配文本，缺创意/创作圣经/当前章细纲直接失败。
 - 真实证据：protected “小说主线⑤” **1 passed (3.3m)**；run `a416b8a8-2bcb-4ad1-8f3d-d50c0956ba4d` 为 20/20 succeeded、20 条真实 succeeded `ai_calls`，最终正文 35 段/4581 非空白字符；首章初稿请求记录含 1451 字符装配上下文。
 - 下一步:
-  1. 提交推送并等待同提交 CI 全绿。
+  1. 提交 `391ef3b` / Actions `30443223990` 已全绿。
   2. 最终生产部署后重跑小说主线⑤ smoke，再提升为已验收。
 
 ### KI-008 `f8e343c` 的 GitHub Actions 后端失败（历史，已解决）
@@ -114,6 +114,18 @@
 - 状态：**已接线**。
 - 本轮接手远端基线为 `f8e343c`；文档可确认的生产 commit 仍为 `91bcf9b`，当前最新提交以实时 Git 为准。
 - 升级门禁：CI 同版本全绿后按部署手册发布，并完成 healthz、登录、八页面、切书、建书/保存、V3 真实 AI 20 节点主链 smoke。
+
+### KI-010 V3 12 项存在“代码已建但产品闭环不完整”
+
+- 状态：**已接线**。
+- 已经通过真实调用复核的项：Chapter Function、Novel DNA、Story Arc、策略库/Prompt Compiler、人物认知分层、时间线锚点、读者体验、Pacing、Author Style Card、Scene Director。详细 run、调用和持久化证据见 `AI_HANDOFF.md` 1.4 与 `V3-FUSION-TRACEABILITY.md`。
+- 本轮修复的伪接线：
+  1. Prompt Compiler 已导入却无产品调用者，现进入 Writer 真实请求；
+  2. Bootstrap 最终一致性未产出读者体验，现改为必填并持久化；
+  3. Author Style 信号和卡片写入均未提交事务，且保存后不触发 Learning Agent，现已修复；
+  4. Scene Director 场景写入未提交事务，前端轮询使用旧闭包状态，现已修复；
+  5. 人物提取提示未要求 `known_info`，五层认知全空；现增加强契约，并修复 `get_states` 跨书查询。
+- 仍未闭环：Repair Engine 只有 `repair_recommendation`，没有符合“AI 预览后用户应用”规则的真实执行入口。该项完成前，V3 12 项整体只能标记为已接线。
 
 ## 非本轮目标但必须如实保留
 

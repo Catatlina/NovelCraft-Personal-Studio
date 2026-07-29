@@ -3,8 +3,11 @@ from app.services.author_style import (
     learn_from_signals,
     merge_style_card,
     normalize_signals,
+    persist_card,
+    record_signals,
     summarize_signals,
 )
+from app.services import author_style
 
 
 # ── normalize_signals ───────────────────────────────────────────────────
@@ -98,3 +101,54 @@ def test_learn_from_signals_no_data_returns_base_only():
     card = learn_from_signals([], [])
     assert card["author_signals"]["signal_count"] == 0
     assert card["author_signals"]["edit_preference"] == "insufficient_data"
+
+
+def test_style_signal_and_card_writes_commit(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.executions = []
+            self.commits = 0
+            self.closed = False
+
+        def execute(self, sql, params):
+            self.executions.append((sql, params))
+            return self
+
+        def commit(self):
+            self.commits += 1
+
+        def close(self):
+            self.closed = True
+
+    signal_db = FakeDb()
+    monkeypatch.setattr(author_style, "connect", lambda: signal_db)
+    assert record_signals(
+        "project-1",
+        "chapter-1",
+        "user-1",
+        [{"signal_type": "like", "liked_text": "雨落在旧巷青石上"}],
+    ) == 1
+    assert signal_db.commits == 1
+    assert signal_db.closed is True
+
+    card_db = FakeDb()
+    monkeypatch.setattr(author_style, "connect", lambda: card_db)
+    persist_card("project-1", {"avg_sentence_length": 18.0}, 1)
+    assert card_db.commits == 1
+    assert card_db.closed is True
+
+
+def test_author_feedback_dispatches_real_learning_task(monkeypatch):
+    from app.api.v1 import author_style as author_style_api
+    from app.workers import m3_tasks
+
+    class Queued:
+        id = "learning-task-1"
+
+    monkeypatch.setattr(
+        m3_tasks.run_author_style_learning,
+        "delay",
+        lambda project_id: Queued(),
+    )
+
+    assert author_style_api._dispatch_style_learning("project-1") == "learning-task-1"

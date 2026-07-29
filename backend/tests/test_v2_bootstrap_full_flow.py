@@ -100,7 +100,26 @@ def _provider_output(task_type: str) -> dict:
         "write_polish": {"polished": {"body": long_body}, "changes_summary": "收紧节奏"},
         "write_length_check": {"actual_chars": 3600, "is_acceptable": True},
         "write_fact_reconcile": {"reconciliation": {"conflicts_found": 0}},
-        "final_consistency_check": {"checks": {"source_fidelity": {"status": "pass", "issues": []}, "characters": {"status": "pass", "issues": []}, "locations": {"status": "pass", "issues": []}, "timeline": {"status": "pass", "issues": []}, "objects": {"status": "pass", "issues": []}, "settings": {"status": "pass", "issues": []}, "foreshadowing": {"status": "pass", "issues": []}}, "overall_status": "pass", "warning_count": 0},
+        "final_consistency_check": {
+            "checks": {
+                "source_fidelity": {"status": "pass", "issues": []},
+                "characters": {"status": "pass", "issues": []},
+                "locations": {"status": "pass", "issues": []},
+                "timeline": {"status": "pass", "issues": []},
+                "objects": {"status": "pass", "issues": []},
+                "settings": {"status": "pass", "issues": []},
+                "foreshadowing": {"status": "pass", "issues": []},
+            },
+            "overall_status": "pass",
+            "warning_count": 0,
+            "reader_experience": {
+                "expectation": 82,
+                "conflict": 80,
+                "payoff": 78,
+                "emotion_shift": 81,
+                "worth_continuing": 84,
+            },
+        },
         "final_continuity_audit": {"continuity": {"status": "continuous", "gaps": [], "narrative_flow": "场景和情绪衔接自然"}},
         "final_humanize": {"humanized_text": "\n".join(long_body), "changes": ["收紧句子"]},
     }
@@ -164,6 +183,8 @@ def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
     ).fetchone()
     assert chapter is not None
     assert len(str(chapter["body"])) > 200
+    assert chapter["meta"]["reader_experience"]["status"] == "pass"
+    assert chapter["meta"]["reader_experience"]["scores"]["worth_continuing"] == 84.0
     # Worldview + characters landed in the knowledge hub
     kinds = [r["kind"] for r in db.execute(
         "SELECT kind FROM knowledge_items WHERE content_id=%s AND is_deleted=FALSE", (novel_id,)

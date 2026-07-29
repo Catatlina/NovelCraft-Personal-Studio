@@ -6,15 +6,62 @@ Real logic only — no mock providers.
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.services.entity_tracker import split_known_info, KNOWN_INFO_LAYERS  # noqa: E402
+from app.gateway import OutputValidationError, validate_task_output  # noqa: E402
+from app.services import entity_tracker  # noqa: E402
+from app.services.entity_tracker import get_states, split_known_info, KNOWN_INFO_LAYERS  # noqa: E402
 
 
 def test_split_empty_returns_five_layers():
     res = split_known_info([])
     assert set(res.keys()) == set(KNOWN_INFO_LAYERS)
     assert all(v == [] for v in res.values())
+
+
+def test_extract_entities_contract_requires_real_cognition_evidence():
+    accepted = validate_task_output(
+        "extract_entities",
+        {
+            "entities": [{
+                "type": "character",
+                "name": "林默",
+                "state": "警惕",
+                "location": "旧巷",
+                "known_info": [
+                    {"layer": "reader_known", "text": "林默收到了匿名信"},
+                    {"layer": "character_misunderstood", "text": "林默误以为寄信人是同事"},
+                ],
+            }],
+        },
+    )
+    assert len(accepted["entities"][0]["known_info"]) == 2
+
+    with pytest.raises(OutputValidationError):
+        validate_task_output(
+            "extract_entities",
+            {"entities": [{"type": "character", "name": "林默", "known_info": []}]},
+        )
+
+
+def test_get_states_is_scoped_to_one_novel_without_ambiguous_columns(monkeypatch):
+    class FakeDb:
+        def execute(self, sql, params):
+            assert "c.parent_id = %s" in sql
+            assert "es.updated_at" in sql
+            assert params == ("novel-2", 7)
+            return self
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(entity_tracker, "connect", FakeDb)
+    assert get_states("novel-2", limit=7) == []
 
 
 def test_split_plain_strings_default_to_world_facts():

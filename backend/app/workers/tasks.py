@@ -300,13 +300,15 @@ def _check_story_arc_coverage(arcs: Any, chapter_seq: int, outline_participants:
 # skill hints it triggers. Both degrade to "" / [] when nothing matches, so the
 # Writer prompt is never blocked.
 def _strategy_directive_for_chapter(run_context: dict) -> tuple[str, list[str]]:
-    seq = int(run_context.get("chapter_seq") or 1)
+    seq = int(run_context.get("_chapter_seq") or run_context.get("chapter_seq") or 1)
     outlines = run_context.get("chapter_outlines") or []
     function_type = ""
+    chapter_outline: dict[str, Any] = {}
     if isinstance(outlines, list):
         for o in outlines:
             if isinstance(o, dict) and int(o.get("seq") or 0) == seq:
                 function_type = str(o.get("function_type", ""))
+                chapter_outline = o
                 break
     db = connect()
     rows = db.execute(
@@ -316,7 +318,14 @@ def _strategy_directive_for_chapter(run_context: dict) -> tuple[str, list[str]]:
     db.close()
     strats = [dict(r) for r in rows]
     matched = select_strategies(strats, seq, function_type)
-    return compile_strategy_directive(matched), skill_hints_for_strategies(matched)
+    hints = skill_hints_for_strategies(matched)
+    compiled = compile_prompt(
+        "",
+        strategy_directive=compile_strategy_directive(matched),
+        novel_dna=run_context.get("novel_dna"),
+        chapter_function=chapter_outline,
+    )
+    return compiled, hints
 
 
 # V3 Repair Engine (§8): three-tier repair classification. Pure, deterministic.
@@ -1879,6 +1888,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
         context[task_type] = output
         if task_type == "final_consistency_check":
             checks = output.get("checks") if isinstance(output.get("checks"), dict) else {}
+            from app.services.reader_experience import summarize_reader_experience
+            reader_experience = summarize_reader_experience(output.get("reader_experience"))
             # V3 Chapter Function: pacing gate over the whole outline's
             # function_type sequence. Stored as a dimension, never blocks the
             # consistency gate itself.
@@ -1944,6 +1955,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                         (encode({"quality_gate": {"status": "failed", "checks": checks},
                                   "pacing_check": pacing, "arc_check": arc_check,
                                   "timeline_anchor_check": anchor_check,
+                                  "reader_experience": reader_experience,
                                   "repair_recommendation": repair_rec}), cid),
                     )
                 db.commit()
@@ -1960,6 +1972,7 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                         "pacing_check": pacing,
                         "arc_check": arc_check,
                         "timeline_anchor_check": anchor_check,
+                        "reader_experience": reader_experience,
                         "review_7dim": _quality_evidence_payload(output, context.get("self_review"), pacing, arc_check),
                     }), cid),
                 )

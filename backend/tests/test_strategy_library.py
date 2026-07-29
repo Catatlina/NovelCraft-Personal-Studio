@@ -140,3 +140,35 @@ def test_compile_prompt_extra_layers():
     assert "策略指引" in out
     assert "场景分镜" in out
     assert "场景1" in out
+
+
+def test_bootstrap_writer_uses_prompt_compiler_on_the_product_path(monkeypatch):
+    from app.workers import tasks
+
+    class FakeDb:
+        def execute(self, _sql):
+            return self
+
+        def fetchall(self):
+            return STRATEGIES
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(tasks, "connect", FakeDb)
+    directive, hints = tasks._strategy_directive_for_chapter({
+        "_chapter_seq": 2,
+        "novel_dna": {"forbidden_deviations": ["禁止无理由暴富"]},
+        "chapter_outlines": [{
+            "seq": 2,
+            "function_type": "冲突",
+            "chapter_goal": "主角守住第一笔订单",
+            "reader_expectation": "看到主角反制",
+        }],
+    })
+
+    assert "【本章策略指引】" in directive
+    assert "黄金三章" in directive and "打脸策略" in directive
+    assert "【创作红线】" in directive and "禁止无理由暴富" in directive
+    assert "【本章功能】" in directive and "主角守住第一笔订单" in directive
+    assert any("冲突" in hint for hint in hints)

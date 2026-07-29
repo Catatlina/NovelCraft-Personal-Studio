@@ -116,6 +116,7 @@ def persist_card(project_id: str, card: dict, samples_count: int) -> None:
            DO UPDATE SET card = EXCLUDED.card, samples_count = EXCLUDED.samples_count, updated_at = now()""",
         (new_id(), project_id, encode(card), int(samples_count)),
     )
+    db.commit()
     db.close()
 
 
@@ -144,6 +145,7 @@ def record_signals(project_id: str, content_id: str | None, author_id: str | Non
             (new_id(), project_id, content_id, author_id, sig["signal_type"],
              sig["kept_text"], sig["deleted_text"], sig["edited_text"], sig["liked_text"]),
         )
+    db.commit()
     db.close()
     return len(normalized)
 

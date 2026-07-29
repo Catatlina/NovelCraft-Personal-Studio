@@ -436,7 +436,14 @@ $instruction
     ("narrative.extract_arcs", "3.0.0", "deepseek",
      '提取人物弧线进展。\n$instructions\n$body\n输出 JSON: {"arcs":[{"character":"人物名","stage":"弧线阶段","goal":"目标"}]}'),
     ("narrative.extract_entities", "3.0.0", "deepseek",
-     '提取章节中的人物/地点/物品实体及其最新状态。\n$body\n输出 JSON: {"entities":[{"type":"character/location/item","name":"名称","state":"状态","location":"位置"}]}'),
+     '提取章节中的人物/地点/物品实体及其最新状态，并为每个实体提取至少一条认知事实。\n'
+     'known_info 每项必须包含 text 和 layer；layer 只能是：'
+     'world_facts（客观事实）、reader_known（读者已知）、protagonist_known（主角已知）、'
+     'character_known（该角色已知）、character_misunderstood（该角色误解）。'
+     '人物按正文明确证据区分认知层；地点/物品的客观信息使用 world_facts。'
+     '不得推测正文没有表达的认知。\n$body\n'
+     '输出 JSON: {"entities":[{"type":"character","name":"名称","state":"状态","location":"位置",'
+     '"known_info":[{"layer":"reader_known","text":"正文已向读者揭示的事实"}]}]}'),
     ("narrative.extract_foreshadowing", "3.0.0", "deepseek",
      '提取本章伏笔（埋设/推进/回收）。\n$body\n输出 JSON: {"foreshadowings":[{"content":"伏笔","importance":"high/medium/low","hint_chapter":5}]}'),
 
@@ -922,9 +929,13 @@ body 至少 12 段，每段为完整叙事段落，总字数不得低于 3000 �
 6. settings：是否违反世界观规则
 7. foreshadowing：伏笔埋设是否被意外提前泄底
 
+读者体验另列五项 0-100 分（不改变上述一致性结论）：
+expectation（期待兑现）、conflict（冲突张力）、payoff（爽点兑现）、
+emotion_shift（情绪变化）、worth_continuing（追读意愿）。
+
 任何一维存在问题，overall_status 不得为 pass；warning_count 必须等于 warning/fail issue 总数。不得因为文笔流畅而忽略事实冲突。
 
-输出 JSON: {"checks":{"source_fidelity":{"status":"pass","issues":[]},"characters":{"status":"pass","issues":[]},"locations":{"status":"pass","issues":[]},"timeline":{"status":"pass","issues":[]},"objects":{"status":"pass","issues":[]},"settings":{"status":"pass","issues":[]},"foreshadowing":{"status":"pass","issues":[]}},"overall_status":"pass","warning_count":0}"""),
+输出 JSON: {"checks":{"source_fidelity":{"status":"pass","issues":[]},"characters":{"status":"pass","issues":[]},"locations":{"status":"pass","issues":[]},"timeline":{"status":"pass","issues":[]},"objects":{"status":"pass","issues":[]},"settings":{"status":"pass","issues":[]},"foreshadowing":{"status":"pass","issues":[]}},"overall_status":"pass","warning_count":0,"reader_experience":{"expectation":82,"conflict":78,"payoff":76,"emotion_shift":80,"worth_continuing":84}}"""),
 
     ("bootstrap.final_continuity_audit", "1.0.0", "deepseek",
      """你是连续性审计员。请审计本章叙事流的连续性。
@@ -1134,7 +1145,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "write_polish":           '{"polished":{"title":"章名","body":["段落一","段落二","段落三","段落四","段落五","段落六"]},"changes_summary":"修改摘要"}（body 段落数与原文相当，至少 4 段）',
     "write_length_check":     '{"actual_chars":3500,"is_acceptable":true,"advice":"无需调整"}',
     "write_fact_reconcile":   '{"reconciliation":{"conflicts_found":0,"issues":[],"passed":true}}',
-    "final_consistency_check": '{"checks":{"source_fidelity":{"status":"pass","issues":[]},"characters":{"status":"pass","issues":[]},"locations":{"status":"pass","issues":[]},"timeline":{"status":"pass","issues":[]},"objects":{"status":"pass","issues":[]},"settings":{"status":"pass","issues":[]},"foreshadowing":{"status":"pass","issues":[]}},"overall_status":"pass","warning_count":0}',
+    "final_consistency_check": '{"checks":{"source_fidelity":{"status":"pass","issues":[]},"characters":{"status":"pass","issues":[]},"locations":{"status":"pass","issues":[]},"timeline":{"status":"pass","issues":[]},"objects":{"status":"pass","issues":[]},"settings":{"status":"pass","issues":[]},"foreshadowing":{"status":"pass","issues":[]}},"overall_status":"pass","warning_count":0,"reader_experience":{"expectation":82,"conflict":78,"payoff":76,"emotion_shift":80,"worth_continuing":84}}',
     "final_continuity_audit": '{"continuity":{"status":"continuous","gaps":[],"narrative_flow":"流畅"}}',
     "final_humanize":         '{"humanized_text":"处理后完整正文","changes":["改动说明"],"ai_patterns_removed":["消除的AI痕迹"]}',
     # ── De-AI 7-layer pipeline contracts ──

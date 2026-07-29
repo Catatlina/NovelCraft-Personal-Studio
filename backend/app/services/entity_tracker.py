@@ -82,9 +82,13 @@ def get_states(novel_id: str, limit: int = 10) -> list[dict]:
     """Get latest entity states for a novel."""
     db = connect()
     rows = db.execute(
-        """SELECT DISTINCT ON (entity_name) entity_type, entity_name, location, relationships, updated_at
-           FROM entity_states ORDER BY entity_name, updated_at DESC LIMIT %s""",
-        (limit,),
+        """SELECT DISTINCT ON (es.entity_name)
+                  es.entity_type, es.entity_name, es.location, es.relationships, es.updated_at
+           FROM entity_states es
+           JOIN contents c ON c.id = es.chapter_id
+           WHERE c.parent_id = %s AND c.is_deleted = FALSE
+           ORDER BY es.entity_name, es.updated_at DESC LIMIT %s""",
+        (novel_id, limit),
     ).fetchall()
     db.close()
     return [dict(r) for r in rows]

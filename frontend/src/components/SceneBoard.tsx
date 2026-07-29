@@ -25,12 +25,15 @@ export function SceneBoard({ chapterId, projectId }: { chapterId: string; projec
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    if (!chapterId) return;
+    if (!chapterId) return [];
     try {
       const res = await api<{ scenes: Scene[] }>(`/api/v1/chapters/${chapterId}/scenes`);
-      setScenes(res.scenes || []);
+      const nextScenes = res.scenes || [];
+      setScenes(nextScenes);
+      return nextScenes;
     } catch {
       /* 读取失败静默，不阻塞编辑器 */
+      return [];
     }
   }, [chapterId]);
 
@@ -47,8 +50,8 @@ export function SceneBoard({ chapterId, projectId }: { chapterId: string; projec
       // 异步任务，轮询最多 ~12s
       for (let i = 0; i < 12; i++) {
         await new Promise(r => setTimeout(r, 1000));
-        await load();
-        if (scenes.length > 0) break;
+        const nextScenes = await load();
+        if (nextScenes.length > 0) break;
       }
     } catch (e: any) {
       setError(e?.message || "生成失败");
