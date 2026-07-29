@@ -220,7 +220,7 @@ export default function App() {
   }, [tab, novel?.id]);
 
   useEffect(() => {
-    if (!novel || !project) return;
+    if (!novel || !project || userSelectedNovel.current) return;
     let active = true;
     const contentsKey = `contents:${novel.id}`;
     // Preserve deterministic precedence: cached data can paint first, but a
