@@ -26,7 +26,7 @@
 | NOV-S-002 | 创作知识导入、导出和统计 | `Settings.tsx` | knowledge/stats API | 已接线 | 页面/API 接线 | 真库数据操作 E2E |
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
 | NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 已验收 | 提交 `07a8c0f`：本地后端 761 passed / 9 skipped / 1 xpassed、前端 12 passed、build、E2E 4 passed / 4 skipped、三项静态校验；Actions `30439322188` 五项全绿 | 后续批次继续维持同提交 CI |
-| NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected “小说主线⑤” 1 passed (5.2m)；run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 20/20 nodes、22 succeeded ai_calls；Writer 含 Prompt Compiler 三层指令，最终一致性含五维读者体验；上一批 `391ef3b` / Actions `30443223990` 全绿 | 当前 V3 审计修复提交推送且 CI 全绿；最终生产 smoke 后提升已验收 |
+| NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected “小说主线⑤” 1 passed (5.2m)；run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 20/20 nodes、22 succeeded ai_calls；Writer 含 Prompt Compiler 三层指令，最终一致性含五维读者体验；提交 `5c544ff` / Actions `30445384633` 五项全绿 | Repair Engine 预览应用闭环；最终生产 smoke 后提升已验收 |
 | NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 已接线 | 历史生产版本为 `91bcf9b`；当前 main 与本批修复均未部署 | 当前提交推送、CI 全绿、部署及生产 smoke |
 
 ## 更新规则

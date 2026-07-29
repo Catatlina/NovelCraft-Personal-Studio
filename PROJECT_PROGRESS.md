@@ -12,7 +12,8 @@
 - 修复事务假接线：Author Style 信号/卡片、Scene Director 场景此前关闭连接即回滚，现显式提交；作者反馈后会调度 Learning Agent。
 - 修复契约与隔离：人物提取强制认知事实层；`get_states` 按小说过滤，避免跨书串数据；场景轮询读取本次返回结果。
 - 本地门禁：后端 `775 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；确定性 E2E `4 passed, 4 skipped`；交付声明、前后端契约、AI 真实性和差异检查通过。
-- 当前状态：**已接线**（实测：run `955d4719-8e21-4043-8a3e-2352c06c0ce2`；追踪：`docs/V3-FUSION-TRACEABILITY.md`）。Repair Engine 尚无“预览后应用”的产品入口，不能宣称 V3 12 项整体可用或已验收。
+- CI 证据：提交 `5c544ff` 的 Actions run `30445384633` 五项全绿。
+- 当前状态：**已接线**（实测：run `955d4719-8e21-4043-8a3e-2352c06c0ce2`；CI：`30445384633`；追踪：`docs/V3-FUSION-TRACEABILITY.md`）。Repair Engine 尚无“预览后应用”的产品入口，不能宣称 V3 12 项整体可用或已验收。
 
 ## 2026-07-29 V3 真实 20 节点链与上下文装配修复
 

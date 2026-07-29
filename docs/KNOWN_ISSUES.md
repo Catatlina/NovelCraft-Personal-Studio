@@ -119,6 +119,7 @@
 
 - 状态：**已接线**。
 - 已经通过真实调用复核的项：Chapter Function、Novel DNA、Story Arc、策略库/Prompt Compiler、人物认知分层、时间线锚点、读者体验、Pacing、Author Style Card、Scene Director。详细 run、调用和持久化证据见 `AI_HANDOFF.md` 1.4 与 `V3-FUSION-TRACEABILITY.md`。
+- 同提交门禁：`5c544ff` / Actions `30445384633` 五项全绿。
 - 本轮修复的伪接线：
   1. Prompt Compiler 已导入却无产品调用者，现进入 Writer 真实请求；
   2. Bootstrap 最终一致性未产出读者体验，现改为必填并持久化；

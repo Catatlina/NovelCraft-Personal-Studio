@@ -61,6 +61,7 @@
 - Author Style Card：修复信号与卡片事务未提交；1 条偏好信号已真实持久化、Learning Agent 重建卡片，ContextAssembler 出现作者风格层；编辑反馈 API 现在会真实调度学习任务。
 - Scene Director：修复场景事务未提交；真实 `scene_direct` 生成并持久化 5 个场景，ContextAssembler 出现场景分镜层；前端轮询改为使用本次返回结果，避免旧状态闭包固定等待。
 - 当前本地门禁：后端 **775 passed, 9 skipped, 1 xpassed**；前端 **12 passed**；构建通过；确定性 E2E **4 passed, 4 skipped**；交付声明、前后端契约、AI 真实性和 `git diff --check` 通过。
+- 提交 `5c544ff` 已推送；GitHub Actions run `30445384633` 的 backend、e2e、frontend、frontend-test、security 五项全绿。
 - 仍不能宣称 12 项全部完成：Repair Engine 当前只有失败推荐，`repair_local` / `replan_chapter` 没有产品执行入口；且 AI 修复必须改为“生成预览 → 用户应用”，不能直接原地覆盖。详见 KI-010。
 
 ## 2. 当前产品契约
