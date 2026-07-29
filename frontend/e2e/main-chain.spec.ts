@@ -35,7 +35,7 @@ async function authContext(page: Page) {
   return { token: token!, headers, projectId: projects[0].id as string };
 }
 
-async function createBookWithChapter(page: Page, titleSeed: string) {
+async function createBookWithChapter(page: Page, titleSeed: string, chapterTitle = "第1章 雨夜来客") {
   const { headers, projectId } = await authContext(page);
   const createResponse = await page.request.post(`/api/v1/projects/${projectId}/novels`, {
     headers,
@@ -45,7 +45,7 @@ async function createBookWithChapter(page: Page, titleSeed: string) {
   const novelId = (await createResponse.json()).data.id as string;
   const importResponse = await page.request.post(`/api/v1/novels/${novelId}/import-chapters`, {
     headers,
-    data: { text: "第1章 雨夜来客" },
+    data: { text: chapterTitle },
   });
   expect(importResponse.ok()).toBeTruthy();
   expect((await importResponse.json()).data.imported).toBe(1);
@@ -139,7 +139,45 @@ test("小说主线④：审阅不伪造分数，小说设置只保留创作相�
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("nc_model"))).toBe("deepseek-chat");
 });
 
-test("小说主线⑥：真实 AI 编辑 生成→预览→放弃/应用→版本恢复（protected）", async ({ page }) => {
+test("小说主线⑤：公共页快速切书后作品、章节与审阅保持同一本", async ({ page }) => {
+  await registerFreshUser(page);
+  const firstTitle = `切书甲-${Date.now()}`;
+  const secondTitle = `切书乙-${Date.now()}`;
+  const firstId = await createBookWithChapter(page, firstTitle, "第1章 甲书专属章节");
+  const secondId = await createBookWithChapter(page, secondTitle, "第1章 乙书专属章节");
+
+  // 让第一次选择的详情请求故意晚返回，验证旧响应不能覆盖最后一次选择。
+  await page.route(`**/api/v1/contents/${secondId}`, async route => {
+    await new Promise(resolve => setTimeout(resolve, 700));
+    await route.continue();
+  });
+  await page.reload();
+  await page.getByRole("navigation", { name: "小说创作主导航" })
+    .getByRole("button", { name: "章节编辑器", exact: true }).click();
+
+  const selector = page.getByRole("combobox", { name: "切换作品" });
+  await expect(selector).toBeVisible({ timeout: 10_000 });
+  await selector.selectOption(secondId);
+  await selector.selectOption(firstId);
+
+  await expect(selector).toHaveValue(firstId);
+  await expect(page.getByText("第1章 甲书专属章节", { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("第1章 乙书专属章节", { exact: true })).toHaveCount(0);
+  await page.waitForTimeout(900);
+  await expect(selector).toHaveValue(firstId);
+  await expect(page.getByText("第1章 甲书专属章节", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("navigation", { name: "小说创作主导航" })
+    .getByRole("button", { name: "审阅与一致性", exact: true }).click();
+  await expect(selector).toHaveValue(firstId);
+  await expect(page.getByText("正在查看《第1章 甲书专属章节》的真实审阅证据。", { exact: true })).toBeVisible();
+
+  await page.getByRole("navigation", { name: "小说创作主导航" })
+    .getByRole("button", { name: "我的书库", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "切换作品" })).toHaveCount(0);
+});
+
+test("小说主线⑦：真实 AI 编辑 生成→预览→放弃/应用→版本恢复（protected）", async ({ page }) => {
   test.skip(!process.env.DEEPSEEK_API_KEY, "需要 DEEPSEEK_API_KEY");
   test.setTimeout(480_000);
 

@@ -8,6 +8,22 @@ cd "$(dirname "$0")/../backend"
 PY=".venv/bin/python"
 [ -x "$PY" ] || PY="python"
 
+if [ -z "${DATABASE_URL:-}" ]; then
+  command -v createdb >/dev/null 2>&1 || {
+    echo "DATABASE_URL 未设置，且本机没有 createdb，拒绝让 E2E 使用开发库" >&2
+    exit 1
+  }
+  E2E_DB_NAME="${NOVELCRAFT_E2E_DB_NAME:-starlume_e2e}"
+  createdb "$E2E_DB_NAME" 2>/dev/null || true
+  DATABASE_URL="postgresql://$(id -un)@localhost/$E2E_DB_NAME"
+  export DATABASE_URL
+fi
+
+# The E2E stack uses a persistent real PostgreSQL database locally. Always
+# advance it before serving requests so UI fallbacks cannot hide missing-table
+# errors from an older developer database.
+"$PY" -m alembic upgrade head
+
 "$PY" -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 &
 WORKER_PID=$!
 

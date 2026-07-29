@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   BookOpen,
   CircleCheckBig,
@@ -71,6 +71,10 @@ export function Layout({
   const [selectedId, setSelectedId] = useState(currentNovelId);
   const expanded = !collapsed || hovered;
   const initials = (userEmail?.trim()[0] || "S").toUpperCase();
+
+  useEffect(() => {
+    setSelectedId(currentNovelId);
+  }, [currentNovelId]);
 
   return (
     <div className="app-shell">

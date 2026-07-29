@@ -9,6 +9,7 @@
 | NOV-G-002 | 展示八个小说入口（含扫榜选书） | `Layout.tsx`、`App.tsx` | 不改历史数据 | 已验收 | E2E 主线① + visual.spec 截图 + 生产巡检 | — |
 | NOV-G-003 | 旧入口迁移、未知入口 404 | `App.tsx`、`NotFoundPage.tsx` | 无 | 已验收 | E2E 主线② + 生产路由 smoke | — |
 | NOV-G-004 | 浅深色、主题记忆、响应式 | `ThemeProvider.tsx`、`styles.css` | 浏览器偏好 | 已验收 | 单测 + visual.spec 桌面/手机截图 + 生产巡检 | — |
+| NOV-G-005 | 公共页多书切换且作品、run、章节、编辑器、审阅一致 | `Layout.tsx`、`App.tsx` | contents、latest run；账号隔离缓存 | 可用 | E2E 主线⑤：两本真书 + 延迟旧请求，快速切换后编辑器/审阅保持最后选择；选择器仅三个公共页；确定性 E2E 5 passed / 4 skipped | 同提交 CI；生产切书 smoke |
 | NOV-H-001 | 首页显示真实书籍和运行状态 | `WorkspaceDashboard.tsx` | `/library/books`、`/runs/latest` | 可用 | 单测、E2E 空状态 | 有书/有运行生产证据 |
 | NOV-W-001 | 输入创意、题材、风格、篇幅并启动 | `Wizard.tsx` | Bootstrap API、真实 Gateway | 已验收 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；修复 step 校验 bug；生产 healthz /wizard smoke | — |
 | NOV-W-002 | AI 策划后必须人工确认书名 | `Progress.tsx` | `human_confirm_title` 节点 | 已验收 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；waiting_human 真实出现并点选定名；生产 smoke | — |
@@ -22,7 +23,7 @@
 | NOV-E-004 | 版本查看与恢复 | 编辑器版本区 | versions API | 已验收 | protected E2E 1 passed (2026-07-28, run9)：按版本 id 恢复后正文 A 回归、AI 建议消失、DB content.body 确为 [A]；生产 smoke | — |
 | NOV-R-001 | 无审阅证据时不伪造评分 | `Review.tsx` | run review outputs | 已验收 | E2E 主线④；生产空态 smoke | — |
 | NOV-R-002 | 展示七维、一致性、连续性和问题证据 | `Review.tsx` | review/consistency nodes | 已验收 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；protected-06 截图；生产 smoke | — |
-| NOV-R-003 | 审阅建议先预览再由用户应用 | `Review.tsx` | repair preview/apply API、签名与并发门禁 | 已接线 | Repair 定向 15 passed；前端预览/确认 2 tests；后端全量 781 passed；浏览器验证无密钥时显式失败且不改正文 | 真实 Provider 正向预览→应用；同提交 CI |
+| NOV-R-003 | 审阅建议先预览再由用户应用 | `Review.tsx` | repair preview/apply API、签名与并发门禁 | 已接线 | Repair 定向 15 passed；前端预览/确认 2 tests；后端全量 781 passed；浏览器验证无密钥时显式失败且不改正文；提交 `6f7184c` / Actions `30447533339` 五项全绿 | 真实 Provider 正向预览→应用 |
 | NOV-S-001 | BYOK 只保存在当前会话 | `Settings.tsx` | 请求 Header 优先 | 已验收 | E2E 主线④；生产请求验证 | — |
 | NOV-S-002 | 创作知识导入、导出和统计 | `Settings.tsx` | knowledge/stats API | 已接线 | 页面/API 接线 | 真库数据操作 E2E |
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |

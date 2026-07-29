@@ -94,6 +94,7 @@ export default function App() {
   const [run, setRun] = useState<Run | null>(null);
   const restoringRun = useRef(false);
   const userSelectedNovel = useRef(false);
+  const novelSelectionEpoch = useRef(0);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [idea, setIdea] = useState("一个写作者发现自己删掉的章节正在现实里发生。");
@@ -112,6 +113,8 @@ export default function App() {
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
+  const projectsCacheKey = `projects:${userEmail || "signed-out"}`;
+  const currentNovelCacheKey = `currentNovel:${userEmail || "signed-out"}`;
 
   useEffect(() => {
     const syncRoute = () => {
@@ -149,60 +152,100 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    // Try offline cache first
-    cacheGet<{ id: string; name: string }[]>("projects").then(cached => {
-      if (cached?.length) setProject(cached[0]);
+    let active = true;
+    novelSelectionEpoch.current += 1;
+    userSelectedNovel.current = false;
+    setProject(null);
+    setNovel(null);
+    setNovels([]);
+    setRun(null);
+    setChapters([]);
+    setChapter(null);
+    setEditorText("");
+    // Try this account's offline cache first, then let the API win.
+    void cacheGet<{ id: string; name: string }[]>(projectsCacheKey).then(cached => {
+      if (active && cached?.length) setProject(cached[0]);
     });
-    cacheGet<Content>("currentNovel").then(cached => { if (cached) setNovel(cached); });
-    // Then fetch from API
-    api<{ id: string; name: string }[]>("/api/v1/projects").then(p => {
+    void cacheGet<Content>(currentNovelCacheKey).then(cached => {
+      if (active && cached) setNovel(cached);
+    });
+    void api<{ id: string; name: string }[]>("/api/v1/projects").then(p => {
+      if (!active) return;
       setProject(p[0] ?? null);
-      cacheSet("projects", p);
-    }).catch(e => setError(String(e)));
-  }, [token]);
+      void cacheSet(projectsCacheKey, p);
+    }).catch(e => {
+      if (active) setError(String(e));
+    });
+    return () => { active = false; };
+  }, [token, userEmail, projectsCacheKey, currentNovelCacheKey]);
 
   // 全局作品列表（供 Layout 作品选择器使用）
   useEffect(() => {
     if (!project) return;
+    let active = true;
     api<Content[]>(`/api/v1/contents?project_id=${project.id}`).then(items => {
+      if (!active) return;
       const n = (items || []).filter(i => i.type === "novel");
       setNovels(n);
+      if (n.length > 0 && !n.some(item => item.id === novel?.id)) {
+        setNovel(n[0]);
+        void cacheSet(currentNovelCacheKey, n[0]);
+      }
     }).catch(() => {});
-  }, [project?.id]);
+    return () => { active = false; };
+  }, [project?.id, novel?.id, currentNovelCacheKey]);
 
   useEffect(() => {
     if (!token || !project || run || restoringRun.current || userSelectedNovel.current) return;
     restoringRun.current = true;
+    let active = true;
+    const restoreEpoch = novelSelectionEpoch.current;
     const savedRunId = localStorage.getItem(`nc_current_run:${project.id}`) || "";
-    const path = savedRunId
-      ? `/api/v1/runs/${savedRunId}`
-      : `/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`;
-    api<Run>(path)
-      .then(restored => {
+    const canApply = () => active
+      && restoreEpoch === novelSelectionEpoch.current
+      && !userSelectedNovel.current;
+    const restore = async () => {
+      const path = savedRunId
+        ? `/api/v1/runs/${savedRunId}`
+        : `/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`;
+      try {
+        const restored = await api<Run>(path);
+        if (!canApply()) return;
+        const content = await api<Content>(`/api/v1/contents/${restored.novel_id}`);
+        if (!canApply()) return;
         setRun(restored);
         localStorage.setItem(`nc_current_run:${project.id}`, restored.id);
-        return api<Content>(`/api/v1/contents/${restored.novel_id}`);
-      })
-      .then(content => { setNovel(content); void cacheSet("currentNovel", content); })
-      .catch(async firstError => {
+        setNovel(content);
+        void cacheSet(currentNovelCacheKey, content);
+      } catch (firstError) {
         if (!savedRunId) {
-          if (!(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
+          if (canApply() && !(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
           return;
         }
         localStorage.removeItem(`nc_current_run:${project.id}`);
         try {
           const restored = await api<Run>(`/api/v1/runs/latest?project_id=${encodeURIComponent(project.id)}`);
+          if (!canApply()) return;
+          const content = await api<Content>(`/api/v1/contents/${restored.novel_id}`);
+          if (!canApply()) return;
           setRun(restored);
           localStorage.setItem(`nc_current_run:${project.id}`, restored.id);
-          const content = await api<Content>(`/api/v1/contents/${restored.novel_id}`);
-          setNovel(content); void cacheSet("currentNovel", content);
+          setNovel(content);
+          void cacheSet(currentNovelCacheKey, content);
         } catch {
           // A project without workflow runs is a valid initial state.
-          if (!(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
+          if (canApply() && !(firstError instanceof ApiError && firstError.status === 404)) setError(String(firstError));
         }
-      })
-      .finally(() => { restoringRun.current = false; });
-  }, [token, project?.id, run?.id]);
+      } finally {
+        if (active) restoringRun.current = false;
+      }
+    };
+    void restore();
+    return () => {
+      active = false;
+      restoringRun.current = false;
+    };
+  }, [token, project?.id, run?.id, currentNovelCacheKey]);
 
   useEffect(() => {
     if (!run) return;
@@ -229,7 +272,7 @@ export default function App() {
   }, [tab, chapters, chapter?.id]);
 
   useEffect(() => {
-    if (!novel || !project || userSelectedNovel.current) return;
+    if (!novel || !project) return;
     let active = true;
     const contentsKey = `contents:${novel.id}`;
     // Preserve deterministic precedence: cached data can paint first, but a
@@ -266,7 +309,7 @@ export default function App() {
       }
     })();
     return () => { active = false; };
-  }, [novel?.id, run?.status]);
+  }, [novel?.id, project?.id, run?.status]);
 
   function selectChapter(chapterId: string) {
     const selected = chapters.find(item => item.id === chapterId) ?? null;
@@ -293,7 +336,7 @@ export default function App() {
     localStorage.setItem(`nc_current_run:${r.project_id}`, r.id);
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
-    void cacheSet("currentNovel", n);
+    void cacheSet(currentNovelCacheKey, n);
   }
 
   async function startBootstrap() {
@@ -302,7 +345,7 @@ export default function App() {
     try {
       const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, style, target_words: targetWords }) });
       setNovel(c);
-      void cacheSet("currentNovel", c);
+      void cacheSet(currentNovelCacheKey, c);
       const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: JSON.stringify({ auto_confirm_title: false }) });
       setTab("progress");
       await refreshRun(s.run_id);
@@ -634,6 +677,12 @@ export default function App() {
       setToken("");
       setUserEmail("");
       setProject(null);
+      setNovel(null);
+      setNovels([]);
+      setRun(null);
+      setChapters([]);
+      setChapter(null);
+      setEditorText("");
     }
   };
 
@@ -643,40 +692,61 @@ export default function App() {
       currentNovelId={novel?.id}
       onNovelChange={async (novelId) => {
         userSelectedNovel.current = true;
-        if (novelId === novel?.id) return;
+        const selectionEpoch = ++novelSelectionEpoch.current;
+        const isCurrentSelection = () => selectionEpoch === novelSelectionEpoch.current;
+        setError("");
         // 先清空旧状态
+        const selectedSummary = novels.find(item => item.id === novelId);
+        if (selectedSummary) setNovel(selectedSummary);
         setRun(null);
         setChapters([]);
         setChapter(null);
         setEditorText("");
-        // 加载新书
-        const book = await api<Content>(`/api/v1/contents/${novelId}`);
-        setNovel(book);
-        void cacheSet("currentNovel", book);
-        // 并行加载运行状态和章节
-        const [r, items] = await Promise.all([
-          api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`).catch(() => null),
-          api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`),
-        ]);
-        setRun(r);
-        const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
-        setChapters(chs);
-        const ch = chs[0] ?? null;
-        setChapter(ch);
-        setEditorText(ch ? docToText(ch.body) : "");
-        if (ch) loadVersions(ch.id);
+        setVersions([]);
+        setPendingAiEdit(null);
+        setEditorAiReview(null);
+        try {
+          // 加载新书
+          const book = await api<Content>(`/api/v1/contents/${novelId}`);
+          if (!isCurrentSelection()) return;
+          setNovel(book);
+          void cacheSet(currentNovelCacheKey, book);
+          // 并行加载运行状态和章节
+          const [r, items] = await Promise.all([
+            api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`).catch(() => null),
+            api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`),
+          ]);
+          if (!isCurrentSelection()) return;
+          setRun(r);
+          const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+          setChapters(chs);
+          const ch = chs[0] ?? null;
+          setChapter(ch);
+          setEditorText(ch ? docToText(ch.body) : "");
+          if (ch) void loadVersions(ch.id);
+        } catch (caught) {
+          if (isCurrentSelection()) setError(caught instanceof Error ? caught.message : String(caught));
+        }
       }}
       showSelector={tab === "progress" || tab === "editor" || tab === "review"}>
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
-      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => { const book = await api<Content>(`/api/v1/contents/${bookId}`); setNovel(book); setTab("editor"); }} />}
+      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => {
+        userSelectedNovel.current = true;
+        novelSelectionEpoch.current += 1;
+        const book = await api<Content>(`/api/v1/contents/${bookId}`);
+        setNovel(book);
+        void cacheSet(currentNovelCacheKey, book);
+        setTab("editor");
+      }} />}
       {tab === "ranking" && project && (
         <RankingCenter
           projectId={project.id}
           onBookCreated={async (novelId, runId) => {
             const book = await api<Content>(`/api/v1/contents/${novelId}`);
             setNovel(book);
+            void cacheSet(currentNovelCacheKey, book);
             setTab(runId ? "progress" : "library");
           }}
         />
