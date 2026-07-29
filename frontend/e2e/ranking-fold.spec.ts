@@ -28,8 +28,10 @@ test("扫榜折叠 UI：榜单源与榜单快照默认折叠且可展开", async
     .getByRole("button", { name: "扫榜选书", exact: true }).click();
   await expect(page.getByRole("heading", { name: "榜单中心" })).toBeVisible({ timeout: 15_000 });
 
-  const sourceSection = page.locator("details.card", { hasText: "榜单源" });
-  const snapshotSection = page.locator("details.card", { hasText: "榜单快照" });
+  // 用 summary 标题精确命中，避免「榜单快照」空态提示“请先扫描榜单源”
+  // 其中的“榜单源”字样误命中榜单源区块（strict mode violation）。
+  const sourceSection = page.locator("details.card").filter({ has: page.locator("summary", { hasText: "榜单源" }) });
+  const snapshotSection = page.locator("details.card").filter({ has: page.locator("summary", { hasText: "榜单快照" }) });
 
   // 两主区默认折叠（与收口后的统一折叠行为一致）
   await expect(sourceSection).toBeVisible();
