@@ -1,8 +1,7 @@
 /* eslint-disable */
-// PWA Service Worker — offline cache
-const CACHE = "novelcraft-v3";
+// PWA Service Worker — network-first, v4
+const CACHE = "novelcraft-v4";
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/","/index.html"])));
   self.skipWaiting();
 });
 self.addEventListener("activate", (e) => {
@@ -18,9 +17,13 @@ self.addEventListener("fetch", (e) => {
     )));
     return;
   }
-  if (e.request.mode === "navigate") {
-    e.respondWith(fetch(e.request).catch(() => caches.match("/index.html")));
-    return;
-  }
-  e.respondWith(caches.match(e.request).then(cached => cached || fetch(e.request)));
+  e.respondWith(
+    fetch(e.request)
+      .then(response => {
+        const cloned = response.clone();
+        caches.open(CACHE).then(c => c.put(e.request, cloned));
+        return response;
+      })
+      .catch(() => caches.match(e.request))
+  );
 });
