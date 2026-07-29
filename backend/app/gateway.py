@@ -423,6 +423,11 @@ class _DeaiScoreOutput(_LenientOutput):
     reasons: list[str] = Field(default_factory=list)
 
 
+class _DeaiRewriteOutput(_LenientOutput):
+    """V3 deai.rewrite: full de-AI rewrite for web novel style."""
+    text: str = Field(min_length=20)
+
+
 class _StyleImitationOutput(_LenientOutput):
     title: str = Field(min_length=2)
     style_profile: dict[str, Any]
@@ -525,6 +530,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "deai_deduplicate": _DeaiLayerOutput,
     "deai_polish": _DeaiLayerOutput,
     "deai_score": _DeaiScoreOutput,
+    "deai_rewrite": _DeaiRewriteOutput,
     "style_imitation": _StyleImitationOutput,
     "scene_direct": _ScenePlanOutput,
 }

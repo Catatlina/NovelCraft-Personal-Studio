@@ -105,7 +105,7 @@ class DeaiPipeline:
     def run(self, text: str) -> dict:
         """Run the pipeline.
 
-        Returns keys: original_score, final_score, layers, final_text, (warning?).
+        Returns keys: original_score, final_score, layers, final_text.
         """
         if not text or not text.strip():
                 return {
@@ -117,30 +117,35 @@ class DeaiPipeline:
 
         original_score = quick_deai_score(text)
         layers: list[dict] = []
-        polished = text
 
-        for name, note in _LAYER_NAMES:
-            if name == "词汇去机器味":
-                polished = _heuristic_polish(polished)
-            layers.append({"name": name, "note": note, "applied": True})
+        # Layer 1: heuristic polish (词法级快速清洗)
+        polished = _heuristic_polish(text)
+        layers.append({"name": "词汇去机器味", "note": "heuristic", "applied": True})
 
-        final_score = max(0, original_score - 25)
-
+        # Layer 2: real AI rewrite with web-novel style prompt
         from app.gateway import OutputValidationError, complete
-        out = complete(
-                    run_id=None,
-                    node_key=None,
-                    project_id=self.project_id,
-                    task_type="deai_rewrite",
-                    prompt_name="deai.rewrite",
-                    variables={"text": text[:4000], "title": self.chapter_title},
-                    client_mutation_id=f"deai:{self.content_id}:{abs(hash(text)) % 10 ** 8}",
-        )
-        rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
-        if len(rewritten.strip()) <= 20:
-            raise OutputValidationError("deai rewrite response was empty or too short")
-        polished = rewritten
-        final_score = max(0, original_score - 45)
+        try:
+            out = complete(
+                        run_id=None,
+                        node_key=None,
+                        project_id=self.project_id,
+                        task_type="deai_rewrite",
+                        prompt_name="deai.rewrite",
+                        variables={"text": text[:6000], "title": self.chapter_title},
+                        client_mutation_id=f"deai:{self.content_id}:{abs(hash(text)) % 10 ** 8}",
+            )
+            rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
+            if len(rewritten.strip()) >= 20:
+                polished = rewritten
+                layers.append({"name": "AI 网文风格重写", "note": "deai.rewrite", "applied": True})
+        except Exception:
+            layers.append({"name": "AI 网文风格重写", "note": "provider unavailable, fallback to heuristic", "applied": False})
+
+        # Layer 3: post-processing — enforce short paragraphs
+        polished = _enforce_short_paragraphs(polished)
+        layers.append({"name": "段落拆分", "note": "post-process", "applied": True})
+
+        final_score = quick_deai_score(polished)
 
         return {
             "original_score": original_score,
@@ -148,3 +153,32 @@ class DeaiPipeline:
             "layers": layers,
             "final_text": polished,
         }
+
+
+def _enforce_short_paragraphs(text: str) -> str:
+    """Post-process: 强制拆分过长段落，模拟网文短段落节奏。"""
+    paras = [p.strip() for p in text.split("\n") if p.strip()]
+    result: list[str] = []
+    for p in paras:
+        # 对话行保留不拆
+        if p and p[0] in ('\u300c', '\u201c', '\u2018', '\u0022', '\u0027'):
+            result.append(p)
+            continue
+        if len(p) > 120 and p.count("\u3002") >= 3:
+            sentences = re.split(r"(?<=[\u3002\uff01\uff1f!?])", p)
+            chunk = ""
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                if len(chunk) + len(s) > 100 and chunk:
+                    result.append(chunk)
+                    chunk = s
+                else:
+                    chunk += s
+            if chunk:
+                result.append(chunk)
+        else:
+            result.append(p)
+    return "\n\n".join(result)
+    return "\n\n".join(result)
