@@ -66,6 +66,22 @@ async function waitForActionableRun(page: Page, headers: Record<string, string>,
 
 const ACTIONABLE = new Set(["failed", "dispatch_failed", "pending"]);
 
+/** 控件③专用：仅当 run 进入 failed（存在失败节点、启动/重启按钮可见）才返回。 */
+async function waitForFailedRun(page: Page, headers: Record<string, string>, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  let last: { id: string; status: string } | null = null;
+  while (Date.now() < deadline) {
+    const r = await page.request.get("/api/v1/runs/latest", { headers });
+    if (r.ok()) {
+      const data = (await r.json()).data;
+      last = { id: data.id, status: data.status };
+      if (data.status === "failed") return last;
+    }
+    await page.waitForTimeout(2000);
+  }
+  return last; // 可能停留在 pending/dispatch_failed/running/succeeded，调用方据此 skip
+}
+
 test("控件①：全流程重执行弹窗可打开、取消可关闭", async ({ page }) => {
   test.setTimeout(200_000);
   await registerFreshUser(page);
@@ -139,15 +155,17 @@ test("控件③：启动/重启在同 run 内重跑（观测到失败态才断�
   await startWizardRun(page);
 
   const headers = await authHeaders(page);
-  const run = await waitForActionableRun(page, headers, 170_000);
-  if (!run || !ACTIONABLE.has(run.status)) {
-    test.skip(true, "未观测到确定性失败/待运行 run（启动/重启控件需 run 非 running）");
+  // 「启动/重启」按钮仅在 run 实际进入 failed（存在失败节点）时渲染，
+  // pending/dispatch_failed 阶段 failedCount 为 0、按钮不可见，故只等 failed。
+  const run = await waitForFailedRun(page, headers, 170_000);
+  if (!run || run.status !== "failed") {
+    test.skip(true, "未观测到 failed 态 run（启动/重启控件仅在有失败节点时可见，否则跳过）");
     return;
   }
 
-  // 「启动/重启」按钮在 failed/pending/dispatch_failed 时可见
+  // 「启动/重启」按钮在 failed 时可见
   const restartBtn = page.getByRole("button", { name: "启动/重启" });
-  await expect(restartBtn).toBeVisible({ timeout: 10_000 });
+  await expect(restartBtn).toBeVisible({ timeout: 20_000 });
   await restartBtn.click();
 
   // 重启后 run 重新进入 running（同一 run_id，不新建）

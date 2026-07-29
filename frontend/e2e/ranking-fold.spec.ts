@@ -51,7 +51,8 @@ test("扫榜折叠 UI：榜单源与榜单快照默认折叠且可展开", async
   // 展开榜单快照：出现快照表或空态
   await snapshotSection.locator("summary").click();
   await expect(snapshotSection).toHaveAttribute("open");
-  await expect(snapshotSection.getByText(/条记录|暂无快照记录/)).toBeVisible();
+  // 空态下「0 条记录」(header) 与「暂无快照记录」(body) 都满足正则，取首个避免 strict 命中
+  await expect(snapshotSection.getByText(/条记录/).first()).toBeVisible();
 
   await page.screenshot({ path: "artifacts/screenshots/ranking-fold.png" });
 });
