@@ -84,6 +84,7 @@ test("创作进度①：无 run 时展示真实空状态", async ({ page }) => {
 });
 
 test("创作进度②：失败节点展示失败原因与重试控件（真实失败 run，无 Key）", async ({ page }) => {
+  test.setTimeout(180_000);
   await registerFreshUser(page);
   await startWizardRun(page);
 
@@ -101,14 +102,14 @@ test("创作进度②：失败节点展示失败原因与重试控件（真实�
   // AI 失败路径为 Celery 重试（非立即失败），因此只断言能稳定观测到的失败，
   // 否则优雅跳过——不伪造失败。
   const pollDeadline = Date.now() + 150_000;
-  let failure: { kind: "node" | "run"; detail: string } | null = null;
+  let failure: { kind: "node" | "run"; detail: string; title?: string } | null = null;
   while (Date.now() < pollDeadline) {
     const r = await page.request.get(`/api/v1/runs/${runId}`, { headers });
     if (r.ok()) {
       const body = (await r.json()).data;
-      const nodes: Array<{ node_key: string; status: string; error?: string | null }> = body.nodes || [];
+      const nodes: Array<{ node_key: string; status: string; title: string; error?: string | null }> = body.nodes || [];
       const failedNode = nodes.find(n => n.status === "failed" || n.status === "pending_budget");
-      if (failedNode) { failure = { kind: "node", detail: failedNode.error || "" }; break; }
+      if (failedNode) { failure = { kind: "node", detail: failedNode.error || "", title: failedNode.title }; break; }
       if (body.status === "failed" || body.status === "dispatch_failed") { failure = { kind: "run", detail: body.status }; break; }
     }
     await page.waitForTimeout(2000);
@@ -121,6 +122,10 @@ test("创作进度②：失败节点展示失败原因与重试控件（真实�
 
   // 失败 UI 证据
   if (failure.kind === "node") {
+    // 选中失败节点，确保详情面板展示失败原因与重试控件（与默认选中无关）
+    if (failure.title) {
+      await page.locator(".node-list > button", { hasText: failure.title }).first().click();
+    }
     await expect(page.getByText("执行失败")).toBeVisible({ timeout: 15_000 });
     if (failure.detail) await expect(page.getByText(failure.detail)).toBeVisible();
     // 失败节点详情里提供「重试此步骤」
