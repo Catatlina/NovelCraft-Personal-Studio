@@ -634,13 +634,19 @@ export default function App() {
         if (novelId === novel?.id) return;
         const book = await api<Content>(`/api/v1/contents/${novelId}`);
         setNovel(book);
-        setChapters([]);
-        setChapter(null);
-        setEditorText("");
-        // 加载新书的运行状态
+        void cacheSet("currentNovel", book);
+        // 加载新书的运行状态和章节
         api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`)
           .then(r => setRun(r))
           .catch(() => setRun(null));
+        // 强制重新加载章节（useEffect 会通过 novel?.id 变化自动触发）
+        const items = await api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`);
+        const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+        setChapters(chs);
+        const ch = chs[0] ?? null;
+        setChapter(ch);
+        setEditorText(ch ? docToText(ch.body) : "");
+        if (ch) loadVersions(ch.id);
       }}
       showSelector={tab === "progress" || tab === "editor" || tab === "review"}>
       {error && <div className="error">{error}</div>}
@@ -659,7 +665,19 @@ export default function App() {
       )}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
-      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onOpenEditor={() => setTab("editor")} />}
+      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onOpenEditor={async () => {
+        // 加载最新章节到编辑器
+        if (novel && project) {
+          const items = await api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`);
+          const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+          setChapters(chs);
+          if (chs.length > 0) {
+            setChapter(chs[chs.length - 1]); // 最新章节
+            setEditorText(docToText(chs[chs.length - 1].body));
+          }
+        }
+        setTab("editor");
+      }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
             <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id }} />

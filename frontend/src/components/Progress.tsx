@@ -219,17 +219,22 @@ export function Progress({
             {activeNode ? `正在执行：${activeNode.title}` : failedCount ? "流程遇到问题，请查看失败步骤。" : run.status === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className={`progress-run-state ${run.status || "pending"}`}>{RUN_LABELS[run.status || "pending"] || run.status}</span>
           {failedCount > 0 && (
             <button className="btn-sm btn-primary" disabled={retrying !== ""} onClick={() => {
               nodes.filter(n => RETRYABLE_STATUSES.has(n.status)).forEach(n => retry(n));
-            }}><RefreshCw size={14} /> 重试全部失败 ({failedCount})</button>
+            }}><RefreshCw size={14} /> 重试失败 ({failedCount})</button>
           )}
-          {run.status === "failed" && (
+          {nodes.length > 0 && (
+            <button className="btn-sm btn-primary" disabled={retrying !== ""} onClick={() => {
+              nodes.filter(n => n.status !== "succeeded" && n.status !== "running").forEach(n => retry(n));
+            }}><RefreshCw size={14} /> 全流程重执行</button>
+          )}
+          {run.status === "succeeded" && (
             <button className="btn-sm btn-ghost" onClick={() => {
-              nodes.filter(n => n.status === "failed").forEach(n => retry(n));
-            }}><RefreshCw size={14} /> 重启流程</button>
+              nodes.forEach(n => retry(n));
+            }}><RefreshCw size={14} /> 重新运行全部</button>
           )}
         </div>
       </section>
