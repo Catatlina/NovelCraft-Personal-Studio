@@ -6,7 +6,7 @@
 | 编号 | 需求 | 前端 | 后端/数据 | 状态 | 当前证据 | 升级门禁 |
 |---|---|---|---|---|---|---|
 | NOV-G-001 | 用户可注册、登录、退出 | `LoginPage.tsx`、`App.tsx` | `/auth/register`、`/auth/login`、JWT | 已验收 | E2E 主线① + 生产 `novel.xyjin.xyz` 认证 smoke | — |
-| NOV-G-002 | 只展示七个小说入口 | `Layout.tsx`、`App.tsx` | 不改历史数据 | 已验收 | E2E 主线① + visual.spec 15 张截图 + 生产巡检 | — |
+| NOV-G-002 | 展示八个小说入口（含扫榜选书） | `Layout.tsx`、`App.tsx` | 不改历史数据 | 已验收 | E2E 主线① + visual.spec 截图 + 生产巡检 | — |
 | NOV-G-003 | 旧入口迁移、未知入口 404 | `App.tsx`、`NotFoundPage.tsx` | 无 | 已验收 | E2E 主线② + 生产路由 smoke | — |
 | NOV-G-004 | 浅深色、主题记忆、响应式 | `ThemeProvider.tsx`、`styles.css` | 浏览器偏好 | 已验收 | 单测 + visual.spec 桌面/手机截图 + 生产巡检 | — |
 | NOV-H-001 | 首页显示真实书籍和运行状态 | `WorkspaceDashboard.tsx` | `/library/books`、`/runs/latest` | 可用 | 单测、E2E 空状态 | 有书/有运行生产证据 |

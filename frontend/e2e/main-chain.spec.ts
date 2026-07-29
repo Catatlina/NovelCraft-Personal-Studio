@@ -52,24 +52,24 @@ async function createBookWithChapter(page: Page, titleSeed: string) {
   return novelId;
 }
 
-test("小说主线①：注册后只展示七个小说入口与真实空状态", async ({ page }) => {
+test("小说主线①：注册后只展示八个小说入口与真实空状态", async ({ page }) => {
   await registerFreshUser(page);
 
   const navigation = page.getByRole("navigation", { name: "小说创作主导航" });
-  for (const label of ["小说首页", "创作向导", "我的书库", "创作进度", "章节编辑器", "审阅与一致性", "小说设置"]) {
+  for (const label of ["小说首页", "创作向导", "扫榜选书", "我的书库", "创作进度", "章节编辑器", "审阅与一致性", "小说设置"]) {
     await expect(navigation.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
-  await expect(navigation.getByRole("button", { name: "扫榜选书", exact: true })).toHaveCount(0);
   await expect(page.getByText("书架还是空的")).toBeVisible();
   await expect(page.getByText("当前没有阻塞项")).toBeVisible();
 });
 
-test("小说主线②：旧入口迁移、未知入口 404、移动端底栏", async ({ page }) => {
+test("小说主线②：扫榜选书入口有效、未知入口 404、移动端底栏", async ({ page }) => {
   await registerFreshUser(page);
 
+  // 扫榜选书现在是有效入口，不再重定向
   await page.goto("/#/ranking");
-  await expect(page).toHaveURL(/#\/wizard$/);
-  await expect(page.getByRole("heading", { name: "把一个念头，变成完整故事。" })).toBeVisible();
+  await expect(page).toHaveURL(/#\/ranking$/);
+  await expect(page.getByRole("heading", { name: "扫榜选书" })).toBeVisible({ timeout: 10000 });
 
   await page.goto("/#/missing-page");
   await expect(page.getByRole("heading", { name: "这一页没有写进故事里。" })).toBeVisible();

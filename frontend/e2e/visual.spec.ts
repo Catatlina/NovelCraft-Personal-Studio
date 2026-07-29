@@ -14,6 +14,7 @@ import { expect, type Page, test } from "@playwright/test";
 const TABS = [
   "小说首页",
   "创作向导",
+  "扫榜选书",
   "我的书库",
   "创作进度",
   "章节编辑器",

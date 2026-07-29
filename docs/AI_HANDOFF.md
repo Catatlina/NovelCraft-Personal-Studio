@@ -29,21 +29,22 @@
 - 构建：`npm run build` → TypeScript + Vite 通过；仅保留 `api.ts` 动静态混合导入与空 `react` chunk 的既有警告。
 - E2E：`npm run test:e2e` → **4 passed, 1 skipped**；第 5 条 `e2e/main-chain.spec.ts:134`（protected 真实 AI 全链）因本机无 `DEEPSEEK_API_KEY` 被 `test.skip` 真实跳过，未计入通过。
 - 真实性门禁：`bash scripts/ai_development_gate.sh` → AST 真实性与 whitespace 通过；suspicion scan 按设计返回 3（宽泛告警）。逐条解释见 `KNOWN_ISSUES.md` KI-005（全部为测试 monkeypatch / UI placeholder / 反伪注释 / 合法空态 / 非小说历史兜底，非业务伪实现）。
-- 文档↔代码一致性：抽样确认 `Layout.tsx` 主导航恰为七项小说页面；`App.tsx` 未导入任何非小说页面组件（RankingCenter/Hotspot/PublishDashboard/Studio/Collaboration/IntelligenceAgent 等均未出现）；protected E2E 为真实 `test.skip` 而非伪通过。
+- 文档↔代码一致性：抽样确认 `Layout.tsx` 主导航为八项（含扫榜选书）；`App.tsx` 导入 `RankingCenter` 用于扫榜选书页面，其余非小说组件（Hotspot/PublishDashboard/Studio/Collaboration/IntelligenceAgent 等均未出现）；protected E2E 为真实 `test.skip` 而非伪通过。
 
 未完成顺序第一项（protected 真实 AI E2E）状态：**✅ 已完成（2026-07-28，本地真实 Key 环境）**。执行 `npx playwright test e2e/main-chain.spec.ts --grep "protected"` → **1 passed (13.2m)**。证据：run `8f1fd62b-5ad8-4208-8fd8-887f33425631`（succeeded）、19 条真实 `ai_calls`（¥0.1889）、产物《午夜头条》+ 第一章 2350 chars、截图 protected-02..06。过程中修复 3 个真实阻断（Wizard step 校验 / e2e-backend 缺 Celery worker / dev 库迁移落后），详见 KI-001。`test.skip` 保留，无 Key 环境仍真实跳过。Key 存放于 gitignored `.env.local`，不入库。
 
 ## 2. 当前产品契约
 
 - 用户可见品牌统一为 **Starlume AI**。
-- 当前只做小说，主导航只保留七项：
+- 当前只做小说，主导航保留八项：
   1. 小说首页
   2. 创作向导
-  3. 我的书库
-  4. 创作进度
-  5. 章节编辑器
-  6. 审阅与一致性
-  7. 小说设置
+  3. 扫榜选书
+  4. 我的书库
+  5. 创作进度
+  6. 章节编辑器
+  7. 审阅与一致性
+  8. 小说设置
 - 非小说模块从产品 UI 隐藏，但现阶段不得删除其历史数据和仍被后端使用的源码。
 - 老入口必须迁移到小说主线；未知入口必须显示真实 404。
 - AI 编辑必须“生成结果 → 差异预览 → 用户应用或放弃 → 保存版本”；AI 失败不得覆盖原文。
@@ -86,7 +87,7 @@
 - 72/260px 桌面侧栏、平板收起、手机底部导航。
 - 登录、注册、全局错误边界、404。
 - 小说首页真实加载、错误、空状态和重试。
-- 七个小说主页面入口；非小说入口不再由 `App.tsx` 导入和渲染。
+- 八个小说主页面入口（含扫榜选书）；其余非小说入口不再由 `App.tsx` 导入和渲染。
 - 书库真实建书、详情、章节导入、编辑保存、刷新后持久化。
 - 审阅页无证据时不伪造分数。
 - 小说设置只保留 AI 连接、创作数据、账号安全。
@@ -118,7 +119,7 @@ npm run test:e2e
 
 已通过的 E2E：
 
-1. 注册 → 七个小说入口 → 真实首页空状态。
+1. 注册 → 八个小说入口（含扫榜选书） → 真实首页空状态。
 2. 旧入口迁移 → 404 → 手机底栏。
 3. 建书 → 详情 → 导入章节 → 编辑 → 保存 → 重载后持久化。
 4. 审阅无伪分 → 小说设置收敛 → BYOK 会话保存。
@@ -138,7 +139,7 @@ npm run test:e2e
 5. 更新 `README.md` 中仍写“19 Tab/扫榜默认入口”的过时说明。
 6. 运行工程真实性门禁；宽泛告警必须逐项解释，不能静默忽略。
 7. 提交、推送 `main`，等待 GitHub Actions 全绿。
-8. 按部署手册部署，检查健康接口、登录、七页面、建书/保存和真实 AI 主链。
+8. 按部署手册部署，检查健康接口、登录、八页面（含扫榜选书）、建书/保存和真实 AI 主链。
 9. 生产验证后才能把对应状态提升为“已验收”。
 
 ## 8. 禁止破坏
