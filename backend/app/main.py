@@ -272,8 +272,10 @@ async def capture_api_key(request: Request, call_next):
         tokens.append((_request_api_base_url, _request_api_base_url.set(base_url)))
     model = request.headers.get("X-Model")
     if model:
-        # Plan gate: a model not in the user's plan is rejected at the boundary.
-        if user_id:
+        # Plan gate: only enforce model quota on AI generation endpoints.
+        _path = request.url.path
+        _ai_paths = any(p in _path for p in ("/ai/", "/deai", "/bootstrap", "/continue", "/generate", "/prompts/"))
+        if _ai_paths and user_id:
             try:
                 enforce_quota(user_id, None, "model", model)
             except HTTPException as exc:
