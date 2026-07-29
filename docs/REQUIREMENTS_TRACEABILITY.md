@@ -22,11 +22,12 @@
 | NOV-E-004 | 版本查看与恢复 | 编辑器版本区 | versions API | 已验收 | protected E2E 1 passed (2026-07-28, run9)：按版本 id 恢复后正文 A 回归、AI 建议消失、DB content.body 确为 [A]；生产 smoke | — |
 | NOV-R-001 | 无审阅证据时不伪造评分 | `Review.tsx` | run review outputs | 已验收 | E2E 主线④；生产空态 smoke | — |
 | NOV-R-002 | 展示七维、一致性、连续性和问题证据 | `Review.tsx` | review/consistency nodes | 已验收 | protected E2E 1 passed (2026-07-28, run 8f1fd62b, 19 ai_calls)；protected-06 截图；生产 smoke | — |
+| NOV-R-003 | 审阅建议先预览再由用户应用 | `Review.tsx` | repair preview/apply API、签名与并发门禁 | 已接线 | Repair 定向 15 passed；前端预览/确认 2 tests；后端全量 781 passed；浏览器验证无密钥时显式失败且不改正文 | 真实 Provider 正向预览→应用；同提交 CI |
 | NOV-S-001 | BYOK 只保存在当前会话 | `Settings.tsx` | 请求 Header 优先 | 已验收 | E2E 主线④；生产请求验证 | — |
 | NOV-S-002 | 创作知识导入、导出和统计 | `Settings.tsx` | knowledge/stats API | 已接线 | 页面/API 接线 | 真库数据操作 E2E |
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
 | NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 已验收 | 提交 `07a8c0f`：本地后端 761 passed / 9 skipped / 1 xpassed、前端 12 passed、build、E2E 4 passed / 4 skipped、三项静态校验；Actions `30439322188` 五项全绿 | 后续批次继续维持同提交 CI |
-| NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected “小说主线⑤” 1 passed (5.2m)；run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 20/20 nodes、22 succeeded ai_calls；Writer 含 Prompt Compiler 三层指令，最终一致性含五维读者体验；提交 `5c544ff` / Actions `30445384633` 五项全绿 | Repair Engine 预览应用闭环；最终生产 smoke 后提升已验收 |
+| NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected “小说主线⑤” 1 passed (5.2m)；run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 20/20 nodes、22 succeeded ai_calls；Writer 含 Prompt Compiler 三层指令，最终一致性含五维读者体验；提交 `5c544ff` / Actions `30445384633` 五项全绿 | Repair Engine 正向 Provider 预览应用；最终生产 smoke 后提升已验收 |
 | NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 已接线 | 历史生产版本为 `91bcf9b`；当前 main 与本批修复均未部署 | 当前提交推送、CI 全绿、部署及生产 smoke |
 
 ## 更新规则

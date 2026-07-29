@@ -16,7 +16,7 @@
 | ② | Novel DNA | **可用** | plan_idea 同一次调用产出 commercial_positioning/story_promise/forbidden_deviations（不增调用）；存为书 meta 顶层键 + novel_dna 嵌套；草稿提示注入 `$forbidden_deviations` 强约束；`_check_novel_dna_consistency` 自洽校验（红线与定位/承诺矛盾→fail，存 meta） | run `955d4719` 真实产出并持久化 DNA，Writer 编译指令含创作红线 |
 | ③ | Story Arc 单层实体化 | **可用** | 故事弧 entity_type=story_arc（parent_id 挂书，旧书无弧优雅降级）；蓝图阶段新增 `generate_story_arc` 节点；装配器插 `arc_summary`；终审做弧线追踪 | run `955d4719` 的 `generate_story_arc` 和故事弧实体真实成功；提交 `391ef3b` CI 全绿 |
 | ④ | 网文策略库 MVP | **可用** | strategy 表 + 3 个策略；Writer 按章序/功能匹配策略和 Skill 提示；Prompt Compiler 合并策略、DNA 红线和 Chapter Function | run `955d4719` Writer 请求含 246 字符编译指令，三层标签均真实存在；产品路径回归通过 |
-| ⑤ | Repair Engine 三级版 | **已接线** | `_classify_repair_level`（纯逻辑分级：sentence/paragraph→repair_local，chapter→章级重写复用现有，plot→replan_chapter；按剧情>逻辑>表达>文字优先级）；`repair_local` 节点（prompt+契约 _RepairLocalOutput：replacements 列表，`_apply_replacements` 局部替换，存 meta.repair_log **原地增量不建版本分支**，符合§8.4）；`replan_chapter` 节点（prompt+契约 _ReplanChapterOutput：revised_outline+rationale，存 meta.replan_log）；final_consistency_check 失败路径写入 `repair_recommendation`（分级推荐，保留现有 needs_rewrite 兜底） | `tests/test_repair_engine.py` 10 passed；真实 AI 全链 ⑤⑦ 待全量验收 |
+| ⑤ | Repair Engine 三级版 | **已接线** | 失败证据分级为局部修复/整章重写/重新规划；审阅页调用统一 preview/apply API。预览签名、防篡改、`updated_at` 冲突门禁；用户确认前不改正文/细纲；局部替换保留 TipTap 结构，应用后仍进入待复审/待重写 | Repair 定向 15 passed、后端 781 passed、前端 14 passed/build、E2E 4 passed；浏览器负向失败不覆盖。正向真实 Provider 场景与同提交 CI 待完成 |
 
 ## 第二阶段（提升百万字能力）
 | # | 功能 | 状态 | 挂载点 | 验收 |

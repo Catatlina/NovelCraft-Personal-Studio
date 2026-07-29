@@ -76,6 +76,29 @@ def test_apply_replacements_skips_unmatched():
     assert new_body == body
 
 
+def test_apply_replacements_preserves_tiptap_document_shape():
+    body = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "text": "他是一个好人。"},
+            {"type": "paragraph", "content": [{"type": "text", "text": "她默默走了。"}]},
+        ],
+    }
+    new_body, applied, skipped = _apply_replacements(
+        body,
+        [
+            {"anchor": "一个好人", "replacement": "个善良的人"},
+            {"anchor": "默默走了", "replacement": "转身离开了"},
+        ],
+    )
+    assert new_body["type"] == "doc"
+    assert new_body["content"][0]["text"] == "他是个善良的人。"
+    assert new_body["content"][1]["content"][0]["text"] == "她转身离开了。"
+    assert applied == ["一个好人", "默默走了"]
+    assert skipped == []
+    assert body["content"][0]["text"] == "他是一个好人。"
+
+
 def test_repair_local_contract_requires_replacements():
     try:
         _RepairLocalOutput.model_validate({"replacements": []})

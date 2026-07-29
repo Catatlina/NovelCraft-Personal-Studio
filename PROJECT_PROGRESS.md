@@ -2,7 +2,17 @@
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-29（V3 真实 20 节点链与上下文装配修复）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-29（Repair Engine 预览应用产品接线）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+
+## 2026-07-29 Repair Engine 预览应用产品接线
+
+- 审阅页可读取真实章节 `quality_gate` 与 `repair_recommendation`，按局部修复、整章重写、重新规划三档生成建议。
+- 新产品门禁为“生成签名预览 → 用户查看前后内容 → 确认应用或放弃”；预览阶段不更新正文或细纲。
+- 应用前校验签名与章节 `updated_at`；预览被篡改或章节已变化时返回 422/409，不覆盖新稿；TipTap 文档结构保持不变。
+- 应用后不伪装审核通过：局部/整章修复进入 `needs_review`，重新规划保持 `needs_rewrite`；AI Provider 失败在页面显示真实错误。
+- 本地门禁：后端 `781 passed, 9 skipped, 1 xpassed`；Repair 定向 `15 passed`；前端 `14 passed`；构建通过；确定性 E2E `4 passed, 4 skipped`；前后端契约、交付声明、AI 真实性和差异检查通过。
+- 当前状态：**已接线**（文件：`backend/app/api/v1/repairs.py`、`frontend/src/components/Review.tsx`；T2/T3 证据如上）。
+- 升级门禁：当前环境没有 Provider 密钥，正向真实 AI 预览尚未复验，因此状态保持在已接线。
 
 ## 2026-07-29 V3 真实调用与持久化审计
 
@@ -13,7 +23,7 @@
 - 修复契约与隔离：人物提取强制认知事实层；`get_states` 按小说过滤，避免跨书串数据；场景轮询读取本次返回结果。
 - 本地门禁：后端 `775 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；确定性 E2E `4 passed, 4 skipped`；交付声明、前后端契约、AI 真实性和差异检查通过。
 - CI 证据：提交 `5c544ff` 的 Actions run `30445384633` 五项全绿。
-- 当前状态：**已接线**（实测：run `955d4719-8e21-4043-8a3e-2352c06c0ce2`；CI：`30445384633`；追踪：`docs/V3-FUSION-TRACEABILITY.md`）。Repair Engine 尚无“预览后应用”的产品入口，不能宣称 V3 12 项整体可用或已验收。
+- 当前状态：**已接线**（实测：run `955d4719-8e21-4043-8a3e-2352c06c0ce2`；CI：`30445384633`；追踪：`docs/V3-FUSION-TRACEABILITY.md`）。Repair Engine 已补产品入口但尚缺正向真实 Provider 预览证据，不能宣称 V3 12 项整体可用或已验收。
 
 ## 2026-07-29 V3 真实 20 节点链与上下文装配修复
 

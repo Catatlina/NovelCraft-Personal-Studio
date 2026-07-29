@@ -962,6 +962,12 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .ai-edit-preview > p { margin-top: 11px; color: var(--text-muted); font-size: 11px; }
 .ai-edit-preview-actions { margin-top: 13px; display: flex; justify-content: flex-end; gap: 8px; }
 .ai-edit-preview-actions button { min-height: 38px; border-radius: 10px; }
+.repair-preview { margin-bottom: 24px; }
+.repair-preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.repair-preview-grid > div { min-width: 0; }
+.repair-preview-grid strong { display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px; }
+.repair-preview-grid pre { max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; padding: 16px; border-radius: 14px; background: var(--bg-hover); color: var(--text-primary); font: inherit; line-height: 1.65; }
+@media (max-width: 640px) { .repair-preview-grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 1024px) {
   .app-main.sidebar-pinned { margin-left: 72px; }

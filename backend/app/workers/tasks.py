@@ -20,6 +20,7 @@ import json
 import math
 import re
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
@@ -396,39 +397,41 @@ def _apply_replacements(body: Any, replacements: list[dict]) -> tuple[Any, list[
     if not isinstance(replacements, list) or not replacements:
         return body, [], []
     applied: list[str] = []
-    skipped: list[str] = []
-    if isinstance(body, list):
-        new_body = []
-        for part in body:
-            seg = part if isinstance(part, str) else str(part.get("text", "") if isinstance(part, dict) else part)
-            for r in replacements:
-                anchor = str(r.get("anchor", ""))
-                repl = str(r.get("replacement", ""))
-                if anchor and anchor in seg:
-                    seg = seg.replace(anchor, repl)
-                    if anchor not in applied:
-                        applied.append(anchor)
-            new_body.append(seg)
-        return new_body, applied, skipped
-    text = body if isinstance(body, str) else extract_body_text(body)
-    seg = text
-    for r in replacements:
-        anchor = str(r.get("anchor", ""))
-        repl = str(r.get("replacement", ""))
-        if anchor and anchor in seg:
-            seg = seg.replace(anchor, repl)
-            applied.append(anchor)
-        else:
-            skipped.append(anchor)
-    return seg, applied, skipped
+    normalized = [
+        (str(item.get("anchor", "")), str(item.get("replacement", "")))
+        for item in replacements if isinstance(item, dict)
+    ]
+
+    def replace_text(text: str) -> str:
+        updated = text
+        for anchor, replacement in normalized:
+            if anchor and anchor in updated:
+                updated = updated.replace(anchor, replacement)
+                if anchor not in applied:
+                    applied.append(anchor)
+        return updated
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, str):
+            return replace_text(value)
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, dict):
+            copied = deepcopy(value)
+            if isinstance(copied.get("text"), str):
+                copied["text"] = replace_text(copied["text"])
+            if isinstance(copied.get("content"), list):
+                copied["content"] = [walk(item) for item in copied["content"]]
+            return copied
+        return value
+
+    new_body = walk(body)
+    skipped = [anchor for anchor, _replacement in normalized if anchor and anchor not in applied]
+    return new_body, applied, skipped
 
 
-def _repair_local(chapter_id: str, novel_id: str, project_id: str, issues_text: str) -> dict[str, Any]:
-    """Run sentence/paragraph-level local repair on a chapter (§8.2).
-
-    Persists as an in-place incremental record (meta.repair_log), does NOT create
-    a new version branch. Returns applied/skipped anchors for audit.
-    """
+def _preview_local_repair(chapter_id: str, novel_id: str, project_id: str, issues_text: str) -> dict[str, Any]:
+    """Generate a local-repair proposal without mutating the chapter."""
     db = connect()
     chapter = db.execute(
         "SELECT id, title, body, meta, parent_id, project_id FROM contents WHERE id=%s",
@@ -455,28 +458,22 @@ def _repair_local(chapter_id: str, novel_id: str, project_id: str, issues_text: 
     output = validate_task_output("repair_local", output)
     replacements = output.get("replacements", []) if isinstance(output, dict) else []
     new_body, applied, skipped = _apply_replacements(body, replacements)
-
-    db = connect()
-    log = list((meta.get("repair_log") or []))
-    log.append({
+    if not applied or skipped:
+        raise OutputValidationError(
+            "repair preview contains anchors that do not exactly match the current chapter"
+        )
+    return {
+        "action": "repair_local",
         "level": "local",
+        "replacements": replacements,
+        "proposed_body": new_body,
         "applied": applied,
         "skipped": skipped,
-        "at": datetime.now(timezone.utc).isoformat(),
-    })
-    db.execute(
-        "UPDATE contents SET body=%s, meta=meta || %s, updated_at=now() WHERE id=%s",
-        (encode(new_body), encode({"repair_log": log}), chapter_id),
-    )
-    db.commit()
-    db.close()
-    return {"applied": applied, "skipped": skipped, "level": "local"}
+    }
 
 
-def _replan_chapter(chapter_id: str, novel_id: str, project_id: str, issues_text: str) -> dict[str, Any]:
-    """Plot-level repair (§8.4): send the chapter back to the Planner for a
-    revised outline. Records the revised plan in meta.replan_log (incremental,
-    no version branch) and returns it for downstream re-generation."""
+def _preview_chapter_replan(chapter_id: str, novel_id: str, project_id: str, issues_text: str) -> dict[str, Any]:
+    """Generate a revised-outline proposal without mutating the chapter."""
     db = connect()
     chapter = db.execute(
         "SELECT id, title, body, meta, parent_id, project_id FROM contents WHERE id=%s",
@@ -506,21 +503,12 @@ def _replan_chapter(chapter_id: str, novel_id: str, project_id: str, issues_text
     output = validate_task_output("replan_chapter", output)
     revised = output.get("revised_outline", {}) if isinstance(output, dict) else {}
     rationale = str(output.get("rationale", "")) if isinstance(output, dict) else ""
-
-    db = connect()
-    log = list((meta.get("replan_log") or []))
-    log.append({
+    return {
+        "action": "replan_chapter",
+        "level": "plot",
         "revised_outline": revised,
         "rationale": rationale,
-        "at": datetime.now(timezone.utc).isoformat(),
-    })
-    db.execute(
-        "UPDATE contents SET meta=meta || %s, updated_at=now() WHERE id=%s",
-        (encode({"replan_log": log, "outline": revised}), chapter_id),
-    )
-    db.commit()
-    db.close()
-    return {"revised_outline": revised, "rationale": rationale, "level": "plot"}
+    }
 
 
 def _humanize_quality_feedback(before_text: str, output: dict) -> str:

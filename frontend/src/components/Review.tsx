@@ -1,4 +1,6 @@
-import { AlertTriangle, BookOpenCheck, CheckCircle2, CircleHelp, Route, Users } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, BookOpenCheck, CheckCircle2, CircleHelp, Route, Sparkles, Users } from "lucide-react";
+import { ApiError, api } from "../lib/api";
 
 type ReviewPayload = {
   score?: number;
@@ -52,14 +54,25 @@ export function Review({
   timeline = [],
   arcs = [],
   onOpenEditor,
+  onRepairApplied,
 }: {
-  chapter?: { id?: string; title?: string } | null;
+  chapter?: { id?: string; title?: string; body?: unknown; meta?: Record<string, unknown>; updated_at?: string } | null;
   review?: ReviewPayload;
   characters?: Array<{ id?: string; title?: string; name?: string; body?: string }>;
   timeline?: Array<{ event?: string; chapter_seq?: number }>;
   arcs?: Array<{ character?: string; stage?: string; goal?: string; status?: string }>;
   onOpenEditor?: (chapterId?: string) => void;
+  onRepairApplied?: (updated: { body?: unknown; meta?: Record<string, unknown>; status?: string; updated_at?: string }) => void;
 }) {
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairError, setRepairError] = useState("");
+  const [repairPreview, setRepairPreview] = useState<null | {
+    action: "repair_local" | "rewrite_chapter" | "replan_chapter";
+    base_updated_at: string;
+    current_body: unknown;
+    proposal: Record<string, unknown>;
+    signature: string;
+  }>(null);
   const consistency = review.final_consistency_check || review;
   const checks = consistency.checks || {};
   const dimensionScores = review.dimensions || Object.fromEntries(
@@ -74,6 +87,82 @@ export function Review({
   const strengths = cleanItems(review.strengths);
   const continuity = review.final_continuity_audit?.continuity;
   const hasEvidence = score > 0 || Object.keys(checks).length > 0 || issues.length > 0 || Boolean(continuity);
+  const recommendation = chapter?.meta?.repair_recommendation as {
+    action?: "repair_local" | "rewrite_chapter" | "replan_chapter";
+    level?: string;
+    reason?: string;
+  } | undefined;
+
+  function bodyText(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(bodyText).filter(Boolean).join("\n\n");
+    if (value && typeof value === "object") {
+      const item = value as { text?: unknown; content?: unknown };
+      if (typeof item.text === "string") return item.text;
+      return bodyText(item.content);
+    }
+    return "";
+  }
+
+  function repairErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof ApiError) {
+      const payload = error.payload as { message?: string; detail?: string | { message?: string } } | null;
+      if (typeof payload?.detail === "string") return payload.detail;
+      if (payload?.detail && typeof payload.detail === "object" && payload.detail.message) return payload.detail.message;
+      if (payload?.message) return payload.message;
+    }
+    return error instanceof Error && error.message ? error.message : fallback;
+  }
+
+  async function generateRepairPreview() {
+    if (!chapter?.id || !recommendation?.action || !issues.length) return;
+    setRepairBusy(true);
+    setRepairError("");
+    try {
+      const preview = await api<NonNullable<typeof repairPreview>>(
+        `/api/v1/chapters/${chapter.id}/repair-preview`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: recommendation.action,
+            issues,
+            client_mutation_id: crypto.randomUUID(),
+          }),
+        },
+      );
+      setRepairPreview(preview);
+    } catch (error) {
+      setRepairError(repairErrorMessage(error, "修复预览生成失败"));
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
+  async function applyRepairPreview() {
+    if (!chapter?.id || !repairPreview) return;
+    setRepairBusy(true);
+    setRepairError("");
+    try {
+      const updated = await api<{ body?: unknown; meta?: Record<string, unknown>; status?: string; updated_at?: string }>(
+        `/api/v1/chapters/${chapter.id}/repair-apply`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: repairPreview.action,
+            base_updated_at: repairPreview.base_updated_at,
+            proposal: repairPreview.proposal,
+            signature: repairPreview.signature,
+          }),
+        },
+      );
+      onRepairApplied?.(updated);
+      setRepairPreview(null);
+    } catch (error) {
+      setRepairError(repairErrorMessage(error, "应用失败，请重新生成预览"));
+    } finally {
+      setRepairBusy(false);
+    }
+  }
 
   return (
     <div className="review-page page-enter">
@@ -92,8 +181,40 @@ export function Review({
               <BookOpenCheck size={14} /> 打开编辑器修改
             </button>
           )}
+          {recommendation?.action && issues.length > 0 && (
+            <button className="btn-sm" disabled={repairBusy} onClick={() => void generateRepairPreview()}>
+              <Sparkles size={14} /> {repairBusy ? "生成预览中…" : "按审阅建议生成修复预览"}
+            </button>
+          )}
         </div>
       </section>
+
+      {repairError && <section className="error">{repairError}</section>}
+      {repairPreview && (
+        <section className="repair-preview starlume-card">
+          <div className="section-heading">
+            <div><p className="eyebrow">REPAIR PREVIEW</p><h3>修复预览 · 尚未应用</h3></div>
+            <span>{repairPreview.action === "repair_local" ? "局部修复" : repairPreview.action === "replan_chapter" ? "重新规划" : "整章重写"}</span>
+          </div>
+          {repairPreview.action === "replan_chapter" ? (
+            <div className="repair-preview-grid">
+              <div><strong>当前细纲</strong><pre>{JSON.stringify(chapter?.meta?.outline || {}, null, 2)}</pre></div>
+              <div><strong>建议细纲</strong><pre>{JSON.stringify(repairPreview.proposal.revised_outline || {}, null, 2)}</pre></div>
+            </div>
+          ) : (
+            <div className="repair-preview-grid">
+              <div><strong>当前正文</strong><pre>{bodyText(repairPreview.current_body)}</pre></div>
+              <div><strong>建议正文</strong><pre>{bodyText(repairPreview.proposal.proposed_body)}</pre></div>
+            </div>
+          )}
+          <div className="ai-edit-preview-actions">
+            <button type="button" className="btn-primary" disabled={repairBusy} onClick={() => void applyRepairPreview()}>
+              {repairBusy ? "应用中…" : "确认应用"}
+            </button>
+            <button type="button" disabled={repairBusy} onClick={() => setRepairPreview(null)}>放弃建议</button>
+          </div>
+        </section>
+      )}
 
       {!hasEvidence ? (
         <section className="review-empty starlume-card">

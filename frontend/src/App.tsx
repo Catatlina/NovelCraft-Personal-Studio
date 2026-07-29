@@ -220,6 +220,15 @@ export default function App() {
   }, [tab, novel?.id]);
 
   useEffect(() => {
+    if (tab !== "review" || chapters.length === 0) return;
+    const latest = chapters[chapters.length - 1];
+    if (chapter?.id !== latest.id) {
+      setChapter(latest);
+      setEditorText(docToText(latest.body));
+    }
+  }, [tab, chapters, chapter?.id]);
+
+  useEffect(() => {
     if (!novel || !project || userSelectedNovel.current) return;
     let active = true;
     const contentsKey = `contents:${novel.id}`;
@@ -586,10 +595,11 @@ export default function App() {
 
   // V2 runs split quality data across self-review and consistency nodes; legacy runs used n8.
   const review = ({
+    ...((chapter?.meta?.review_7dim as Record<string, unknown> | undefined) ?? {}),
     ...(run?.nodes.find(n => n.node_key === "n8")?.output ?? {}),
     ...(run?.nodes.find(n => n.node_key === "write_self_review")?.output ?? {}),
-    final_consistency_check: run?.nodes.find(n => n.node_key === "final_consistency_check")?.output,
-    final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output,
+    final_consistency_check: run?.nodes.find(n => n.node_key === "final_consistency_check")?.output ?? chapter?.meta?.final_consistency_check ?? chapter?.meta?.quality_gate,
+    final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output ?? chapter?.meta?.final_continuity_audit,
   }) as any;
 
   const titles: Record<Tab, string> = { dashboard: "小说首页", overview: "数据概览", workspace: "小说首页", ranking: "扫榜选书", library: "我的书库", wizard: "创作向导", progress: "创作进度", review: "审阅与一致性", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "小说设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话", marketplace: "模块市场" };
@@ -673,7 +683,12 @@ export default function App() {
       )}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
-      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onOpenEditor={async () => {
+      {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onRepairApplied={(updated) => {
+        if (!chapter) return;
+        const merged = { ...chapter, ...updated, body: (updated.body as TipTapDoc | undefined) ?? chapter.body };
+        setChapter(merged);
+        setEditorText(docToText(merged.body));
+      }} onOpenEditor={async () => {
         // 加载最新章节到编辑器
         if (novel && project) {
           const items = await api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`);
