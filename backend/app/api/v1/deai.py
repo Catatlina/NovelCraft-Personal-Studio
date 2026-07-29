@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.core.security import get_current_user
@@ -85,7 +86,7 @@ class DeaiScoreResponse(BaseModel):
 def run_deai_pipeline(
     content_id: str,
     user: dict = Depends(get_current_user),
-) -> dict:
+) -> JSONResponse:
     """Run the full 7-layer de-AI pipeline on a chapter.
 
     Provider and pipeline failures are surfaced explicitly as 502 responses.
