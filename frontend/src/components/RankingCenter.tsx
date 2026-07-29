@@ -517,7 +517,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     )}
 
     {/* ── Snapshots table ── */}
-    <details className="card" open>
+    <details className="card">
       <summary className="card-head" style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div className="card-title">
           <span>📸</span> 榜单快照
