@@ -632,15 +632,21 @@ export default function App() {
       currentNovelId={novel?.id}
       onNovelChange={async (novelId) => {
         if (novelId === novel?.id) return;
+        // 先清空旧状态
+        setRun(null);
+        setChapters([]);
+        setChapter(null);
+        setEditorText("");
+        // 加载新书
         const book = await api<Content>(`/api/v1/contents/${novelId}`);
         setNovel(book);
         void cacheSet("currentNovel", book);
-        // 加载新书的运行状态和章节
-        api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`)
-          .then(r => setRun(r))
-          .catch(() => setRun(null));
-        // 强制重新加载章节（useEffect 会通过 novel?.id 变化自动触发）
-        const items = await api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`);
+        // 并行加载运行状态和章节
+        const [r, items] = await Promise.all([
+          api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`).catch(() => null),
+          api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`),
+        ]);
+        setRun(r);
         const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
         setChapters(chs);
         const ch = chs[0] ?? null;
