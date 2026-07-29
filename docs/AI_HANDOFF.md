@@ -199,8 +199,12 @@ bash scripts/backend-gate.sh
 ## 7. 当前未完成顺序
 
 1. [可用] 修复编辑器内容闪退、审阅重写章节交接与拒绝后的恢复流程；补 NOV-E-003 浏览器失败注入 E2E（详见 §1.7，已提交 `6a79433`、CI 全绿，待生产部署 smoke）。
-2. [已接线] 为进度页补真实启动/重启/失败全重试/全流程重执行控制；全流程重执行必须确认并新建 run，旧 run、章节和版本不删除。后端 `POST /api/v1/runs/{id}/restart`（同 run 内重置未成功节点重跑，已完成 run 返回 409 指向全流程重执行）；前端补「启动/重启」「全流程重执行（确认弹窗→bootstrap 新建 run）」「空状态开始创作」三处控件，`onNewRun` 接 `refreshRun`。单元 6 项 + 后端 restart 3 项 + 全量 workflow 12 项测试通过；待生产部署 smoke（§7#6）转 已验收。
-3. 收口扫榜折叠 UI、部署缓存、`X-Model` 鉴权范围和版本 badge，并补对应回归。
+2. [已接线] 为进度页补真实启动/重启/失败全重试/全流程重执行控制；全流程重执行必须确认并新建 run，旧 run、章节和版本不删除。后端 `POST /api/v1/runs/{id}/restart`（同 run 内重置未成功节点重跑，已完成 run 返回 409 指向全流程重执行）；前端补「启动/重启」「全流程重执行（确认弹窗→bootstrap 新建 run）」「空状态开始创作」三处控件，`onNewRun` 接 `refreshRun`。单元 6 项 + 后端 restart 3 项 + 全量 workflow 12 项测试通过；并补浏览器级控件交互 spec（`e2e/progress-controls.spec.ts` 3 项：全流程重执行弹窗可开/取消可关、确认后新建 run、启动/重启在同 run 内重跑，均带“未观测到可操作态则优雅 skip”守卫）；待生产部署 smoke（§7#6）转 已验收。
+3. [已接线] 收口扫榜折叠 UI、部署缓存、`X-Model` 鉴权范围和版本 badge，并补对应回归：
+   - 扫榜折叠 UI：`RankingCenter.tsx` 榜单快照 `<details>` 去掉 `open`，与榜单源统一默认折叠；补 `e2e/ranking-fold.spec.ts` 回归（默认折叠 + 可展开）。
+   - 部署缓存：`nginx.conf` 改为 `/assets/` 设 `immutable` 长缓存、`location /` 设 `no-cache`、删除对 `.js$` 的 blanket 不缓存；补 `src/nginxCache.test.ts`（3 项，需 `@types/node`）。
+   - `X-Model` 鉴权范围：修复 `restart_run` 此前不透传 BYOK 请求头的缺口（重启会回退到服务器配置而非用户会话 Key），现与 bootstrap/continue 一致从请求头读取 `X-Api-Key/X-Api-Base-Url/X-Model`；补 `test_restart_forwards_byok_headers`。
+   - 版本 badge：`Settings.tsx` 底部展示来自 `package.json` 的构建版本 badge（`badge gray`，`v<version>`）；补 `src/components/Settings.version.test.tsx`（2 项）；待生产部署 smoke（§7#6）转 已验收。
 4. 跑八页面桌面/手机视觉、真库设置正负例、完整浏览器验收；每个批次独立提交推送并等 CI。
 5. 有 Provider 密钥时补 Repair Engine 正向真实预览应用证据。
 6. 仅在最终绿色提交完成真实 Provider 链后部署；生产检查 healthz、登录、八页面、切书、建书/保存和 V3 20 节点 smoke。

@@ -329,6 +329,8 @@ button:active:not(:disabled) { transform: scale(.96); }
 .badge.orange { color: var(--warning); background: var(--warning-soft); }
 .badge.cyan, .badge.purple { color: var(--brand-500); background: var(--brand-50); }
 .badge.gray { color: var(--text-secondary); background: var(--bg-hover); }
+.settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 12px; }
+.settings-footer-brand { font-weight: 500; }
 .btn-sm { min-height: 32px; padding: 5px 9px; border-radius: 9px; font-size: 12px; }
 .btn-primary { color: #fff !important; background: var(--brand-500) !important; border-color: var(--brand-500) !important; }
 .btn-primary:hover { background: var(--brand-600) !important; }

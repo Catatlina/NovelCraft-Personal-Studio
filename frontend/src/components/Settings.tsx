@@ -9,6 +9,8 @@ import {
   setApiUrl,
   setModel,
 } from "../lib/api";
+import { Badge } from "../components/ui";
+import { version as appVersion } from "../../package.json";
 
 type SettingsTab = "ai" | "data" | "account";
 type Stats = { ai_calls: number; contents: number; db_size: string };
@@ -170,6 +172,11 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
           )}
         </main>
       </div>
+
+      <footer className="settings-footer">
+        <span className="settings-footer-brand">Starlume AI · 本地创作助手</span>
+        <Badge data-testid="app-version-badge" className="badge gray">v{appVersion}</Badge>
+      </footer>
     </div>
   );
 }
