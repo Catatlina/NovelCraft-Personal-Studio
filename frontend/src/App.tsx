@@ -93,6 +93,7 @@ export default function App() {
   const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
   const restoringRun = useRef(false);
+  const userSelectedNovel = useRef(false);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [idea, setIdea] = useState("一个写作者发现自己删掉的章节正在现实里发生。");
@@ -170,7 +171,7 @@ export default function App() {
   }, [project?.id]);
 
   useEffect(() => {
-    if (!token || !project || run || restoringRun.current) return;
+    if (!token || !project || run || restoringRun.current || userSelectedNovel.current) return;
     restoringRun.current = true;
     const savedRunId = localStorage.getItem(`nc_current_run:${project.id}`) || "";
     const path = savedRunId
@@ -631,6 +632,7 @@ export default function App() {
       novels={novels.map(n => ({ id: n.id, title: n.title }))}
       currentNovelId={novel?.id}
       onNovelChange={async (novelId) => {
+        userSelectedNovel.current = true;
         if (novelId === novel?.id) return;
         // 先清空旧状态
         setRun(null);
