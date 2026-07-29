@@ -68,8 +68,14 @@ export function Layout({
   const [collapsed, setCollapsed] = useState(true);
   const [hovered, setHovered] = useState(false);
   const { theme, setTheme } = useTheme();
+  const [selectedId, setSelectedId] = useState(currentNovelId);
   const expanded = !collapsed || hovered;
   const initials = (userEmail?.trim()[0] || "S").toUpperCase();
+
+  // 外部 novel 变化时同步选中状态
+  React.useEffect(() => {
+    if (currentNovelId !== selectedId) setSelectedId(currentNovelId);
+  }, [currentNovelId]);
 
   return (
     <div className="app-shell">
@@ -148,9 +154,12 @@ export function Layout({
             {showSelector && novels && novels.length > 0 && (
               <select
                 className="novel-selector"
-                defaultValue={currentNovelId || ""}
-                key={currentNovelId || "no-novel"}
-                onChange={e => onNovelChange?.(e.target.value)}
+                value={selectedId || ""}
+                onChange={e => {
+                  const id = e.target.value;
+                  setSelectedId(id);
+                  onNovelChange?.(id);
+                }}
                 aria-label="切换作品"
               >
                 {novels.map(n => (
