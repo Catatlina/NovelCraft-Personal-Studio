@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Sparkles,
 } from "lucide-react";
-import { ApiError, apiRaw } from "../lib/api";
+import { ApiEnvelope, ApiError, apiRaw } from "../lib/api";
 
 type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string }> };
 type Content = {
@@ -45,6 +45,7 @@ type Run = {
 
 const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
 const RETRYABLE_STATUSES = new Set(["failed", "pending_budget"]);
+const RESTARTABLE_RUN = new Set(["pending", "dispatch_failed", "failed"]);
 const PLANNING_NODES = new Set([
   "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
   "plan_world_architecture", "plan_character_system", "plan_conflict_map",
@@ -122,11 +123,13 @@ export function Progress({
   novel,
   onConfirm,
   onRegenerateTitles,
+  onNewRun,
 }: {
   run: Run | null;
   novel: Content | null;
   onConfirm: (title: string) => Promise<void>;
   onRegenerateTitles: (feedback: string) => Promise<void>;
+  onNewRun: (runId: string) => Promise<void>;
 }) {
   const nodes = run?.nodes || [];
   const currentKey = run?.current_node_key || String(run?.context?.current_node_key || "");
@@ -138,6 +141,9 @@ export function Progress({
   const [titleFeedback, setTitleFeedback] = useState("");
   const [titleBusy, setTitleBusy] = useState(false);
   const [retrying, setRetrying] = useState("");
+  const [restarting, setRestarting] = useState("");
+  const [bootstrapping, setBootstrapping] = useState(false);
+  const [showReexecute, setShowReexecute] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   const selectedNode = useMemo(
@@ -198,6 +204,47 @@ export function Progress({
     }
   }
 
+  async function reexecuteAll() {
+    if (!novel?.id) return;
+    setBootstrapping(true);
+    setNotice(null);
+    try {
+      const envelope = await apiRaw<ApiEnvelope<{ run_id: string }>>(
+        `/api/v1/novels/${novel.id}/bootstrap`,
+        { method: "POST", body: "{}" },
+      );
+      const newRunId = envelope?.data?.run_id;
+      setShowReexecute(false);
+      if (!newRunId) {
+        setNotice({ kind: "error", text: "全流程重执行已提交，但未返回新的 run_id。" });
+        return;
+      }
+      await onNewRun(newRunId);
+      setNotice({ kind: "success", text: "已新建一次完整创作 run，旧 run 与章节、版本均保留。" });
+    } catch (caught) {
+      const detail = caught instanceof ApiError ? caught.message : String(caught);
+      setNotice({ kind: "error", text: `全流程重执行失败：${detail}` });
+    } finally {
+      setBootstrapping(false);
+    }
+  }
+
+  async function restartCurrentRun() {
+    if (!run) return;
+    setRestarting(run.id);
+    setNotice(null);
+    try {
+      await apiRaw(`/api/v1/runs/${run.id}/restart`, { method: "POST", body: "{}" });
+      setNotice({ kind: "success", text: "已在原 run 内重启未完成步骤，run 与章节、版本保持不变。" });
+      await onNewRun(run.id);
+    } catch (caught) {
+      const detail = caught instanceof ApiError ? caught.message : String(caught);
+      setNotice({ kind: "error", text: `重启失败：${detail}` });
+    } finally {
+      setRestarting("");
+    }
+  }
+
   if (!run) {
     return (
       <section className="progress-empty page-enter">
@@ -205,6 +252,11 @@ export function Progress({
         <p className="eyebrow">CREATION PROGRESS</p>
         <h2>还没有正在运行的创作。</h2>
         <p>从「创作向导」启动一本小说后，AI 的每一步真实状态、产物和失败原因都会显示在这里。</p>
+        {novel?.id && (
+          <button className="btn-sm btn-primary" disabled={bootstrapping} onClick={() => void reexecuteAll()}>
+            <Sparkles size={15} /> {bootstrapping ? "正在启动…" : "开始创作"}
+          </button>
+        )}
       </section>
     );
   }
@@ -226,15 +278,15 @@ export function Progress({
               nodes.filter(n => RETRYABLE_STATUSES.has(n.status)).forEach(n => retry(n));
             }}><RefreshCw size={14} /> 重试失败 ({failedCount})</button>
           )}
-          {nodes.length > 0 && (
-            <button className="btn-sm btn-primary" disabled={retrying !== ""} onClick={() => {
-              nodes.filter(n => n.status !== "succeeded" && n.status !== "running").forEach(n => retry(n));
-            }}><RefreshCw size={14} /> 全流程重执行</button>
+          {RESTARTABLE_RUN.has(run.status || "") && (
+            <button className="btn-sm btn-ghost" disabled={restarting !== ""} onClick={() => void restartCurrentRun()}>
+              <RefreshCw size={14} /> 启动/重启
+            </button>
           )}
-          {run.status === "succeeded" && (
-            <button className="btn-sm btn-ghost" onClick={() => {
-              nodes.forEach(n => retry(n));
-            }}><RefreshCw size={14} /> 重新运行全部</button>
+          {nodes.length > 0 && run.status !== "running" && (
+            <button className="btn-sm btn-primary" disabled={bootstrapping} onClick={() => setShowReexecute(true)}>
+              <RefreshCw size={14} /> 全流程重执行
+            </button>
           )}
         </div>
       </section>
@@ -342,6 +394,21 @@ export function Progress({
             ))}
           </div>
         </section>
+      )}
+
+      {showReexecute && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => { if (!bootstrapping) setShowReexecute(false); }}>
+          <div className="modal-card" onClick={event => event.stopPropagation()}>
+            <h3>确认全流程重执行？</h3>
+            <p>这会<strong>新建一次</strong>完整创作 run，从策划到首章重新生成。当前的 run、已生成的章节与版本都<strong>不会被删除</strong>，你可以在进度页切换查看历史记录。</p>
+            <div className="modal-actions">
+              <button type="button" className="btn-sm btn-ghost" disabled={bootstrapping} onClick={() => setShowReexecute(false)}>取消</button>
+              <button type="button" className="btn-sm btn-primary" disabled={bootstrapping} onClick={() => void reexecuteAll()}>
+                {bootstrapping ? "正在新建…" : "确认重执行"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

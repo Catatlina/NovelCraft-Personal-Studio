@@ -1207,6 +1207,47 @@ async def retry_node(run_id: str, node_key: str, user: dict = Depends(get_curren
     return ok({"run_id": run_id, "node_key": node_key})
 
 
+@app.post("/api/v1/runs/{run_id}/restart")
+async def restart_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    """Restart a run in place: reset every non-succeeded node to pending and
+    re-dispatch bootstrap from the earliest non-succeeded node (DAG order). The
+    run_id and all chapters/versions are preserved — this is NOT a full
+    re-execute. Succeeded runs must use the full re-execute (bootstrap) flow."""
+    conn, run = load_run_for_user(run_id, user, {"owner", "editor"})
+    if run["status"] == "succeeded":
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail="已完成的创作请用「全流程重执行」新建一次 run，旧 run 与章节、版本会保留。",
+        )
+    from .workers.tasks import execute_bootstrap, BOOTSTRAP_NODES
+    rows = conn.execute(
+        "SELECT node_key, status FROM run_nodes WHERE run_id = %s", (run_id,)
+    ).fetchall()
+    status_by_key = {r["node_key"]: r["status"] for r in rows}
+    start_key = None
+    for key, *_ in BOOTSTRAP_NODES:
+        if status_by_key.get(key) != "succeeded":
+            start_key = key
+            break
+    if start_key is None:
+        start_key = BOOTSTRAP_NODES[0][0] if BOOTSTRAP_NODES else "plan_idea"
+    conn.execute(
+        """UPDATE run_nodes SET status = 'pending', output = '{}', error = NULL,
+               started_at = NULL, finished_at = NULL
+           WHERE run_id = %s AND status <> 'succeeded'""",
+        (run_id,),
+    )
+    conn.execute(
+        "UPDATE workflow_runs SET status = 'running', current_node_key = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+        (start_key, run_id),
+    )
+    conn.commit()
+    conn.close()
+    execute_bootstrap.delay(run_id, start_key)
+    return ok({"run_id": run_id, "start_key": start_key, "status": "running"})
+
+
 @app.delete("/api/v1/contents/{content_id}")
 def delete_content(content_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     """QA-004: soft-delete a content row; deleting a novel cascades to its

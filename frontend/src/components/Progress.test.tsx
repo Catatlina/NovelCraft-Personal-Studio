@@ -1,15 +1,23 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Progress } from "./Progress";
 
 vi.mock("../lib/api", () => ({
   ApiError: class extends Error {},
+  ApiEnvelope: class {},
   apiRaw: vi.fn().mockResolvedValue(undefined),
 }));
 
+const novelStub = { id: "novel-1", title: "测试小说" } as any;
+
+afterEach(() => {
+  vi.clearAllMocks();
+  cleanup();
+});
+
 describe("创作进度门禁", () => {
   it("没有运行时展示真实空状态", () => {
-    render(<Progress run={null} novel={null} onConfirm={vi.fn()} onRegenerateTitles={vi.fn()} />);
+    render(<Progress run={null} novel={null} onConfirm={vi.fn()} onRegenerateTitles={vi.fn()} onNewRun={vi.fn()} />);
 
     expect(screen.getByText("还没有正在运行的创作。")).toBeTruthy();
     expect(screen.queryByText("预计完成")).toBeNull();
@@ -35,6 +43,7 @@ describe("创作进度门禁", () => {
         novel={null}
         onConfirm={confirm}
         onRegenerateTitles={vi.fn()}
+        onNewRun={vi.fn()}
       />,
     );
 
@@ -65,6 +74,7 @@ describe("创作进度门禁", () => {
         novel={null}
         onConfirm={vi.fn()}
         onRegenerateTitles={vi.fn()}
+        onNewRun={vi.fn()}
       />,
     );
 
@@ -74,6 +84,110 @@ describe("创作进度门禁", () => {
     await waitFor(() =>
       expect(apiRaw).toHaveBeenCalledWith(
         "/api/v1/runs/run-2/nodes/plan_idea/retry",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("空状态展示开始创作按钮，点击后新建 run 并通过 onNewRun 切换", async () => {
+    const { apiRaw } = await import("../lib/api");
+    const onNewRun = vi.fn().mockResolvedValue(undefined);
+    (apiRaw as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ code: 0, message: "ok", data: { run_id: "fresh-run" } });
+
+    render(
+      <Progress
+        run={null}
+        novel={novelStub}
+        onConfirm={vi.fn()}
+        onRegenerateTitles={vi.fn()}
+        onNewRun={onNewRun}
+      />,
+    );
+
+    const startBtn = screen.getByRole("button", { name: /开始创作/ });
+    fireEvent.click(startBtn);
+    await waitFor(() =>
+      expect(apiRaw).toHaveBeenCalledWith(
+        "/api/v1/novels/novel-1/bootstrap",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(onNewRun).toHaveBeenCalledWith("fresh-run"));
+  });
+
+  it("全流程重执行先弹确认框，确认后新建 run 并切换（旧 run 不删除）", async () => {
+    const { apiRaw } = await import("../lib/api");
+    const onNewRun = vi.fn().mockResolvedValue(undefined);
+    (apiRaw as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ code: 0, message: "ok", data: { run_id: "v2-run" } });
+
+    render(
+      <Progress
+        run={{
+          id: "run-3",
+          status: "failed",
+          current_node_key: "plan_idea",
+          context: {},
+          nodes: [{
+            node_key: "plan_idea",
+            kind: "agent",
+            agent: "deepseek",
+            title: "创意策划",
+            status: "failed",
+            error: "模型超时",
+            attempt: 1,
+          }],
+        }}
+        novel={novelStub}
+        onConfirm={vi.fn()}
+        onRegenerateTitles={vi.fn()}
+        onNewRun={onNewRun}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /全流程重执行/ }));
+    expect(screen.getByText("确认全流程重执行？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /确认重执行/ }));
+    await waitFor(() =>
+      expect(apiRaw).toHaveBeenCalledWith(
+        "/api/v1/novels/novel-1/bootstrap",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(onNewRun).toHaveBeenCalledWith("v2-run"));
+  });
+
+  it("启动/重启按钮调用 restart 端点（同一 run 内重跑）", async () => {
+    const { apiRaw } = await import("../lib/api");
+    (apiRaw as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    render(
+      <Progress
+        run={{
+          id: "run-4",
+          status: "failed",
+          current_node_key: "plan_idea",
+          context: {},
+          nodes: [{
+            node_key: "plan_idea",
+            kind: "agent",
+            agent: "deepseek",
+            title: "创意策划",
+            status: "failed",
+            error: "模型超时",
+            attempt: 1,
+          }],
+        }}
+        novel={null}
+        onConfirm={vi.fn()}
+        onRegenerateTitles={vi.fn()}
+        onNewRun={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /启动\/重启/ }));
+    await waitFor(() =>
+      expect(apiRaw).toHaveBeenCalledWith(
+        "/api/v1/runs/run-4/restart",
         expect.objectContaining({ method: "POST" }),
       ),
     );
