@@ -1208,11 +1208,16 @@ async def retry_node(run_id: str, node_key: str, user: dict = Depends(get_curren
 
 
 @app.post("/api/v1/runs/{run_id}/restart")
-async def restart_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+async def restart_run(run_id: str, request: Request, user: dict = Depends(get_current_user)) -> ApiResponse:
     """Restart a run in place: reset every non-succeeded node to pending and
     re-dispatch bootstrap from the earliest non-succeeded node (DAG order). The
     run_id and all chapters/versions are preserved — this is NOT a full
-    re-execute. Succeeded runs must use the full re-execute (bootstrap) flow."""
+    re-execute. Succeeded runs must use the full re-execute (bootstrap) flow.
+
+    BYOK headers (X-Api-Key / X-Api-Base-Url / X-Model) are carried from the
+    restart request into the re-dispatched bootstrap, consistent with the other
+    AI-generation endpoints — so a run started under a user-supplied model/key
+    keeps that scope on restart instead of silently falling back to server config."""
     conn, run = load_run_for_user(run_id, user, {"owner", "editor"})
     if run["status"] == "succeeded":
         conn.close()
@@ -1244,7 +1249,14 @@ async def restart_run(run_id: str, user: dict = Depends(get_current_user)) -> Ap
     )
     conn.commit()
     conn.close()
-    execute_bootstrap.delay(run_id, start_key)
+    # 透传 BYOK：与 bootstrap / continue 等 AI 端点一致，从重启请求取 X-Model/X-Api-Key/X-Api-Base-Url
+    execute_bootstrap.delay(
+        run_id, start_key,
+        "",  # 遗留明文 api_key 不再使用，统一走 api_key_ref
+        request.headers.get("X-Api-Base-Url", ""),
+        request.headers.get("X-Model", ""),
+        api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
+    )
     return ok({"run_id": run_id, "start_key": start_key, "status": "running"})
 
 

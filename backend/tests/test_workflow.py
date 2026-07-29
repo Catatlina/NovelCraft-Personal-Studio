@@ -180,7 +180,8 @@ def test_restart_resets_non_succeeded_nodes_keeps_run_id(client, monkeypatch):
     assert succeeded["status"] == "succeeded"  # preserved
     assert run_row["status"] == "running"
     assert run_row["current_node_key"] == "plan_market_fit"
-    assert dispatched and dispatched[0] == (run_id, "plan_market_fit")
+    # execute_bootstrap.delay 前两个位置参数必须是 (run_id, start_key)
+    assert dispatched and dispatched[0][0] == run_id and dispatched[0][1] == "plan_market_fit"
 
 
 def test_restart_rejects_succeeded_run(client):
@@ -195,3 +196,44 @@ def test_restart_rejects_succeeded_run(client):
     headers = {"Authorization": f"Bearer {token}"}
     resp = client.post(f"/api/v1/runs/{run_id}/restart", headers=headers)
     assert resp.status_code == 409
+
+
+def test_restart_forwards_byok_headers(client, monkeypatch):
+    """§7 #3 X-Model 鉴权范围：restart 必须像 bootstrap/continue 等 AI 端点一样，
+    从重启请求透传 BYOK 头（X-Api-Key / X-Api-Base-Url / X-Model）。否则带自定义
+    model/key 的 run 重启后会静默回退到服务端默认配置。"""
+    from app.main import connect
+    import app.workers.tasks as tasks_mod
+    token = _auth(client)
+    run_id, _nid, _pid = _make_run(client, token)
+
+    conn = connect()
+    conn.execute("UPDATE run_nodes SET status='succeeded', output='{\"x\":1}' WHERE run_id=%s", (run_id,))
+    conn.execute(
+        "UPDATE run_nodes SET status='failed', output='{}', error='x' WHERE run_id=%s AND node_key='plan_market_fit'",
+        (run_id,),
+    )
+    conn.execute("UPDATE workflow_runs SET status='failed', current_node_key='plan_market_fit' WHERE id=%s", (run_id,))
+    conn.commit()
+    conn.close()
+
+    captured = {}
+    def fake_delay(*a, **k):
+        captured["args"] = a
+        captured["kwargs"] = k
+    monkeypatch.setattr(tasks_mod.execute_bootstrap, "delay", fake_delay)
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Api-Key": "sk-test-byok",
+        "X-Api-Base-Url": "https://api.openai.com",
+        "X-Model": "claude-sonnet-4",
+    }
+    resp = client.post(f"/api/v1/runs/{run_id}/restart", headers=headers)
+    assert resp.status_code == 200
+    args = captured.get("args", ())
+    # execute_bootstrap.delay(run_id, start_key, "", api_url, model, api_key_ref=...)
+    assert args[0] == run_id
+    assert args[3] == "https://api.openai.com"  # X-Api-Base-Url 透传
+    assert args[4] == "claude-sonnet-4"          # X-Model 透传
+    assert captured.get("kwargs", {}).get("api_key_ref"), "X-Api-Key 应经 stash_byok_key 生成非空 ref 透传"
