@@ -18,6 +18,8 @@ import inspect
 import re
 from pathlib import Path
 
+import pytest
+
 from app import config as app_config
 from app import gateway
 from app.prompt_registry import OUTPUT_CONTRACTS, PROMPT_SEEDS
@@ -162,6 +164,70 @@ def test_writing_selects_only_the_requested_chapter_outline():
     assert selected == context["chapter_outlines"][0]
     assert "测试设备" not in str(selected)
     assert "向父母坦白" not in str(selected)
+
+
+def test_bootstrap_writing_injects_assembler_text_and_structured_layers():
+    from app.workers.tasks import _assemble_bootstrap_writing_context
+
+    class FakeAssembler:
+        def __init__(self, novel_id):
+            assert novel_id == "novel-1"
+            self.layers_built = {}
+
+        def build(self):
+            self.layers_built = {
+                "recent_chapters": "[无最近章节]",
+                "foreshadowing_alerts": "[无到期伏笔]",
+                "arc_summary": "主线弧",
+            }
+            return "## 故事弧\n主线弧"
+
+    context = _assemble_bootstrap_writing_context(
+        "novel-1",
+        {
+            "idea": "少年在旧城追查失踪案",
+            "creative_bible": "世界规则与人物边界",
+            "_chapter_outline": {"seq": 1, "outline": "发现第一条线索"},
+        },
+        FakeAssembler,
+    )
+
+    assert context["_assembled_context"] == "## 故事弧\n主线弧"
+    assert context["arc_summary"] == "主线弧"
+    assert context["recent_chapters"] == "[无最近章节]"
+
+
+def test_bootstrap_writing_fails_when_required_planning_context_is_missing():
+    from app.workers.tasks import _assemble_bootstrap_writing_context
+
+    with pytest.raises(gateway.OutputValidationError, match="creative_bible, _chapter_outline"):
+        _assemble_bootstrap_writing_context(
+            "novel-1",
+            {"idea": "只有创意，没有圣经和细纲"},
+            lambda novel_id: None,
+        )
+
+
+def test_bootstrap_writing_does_not_hide_assembler_failures():
+    from app.workers.tasks import _assemble_bootstrap_writing_context
+
+    class BrokenAssembler:
+        def __init__(self, novel_id):
+            self.layers_built = {}
+
+        def build(self):
+            raise RuntimeError("database unavailable")
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        _assemble_bootstrap_writing_context(
+            "novel-1",
+            {
+                "idea": "完整创意",
+                "creative_bible": "完整圣经",
+                "_chapter_outline": {"seq": 1},
+            },
+            BrokenAssembler,
+        )
 
 
 def test_title_regeneration_requires_three_to_ten_real_candidates():

@@ -65,6 +65,7 @@ def persist_scenes(chapter_id: str, project_id: str, scenes: list[dict]) -> int:
             (new_id(), chapter_id, project_id, i, sc["title"], sc["beat"],
              sc["goal"], sc["setting"], sc["pov"], encode({"source": "scene_director"})),
         )
+    db.commit()
     db.close()
     return len(normalized)
 

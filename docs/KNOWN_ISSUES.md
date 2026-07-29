@@ -72,9 +72,9 @@
 
 ## 新发现的线上/生产稳定性问题
 
-### KI-007 `write_polish` 节点对 `deepseek-chat` 输出格式不稳定
+### KI-007 `write_polish` 节点对 `deepseek-chat` 输出格式与保真不稳定
 
-- 状态:**已接线**(代码修复已落地并通过单元测试;5 富状态全链待生产 E2E 重跑取证后提升为已验收)。
+- 状态：**可用**（真实 Provider 本地全链已通过；尚未部署生产）。
 - 现象:真实 AI 全链 E2E(小说主线5)连续两次在 `write_polish` 节点返回 `invalid_output`,导致 run failed;切换模型前旧链路上也曾出现相同问题。
 - 根因(已校正):失败发生在 `gateway.validate_task_output` 的 Pydantic 契约校验(`_WritePolishOutput` 要求 `polished.body: list[str]` 且 `changes_summary: str`),而非 `_persist_chapter_polish`。`deepseek-chat` 在此节点返回了**结构松散但内容有效**的载荷:裸 `body`(无 `polished` 包裹)、`body` 为字符串而非段落列表、或缺失 `changes_summary`。重试循环只是对同一种漂移重新采样 3 次后放弃。
 - 修复(commit 见下方部署记录):在 `gateway.validate_task_output` 前增加 `_normalize_bootstrap_output` 输出修复层(V3 Repair Engine 思路):
@@ -85,13 +85,20 @@
   修复后契约不被削弱--真正空 / 非叙事输出仍会被下游闸门拒绝。
 - 证据:
   - `tests/test_write_polish_repair.py` **8 passed**(canonical / 裸 body / 字符串 body / 单块长文 / 缺 changes_summary / changes 列表 / dict 列表 / 空输出仍拒)。
+- 追加真实根因与修复：
+  1. `generate_story_arc` 的提示输出契约使用 `arc_name/arc_type`，与 Gateway 的 `name/goal/...` schema 冲突，已统一；
+  2. `chapter_text` 未列入长上下文字段，真实润色提示只收到约 1500 字符，已提高到 12000；
+  3. 润色改为最多 3 次真实质量采样并回传明确段落/字数差距；内容保留不足 75% 时禁止继续；
+  4. 仅当文本保留至少 75% 且段落不足 60% 时，允许按句末标点做不改字的确定性重新分段；
+  5. Bootstrap 首章装配器此前把字符串当字典并静默吞错，现已真实注入装配文本，缺创意/创作圣经/当前章细纲直接失败。
+- 真实证据：protected “小说主线⑤” **1 passed (3.3m)**；run `a416b8a8-2bcb-4ad1-8f3d-d50c0956ba4d` 为 20/20 succeeded、20 条真实 succeeded `ai_calls`，最终正文 35 段/4581 非空白字符；首章初稿请求记录含 1451 字符装配上下文。
 - 下一步:
-  1. 部署生产后重跑小说主线5,确认 `write_polish` 稳定通过。
-  2. 5 通过后把 KI-006 / NOV-Q-002 提升为已验收。
+  1. 提交推送并等待同提交 CI 全绿。
+  2. 最终生产部署后重跑小说主线⑤ smoke，再提升为已验收。
 
-### KI-008 当前 `main` 的 GitHub Actions 后端失败
+### KI-008 `f8e343c` 的 GitHub Actions 后端失败（历史，已解决）
 
-- 状态：**可用**（修复已通过本地全量门禁，尚缺新 CI 同版本证据）。
+- 状态：**已验收**。
 - 失败 run：`30425548279`，commit `f8e343c`；backend 为 `10 failed, 750 passed, 9 skipped, 1 xpassed`，其余 frontend、frontend-test、e2e、security 通过。
 - 根因与修复：
   1. 新增 `generate_story_arc` 后，19 节点断言与完整流程 Provider 夹具未更新；
@@ -100,7 +107,7 @@
   4. Costs/预算 UI 已按小说优先退役，但两条静态源码测试仍要求恢复旧入口；
   5. `PROJECT_PROGRESS.md` 的历史措辞触发交付声明校验。
 - 本地证据：后端 `761 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；E2E `4 passed, 4 skipped`；交付声明、AI 真实性、前后端契约、`git diff --check` 通过。
-- 升级门禁：提交、推送并等待新的 Actions run 全绿后，才可标记已验收。
+- CI 证据：修复提交 `07a8c0f` 的 Actions run `30439322188` 五项全绿（backend、e2e、frontend、frontend-test、security）。
 
 ### KI-009 当前 V3 代码尚未部署生产
 

@@ -2,7 +2,17 @@
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-29（V3 接手复验与 CI 修复）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-29（V3 真实 20 节点链与上下文装配修复）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+
+## 2026-07-29 V3 真实 20 节点链与上下文装配修复
+
+- 真实 Provider：protected “小说主线⑤” **1 passed (3.3m)**；run `a416b8a8-2bcb-4ad1-8f3d-d50c0956ba4d` 为 20/20 节点 succeeded、20 条真实 succeeded `ai_calls`。
+- 产物证据：最终首章 35 段、4581 非空白字符；`generate_story_arc`、`write_chapter_draft`、`write_polish`、`final_humanize` 均有真实 token 与 latency 记录。
+- 首章上下文：修复 `ContextAssembler.build()` 返回文本却被当字典遍历并静默吞错的问题；初稿请求实际记录 1451 字符 `_assembled_context`、故事弧层、854 字符创作圣经和 453 字符当前章细纲。
+- 保真门禁：润色最多 3 次真实生成；必须保留至少 75% 内容；只有内容完整但段落过密时才按句末标点不改字重新分段，否则真实失败。
+- 契约修复：故事弧提示输出字段与 Gateway schema 统一；`chapter_text` 长上下文上限调整为 12000，避免模型只看到章首。
+- 本地门禁：后端 `771 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；迁移库为 `b324f6c7a7f1 (head)`；确定性 E2E `4 passed, 4 skipped`。
+- 当前状态：**可用**。本批尚待独立提交、推送和同提交 CI；生产仍为历史提交 `91bcf9b`。
 
 ## 2026-07-29 V3 接手复验与 CI 修复
 
@@ -10,8 +20,9 @@
 - 真实缺陷：章节质量证据会无条件声称 pacing/story-arc 来源；现改为仅记录实际采样来源，并补可选来源回归。
 - 测试契约：Bootstrap 已为 20 节点（19 AI + 1 人工门禁），同步更新完整流程夹具、节点断言与 BYOK 引用参数；不恢复已从小说 UI 退役的 Costs/预算入口。
 - 本地门禁：后端 `761 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；确定性 E2E `4 passed, 4 skipped`；交付声明、AI 真实性、前后端契约与 `git diff --check` 通过。
-- 当前状态：**可用**。
-- 未完成门禁：新 CI 同版本全绿、真实 Provider 复验与部署。
+- CI 证据：提交 `07a8c0f` 的 Actions run `30439322188` 五项全绿。
+- 当前状态：**已验收**（仅指提交 `07a8c0f`、Actions `30439322188` 已验证的本节 CI 修复批次）。
+- 未完成门禁：后续 V3 真实链修复批次的同提交 CI 与最终部署。
 
 ## 2026-07-28 生产部署与线上热修复
 

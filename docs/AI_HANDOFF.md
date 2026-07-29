@@ -14,9 +14,9 @@
 - GitHub：<https://github.com/Catatlina/NovelCraft-Personal-Studio>
 - 当前分支：`main`
 - 交接前远端基线（历史）：`origin/main @ e5174c4`
-- 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。
+- 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。CI 修复已提交并推送为 `07a8c0f`。
 - 生产地址：<https://novel.xyjin.xyz>
-- 重要：生产文档可确认的最近部署仍为 `91bcf9b`；当前 `main @ f8e343c` 及本批修复均**尚未部署**。生产站不能作为当前 V3 代码已验收的证据。
+- 重要：生产文档可确认的最近部署仍为 `91bcf9b`；当前 `main` 后续提交及本批修复均**尚未部署**。生产站不能作为当前 V3 代码已验收的证据。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
@@ -39,7 +39,18 @@
 - GitHub Actions run `30425548279` 的 frontend、frontend-test、e2e、security 通过，backend 失败：`10 failed, 750 passed, 9 skipped, 1 xpassed`。
 - 本批已修复：质量证据只记录实际采样来源；V3 20 节点与完整流程夹具；BYOK 引用参数的同步调度测试；小说优先边界下已退役 Costs/预算 UI 的过期源码断言；交付声明中的过期措辞。
 - 当前本地证据：后端 **761 passed, 9 skipped, 1 xpassed**；前端 **12 passed**；构建通过；确定性 E2E **4 passed, 4 skipped**（1 个按需视觉集 + 3 个真实 AI protected 用例均未计入通过）；真实性、交付声明、前后端契约与 `git diff --check` 通过。
-- 当前仅建立了本地**可用**证据；新 CI 同版本全绿与部署证据齐备前不能提升为已验收。
+- 提交 `07a8c0f` 已由 GitHub Actions run `30439322188` 验证：backend、e2e、frontend、frontend-test、security 五项全绿。
+
+## 1.3 V3 真实 20 节点链与首章上下文修复 checkpoint（2026-07-29）
+
+- protected Playwright “小说主线⑤”已用真实 DeepSeek 通过：**1 passed (3.3m)**。
+- 成功 run：`a416b8a8-2bcb-4ad1-8f3d-d50c0956ba4d`；novel：`d565a758-4ebe-49d2-9ba6-e4a223e855d3`；20/20 节点 succeeded；20 条真实 succeeded `ai_calls`。
+- 首章初稿的请求证据实际包含 `_assembled_context`（1451 字符）、故事弧层、`creative_bible`（854 字符）和当前章细纲（453 字符）；最终正文 35 段、4581 个非空白字符。
+- 本批修复了四个真实阻断：故事弧提示输出契约与 Gateway schema 冲突；`chapter_text` 被通用 1500 字符清洗上限截断；润色只采样一次且缺少质量反馈；Bootstrap 把 `ContextAssembler.build()` 返回的文本误当字典并静默吞错。
+- 润色现最多执行 3 次真实生成；只有输出保留至少 75% 内容时，才允许按句末标点进行不改字的确定性重新分段；否则继续重试并最终真实失败。
+- Bootstrap 写作现在强制具备创意、创作圣经和当前章细纲；首章历史章节、伏笔等可选层允许为空；装配器故障不再伪装成功。
+- 修复后本地门禁：后端 **771 passed, 9 skipped, 1 xpassed**；前端 **12 passed**；构建通过；迁移库在 `b324f6c7a7f1 (head)`；确定性 E2E **4 passed, 4 skipped**。
+- 本 checkpoint 的代码尚待独立提交、推送和同提交 CI；未完成前不得把它写成生产已部署。
 
 ## 2. 当前产品契约
 
@@ -101,6 +112,7 @@
 - 小说设置只保留 AI 连接、创作数据、账号安全。
 - `#/ranking` 为真实扫榜选书入口，未知入口显示 404。
 - 侧栏悬浮/固定展开不再遮挡书库首卡片。
+- V3 新 UI 真实 20 节点链已在本地受保护环境跑通，包含故事弧、首章上下文装配、润色、去 AI 味、终审和导出证据；尚未部署生产。
 
 ### 已接线
 
@@ -126,7 +138,7 @@ npm run test:e2e
 
 cd ../backend
 .venv/bin/pytest tests/ -q
-# 761 passed, 9 skipped, 1 xpassed
+# 771 passed, 9 skipped, 1 xpassed（当前 V3 修复树）
 ```
 
 已通过的 E2E：
@@ -141,15 +153,18 @@ cd ../backend
 - 1 个按需八页面视觉截图集（需 `STARLUME_CAPTURE_VISUAL=1`）。
 - 3 个真实 AI protected 用例（AI 编辑、运行中进度、向导全链）；本轮刻意未注入 `DEEPSEEK_API_KEY`，不得将跳过计入通过。
 
+另行注入受保护 Key 后，向导全链中的“小说主线⑤”已独立通过 **1 passed (3.3m)**；见 1.3 的 run 与 `ai_calls` 证据。
+
 ## 7. 当前未完成顺序
 
-1. 为当前 V3 20 节点代码注入受保护的真实 DeepSeek Key，重跑向导全链，重点确认 KI-007 `write_polish` 修复与新增 `generate_story_arc` 均真实通过；保留 run、`ai_calls` 和失败/成功证据。
-2. 补 NOV-E-003 浏览器失败注入 E2E，证明 AI 失败不会覆盖原文。
-3. 以 `STARLUME_CAPTURE_VISUAL=1` 重跑八页面桌面/手机截图集，检查 17 张输出（8×2 + 404）。
-4. 补小说设置知识导入/导出与改密的真库正负例 E2E（NOV-S-002/S-003）。
-5. 提交并推送本批修复，等待 GitHub Actions 同版本全绿；未绿前 NOV-Q-001 保持可用。
-6. 按部署手册部署当前绿色提交，检查健康接口、登录、八页面、切书、建书/保存和真实 AI 主链。
-7. 生产验证后才能把当前版本部署和 V3 全链提升为已验收。
+1. 提交并推送 1.3 的 V3 真实链修复，等待同提交 GitHub Actions 全绿。
+2. 继续逐项核验 V3 功能的真实产品调用者与持久化证据，优先确认 Scene Director、作者风格学习、时间线锚点、认知分层等不是“只有代码”；本批只修复了已发现的场景事务未提交，不能宣称 12 项已全部接通。
+3. 修复全局作品选择器：仅出现在进度/编辑器/审阅三个公共页；切书不得回弹，并原子刷新 run、章节、编辑器和审阅数据。
+4. 修复编辑器内容闪退、审阅重写章节交接与拒绝后的恢复流程；补 NOV-E-003 浏览器失败注入 E2E。
+5. 为进度页补真实启动/重启/失败全重试/全流程重执行控制；全流程重执行必须确认并新建 run，旧 run、章节和版本不删除。审阅建议必须进入编辑器预览，由用户应用。
+6. 收口扫榜折叠 UI、部署缓存、`X-Model` 鉴权范围和版本 badge，并补对应回归。
+7. 跑八页面桌面/手机视觉、真库设置正负例、完整浏览器验收；每个批次独立提交推送并等 CI。
+8. 仅在最终绿色提交完成真实 Provider 链后部署；生产检查 healthz、登录、八页面、切书、建书/保存和 V3 20 节点 smoke。
 
 ## 8. 禁止破坏
 

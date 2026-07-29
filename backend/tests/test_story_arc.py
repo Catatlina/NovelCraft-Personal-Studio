@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.gateway import validate_task_output, _GenerateStoryArcOutput  # noqa: E402
+from app.prompt_registry import OUTPUT_CONTRACTS  # noqa: E402
 from app.workers.tasks import _check_story_arc_coverage  # noqa: E402
 
 
@@ -82,3 +83,13 @@ def test_generate_story_arc_contract_requires_arcs():
     assert isinstance(out, dict)
     assert len(out["story_arcs"]) == 1
     assert out["story_arcs"][0]["status"] == "planning"  # default applied
+
+
+def test_story_arc_prompt_contract_matches_gateway_schema():
+    contract = OUTPUT_CONTRACTS["generate_story_arc"]
+
+    assert '"name"' in contract
+    assert '"goal"' in contract
+    assert '"participants"' in contract
+    assert '"chapter_range"' in contract
+    assert '"arc_name"' not in contract

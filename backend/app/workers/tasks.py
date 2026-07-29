@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from datetime import datetime, timezone
 from functools import wraps
@@ -478,9 +479,9 @@ def _replan_chapter(chapter_id: str, novel_id: str, project_id: str, issues_text
     meta = chapter.get("meta") if isinstance(chapter.get("meta"), dict) else {}
     outline = meta.get("outline") or {}
     assembler = ContextAssembler(novel_id)
-    context = assembler.build()
-    book_state = context.get("book_state", "")
-    arc_summary = context.get("arc_summary", "")
+    assembler.build()
+    book_state = assembler.layers_built.get("book_state", "")
+    arc_summary = assembler.layers_built.get("arc_summary", "")
 
     output = complete(
         run_id=None, node_key="replan_chapter", project_id=project_id,
@@ -530,6 +531,79 @@ def _humanize_quality_feedback(before_text: str, output: dict) -> str:
             f"{exc}. 本次只有 {after_chars} 个字符；本章必须至少输出 {minimum_chars} 个字符。"
             "请逐段等量改写完整原文，保留全部事件、动作、对话和细节，不得概括或删段；"
             "自然分段数必须保留至少 60%。"
+        )
+    return ""
+
+
+def _reflow_polish_paragraphs(before_text: str, output: dict) -> dict:
+    """Reflow only content-complete polish output; never invent or rewrite text."""
+    polished = output.get("polished", output.get("chapter", output))
+    body = polished.get("body", []) if isinstance(polished, dict) else []
+    paragraphs = [
+        str(part if isinstance(part, str) else part.get("text", ""))
+        for part in body
+        if isinstance(part, (str, dict))
+        and str(part if isinstance(part, str) else part.get("text", "")).strip()
+    ]
+    before_count = len(_chapter_paragraphs_from_text(before_text))
+    target_count = math.ceil(before_count * 0.60)
+    after_text = "".join(paragraphs)
+    if (
+        before_count < 6
+        or len(paragraphs) >= target_count
+        or len(after_text) < math.ceil(len(before_text.replace("\n", "").strip()) * 0.75)
+    ):
+        return output
+
+    sentences = [
+        sentence
+        for paragraph in paragraphs
+        for sentence in re.findall(r".*?[。！？!?]|.+\Z", paragraph, flags=re.S)
+        if sentence
+    ]
+    if len(sentences) < target_count:
+        return output
+
+    quotient, remainder = divmod(len(sentences), target_count)
+    reflowed: list[str] = []
+    cursor = 0
+    for index in range(target_count):
+        size = quotient + (1 if index < remainder else 0)
+        reflowed.append("".join(sentences[cursor:cursor + size]))
+        cursor += size
+
+    normalized = dict(output)
+    normalized["polished"] = {**polished, "body": reflowed}
+    return normalized
+
+
+def _polish_quality_feedback(before_text: str, output: dict) -> str:
+    """Return actionable retry feedback without weakening the persistence gate."""
+    polished = output.get("polished", output.get("chapter", output))
+    body = polished.get("body", []) if isinstance(polished, dict) else []
+    paragraphs = [
+        str(part if isinstance(part, str) else part.get("text", "")).strip()
+        for part in body
+        if isinstance(part, (str, dict))
+        and str(part if isinstance(part, str) else part.get("text", "")).strip()
+    ]
+    before_paragraphs = _chapter_paragraphs_from_text(before_text)
+    minimum_paragraphs = math.ceil(len(before_paragraphs) * 0.60)
+    after_chars = len("\n".join(paragraphs).strip())
+    minimum_chars = max(MIN_CHAPTER_CHARS, math.ceil(len(before_text.strip()) * 0.75))
+    try:
+        _assert_story_revision_quality(
+            task_type="write_polish",
+            before_text=before_text,
+            after_paragraphs=paragraphs,
+            min_ratio=0.75,
+        )
+        _assert_min_chapter_length("write_polish", "\n".join(paragraphs))
+    except OutputValidationError as exc:
+        return (
+            f"{exc}. 本次输出 {len(paragraphs)} 段、{after_chars} 个字符；"
+            f"必须输出完整润色后全文，至少 {minimum_paragraphs} 段、{minimum_chars} 个字符。"
+            "请保留全部事件、动作、对话和细节，只做必要润色，不得合并过多段落。"
         )
     return ""
 
@@ -600,6 +674,48 @@ def _chapter_outline_for_seq(context: dict, chapter_seq: int) -> dict:
     if 0 < chapter_seq <= len(outlines) and isinstance(outlines[chapter_seq - 1], dict):
         return outlines[chapter_seq - 1]
     return {}
+
+
+def _assemble_bootstrap_writing_context(
+    novel_id: str,
+    run_context: dict,
+    assembler_factory: Any | None = None,
+) -> dict:
+    """Inject the real V3 context layers used by the bootstrap Writer.
+
+    The bootstrap chain requires its own idea, creative bible and selected
+    chapter outline. Historical chapters, foreshadows and other assembler
+    layers remain optional for a first chapter, but an assembler failure must
+    never be hidden as a successful write.
+    """
+    required = {
+        "idea": run_context.get("idea") or run_context.get("idea_expanded"),
+        "creative_bible": run_context.get("creative_bible"),
+        "_chapter_outline": run_context.get("_chapter_outline"),
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise OutputValidationError(
+            "bootstrap writing context missing required fields: " + ", ".join(missing)
+        )
+
+    if assembler_factory is None:
+        from app.services.assembler import ContextAssembler
+        assembler_factory = ContextAssembler
+
+    assembler = assembler_factory(novel_id)
+    assembled_text = assembler.build()
+    if not isinstance(assembled_text, str):
+        raise OutputValidationError("context assembler returned non-text output")
+
+    enriched = dict(run_context)
+    for key, value in assembler.layers_built.items():
+        if key not in enriched:
+            enriched[key] = value
+    enriched["_assembled_context"] = assembled_text
+    return enriched
+
+
 # ── Isolated request context decorator ──────────────────────────────────────
 
 def _isolated_request_context(fn):
@@ -857,7 +973,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
 
     Stages:
       1. Planning (7 agent nodes) → human_confirm_title
-      2. Blueprint (3 agent nodes)
+      2. Blueprint (4 agent nodes)
       3. Writing (5 agent nodes per chapter, initially ch 1)
       4. Finalization (3 agent nodes)
 
@@ -1065,21 +1181,29 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             run_context["_context_window"] = context_window
             run_context["_chapter_seq"] = chapter_seq
             run_context["_chapter_outline"] = _chapter_outline_for_seq(run_context, chapter_seq)
-            # V3 7-layer context assembly: inject all assembler layers into run_context
+            # V3 context assembly is a writing prerequisite. Optional history
+            # layers may be empty for chapter one; infrastructure errors and
+            # missing core planning inputs must fail truthfully.
             try:
-                from app.services.assembler import ContextAssembler
-                asm = ContextAssembler(novel_id)
-                assembled = asm.build()
-                # Compile structured layers into a single text block for the prompt
-                layers_text = []
-                for key, val in assembled.items():
-                    if val and isinstance(val, str) and val.strip():
-                        layers_text.append(val.strip())
-                    if key not in run_context:
-                        run_context[key] = val
-                run_context["_assembled_context"] = "\n\n".join(layers_text)
-            except Exception:
-                pass  # assembler 失败不阻断写作
+                run_context = _assemble_bootstrap_writing_context(novel_id, run_context)
+            except OutputValidationError as exc:
+                _mark_node(run_id, node_key, "failed", str(exc))
+                _record_bootstrap_event(
+                    run_id,
+                    "node.failed",
+                    node_key=node_key,
+                    payload={"reason": "invalid_context", "detail": str(exc)[:200]},
+                )
+                return {"status": "invalid_output", "node_key": node_key}
+            except Exception as exc:
+                _mark_node(run_id, node_key, "failed", f"context assembler failed: {exc}"[:500])
+                _record_bootstrap_event(
+                    run_id,
+                    "node.failed",
+                    node_key=node_key,
+                    payload={"reason": "context_assembler_failed", "detail": str(exc)[:200]},
+                )
+                raise self.retry(exc=exc, countdown=5)
             # P2-T2 / Q9: cap the unbounded writing context (prior-chapter window +
             # planning text blobs) to a token budget, mirroring ContextAssembler's
             # 5400-token cap so a million-word outline cannot blow the prompt cost
@@ -1186,7 +1310,11 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     )
             else:
                 quality_feedback = ""
-                quality_attempts = 3 if task_type in {"write_chapter_draft", "final_humanize"} else 1
+                quality_attempts = (
+                    3
+                    if task_type in {"write_chapter_draft", "write_polish", "final_humanize"}
+                    else 1
+                )
                 for quality_attempt in range(1, quality_attempts + 1):
                     variables = {
                         **run_context,
@@ -1214,8 +1342,18 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         ),
                     )
                     output = validate_task_output(task_type or "", output)
+                    if task_type == "write_polish":
+                        output = _reflow_polish_paragraphs(
+                            str(run_context.get("chapter_text") or ""),
+                            output,
+                        )
                     if task_type == "write_chapter_draft":
                         quality_feedback = _draft_length_feedback(output)
+                    elif task_type == "write_polish":
+                        quality_feedback = _polish_quality_feedback(
+                            str(run_context.get("chapter_text") or ""),
+                            output,
+                        )
                     elif task_type == "final_humanize":
                         quality_feedback = _humanize_quality_feedback(
                             str(run_context.get("_chapter_body") or ""),
@@ -1957,7 +2095,7 @@ def _persist_chapter_polish(db, node_key: str, output: dict, context: dict, run_
                 task_type="write_polish",
                 before_text=before_text or context.get("chapter_text", ""),
                 after_paragraphs=polished_paragraphs,
-                min_ratio=0.50,
+                min_ratio=0.75,
             )
             _assert_min_chapter_length("write_polish", "\n".join(polished_paragraphs))
         except OutputValidationError:

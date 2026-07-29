@@ -862,6 +862,7 @@ body 至少 12 段，每段为完整叙事段落，总字数不得低于 3000 �
 章节正文：$chapter_text
 自审缺点：$weaknesses
 改进建议：$suggestions
+质量门禁反馈：$quality_retry_feedback
 
 润色原则（story-deslop）：
 1. 优先修复自审列出的具体问题
@@ -1124,7 +1125,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "plan_character_system":  '{"characters":[{"name":"姓名一","role":"主角","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]},{"name":"姓名二","role":"反派","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]},{"name":"姓名三","role":"挚友","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]}]}（characters 至少 3 人）',
     "plan_conflict_map":      '{"conflicts":[{"type":"external","between":["A","B"],"stakes":"赌注","escalation":"升级路径"}]}',
     "blueprint_volume_plan":  '{"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}',
-    "generate_story_arc":       '{"story_arcs":[{"arc_name":"弧线名","arc_type":"成长/堕落/救赎","key_events":["事件1","事件2"],"emotional_trajectory":"情绪轨迹","climax":"高潮","resolution":"结局"}]}',
+    "generate_story_arc":       '{"story_arcs":[{"name":"弧线名","goal":"弧线目标","start_state":"起始状态","end_state":"结束状态","participants":["人物名"],"core_conflict":"核心冲突","key_events":["事件1","事件2"],"payoff_points":["爽点"],"foreshadowing_refs":[],"outcome_impact":"对全书的影响","status":"planning","chapter_range":[1,30]}]}',
     "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',
     "scene.direct":            '{"scenes":[{"title":"场景一","beat":"起势","goal":"交代处境","setting":"夜雨客栈","pov":"主角"},{"title":"场景二","beat":"转折","goal":"遭遇变故","setting":"客栈后院","pov":"主角"},{"title":"场景三","beat":"落幕","goal":"埋下新线索","setting":"黎明山路","pov":"主角"}]}（scenes 至少 3 个，beat 取 起势/发展/转折/高潮/落幕）',
@@ -1178,6 +1179,7 @@ def _stringify(value: Any) -> str:
 _USER_FIELD_TOKENS = ("idea", "selection", "instruction")
 _LONG_INTERNAL_CONTEXT_LIMITS = {
     "_chapter_body": 12000,
+    "chapter_text": 12000,
     "_context_window": 12000,
     "_chapter_outline": 6000,
 }
