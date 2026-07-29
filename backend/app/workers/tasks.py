@@ -1055,11 +1055,26 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             # Blueprint needs planning outputs as inputs
             run_context = _enrich_blueprint_context(run_context, novel_id)
         elif stage == "writing":
-            # Writing needs chapter context window
+            # Writing needs chapter context window + V3 assembler layers
             context_window = _write_before_search(novel_id, chapter_seq, window_size=100)
             run_context["_context_window"] = context_window
             run_context["_chapter_seq"] = chapter_seq
             run_context["_chapter_outline"] = _chapter_outline_for_seq(run_context, chapter_seq)
+            # V3 7-layer context assembly: inject all assembler layers into run_context
+            try:
+                from app.services.assembler import ContextAssembler
+                asm = ContextAssembler(novel_id)
+                assembled = asm.build()
+                # Compile structured layers into a single text block for the prompt
+                layers_text = []
+                for key, val in assembled.items():
+                    if val and isinstance(val, str) and val.strip():
+                        layers_text.append(val.strip())
+                    if key not in run_context:
+                        run_context[key] = val
+                run_context["_assembled_context"] = "\n\n".join(layers_text)
+            except Exception:
+                pass  # assembler 失败不阻断写作
             # P2-T2 / Q9: cap the unbounded writing context (prior-chapter window +
             # planning text blobs) to a token budget, mirroring ContextAssembler's
             # 5400-token cap so a million-word outline cannot blow the prompt cost

@@ -1241,20 +1241,26 @@ def ai_edit(
     from .core.billing import enforce_quota
     enforce_quota(user["id"], None, "max_words_per_month")
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
-    # P1-T3: the bare complete() calls below intentionally let ProviderError /
-    # ProviderRateLimitError / BudgetExceeded propagate to the global error
-    # handler (main.py) which wraps them in a consistent {code,message,data}
-    # envelope. The ai_edit version branch is written only AFTER every completion
-    # succeeds, so a mid-pipeline failure leaves no half-written version row.
-    output = complete(
-        run_id=None,
-        node_key=None,
-        project_id=content["project_id"],
-        task_type=f"editor_{task_op}",
-        prompt_name=f"editor.{task_op}",
-        variables={"selection": payload.selection, "instruction": payload.instruction},
-        client_mutation_id=payload.client_mutation_id,
-    )
+    # V3 deai → use the new DeaiPipeline (web novel style rewrite)
+    if str(op) == "deai":
+        from app.services.deai_pipeline import DeaiPipeline
+        pipeline = DeaiPipeline(
+            project_id=content["project_id"],
+            content_id=content_id,
+            chapter_title=str(content.get("title", "")),
+        )
+        result = pipeline.run(payload.selection)
+        output = {"text": result.get("final_text", payload.selection)}
+    else:
+        output = complete(
+            run_id=None,
+            node_key=None,
+            project_id=content["project_id"],
+            task_type=f"editor_{task_op}",
+            prompt_name=f"editor.{task_op}",
+            variables={"selection": payload.selection, "instruction": payload.instruction},
+            client_mutation_id=payload.client_mutation_id,
+        )
     if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
         review_context = _chapter_review_context(content, output.get("text") or payload.selection)
         output["review_7dim"] = complete(

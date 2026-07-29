@@ -124,7 +124,7 @@ def run_deai_pipeline(
 def get_deai_score(
     content_id: str,
     user: dict = Depends(get_current_user),
-) -> dict:
+) -> JSONResponse:
     """Get AI-taste score for a chapter (heuristic + LLM).
 
     Provider failures are surfaced explicitly; heuristic data is not relabelled
@@ -163,7 +163,7 @@ def get_deai_score(
 def quick_score(
     content_id: str,
     user: dict = Depends(get_current_user),
-) -> dict:
+) -> JSONResponse:
     """Fast heuristic-only AI score (no LLM call)."""
     text = _get_content_body(content_id)
     score = quick_deai_score(text)

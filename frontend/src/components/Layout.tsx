@@ -145,7 +145,8 @@ export function Layout({
             {novels && novels.length > 0 && (
               <select
                 className="novel-selector"
-                value={currentNovelId || ""}
+                defaultValue={currentNovelId || ""}
+                key={currentNovelId || "no-novel"}
                 onChange={e => onNovelChange?.(e.target.value)}
                 aria-label="切换作品"
               >

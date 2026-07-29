@@ -219,7 +219,19 @@ export function Progress({
             {activeNode ? `正在执行：${activeNode.title}` : failedCount ? "流程遇到问题，请查看失败步骤。" : run.status === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
           </p>
         </div>
-        <span className={`progress-run-state ${run.status || "pending"}`}>{RUN_LABELS[run.status || "pending"] || run.status}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className={`progress-run-state ${run.status || "pending"}`}>{RUN_LABELS[run.status || "pending"] || run.status}</span>
+          {failedCount > 0 && (
+            <button className="btn-sm btn-primary" disabled={retrying !== ""} onClick={() => {
+              nodes.filter(n => RETRYABLE_STATUSES.has(n.status)).forEach(n => retry(n));
+            }}><RefreshCw size={14} /> 重试全部失败 ({failedCount})</button>
+          )}
+          {run.status === "failed" && (
+            <button className="btn-sm btn-ghost" onClick={() => {
+              nodes.filter(n => n.status === "failed").forEach(n => retry(n));
+            }}><RefreshCw size={14} /> 重启流程</button>
+          )}
+        </div>
       </section>
 
       {notice && <div className={`progress-notice ${notice.kind}`} role="status">{notice.kind === "error" ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}{notice.text}</div>}

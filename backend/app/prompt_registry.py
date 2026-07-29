@@ -771,6 +771,7 @@ $plan_output
 场景节拍表：$scene_beats
 【V3 Chapter Function 约束】细纲 JSON 中含 function_type / chapter_goal / reader_expectation 三项本章功能约束。生成时本章所有事件必须服务于 chapter_goal（本章目标），并在章末满足 reader_expectation（读者期待）；禁止"有事件无作用"的水字——若某段不推进 function_type 对应的功能，必须删去或改写。
 前文上下文：$_context_window
+V3 创作上下文（人物状态/故事弧/伏笔/知识库/风格卡/场景分镜）：$_assembled_context
 上次长度门禁反馈：$length_retry_feedback
 
 创作目标：
