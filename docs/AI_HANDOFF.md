@@ -83,6 +83,15 @@
 - 本地门禁：前端 **14 passed**；构建通过；确定性 E2E **5 passed, 4 skipped**。E2E 启动脚本现先执行 Alembic 到 `b324f6c7a7f1 (head)`，不再让旧测试库缺表错误被页面容错掩盖。
 - 当前状态：**可用**；尚待本批提交、同提交 CI 与生产部署 smoke，不能宣称已验收。
 
+## 1.7 编辑器闪退/审阅重写交接/拒绝恢复 + NOV-E-003 checkpoint（2026-07-29，本地）
+
+- 本批收口 AI_HANDOFF §7 未完成顺序第 1 项：编辑器内容闪退、审阅重写章节交接、拒绝后恢复流程，并补 NOV-E-003 浏览器失败注入 E2E。
+- 改动文件：`backend/app/main.py`（manual_review 写 tracking；新增 `GET /chapters/{id}/regeneration` 返回真实 Celery 状态：pending_review / failed 显式不覆盖原文 / regenerating）、`frontend/src/App.tsx`（抽出 `activateNovel(novelId, preferredChapterId?)`，epoch 守卫“最后一次选择优先”）、`frontend/src/components/BookLibrary.tsx`（`onOpen(bookId, chapterId)` 打开指定章；`pollChapterRewrite` 轮询 /regeneration）、新增 `backend/tests/test_chapter_regeneration_status.py` 与 `frontend/e2e/main-chain.spec.ts` 的“小说主线⑥ NOV-E-003”。
+- NOV-E-003 设计：无 Provider 密钥时真实 Celery worker 自然失败 → UI 显示“重写失败”且原文未被覆盖；有密钥环境任务会成功重写为新稿，故该用例 `test.skip` 跳过（与既有 protected 用例同约定）。后端日志实证 `ProviderError: DEEPSEEK_API_KEY is not configured`，证明走的是真实失败路径而非伪判定。
+- 前任 agent 卡住的 `{}`→仓库路径污染已确认清除：全树 grep 仅在 docs 命中工作目录路径，源码零污染；`tsc --noEmit` 通过。
+- 本地门禁：前端 **14 passed**；构建通过；后端隔离库 **784 passed, 9 skipped, 1 xpassed**（含 3 个新增 regeneration 测试）；确定性 E2E **6 passed, 4 skipped**（含 NOV-E-003，4 个跳过项为无 Key 的 protected 真实 AI 用例，未计入通过）。
+- 当前状态：**可用（本地）**；尚待本批提交、同提交 CI 与生产部署 smoke，不能宣称已验收。
+
 ## 2. 当前产品契约
 
 - 用户可见品牌统一为 **Starlume AI**。
@@ -159,17 +168,17 @@
 
 ```bash
 npm test
-# 5 files, 12 tests passed
+# 6 files, 14 tests passed
 
 npm run build
 # TypeScript + Vite build passed
 
 npm run test:e2e
-# 5 passed, 4 skipped
+# 6 passed, 4 skipped
 
 cd ..
 bash scripts/backend-gate.sh
-# 781 passed, 9 skipped, 1 xpassed
+# 784 passed, 9 skipped, 1 xpassed
 ```
 
 已通过的 E2E：
@@ -189,7 +198,7 @@ bash scripts/backend-gate.sh
 
 ## 7. 当前未完成顺序
 
-1. 修复编辑器内容闪退、审阅重写章节交接与拒绝后的恢复流程；补 NOV-E-003 浏览器失败注入 E2E。
+1. [可用·本地] 修复编辑器内容闪退、审阅重写章节交接与拒绝后的恢复流程；补 NOV-E-003 浏览器失败注入 E2E（详见 §1.7，待提交/CI/部署）。
 2. 为进度页补真实启动/重启/失败全重试/全流程重执行控制；全流程重执行必须确认并新建 run，旧 run、章节和版本不删除。
 3. 收口扫榜折叠 UI、部署缓存、`X-Model` 鉴权范围和版本 badge，并补对应回归。
 4. 跑八页面桌面/手机视觉、真库设置正负例、完整浏览器验收；每个批次独立提交推送并等 CI。

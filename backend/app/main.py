@@ -696,7 +696,54 @@ async def manual_review_chapter(
         api_url=request.headers.get("X-Api-Base-Url", ""),
         model=request.headers.get("X-Model", ""),
     )
+    tracking_conn = connect()
+    tracking_conn.execute(
+        "UPDATE contents SET meta=meta || %s, updated_at=now() WHERE id=%s",
+        (encode({
+            "manual_review": {
+                "status": "regenerating",
+                "reviewed_by": user["id"],
+                "reviewed_at": now_iso,
+                "reason": payload.reason,
+                "task_id": task.id,
+            },
+        }), chapter_id),
+    )
+    tracking_conn.commit()
+    tracking_conn.close()
     return ok({"chapter_id": chapter_id, "status": "regenerating", "task_id": task.id})
+
+
+@app.get("/api/v1/chapters/{chapter_id}/regeneration")
+def chapter_regeneration_status(
+    chapter_id: str,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Return the real Celery/result state for one authorized chapter rewrite."""
+    conn, chapter = load_content_for_user(chapter_id, user)
+    conn.close()
+    if chapter["type"] != "chapter":
+        raise HTTPException(status_code=400, detail="content is not a chapter")
+    meta = chapter.get("meta") if isinstance(chapter.get("meta"), dict) else dict()
+    manual_review = meta.get("manual_review") if isinstance(meta.get("manual_review"), dict) else dict()
+    task_id = str(manual_review.get("task_id") or "")
+    if chapter.get("status") == "pending_review" and manual_review.get("status") == "regenerated":
+        return ok({"status": "pending_review", "chapter": chapter, "task_id": task_id})
+    if not task_id:
+        raise HTTPException(status_code=404, detail="chapter has no regeneration task")
+
+    from .workers.celery_app import celery_app
+    task = celery_app.AsyncResult(task_id)
+    if task.state == "SUCCESS":
+        refreshed_conn, refreshed = load_content_for_user(chapter_id, user)
+        refreshed_conn.close()
+        result = task.result if isinstance(task.result, dict) else dict()
+        if refreshed.get("status") == "pending_review" and result.get("status") == "pending_review":
+            return ok({"status": "pending_review", "chapter": refreshed, "task_id": task_id})
+        return ok({"status": "failed", "task_id": task_id, "message": "重写任务未产出可复审章节，原文未被覆盖"})
+    if task.state == "FAILURE":
+        return ok({"status": "failed", "task_id": task_id, "message": "重写任务失败，原文保持未覆盖，可修改要求后重试"})
+    return ok({"status": "regenerating", "task_id": task_id})
 
 
 @app.post("/api/v1/novels/{novel_id}/expand-outline")

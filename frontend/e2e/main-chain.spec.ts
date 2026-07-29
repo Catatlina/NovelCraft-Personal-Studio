@@ -342,3 +342,59 @@ test("小说主线⑤：真实 AI 向导→人工定名→首章→审阅→导�
   await expect(page.getByText("一致性维度")).toBeVisible();
   await page.screenshot({ path: "artifacts/screenshots/protected-06-review.png" });
 });
+
+test("小说主线⑥：拒绝重写后真实任务失败、原文未被覆盖（NOV-E-003 失败注入）", async ({ page }) => {
+  // 失败注入用例：需要“无 Provider 密钥”以让真实 Celery worker 自然失败。
+  // 有密钥环境下重写会成功并替换为新稿，与本用例要验证的“失败不覆盖原文”无关，故跳过。
+  test.skip(!!process.env.DEEPSEEK_API_KEY, "NOV-E-003 需要无 Provider 密钥以注入任务失败；有密钥时任务成功重写，本用例跳过");
+  test.setTimeout(180_000);
+
+  await registerFreshUser(page);
+  const titleSeed = `失败注入验收-${Date.now()}`;
+  await createBookWithChapter(page, titleSeed, "第1章 雨夜来客");
+
+  const openDetail = async () => {
+    await page.getByRole("navigation", { name: "小说创作主导航" })
+      .getByRole("button", { name: "我的书库", exact: true }).click();
+    const bookCard = page.locator(".library-page .card").filter({ hasText: titleSeed });
+    await bookCard.getByRole("button", { name: "查看详情" }).click();
+  };
+
+  const originalText = "档案室的灯在午夜第三次闪烁，她终于看清了报纸上自己的名字。";
+
+  // 打开该章编辑器，写入确定性的原文 A 并保存
+  await openDetail();
+  const chapterRow = page.locator(".chapter-review-row").filter({ hasText: /第1章/ }).first();
+  await chapterRow.getByRole("button", { name: /第1章/ }).click();
+  const editor = page.locator(".ProseMirror");
+  await expect(editor).toBeVisible({ timeout: 10_000 });
+  await editor.fill(originalText);
+  const saveResponse = page.waitForResponse(
+    r => r.url().includes("/api/v1/contents/") && r.request().method() === "PUT" && r.ok(),
+  );
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await saveResponse;
+  await expect(editor).toHaveText(originalText, { timeout: 10_000 });
+
+  // 回到详情，拒绝重写
+  await openDetail();
+  const row2 = page.locator(".chapter-review-row").filter({ hasText: /第1章/ }).first();
+  await row2.getByRole("button", { name: "拒绝重写" }).click();
+  // 确认按钮位于 .review-reject-form（.chapter-review-row 的兄弟节点），按页面作用域定位
+  await page.getByRole("button", { name: "确认拒绝并重写" }).click();
+
+  // UI 立即进入“重写中”
+  await expect(row2.locator(".pill.running")).toBeVisible({ timeout: 10_000 });
+
+  // 真实 Celery worker 因缺 Provider 密钥失败 → UI 显示“重写失败”
+  await expect(row2.locator(".pill.failed")).toBeVisible({ timeout: 150_000 });
+
+  // 页面应明确告知原文未被覆盖（仍在详情视图时断言）
+  await expect(page.getByText(/未覆盖|未被覆盖/)).toBeVisible({ timeout: 10_000 });
+
+  // 失败不应覆盖原文：重新打开编辑器，正文与基线一致
+  await row2.getByRole("button", { name: /第1章/ }).click();
+  const editorAfter = page.locator(".ProseMirror");
+  await expect(editorAfter).toBeVisible({ timeout: 10_000 });
+  await expect(editorAfter).toHaveText(originalText, { timeout: 10_000 });
+});

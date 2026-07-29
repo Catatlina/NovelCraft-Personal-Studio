@@ -9,6 +9,7 @@ type BookDetail = { book: Book; synopsis: string; genre: string; outline: unknow
 type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string; blocker_code?: string; cancel_requested?: boolean; updated_at?: string };
 type Completion = { total_chapters: number; reviewed_chapters: number; total_words: number; average_review_score: number; generation_percent?: number | null; review_percent?: number; continuity_flagged?: number; continuity_unchecked?: number; needs_rewrite_chapters?: number; quality_warnings?: string[]; ready_for_release?: boolean; exportable: boolean };
 type ImportPreview = { seq: string; title: string; raw: string };
+type RewriteState = { status: "regenerating" | "pending_review" | "failed"; taskId?: string; message?: string };
 function formatBookOutline(outline: unknown): string {
   if (typeof outline === "string") return outline.trim();
   if (!outline || typeof outline !== "object") return "";
@@ -43,7 +44,7 @@ function formatBookOutline(outline: unknown): string {
   return sections.join("\n\n") || JSON.stringify(outline, null, 2);
 }
 
-export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: (bookId: string) => Promise<void> }) {
+export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: (bookId: string, chapterId?: string) => Promise<void> }) {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -57,6 +58,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [detail, setDetail] = useState<BookDetail | null>(null);
   const [rejectingChapterId, setRejectingChapterId] = useState("");
   const [rejectReason, setRejectReason] = useState("");
+  const [rewriteStates, setRewriteStates] = useState<Record<string, RewriteState>>(Object.create(null));
   // NC-LIB-002: search, filter, sort, pagination
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -234,6 +236,11 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         ? `《${chapter.title}》已通过人工审核并入库。`
         : `《${chapter.title}》已拒绝，正在重新生成。任务 ${result.task_id || ""}`);
       if (decision === "reject") {
+        setRewriteStates(previous => ({
+          ...previous,
+          [chapter.id]: { status: "regenerating", taskId: result.task_id },
+        }));
+        pollChapterRewrite(detail.book, chapter.id);
         setRejectingChapterId("");
         setRejectReason("");
       }
@@ -245,6 +252,41 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       setBusy("");
     }
   };
+
+  function pollChapterRewrite(book: Book, chapterId: string) {
+    const pollerKey = `rewrite:${chapterId}`;
+    if (pollers.current[pollerKey]) window.clearInterval(pollers.current[pollerKey]);
+    const refresh = async () => {
+      try {
+        const result = await api<{ status: RewriteState["status"]; task_id?: string; message?: string }>(
+          `/api/v1/chapters/${chapterId}/regeneration`,
+        );
+        setRewriteStates(previous => ({
+          ...previous,
+          [chapterId]: { status: result.status, taskId: result.task_id, message: result.message },
+        }));
+        if (result.status === "pending_review" || result.status === "failed") {
+          window.clearInterval(pollers.current[pollerKey]);
+          delete pollers.current[pollerKey];
+          await openDetail(book);
+          await loadBookState(book);
+          setNotice(result.status === "pending_review"
+            ? "章节重写已完成，正在等待你重新审阅；原版本仍可从版本历史恢复。"
+            : result.message || "章节重写失败，原文未被覆盖，可修改要求后重试。");
+        }
+      } catch (caught) {
+        window.clearInterval(pollers.current[pollerKey]);
+        delete pollers.current[pollerKey];
+        setRewriteStates(previous => ({
+          ...previous,
+          [chapterId]: { status: "failed", message: String(caught) },
+        }));
+        setNotice(`重写状态刷新失败：${String(caught)}。原文未被覆盖，请刷新后重试。`);
+      }
+    };
+    void refresh();
+    pollers.current[pollerKey] = window.setInterval(() => { void refresh(); }, 2000);
+  }
 
   // NC-LIB-002: Apply filters client-side
   const filtered = books.filter(b => {
@@ -305,17 +347,19 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <div className="chapter-list">
           {detail.chapters.map(ch => <div key={ch.id}>
             <div className="chapter-review-row">
-              <button className="btn-ghost" onClick={() => void onOpen(book.id)}>
+              <button className="btn-ghost" onClick={() => void onOpen(book.id, ch.id)}>
                 第{ch.seq || ch.meta?.seq || "-"}章 {ch.title}
                 <small>{ch.status}{ch.meta?.review_score ? ` · AI分 ${Math.round(ch.meta.review_score)}` : ""}</small>
               </button>
               <div className="chapter-review-actions">
-                {ch.status !== "reviewed" && <button className="btn-sm btn-primary" style={{ width: "auto" }} disabled={busy === ch.id} onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
-                {ch.status !== "reviewed" && <button className="btn-ghost" disabled={busy === ch.id} onClick={() => {
+                {ch.status !== "reviewed" && <button className="btn-sm btn-primary" style={{ width: "auto" }} disabled={busy === ch.id || rewriteStates[ch.id]?.status === "regenerating"} onClick={() => void manualReviewChapter(ch, "approve")}>通过入库</button>}
+                {ch.status !== "reviewed" && <button className="btn-ghost" disabled={busy === ch.id || rewriteStates[ch.id]?.status === "regenerating"} onClick={() => {
                   setRejectingChapterId(ch.id);
                   setRejectReason("质量不达标，请增强场景冲突、生活质感、人物连续性和章末钩子，重写后正文不得低于3000字。");
                 }}>拒绝重写</button>}
                 {ch.status === "reviewed" && <span className="pill succeeded">已入库</span>}
+                {rewriteStates[ch.id]?.status === "regenerating" && <span className="pill running">重写中</span>}
+                {rewriteStates[ch.id]?.status === "failed" && <span className="pill failed">重写失败</span>}
               </div>
             </div>
             {rejectingChapterId === ch.id && <div className="review-reject-form">

@@ -370,6 +370,46 @@ export default function App() {
     await refreshRun(run.id);
   }
 
+  async function activateNovel(novelId: string, preferredChapterId?: string): Promise<boolean> {
+    userSelectedNovel.current = true;
+    const selectionEpoch = ++novelSelectionEpoch.current;
+    const isCurrentSelection = () => selectionEpoch === novelSelectionEpoch.current;
+    setError("");
+    const selectedSummary = novels.find(item => item.id === novelId);
+    if (selectedSummary) setNovel(selectedSummary);
+    setRun(null);
+    setChapters([]);
+    setChapter(null);
+    setEditorText("");
+    setVersions([]);
+    setPendingAiEdit(null);
+    setEditorAiReview(null);
+    try {
+      const book = await api<Content>(`/api/v1/contents/${novelId}`);
+      if (!isCurrentSelection()) return false;
+      setNovel(book);
+      void cacheSet(currentNovelCacheKey, book);
+      const [latestRun, items] = await Promise.all([
+        api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`).catch(() => null),
+        api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`),
+      ]);
+      if (!isCurrentSelection()) return false;
+      setRun(latestRun);
+      const chapterItems = (items || [])
+        .filter(item => item.type === "chapter")
+        .sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+      setChapters(chapterItems);
+      const selectedChapter = chapterItems.find(item => item.id === preferredChapterId) ?? chapterItems[0] ?? null;
+      setChapter(selectedChapter);
+      setEditorText(selectedChapter ? docToText(selectedChapter.body) : "");
+      if (selectedChapter) void loadVersions(selectedChapter.id);
+      return true;
+    } catch (caught) {
+      if (isCurrentSelection()) setError(caught instanceof Error ? caught.message : String(caught));
+      return false;
+    }
+  }
+
   async function saveChapter() {
     if (!chapter) return;
     const prevText = docToText(chapter.body);
@@ -690,55 +730,13 @@ export default function App() {
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status} userEmail={userEmail}
       novels={novels.map(n => ({ id: n.id, title: n.title }))}
       currentNovelId={novel?.id}
-      onNovelChange={async (novelId) => {
-        userSelectedNovel.current = true;
-        const selectionEpoch = ++novelSelectionEpoch.current;
-        const isCurrentSelection = () => selectionEpoch === novelSelectionEpoch.current;
-        setError("");
-        // 先清空旧状态
-        const selectedSummary = novels.find(item => item.id === novelId);
-        if (selectedSummary) setNovel(selectedSummary);
-        setRun(null);
-        setChapters([]);
-        setChapter(null);
-        setEditorText("");
-        setVersions([]);
-        setPendingAiEdit(null);
-        setEditorAiReview(null);
-        try {
-          // 加载新书
-          const book = await api<Content>(`/api/v1/contents/${novelId}`);
-          if (!isCurrentSelection()) return;
-          setNovel(book);
-          void cacheSet(currentNovelCacheKey, book);
-          // 并行加载运行状态和章节
-          const [r, items] = await Promise.all([
-            api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`).catch(() => null),
-            api<Content[]>(`/api/v1/contents?project_id=${book.project_id}&parent_id=${novelId}`),
-          ]);
-          if (!isCurrentSelection()) return;
-          setRun(r);
-          const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
-          setChapters(chs);
-          const ch = chs[0] ?? null;
-          setChapter(ch);
-          setEditorText(ch ? docToText(ch.body) : "");
-          if (ch) void loadVersions(ch.id);
-        } catch (caught) {
-          if (isCurrentSelection()) setError(caught instanceof Error ? caught.message : String(caught));
-        }
-      }}
+      onNovelChange={(novelId) => { void activateNovel(novelId); }}
       showSelector={tab === "progress" || tab === "editor" || tab === "review"}>
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
-      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId) => {
-        userSelectedNovel.current = true;
-        novelSelectionEpoch.current += 1;
-        const book = await api<Content>(`/api/v1/contents/${bookId}`);
-        setNovel(book);
-        void cacheSet(currentNovelCacheKey, book);
-        setTab("editor");
+      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId, chapterId) => {
+        if (await activateNovel(bookId, chapterId)) setTab("editor");
       }} />}
       {tab === "ranking" && project && (
         <RankingCenter
