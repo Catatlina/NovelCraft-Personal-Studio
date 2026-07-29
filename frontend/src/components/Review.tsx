@@ -51,12 +51,14 @@ export function Review({
   characters = [],
   timeline = [],
   arcs = [],
+  onOpenEditor,
 }: {
-  chapter?: { title?: string } | null;
+  chapter?: { id?: string; title?: string } | null;
   review?: ReviewPayload;
   characters?: Array<{ id?: string; title?: string; name?: string; body?: string }>;
   timeline?: Array<{ event?: string; chapter_seq?: number }>;
   arcs?: Array<{ character?: string; stage?: string; goal?: string; status?: string }>;
+  onOpenEditor?: (chapterId?: string) => void;
 }) {
   const consistency = review.final_consistency_check || review;
   const checks = consistency.checks || {};
@@ -81,7 +83,16 @@ export function Review({
           <h2>审阅与一致性</h2>
           <p>{chapter?.title ? `正在查看《${chapter.title}》的真实审阅证据。` : "选择或创建一本小说后，这里会汇总质量与连续性结果。"}</p>
         </div>
-        {hasEvidence && <span className={`review-state ${issues.length ? "warning" : "pass"}`}>{issues.length ? `${issues.length} 项需关注` : "当前检查通过"}</span>}
+        {hasEvidence && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span className={`review-state ${issues.length ? "warning" : "pass"}`}>{issues.length ? `${issues.length} 项需关注` : "当前检查通过"}</span>
+            {onOpenEditor && chapter?.id && (
+              <button className="btn-sm btn-primary" onClick={() => onOpenEditor(chapter.id)}>
+                <BookOpenCheck size={14} /> 打开编辑器修改
+              </button>
+            )}
+          </div>
+        )}
       </section>
 
       {!hasEvidence ? (

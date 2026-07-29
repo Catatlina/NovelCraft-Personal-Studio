@@ -387,11 +387,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
     {/* ── Source cards + import ── */}
     <details className="card" style={{ marginBottom: "var(--space-4)" }}>
-      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none" }}>
+      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div className="card-title" style={{ gap: 6 }}>
           <span>📡</span> 榜单源
         </div>
-        <span className="card-sub">{sources.length} 个平台</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span className="card-sub">{sources.length} 个平台</span>
+          <span className="expand-icon" aria-hidden="true">▼</span>
+        </div>
       </summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 0 var(--space-3)" }}>
         {sourcesPager.pageData.map(source => {
@@ -515,11 +518,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
     {/* ── Snapshots table ── */}
     <details className="card" open>
-      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none" }}>
+      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div className="card-title">
           <span>📸</span> 榜单快照
         </div>
-        <span className="card-sub">{snapshots.length} 条记录</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span className="card-sub">{snapshots.length} 条记录</span>
+          <span className="expand-icon" aria-hidden="true">▼</span>
+        </div>
       </summary>
       <div className="table-wrap">
         <table>

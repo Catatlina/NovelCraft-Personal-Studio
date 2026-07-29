@@ -482,6 +482,8 @@ details.card { margin-bottom: var(--space-4); }
 details.card > summary.card-head { cursor: pointer; list-style: none; user-select: none; transition: background .15s; }
 details.card > summary.card-head:hover { background: var(--bg-elevated); }
 details.card[open] > summary.card-head { border-bottom: 1px solid var(--border-subtle); margin-bottom: var(--space-3); }
+details.card > summary.card-head .expand-icon { display: inline-block; transition: transform .2s; font-size: 10px; color: var(--text-3); }
+details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg); }
 .command-trigger {
   height: 36px;
   min-height: 36px;

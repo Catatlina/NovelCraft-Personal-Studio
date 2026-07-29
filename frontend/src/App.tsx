@@ -637,7 +637,12 @@ export default function App() {
         setChapters([]);
         setChapter(null);
         setEditorText("");
-      }}>
+        // 加载新书的运行状态
+        api<Run>(`/api/v1/runs/latest?project_id=${book.project_id}&novel_id=${novelId}`)
+          .then(r => setRun(r))
+          .catch(() => setRun(null));
+      }}
+      showSelector={tab === "progress" || tab === "editor" || tab === "review"}>
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
@@ -654,7 +659,7 @@ export default function App() {
       )}
       {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap }} />}
       {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} />}
-      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} />}
+      {tab === "review" && <Review chapter={novel} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onOpenEditor={() => setTab("editor")} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
             <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id }} />

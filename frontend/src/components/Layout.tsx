@@ -51,6 +51,7 @@ export function Layout({
   novels,
   currentNovelId,
   onNovelChange,
+  showSelector,
   children,
 }: {
   tab: AppTab;
@@ -61,6 +62,7 @@ export function Layout({
   novels?: Array<{ id: string; title: string }>;
   currentNovelId?: string | null;
   onNovelChange?: (novelId: string) => void;
+  showSelector?: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(true);
@@ -142,7 +144,7 @@ export function Layout({
             {runStatus && <span className={`run-state ${runStatus}`}>{RUN_LABELS[runStatus] || runStatus}</span>}
           </div>
           <div className="header-actions">
-            {novels && novels.length > 0 && (
+            {showSelector && novels && novels.length > 0 && (
               <select
                 className="novel-selector"
                 defaultValue={currentNovelId || ""}
