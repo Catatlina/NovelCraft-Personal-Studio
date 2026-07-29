@@ -999,19 +999,22 @@ def _hydrate_run(conn, run: dict) -> dict:
 
 
 @app.get("/api/v1/runs/latest")
-def get_latest_run(project_id: str | None = None, user: dict = Depends(get_current_user)) -> ApiResponse:
+def get_latest_run(project_id: str | None = None, novel_id: str | None = None, user: dict = Depends(get_current_user)) -> ApiResponse:
     """Restore the user's newest workflow after a browser reload or device switch."""
     conn = connect()
     params: list[str] = [user["id"]]
-    project_filter = ""
+    extra_filters = ""
     if project_id:
-        project_filter = " AND wr.project_id = %s"
+        extra_filters += " AND wr.project_id = %s"
         params.append(project_id)
+    if novel_id:
+        extra_filters += " AND wr.novel_id = %s"
+        params.append(novel_id)
     run = conn.execute(
         """SELECT wr.*
            FROM workflow_runs wr
            JOIN project_members pm ON pm.project_id = wr.project_id
-           WHERE pm.user_id = %s""" + project_filter + """
+           WHERE pm.user_id = %s""" + extra_filters + """
            ORDER BY wr.created_at DESC, wr.id DESC
            LIMIT 1""",
         tuple(params),
