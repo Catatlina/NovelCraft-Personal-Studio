@@ -246,7 +246,7 @@ def init_db() -> None:
         # real model route or the flagship flow fails at its first node.
         "plan_idea", "audit_plan_fidelity", "regenerate_titles", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
         "plan_world_architecture", "plan_character_system", "plan_conflict_map",
-        "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
+        "blueprint_volume_plan", "generate_story_arc", "blueprint_chapter_outline", "blueprint_scene_beat",
         "write_chapter_draft", "write_self_review", "write_polish",
         "write_length_check", "write_fact_reconcile",
         "final_consistency_check", "final_continuity_audit", "final_humanize",

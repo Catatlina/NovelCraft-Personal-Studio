@@ -27,7 +27,7 @@ AGENT_TASK_TYPES = [t for _, kind, _, _, t in BOOTSTRAP_NODES if kind == "agent"
 
 
 def test_v2_has_18_agent_nodes():
-    assert len(AGENT_TASK_TYPES) == 18, AGENT_TASK_TYPES
+    assert len(AGENT_TASK_TYPES) == 19, AGENT_TASK_TYPES
 
 
 def _db_seeded_task_types() -> set[str]:
@@ -73,8 +73,8 @@ def test_prompts_are_methodology_grade_not_stubs():
 
 
 def test_no_fictional_default_models():
-    assert gateway.MODEL == "deepseek-v4-pro"
-    assert app_config.Settings().deepseek_model == "deepseek-v4-pro"
+    assert gateway.MODEL == "deepseek-chat"
+    assert app_config.Settings().deepseek_model == "deepseek-chat"
 
 
 def test_plan_idea_supplies_title_candidates_for_human_gate():
@@ -109,7 +109,7 @@ def test_gateway_resolves_real_route_and_prompt_for_all_nodes(tmp_path):
             f"bootstrap.{t}", t, {"idea": "测试", "genre": "科幻", "style": "硬核"}
         )
         assert provider == "deepseek", (t, provider)
-        assert model == "deepseek-v4-pro", (t, model)
+        assert model == "deepseek-chat", (t, model)
         assert not prompt.startswith("请执行任务"), f"{t} fell back to generic prompt"
         assert len(prompt) > 200, (t, len(prompt))
 

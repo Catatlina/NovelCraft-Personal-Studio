@@ -91,6 +91,7 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/services/ten_layer_analysis.py:_generate_heat_map": "deterministic report aggregation over completed layer data",
     "backend/app/services/ten_layer_analysis.py:_generate_keyword_cloud": "deterministic keyword frequency aggregation",
     "backend/app/services/ten_layer_analysis.py:_generate_trend_report": "deterministic report assembly over layer results",
+    "backend/app/services/assembler.py:_scene_plan": "data formatter: reads scene records from DB and formats as text, no AI generation",
 }
 
 
