@@ -72,11 +72,6 @@ export function Layout({
   const expanded = !collapsed || hovered;
   const initials = (userEmail?.trim()[0] || "S").toUpperCase();
 
-  // 外部 novel 变化时同步选中状态
-  React.useEffect(() => {
-    if (currentNovelId !== selectedId) setSelectedId(currentNovelId);
-  }, [currentNovelId]);
-
   return (
     <div className="app-shell">
       <aside
