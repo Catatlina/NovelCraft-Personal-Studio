@@ -386,14 +386,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     )}
 
     {/* ── Source cards + import ── */}
-    <div className="card">
-      <div className="card-head">
+    <details className="card" style={{ marginBottom: "var(--space-4)" }}>
+      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none" }}>
         <div className="card-title" style={{ gap: 6 }}>
           <span>📡</span> 榜单源
         </div>
         <span className="card-sub">{sources.length} 个平台</span>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      </summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 0 var(--space-3)" }}>
         {sourcesPager.pageData.map(source => {
           const healthLabel = source.last_error ? "异常" : source.last_success_at ? "健康" : "未采集";
           const healthColor = source.last_error ? "var(--danger)" : source.last_success_at ? "var(--success)" : "var(--text-muted)";
@@ -468,7 +468,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           </div>
         ),
       }]} />
-    </div>
+    </details>
 
     {/* ── Analysis mode selector (L3: scan settings, collapsed by default) ── */}
     {snapshots.filter(s => s.status === "succeeded").length > 0 && (
@@ -514,13 +514,13 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     )}
 
     {/* ── Snapshots table ── */}
-    <div className="card">
-      <div className="card-head">
+    <details className="card" open>
+      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none" }}>
         <div className="card-title">
           <span>📸</span> 榜单快照
         </div>
         <span className="card-sub">{snapshots.length} 条记录</span>
-      </div>
+      </summary>
       <div className="table-wrap">
         <table>
           <thead>
@@ -737,7 +737,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
           pageSizeOptions={[10, 20, 50, 100]}
         />
       </div>
-    </div>
+    </details>
 
     {/* ── Multi-platform analysis results ── */}
     {multiAnalysisResult && (

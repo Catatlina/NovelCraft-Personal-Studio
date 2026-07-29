@@ -48,6 +48,9 @@ export function Layout({
   title,
   runStatus,
   userEmail,
+  novels,
+  currentNovelId,
+  onNovelChange,
   children,
 }: {
   tab: AppTab;
@@ -55,6 +58,9 @@ export function Layout({
   title: string;
   runStatus?: string;
   userEmail?: string;
+  novels?: Array<{ id: string; title: string }>;
+  currentNovelId?: string | null;
+  onNovelChange?: (novelId: string) => void;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(true);
@@ -136,6 +142,18 @@ export function Layout({
             {runStatus && <span className={`run-state ${runStatus}`}>{RUN_LABELS[runStatus] || runStatus}</span>}
           </div>
           <div className="header-actions">
+            {novels && novels.length > 0 && (
+              <select
+                className="novel-selector"
+                value={currentNovelId || ""}
+                onChange={e => onNovelChange?.(e.target.value)}
+                aria-label="切换作品"
+              >
+                {novels.map(n => (
+                  <option key={n.id} value={n.id}>{n.title || "待命名作品"}</option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               className="command-trigger"

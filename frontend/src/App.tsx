@@ -86,6 +86,7 @@ export default function App() {
   const [userEmail, setUserEmail] = useState(() => sessionStorage.getItem("starlume_user_email") || "");
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
+  const [novels, setNovels] = useState<Content[]>([]);
   const [characters, setCharacters] = useState<any[]>([]);
   const [narrative, setNarrative] = useState<{ timeline: any[]; arcs: any[] }>({ timeline: [], arcs: [] });
   const [chapter, setChapter] = useState<Content | null>(null);
@@ -158,6 +159,15 @@ export default function App() {
       cacheSet("projects", p);
     }).catch(e => setError(String(e)));
   }, [token]);
+
+  // 全局作品列表（供 Layout 作品选择器使用）
+  useEffect(() => {
+    if (!project) return;
+    api<Content[]>(`/api/v1/contents?project_id=${project.id}`).then(items => {
+      const n = (items || []).filter(i => i.type === "novel");
+      setNovels(n);
+    }).catch(() => {});
+  }, [project?.id]);
 
   useEffect(() => {
     if (!token || !project || run || restoringRun.current) return;
@@ -235,6 +245,7 @@ export default function App() {
         if (!active) return;
         void cacheSet(contentsKey, items);
         const chapterItems = items.filter(i => i.type === "chapter").sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
+        if (chapterItems.length === 0) return; // 服务器无章节时不覆盖已缓存的内容
         setChapters(chapterItems);
         const current = chapterItems.find(item => item.id === chapter?.id) ?? chapterItems[0] ?? null;
         setChapter(current);
@@ -616,7 +627,17 @@ export default function App() {
   };
 
   return (
-    <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status} userEmail={userEmail}>
+    <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status} userEmail={userEmail}
+      novels={novels.map(n => ({ id: n.id, title: n.title }))}
+      currentNovelId={novel?.id}
+      onNovelChange={async (novelId) => {
+        if (novelId === novel?.id) return;
+        const book = await api<Content>(`/api/v1/contents/${novelId}`);
+        setNovel(book);
+        setChapters([]);
+        setChapter(null);
+        setEditorText("");
+      }}>
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}

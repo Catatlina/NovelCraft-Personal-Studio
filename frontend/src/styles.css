@@ -458,6 +458,30 @@ button:active:not(:disabled) { transform: scale(.96); }
 .run-state.failed { color: var(--danger); background: var(--danger-soft); }
 .run-state.succeeded { color: var(--success); background: var(--success-soft); }
 .header-actions { gap: 14px; }
+.novel-selector {
+  height: 36px;
+  min-height: 36px;
+  min-width: 160px;
+  max-width: 220px;
+  padding: 0 32px 0 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.novel-selector:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px var(--primary-soft); }
+/* Collapsible card sections (扫榜源/快照) */
+details.card { margin-bottom: var(--space-4); }
+details.card > summary.card-head { cursor: pointer; list-style: none; user-select: none; transition: background .15s; }
+details.card > summary.card-head:hover { background: var(--bg-elevated); }
+details.card[open] > summary.card-head { border-bottom: 1px solid var(--border-subtle); margin-bottom: var(--space-3); }
 .command-trigger {
   height: 36px;
   min-height: 36px;
