@@ -1,8 +1,17 @@
-# NovelCraft Personal Studio — 真实进度
+# Starlume AI — 真实进度
 
 <!-- delivery-claims: strict -->
 
-> 更新：2026-07-28（主创作链生产验收）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+> 更新：2026-07-29（V3 接手复验与 CI 修复）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
+
+## 2026-07-29 V3 接手复验与 CI 修复
+
+- 基线：同步后 `main = origin/main = f8e343c`，生产文档可确认的最近部署仍为 `91bcf9b`。
+- 真实缺陷：章节质量证据会无条件声称 pacing/story-arc 来源；现改为仅记录实际采样来源，并补可选来源回归。
+- 测试契约：Bootstrap 已为 20 节点（19 AI + 1 人工门禁），同步更新完整流程夹具、节点断言与 BYOK 引用参数；不恢复已从小说 UI 退役的 Costs/预算入口。
+- 本地门禁：后端 `761 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；确定性 E2E `4 passed, 4 skipped`；交付声明、AI 真实性、前后端契约与 `git diff --check` 通过。
+- 当前状态：**可用**。
+- 未完成门禁：新 CI 同版本全绿、真实 Provider 复验与部署。
 
 ## 2026-07-28 生产部署与线上热修复
 
@@ -47,7 +56,7 @@
 - 注入真实 `DEEPSEEK_API_KEY`（gitignored `.env.local`，不入库）后，`npx playwright test e2e/main-chain.spec.ts --grep "protected"` → **1 passed (13.2m)**。
 - 过程中修复 3 个真实阻断：① `Wizard.tsx` HTML5 step 校验拒绝全部预设字数（min=5000/step=10000 不相容，改 min=10000）；② `scripts/e2e-backend.sh` 缺 Celery worker（任务入队无消费者，改双进程）；③ `novelcraft_dev` 迁移落后 6 版（`ai_calls` 缺 `user_id` 致预算断言崩溃，`alembic upgrade head`）。
 - 证据：run `8f1fd62b-5ad8-4208-8fd8-887f33425631` succeeded；19 条真实 `ai_calls`（¥0.1889，write_polish 实测 95.6s）；`waiting_human` 人工定名断点真实出现并点选；产物《午夜头条》第一章 2350 chars；截图 protected-02..06。
-- 状态提升（据 ACCEPTANCE_CRITERIA）：NOV-W-001/W-002/L-003/R-002 已接线 → **可用**；"已验收"仍需生产部署 smoke（KI-002）。
+- 状态提升（据 ACCEPTANCE_CRITERIA）：NOV-W-001/W-002/L-003/R-002 已接线 → **可用**；生产验收仍需部署 smoke（KI-002）。
 - 默认无 Key 门禁不变：`test.skip` 保留，仍为 4 passed + skipped。
 
 ### 2026-07-28 AI 编辑真实浏览器闭环 E2E 通过（未完成顺序 item ②）
@@ -56,14 +65,14 @@
 - 闭环覆盖：续写（真实 DeepSeek `editor.continue`）→ 预览出现且正文不变 → 放弃建议后原文保持不变 → 再次续写 → 应用到草稿（正文含 AI 建议）→ 按版本 id 恢复「应用前原文 A」版本 → 原文回归、AI 建议消失。
 - 过程中定位并修复真实缺陷：E2E 用脆弱的 `nth(index)` 点击，在版本历史 UI 列表未刷新时点到 `body={}` 的 `offline_save` 版本，恢复后编辑器变空。修复：`Editor.tsx` 恢复按钮加 `data-version-id={v.id}`，测试改为按真实版本 id 点击并 `waitFor` 按钮可见。`restore_version` 应用逻辑本身正确（db.py 解码快照 body 为 `[{text:"A"}]`，写回 content.body）。
 - 证据：run9 两次真实 `ai_calls`（deepseek-v4-pro，succeeded）；截图 protected-07/08/09；恢复后 `content.body` 经 API 取证确为 `[{text:"档案室..."}]`，编辑器 DOM `<p>档案室...</p>`。
-- 状态提升：NOV-E-002、NOV-E-004 已接线 → **可用**；KI-003 收口为可用；"已验收"仍需生产部署 smoke（KI-002）。NOV-E-003（AI 失败不覆盖原文）仍为已接线，待失败注入 E2E。
+- 状态提升：NOV-E-002、NOV-E-004 已接线 → **可用**；KI-003 收口为可用；生产验收仍需部署 smoke（KI-002）。NOV-E-003（AI 失败不覆盖原文）仍为已接线，待失败注入 E2E。
 
 ### 2026-07-28 创作进度真实节点浏览器证据（未完成顺序 item ③）
 
 - 新增聚焦 E2E `小说主线③：创作进度运行中真实节点浏览器证据（protected）`：启动 run 后轮询到「生成中」节点/「创作中」状态即截图，约 3.4s 命中，生成 `protected-01-progress-running.png`（真实浏览器，运行中节点 + 完成度文案 + 真实节点标题）。该用例与既有 `小说主线③：建书→详情→导入章节→编辑→保存→重载持久化`（非 protected）同批通过。
 - `Progress.test.tsx` 补失败/重试单测：失败节点显示失败原因与「重试此步骤」按钮，点击后 `apiRaw` 打到 `/api/v1/runs/{id}/nodes/{key}/retry`（POST）；另保留空态与人工定名单测。单测 11 → **12 passed**。
 - 浏览器证据汇总：运行中(protected-01) + 人工定名(protected-02) + 19 节点完成态(protected-03，19 ai_calls) 来自 KI-001 run 8f1fd62b；失败/重试由单测 + 重试端点覆盖（真实浏览器失败注入需强制节点失败，留作后续）。
-- 状态提升：NOV-P-001 已接线 → **可用**；"已验收"仍需生产部署 smoke（KI-002）。
+- 状态提升：NOV-P-001 已接线 → **可用**；生产验收仍需部署 smoke（KI-002）。
 
 ### 2026-07-28 AI 交接 checkpoint
 

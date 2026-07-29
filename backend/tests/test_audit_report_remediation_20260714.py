@@ -291,12 +291,14 @@ def test_responsive_css_targets_real_layout():
     assert "display: flex" in media
 
 
-def test_costs_tab_uses_response_data_arrays():
+def test_retired_costs_tab_stays_out_of_the_novel_product_boundary():
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     costs = (ROOT / "frontend/src/components/Costs.tsx").read_text(encoding="utf-8")
-    assert "setBudgets(Array.isArray(r) ? r : (r.data ?? []))" in app
-    assert "setRoutes(Array.isArray(r) ? r : (r.data ?? []))" in app
+    assert 'from "./components/Costs"' not in app
+    assert "<Costs" not in app
     assert "Array.isArray(aiCalls)" in costs
+    assert "Array.isArray(budgets)" in costs
+    assert "Array.isArray(routes)" in costs
     assert "routesPager.pageData.map" in costs
 
 

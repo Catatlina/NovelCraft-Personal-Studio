@@ -1,8 +1,8 @@
 /**
- * Starlume AI 七页面桌面/手机截图集（KI-006 视觉证据）。
+ * Starlume AI 八页面桌面/手机截图集（KI-006 视觉证据）。
  *
  * 默认 `npm run test:e2e` 不会执行本文件：必须用环境变量显式开启，
- * 以免改变已验收的 "4 passed, 1 skipped" 门禁语义。
+ * 以免把按需视觉取证混入默认确定性门禁。
  *
  *    STARLUME_CAPTURE_VISUAL=1 npx playwright test e2e/visual.spec.ts
  *
@@ -32,7 +32,7 @@ async function registerFreshUser(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "小说首页", exact: true })).toBeVisible({ timeout: 15_000 });
 }
 
-test("七页面桌面/手机截图集", async ({ page }) => {
+test("八页面桌面/手机截图集", async ({ page }) => {
   test.skip(!process.env.STARLUME_CAPTURE_VISUAL, "visual capture is opt-in");
 
   await registerFreshUser(page);

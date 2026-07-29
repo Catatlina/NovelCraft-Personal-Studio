@@ -107,7 +107,8 @@ def test_expand_outline_endpoint(client):
 def test_workflow_nodes_structure():
     """TASK-008/V2: Bootstrap node structure is correct (four stages + human gate)."""
     from app.workers.tasks import BOOTSTRAP_NODES
-    assert len(BOOTSTRAP_NODES) == 19
+    assert len(BOOTSTRAP_NODES) == 20
     kinds = [n[1] for n in BOOTSTRAP_NODES]
     assert "human" in kinds
     assert "agent" in kinds
+    assert any(node[0] == "generate_story_arc" for node in BOOTSTRAP_NODES)

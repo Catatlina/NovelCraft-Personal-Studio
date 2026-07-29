@@ -31,11 +31,12 @@ def test_circuit_breaker_module_loads():
 # --- TASK-008: Workflow engine ---
 
 def test_bootstrap_nodes_unique():
-    """TASK-008/V2: Bootstrap creates exactly 19 unique nodes (18 agent + 1 human)."""
+    """TASK-008/V3: Bootstrap creates 20 unique nodes (19 agent + 1 human)."""
     from app.workers.tasks import BOOTSTRAP_NODES
     keys = [n[0] for n in BOOTSTRAP_NODES]
-    assert len(keys) == 19
-    assert len(set(keys)) == 19
+    assert len(keys) == 20
+    assert len(set(keys)) == 20
+    assert "generate_story_arc" in keys
 
 
 def test_celery_retry_config():

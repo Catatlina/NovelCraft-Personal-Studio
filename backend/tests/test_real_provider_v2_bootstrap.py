@@ -64,8 +64,10 @@ def test_real_v2_bootstrap_journey_a(real_env, seeded_novel):
 
     project_id, novel_id = seeded_novel
 
-    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
-        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
+        tasks.execute_bootstrap.run(
+            rid, start_key, api_key, api_url, model, api_key_ref=api_key_ref
+        )
 
     original_delay = tasks.execute_bootstrap.delay
     tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]

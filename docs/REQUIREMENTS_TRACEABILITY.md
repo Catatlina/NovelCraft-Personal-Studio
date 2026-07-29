@@ -25,9 +25,9 @@
 | NOV-S-001 | BYOK 只保存在当前会话 | `Settings.tsx` | 请求 Header 优先 | 已验收 | E2E 主线④；生产请求验证 | — |
 | NOV-S-002 | 创作知识导入、导出和统计 | `Settings.tsx` | knowledge/stats API | 已接线 | 页面/API 接线 | 真库数据操作 E2E |
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
-| NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 已验收 | 12/12；build；6 passed, 1 skipped（⑤ 富状态 retry 中） | CI 同版本全绿 |
+| NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 可用 | 2026-07-29 本地：后端 761 passed / 9 skipped / 1 xpassed；前端 12 passed；build；E2E 4 passed / 4 skipped；三项静态校验通过 | 推送修复并等待 CI 同版本全绿 |
 | NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected E2E 6 passed, 1 skipped（①②③④⑥⑦，真实 Key）；小说主线⑤ 因 `write_polish` invalid_output 未稳定通过（KI-007） | 修复 KI-007 后重跑 ⑤ |
-| NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 已验收 | 已部署 `novel.xyjin.xyz` commit `91bcf9b`，healthz 全绿 | — |
+| NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 已接线 | 历史生产版本为 `91bcf9b`；当前 main 与本批修复均未部署 | 当前提交推送、CI 全绿、部署及生产 smoke |
 
 ## 更新规则
 

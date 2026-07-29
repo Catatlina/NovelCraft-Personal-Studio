@@ -327,12 +327,12 @@ def test_budget_update_matches_settings_request_body(authed):
     assert float(response.json()["data"]["limit_cny"]) == 3.25
 
 
-def test_settings_uses_real_knowledge_and_budget_endpoints():
+def test_settings_uses_real_knowledge_endpoints_without_retired_admin_budget_ui():
     source = (ROOT / "frontend/src/components/Settings.tsx").read_text(encoding="utf-8")
     assert "/api/v1/import/knowledge_hub" not in source
     assert "/api/v1/admin/knowledge_hub" not in source
     assert "/api/v1/knowledge/import?project_id=" in source
-    assert "/api/v1/admin/budgets/${editBudget.pid}/${encodeURIComponent(editBudget.scope)}" in source
+    assert "/api/v1/admin/budgets/" not in source
 
 
 def test_frontend_response_contracts_match_backend_wrappers():

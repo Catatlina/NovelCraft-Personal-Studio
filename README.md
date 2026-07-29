@@ -1,11 +1,13 @@
-# NovelCraft Personal Studio — 开发文档总索引
+# Starlume AI — 小说创作工作台
 
-> 最后更新：2026-07-14
-> 需求基线：V2.2 ｜ 应用版本：2.2.0（与需求基线对齐；真实进度见 `PROJECT_PROGRESS.md`）
+> 最后更新：2026-07-29
+> 实时状态以 `docs/AI_HANDOFF.md`、`docs/REQUIREMENTS_TRACEABILITY.md` 和 `PROJECT_PROGRESS.md` 为准。
 
 ## 项目概述
 
-NovelCraft Personal Studio 是以“扫榜成书”为主轴的全自动 AI 内容生产系统：扫描小说榜单、提取市场结构、生成原创选题并自动完成整书，所有生成结果统一进入书库。自媒体生产以热点扫描为主轴；灵感生成保留为次要入口。
+Starlume AI（原 NovelCraft Personal Studio）是小说优先的个人创作工作台。当前产品主线覆盖小说首页、创作向导、扫榜选书、书库、创作进度、章节编辑、审阅与一致性、小说设置。AI 创作必须走真实 Provider；失败必须明确失败，AI 编辑必须先预览再由用户应用。
+
+历史自媒体、发布、协作等模块不再出现在当前产品 UI，但其旧数据、数据库迁移和仍被小说主线复用的后端源码暂不删除。
 
 - **仓库**: [Catatlina/NovelCraft-Personal-Studio](https://github.com/Catatlina/NovelCraft-Personal-Studio)
 - **技术栈**: FastAPI + PostgreSQL + Celery + Redis + React + TypeScript + Vite
@@ -13,12 +15,12 @@ NovelCraft Personal Studio 是以“扫榜成书”为主轴的全自动 AI 内�
 
 ## 当前交付状态
 
-旧版“总体 86%”按功能数量统计，无法代表 V2.2 主流程是否可用，现已废止。已有认证、AI Gateway、章节生成、上下文、伏笔、工作流骨架、发布与离线能力可以复用；当前 Playwright 主链已覆盖“CSV 榜单导入→市场分析→原创选题→建书→书库”和平台连接/成本页，真实 DeepSeek key 存在时会执行 protected AI 成书用例。热点→自媒体矩阵已有后端真实网关回归与 Dashboard 入口，并支持配置真实历史归档 URL 后回填近 7 天热点快照；没有授权历史源时接口明确返回 unsupported/502，不伪造历史数据。成稿质量人工验收、真实平台发布回执仍未完成。分项状态见 `PROJECT_PROGRESS.md`。
+旧版按功能数量计算的百分比进度已废止。当前以需求追踪矩阵、确定性真库 E2E、真实 Provider 证据和生产部署证据判定状态。V3 Bootstrap 已扩展为 20 个节点（19 个 AI 节点 + 1 个人工定名门禁）；当前版本仍需完成真实 Provider 全链复验与生产部署，不能仅凭页面或单元测试宣称整条小说链已验收。
 
 ## 系统架构
 
 ```
-frontend/          React 19 + TypeScript + Vite（29 组件，129 条后端路由）
+frontend/          React 19 + TypeScript + Vite
 backend/          
   app/
     api/v1/       auth, config (admin APIs)
@@ -26,7 +28,7 @@ backend/
     ai/           providers (deepseek/claude/openai/gemini)
     services/     15 service modules
     workers/      Celery tasks + beat schedule
-  alembic/        PostgreSQL migrations（17 个迁移，26+ 张表，单头线性）
+  alembic/        PostgreSQL migrations
 scripts/          backup.sh, migrate_v1_to_v2.py, stress_test.py
 nginx/            novelcraft.conf (SSE optimization)
 docker-compose.yml

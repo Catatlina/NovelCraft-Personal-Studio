@@ -56,6 +56,7 @@ def test_invalid_or_empty_bootstrap_output_is_not_persisted_or_succeeded(
     monkeypatch.setattr(tasks, "_enrich_blueprint_context", lambda context, _novel_id: context)
     monkeypatch.setattr(tasks, "_enrich_finalization_context", lambda context, _novel_id: context)
     monkeypatch.setattr(tasks, "_write_before_search", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(tasks, "_strategy_directive_for_chapter", lambda *_args, **_kwargs: ("", []))
     monkeypatch.setattr(tasks, "_create_checkpoint", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(
         tasks,

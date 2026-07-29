@@ -1,6 +1,6 @@
 # Starlume AI 当前已知问题
 
-> 更新时间:2026-07-28。按阻断程度排序;解决后必须保留验证证据并从本表移除或标注历史。
+> 更新时间：2026-07-29。按阻断程度排序；解决后必须保留验证证据并从本表移除或标注历史。
 
 ## 阻断生产验收
 
@@ -20,7 +20,7 @@
   - 截图:`frontend/artifacts/screenshots/protected-02..06.png`(人工定名/完成/书库/编辑器/审阅,5 张)。
 - 保留约束:`test.skip(!process.env.DEEPSEEK_API_KEY)` 未删除;无 Key 环境仍真实跳过,CI 门禁不受影响。
 
-### KI-002 新 UI 已部署生产 -- ✅ 已验收(2026-07-28)
+### KI-002 历史新 UI 版本已部署生产 -- 已验收(2026-07-28)
 
 - 状态:**已验收**。
 - 部署过程(2026-07-28):
@@ -29,6 +29,7 @@
   3. 全量重建并启动 api/worker/beat/migrate/frontend,healthz 返回 `ai_key_configured:true`、`worker:ok: 1 online`、DB/redis ok。
 - 生产验证:`https://novel.xyjin.xyz/` → 200;`/api/v1/healthz` 全绿;部署 commit 随后续修复推进到 `91bcf9b`。
 - 关联收口:KI-001/KI-003 由"可用"提升为**已验收**。
+- 边界：该证据只覆盖部署到 `91bcf9b` 的历史版本，不覆盖当前 `main @ f8e343c` 或 2026-07-29 修复批次；当前版本部署见 KI-009。
 
 ### KI-003 AI 编辑与版本恢复真实浏览器闭环 -- ✅ 已验收(2026-07-28)
 
@@ -61,9 +62,9 @@
   3. **硬编码 active/wired 自报告** 仅 `api/v1/billing.py:82` `UPDATE ... status='active'`--订阅付费成功后的真实状态写库,由真实支付/更新驱动,非能力自报告。
   - 结论:全部命中为非业务伪实现;按《23》§10 用 `GATE_ALLOW_WARNINGS=1` 复验仅表示"已确认良性",不等于修复告警,也不能据此外推全项目完成。
 
-### KI-006 全页面视觉证据 -- 可用(2026-07-28)
+### KI-006 全页面视觉证据 -- 可用(2026-07-29)
 
-- 状态：**可用**（八页面含扫榜选书完整桌面/手机截图集待产；富状态截图已有 ③/⑥ 证据;5 富状态全链 `write_polish` 修复已落地并单测通过,待生产 E2E 重跑取证,见 KI-007)。
+- 状态：**可用**（`visual.spec.ts` 已包含八页面，但历史截图证据仍是七页面口径；本批已把用例名改为八页面，待显式开启截图门禁并检查新产物。富状态全链 `write_polish` 修复待真实 Provider 重跑，见 KI-007）。
 - 证据:
   - `STARLUME_CAPTURE_VISUAL=1 npx playwright test --grep "七页面"` → **passed (9.1s)**，生成 15 张截图（七页面 1280/390 + 404）。注意：此截图集不含扫榜选书页面，需更新 visual.spec.ts 并重跑。
   - `npx playwright test --grep-invert "小说主线5"` → **6 passed, 1 skipped**;含 3-progress `protected-01-progress-running.png`(真实运行中节点)+ 6 版本恢复闭环 `protected-07/08/09.png`。
@@ -87,6 +88,25 @@
 - 下一步:
   1. 部署生产后重跑小说主线5,确认 `write_polish` 稳定通过。
   2. 5 通过后把 KI-006 / NOV-Q-002 提升为已验收。
+
+### KI-008 当前 `main` 的 GitHub Actions 后端失败
+
+- 状态：**可用**（修复已通过本地全量门禁，尚缺新 CI 同版本证据）。
+- 失败 run：`30425548279`，commit `f8e343c`；backend 为 `10 failed, 750 passed, 9 skipped, 1 xpassed`，其余 frontend、frontend-test、e2e、security 通过。
+- 根因与修复：
+  1. 新增 `generate_story_arc` 后，19 节点断言与完整流程 Provider 夹具未更新；
+  2. 同步调度测试未接受新的 `api_key_ref`；
+  3. 质量证据无条件声称 pacing/story-arc 来源，现改为只记录实际采样来源；
+  4. Costs/预算 UI 已按小说优先退役，但两条静态源码测试仍要求恢复旧入口；
+  5. `PROJECT_PROGRESS.md` 的历史措辞触发交付声明校验。
+- 本地证据：后端 `761 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；E2E `4 passed, 4 skipped`；交付声明、AI 真实性、前后端契约、`git diff --check` 通过。
+- 升级门禁：提交、推送并等待新的 Actions run 全绿后，才可标记已验收。
+
+### KI-009 当前 V3 代码尚未部署生产
+
+- 状态：**已接线**。
+- 本轮接手远端基线为 `f8e343c`；文档可确认的生产 commit 仍为 `91bcf9b`，当前最新提交以实时 Git 为准。
+- 升级门禁：CI 同版本全绿后按部署手册发布，并完成 healthz、登录、八页面、切书、建书/保存、V3 真实 AI 20 节点主链 smoke。
 
 ## 非本轮目标但必须如实保留
 

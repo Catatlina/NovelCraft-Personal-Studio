@@ -1,11 +1,11 @@
 """Celery tasks — workflow execution and scheduled jobs.
 
-V2 Bootstrap: 4-stage professional architecture
+V3 Bootstrap: 4-stage professional architecture
   Stage 1 - Planning: Idea → MarketFit → StoryPattern → CoreGameplay →
                        WorldArchitecture → CharacterSystem → ConflictMap
-  Stage 2 - Blueprint: VolumePlan → ChapterOutlineBatch → SceneBeatSheet
+  Stage 2 - Blueprint: VolumePlan → StoryArc → ChapterOutlineBatch → SceneBeatSheet
   Stage 3 - Writing:   ChapterDraft → SelfReview → Polish → LengthCheck → FactReconcile
-  Stage 4 - Finalization: ConsistencyCheck(6-dim) → ContinuityAudit → Humanize
+  Stage 4 - Finalization: Humanize → ConsistencyCheck(7-dim) → ContinuityAudit
 
 Features:
   - Context window management (write-before-search + write-after-reconcile, up to 100 chapters)
@@ -566,6 +566,11 @@ def _quality_evidence_payload(output: dict, self_review: dict | None = None,
     # V3 Story Arc (§4): surface the arc-coverage check as an 弧线追踪 dimension.
     if arc_check and isinstance(arc_check, dict) and arc_check.get("sampled"):
         dimensions["弧线追踪"] = score_by_status.get(str(arc_check.get("status", "")), 0)
+    sources = ["write_self_review", "final_consistency_check"]
+    if pacing and isinstance(pacing, dict) and pacing.get("sampled"):
+        sources.append("chapter_function_pacing")
+    if arc_check and isinstance(arc_check, dict) and arc_check.get("sampled"):
+        sources.append("story_arc_coverage")
     self_review = self_review if isinstance(self_review, dict) else {}
     score = self_review.get("self_score")
     if score is None and dimensions:
@@ -575,7 +580,7 @@ def _quality_evidence_payload(output: dict, self_review: dict | None = None,
         "score": float(score or 0),
         "dimensions": dimensions,
         "issues": issues,
-        "source": "write_self_review+final_consistency_check+chapter_function_pacing+story_arc_coverage",
+        "source": "+".join(sources),
     }
 
 

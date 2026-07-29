@@ -76,6 +76,22 @@ def test_quality_evidence_payload_keeps_score_dimensions_and_provenance():
     }
 
 
+def test_quality_evidence_payload_only_claims_sampled_optional_sources():
+    from app.workers.tasks import _quality_evidence_payload
+
+    payload = _quality_evidence_payload(
+        {"checks": {"characters": {"status": "pass"}}},
+        pacing={"sampled": True, "status": "warning"},
+        arc_check={"sampled": True, "status": "pass"},
+    )
+    assert payload["dimensions"]["节奏检测"] == 65
+    assert payload["dimensions"]["弧线追踪"] == 90
+    assert payload["source"] == (
+        "write_self_review+final_consistency_check"
+        "+chapter_function_pacing+story_arc_coverage"
+    )
+
+
 # --- idempotent persistence (docs/26: run/node 级生成键 + 数据库唯一索引兜底) --
 
 def test_next_chapter_persistence_uses_stable_generation_key():

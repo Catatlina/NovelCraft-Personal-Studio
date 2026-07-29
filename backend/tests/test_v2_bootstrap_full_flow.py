@@ -1,7 +1,7 @@
 """T2 full-flow: the audit's "Journey A" (从零建书 → 一键生成) end to end.
 
-Runs the complete V2 four-stage workflow synchronously against the real test
-database with a patched provider boundary: create_run seeds 19 nodes, planning runs to
+Runs the complete V3 four-stage workflow synchronously against the real test
+database with a patched provider boundary: create_run seeds 20 nodes, planning runs to
 the human gate, title confirmation resumes the run, and blueprint → writing →
 finalization persist a real chapter row, knowledge items and an event ledger.
 
@@ -16,7 +16,7 @@ from app.db import connect, encode, init_db, new_id
 V2_TASK_TYPES = [
     "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
     "plan_world_architecture", "plan_character_system", "plan_conflict_map",
-    "blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
+    "blueprint_volume_plan", "generate_story_arc", "blueprint_chapter_outline", "blueprint_scene_beat",
     "write_chapter_draft", "write_self_review", "write_polish",
     "write_length_check", "write_fact_reconcile",
     "final_humanize", "final_consistency_check", "final_continuity_audit",
@@ -92,7 +92,8 @@ def _provider_output(task_type: str) -> dict:
         "plan_character_system": {"characters": [{"name": "林序", "role": "主角", "arc": "逃避到承担"}, {"name": "沈澜", "role": "盟友", "arc": "守序到质疑"}, {"name": "闻烬", "role": "反派", "arc": "控制到崩塌"}]},
         "plan_conflict_map": {"conflicts": [{"type": "external", "between": ["林序", "执笔会"], "stakes": "人生叙事权", "escalation": "追踪升级为夺权"}]},
         "blueprint_volume_plan": {"volumes": [{"number": 1, "title": "回声来信", "arc": "发现异常", "start_chapter": 1, "end_chapter": 30}]},
-        "blueprint_chapter_outline": {"chapter_outlines": [{"volume": 1, "seq": 1, "title": "第一章 来信", "outline": "主角发现文字成真", "beats": ["停电", "短信", "敲门"]}, {"volume": 1, "seq": 2, "title": "第二章 旁证", "outline": "寻找证据", "beats": ["追查", "受阻", "反转"]}, {"volume": 1, "seq": 3, "title": "第三章 修档馆", "outline": "进入新地点", "beats": ["抵达", "冲突", "钩子"]}]},
+        "generate_story_arc": {"story_arcs": [{"name": "夺回叙事权", "goal": "林序识破执笔会并夺回人生的叙事权", "start_state": "被动承受文本反噬", "end_state": "能够主动约束改写规则", "participants": ["林序", "沈澜", "闻烬"], "core_conflict": "个人自由与叙事控制权之争", "key_events": ["确认文字成真", "找到修档馆", "反制执笔会"], "payoff_points": ["首次主动改写现实"], "outcome_impact": "主角获得进入主线终局的能力", "chapter_range": [1, 30]}]},
+        "blueprint_chapter_outline": {"chapter_outlines": [{"volume": 1, "seq": 1, "title": "第一章 来信", "outline": "主角发现文字成真", "beats": ["停电", "短信", "敲门"], "function_type": "开篇吸引", "chapter_goal": "确认异常来自自己写下的文本", "reader_expectation": "异常规则与首个危机得到揭示"}, {"volume": 1, "seq": 2, "title": "第二章 旁证", "outline": "寻找证据", "beats": ["追查", "受阻", "反转"], "function_type": "冲突升级", "chapter_goal": "建立文字影响现实的证据链", "reader_expectation": "发现能力代价与追踪者"}, {"volume": 1, "seq": 3, "title": "第三章 修档馆", "outline": "进入新地点", "beats": ["抵达", "冲突", "钩子"], "function_type": "伏笔埋设", "chapter_goal": "进入修档馆并接触核心规则", "reader_expectation": "看见更大的幕后组织"}]},
         "blueprint_scene_beat": {"scene_beats": [{"scene": 1, "pov": "林序", "location": "出租屋", "goal": "赶稿", "conflict": "文本成真", "outcome": "意外", "emotional_shift": "烦躁到惊惧"}, {"scene": 2, "pov": "林序", "location": "楼道", "goal": "确认敲门", "conflict": "无人回应", "outcome": "失败", "emotional_shift": "惊惧到好奇"}, {"scene": 3, "pov": "林序", "location": "街口", "goal": "求证", "conflict": "旁证出现", "outcome": "成功", "emotional_shift": "好奇到决心"}]},
         "write_chapter_draft": {"chapter": {"title": "第一章 来信", "body": long_body}},
         "write_self_review": {"self_score": 82, "strengths": ["钩子清晰"], "weaknesses": ["压力可加强"]},
@@ -116,8 +117,10 @@ def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
     # celery eager-ish: call the underlying function synchronously
     run_id = None
 
-    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
-        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
+        tasks.execute_bootstrap.run(
+            rid, start_key, api_key, api_url, model, api_key_ref=api_key_ref
+        )
 
     original_delay = tasks.execute_bootstrap.delay
     tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]
@@ -125,8 +128,8 @@ def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
         run_id = tasks.create_run(project_id, novel_id)
 
         run, node_status = _run_state(run_id)
-        # 19 nodes seeded, planning succeeded, human gate reached
-        assert len(node_status) == 19
+        # 20 nodes seeded, planning succeeded, human gate reached
+        assert len(node_status) == 20
         assert run["status"] == "waiting_human"
         for key in ("plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
                     "plan_world_architecture", "plan_character_system", "plan_conflict_map"):
@@ -142,7 +145,7 @@ def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
 
         run, node_status = _run_state(run_id)
         assert run["status"] == "succeeded", (run["status"], node_status)
-        for key in ("blueprint_volume_plan", "blueprint_chapter_outline", "blueprint_scene_beat",
+        for key in ("blueprint_volume_plan", "generate_story_arc", "blueprint_chapter_outline", "blueprint_scene_beat",
                     "write_chapter_draft", "write_self_review", "write_polish",
                     "write_length_check", "write_fact_reconcile",
                     "final_consistency_check", "final_continuity_audit", "final_humanize"):
@@ -182,8 +185,10 @@ def test_bootstrap_auto_confirms_title_for_unattended_basic_chain(seeded_novel, 
     monkeypatch.setattr(tasks, "complete", lambda **kwargs: _provider_output(kwargs["task_type"]))
     monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
 
-    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
-        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
+        tasks.execute_bootstrap.run(
+            rid, start_key, api_key, api_url, model, api_key_ref=api_key_ref
+        )
 
     original_delay = tasks.execute_bootstrap.delay
     tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]
@@ -244,8 +249,10 @@ def test_bootstrap_rejects_non_narrative_polish_before_overwriting_chapter(seede
     monkeypatch.setattr(tasks, "complete", lambda **kwargs: provider_output(kwargs["task_type"]))
     monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
 
-    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
-        tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
+        tasks.execute_bootstrap.run(
+            rid, start_key, api_key, api_url, model, api_key_ref=api_key_ref
+        )
 
     original_delay = tasks.execute_bootstrap.delay
     tasks.execute_bootstrap.delay = sync_dispatch  # type: ignore[assignment]
@@ -293,9 +300,11 @@ def test_journey_a_resumes_after_provider_failure(seeded_novel, monkeypatch):
 
     monkeypatch.setattr(tasks, "complete", flaky_complete)
 
-    def sync_dispatch(rid, start_key, api_key="", api_url="", model=""):
+    def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
         try:
-            tasks.execute_bootstrap.run(rid, start_key, api_key, api_url, model)
+            tasks.execute_bootstrap.run(
+                rid, start_key, api_key, api_url, model, api_key_ref=api_key_ref
+            )
         except gateway.ProviderError:
             # Real broker dispatch returns before this retryable worker error.
             pass
