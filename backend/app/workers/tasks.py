@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from copy import deepcopy
@@ -105,7 +106,14 @@ NODE_STAGE["human_confirm_title"] = "human"
 
 # Default budget per chapter (all 5 writing nodes combined)
 DEFAULT_CHAPTER_BUDGET_CNY = 0.50
-MIN_CHAPTER_CHARS = 1500
+
+# ── Hard AI gates (code-level, NOT prompt suggestions) ──
+# 每章非空白字符（中文字数）下限；低于则进入重写循环，用尽后标记「待人工重写」。
+MIN_CHAPTER_CHARS = int(os.getenv("MIN_CHAPTER_CHARS", "3000"))
+# 七维评分阈值；低于则进入重写循环，用尽后标记「待人工重写」。
+REVIEW_SCORE_THRESHOLD = float(os.getenv("CHAPTER_QUALITY_THRESHOLD", "85"))
+# 低于阈值时最多重写的次数（共 max_rewrites+1 轮评审）。
+MAX_CHAPTER_REWRITES = int(os.getenv("CHAPTER_MAX_REWRITES", "3"))
 
 # Per-node budget allocation (planning ≈ blueprint < writing < finalization)
 NODE_BUDGET_MULTIPLIERS: dict[str, float] = {
@@ -2047,11 +2055,7 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
     if _looks_like_non_narrative_text(chapter_text):
         db.close()
         raise OutputValidationError("write_chapter_draft returned non-narrative instructional text")
-    try:
-        _assert_min_chapter_length("write_chapter_draft", chapter_text)
-    except OutputValidationError:
-        db.close()
-        raise
+    # 字数下限 + 7 维评分硬门禁由末尾的 _review_and_finalize_chapter 统一处理（先落库，再进入重写循环）。
     chapter_seq = int(context.get("_chapter_seq", 1))
     chapter_meta = {"seq": chapter_seq, "word_count": count_content_chars(chapter_text)}
     cid = new_id()
@@ -2075,8 +2079,19 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
         (new_id(), cid, encode({"title": chapter.get("title", ""), "body": body, "meta": chapter_meta}),
          f"run:{run_id}:node:{node_key}:version"),
     )
-    # Auto-summarize chapter
-    _summarize_and_store(db, cid, chapter.get("body", []))
+    # Flush the draft so the review gate (separate connection) can UPDATE the
+    # same row without blocking on an uncommitted-insert row lock.
+    db.commit()
+    # 硬门禁（与续章/批量一致）：首章同样必须 ≥3000 字且 7 维评分 ≥85，不达标自动重写
+    # （最多 3 次）；用尽仍不达标则标记 needs_rewrite 交付，不硬失败整次建书。
+    continuity = _continuity_report(novel_id, chapter_seq)
+    review = _review_and_finalize_chapter(
+        cid, novel_id, project_id, chapter_seq, generation_key,
+        chapter.get("title", f"第一章"), list(chapter.get("body", [])), continuity,
+    )
+    context["chapter_text"] = "\n".join(review["body"])
+    # Auto-summarize final (possibly rewritten) chapter body
+    _summarize_and_store(db, cid, review["body"])
 def _persist_chapter_polish(db, node_key: str, output: dict, context: dict, run_id: str) -> None:
     """Apply polished text to the chapter in contents."""
     cid = context.get("chapter_id", "")
@@ -2306,7 +2321,8 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
     db = connect()
     from app.services.text_metrics import count_content_chars
     text = "\n".join(t if isinstance(t, str) else t.get("text", "") for t in chapter["body"])
-    _assert_min_chapter_length("gen_next_chapter", text)
+    # 字数硬门禁交由下方 _review_and_finalize_chapter 的统一重写循环处理：
+    # 过短会在评审循环里触发重写，用尽配额则标记 needs_rewrite 交付，不硬失败整次任务。
     chapter_meta = {"seq": next_seq, "word_count": count_content_chars(text)}
     if batch_id and batch_ordinal:
         chapter_meta.update({"batch_id": batch_id, "batch_ordinal": batch_ordinal,
@@ -2374,17 +2390,28 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
             "rewrite_attempts": review["rewrite_attempts"]}
 def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str, chapter_seq: int,
                                  generation_key: str, title: str, paragraphs: list[str],
-                                 continuity: dict, threshold: float = 85, max_rewrites: int = 2) -> dict:
-    """Review every generated chapter; rewrites must be reviewed again before acceptance."""
+                                 continuity: dict, threshold: float = REVIEW_SCORE_THRESHOLD,
+                                 max_rewrites: int = MAX_CHAPTER_REWRITES) -> dict:
+    """Hard AI gate for every generated chapter (code-level, not prompt suggestion).
+
+    Enforces two gates:
+      1) length >= MIN_CHAPTER_CHARS (non-whitespace Chinese chars)
+      2) review_7dim score >= threshold
+    If either fails, the chapter is rewritten (up to max_rewrites times).
+    Only a chapter that passes BOTH is marked 'reviewed'. If the rewrite budget
+    is exhausted, the chapter is persisted but marked 'needs_rewrite' — delivered
+    and clearly flagged for human rewrite, never silently delivered as done.
+    """
+    from app.services.text_metrics import count_content_chars
     current_title = title
     current_body = list(paragraphs)
+    last_score = 0.0
+    last_chars = 0
     for attempt in range(max_rewrites + 1):
         current_text = "\n".join(current_body)
-        length_issue = ""
-        try:
-            _assert_min_chapter_length("chapter_review", current_text)
-        except OutputValidationError as exc:
-            length_issue = str(exc)
+        last_chars = count_content_chars(current_text)
+        length_ok = last_chars >= MIN_CHAPTER_CHARS
+        length_issue = "" if length_ok else f"字数不足：{last_chars}/{MIN_CHAPTER_CHARS} 字"
         review = complete(
             run_id=None, node_key=None, project_id=project_id,
             task_type="review_7dim", prompt_name="bootstrap.review_7dim",
@@ -2393,6 +2420,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             client_mutation_id=f"{generation_key}:review:{attempt}:v1",
         )
         score = float(review["score"])
+        last_score = score
         issues = list(review.get("issues", []))
         if length_issue:
             score = min(score, threshold - 1)
@@ -2412,24 +2440,34 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                DO UPDATE SET score=EXCLUDED.score,dimensions=EXCLUDED.dimensions,issues=EXCLUDED.issues""",
             (new_id(), chapter_id, score, encode(review["dimensions"]), encode(issues), review_key),
         )
-        status = "pending_review"
-        db.execute("""UPDATE contents SET status=%s,meta=meta || %s,updated_at=now() WHERE id=%s""",
-                   (status, encode({"review_score": score, "review_issues": issues,
-                                    "review_attempts": attempt + 1,
-                                    "reader_experience": rx_summary,
-                                    "quality_status": "ai_review_passed" if score >= threshold else "draft_pending_review"}), chapter_id))
-        db.commit(); db.close()
-        if score >= threshold:
-            return {"accepted": False, "review_status": "pending_review", "final_score": score,
-                    "rewrite_attempts": attempt, "title": current_title, "body": current_body}
+        passed = (score >= threshold) and length_ok
+        if passed:
+            db.execute("""UPDATE contents SET status='reviewed',meta=meta || %s,updated_at=now() WHERE id=%s""",
+                       (encode({"review_score": score, "review_issues": issues,
+                                "review_attempts": attempt + 1,
+                                "reader_experience": rx_summary,
+                                "quality_status": "ai_review_passed",
+                                "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}"}), chapter_id))
+            db.commit(); db.close()
+            return {"accepted": True, "review_status": "reviewed", "final_score": score,
+                    "rewrite_attempts": attempt, "title": current_title, "body": current_body,
+                    "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}"}
         if attempt == max_rewrites:
-            db = connect()
+            reason = f"score={score:.0f}/{threshold:.0f}"
+            if not length_ok:
+                reason += f", chars={last_chars}/{MIN_CHAPTER_CHARS}"
             db.execute("""UPDATE contents SET status='needs_rewrite',meta=meta || %s,updated_at=now()
-                          WHERE id=%s""", (encode({"quality_status": "needs_review"}), chapter_id))
+                          WHERE id=%s""",
+                       (encode({"review_score": score, "review_issues": issues,
+                                "review_attempts": attempt + 1,
+                                "reader_experience": rx_summary,
+                                "quality_status": "needs_rewrite",
+                                "quality_reason": reason}), chapter_id))
             db.commit(); db.close()
             return {"accepted": False, "review_status": "needs_rewrite", "final_score": score,
-                    "rewrite_attempts": attempt, "title": current_title, "body": current_body}
-
+                    "rewrite_attempts": attempt, "title": current_title, "body": current_body,
+                    "quality_reason": reason}
+        # Rewrite and retry
         rewritten = complete(
             run_id=None, node_key=None, project_id=project_id,
             task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
@@ -2439,11 +2477,8 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         )["chapter"]
         current_title = rewritten["title"]
         current_body = list(rewritten["body"])
-        _assert_min_chapter_length("chapter_rewrite", "\n".join(current_body))
         rewritten_doc = {"type": "doc", "content": [{"type": "paragraph", "text": text}
-                                                         for text in current_body]}
-        from app.services.text_metrics import count_content_chars
-        db = connect()
+                                                    for text in current_body]}
         db.execute("""UPDATE contents SET title=%s,body=%s,meta=meta || %s,status='pending_review',updated_at=now()
                       WHERE id=%s""",
                    (current_title, encode(rewritten_doc),
@@ -2533,7 +2568,18 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
         )
         db.commit(); db.close()
         raise OutputValidationError("manual regeneration returned non-narrative text")
-    _assert_min_chapter_length("manual_regeneration", text)
+    # 字数硬门禁：与自动生成一致，过短则标记「待人工重写」而非硬失败整次任务。
+    chars = count_content_chars(text)
+    if chars < MIN_CHAPTER_CHARS:
+        db = connect()
+        db.execute(
+            "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+            (encode({"quality_status": "needs_rewrite",
+                     "quality_reason": f"manual_regeneration chars={chars}/{MIN_CHAPTER_CHARS} 字"}), chapter_id),
+        )
+        db.commit(); db.close()
+        return {"status": "needs_rewrite", "chapter_id": chapter_id, "seq": seq,
+                "reason": "regenerated chapter too short"}
 
     db = connect()
     previous_snapshot = {"title": chapter["title"], "body": chapter["body"], "meta": chapter_meta}

@@ -122,6 +122,17 @@ def _provider_output(task_type: str) -> dict:
         },
         "final_continuity_audit": {"continuity": {"status": "continuous", "gaps": [], "narrative_flow": "场景和情绪衔接自然"}},
         "final_humanize": {"humanized_text": "\n".join(long_body), "changes": ["收紧句子"]},
+        # 首章现在走 _review_and_finalize_chapter 硬门禁：评审通过（≥85）即标记 reviewed。
+        "review_7dim": {
+            "score": 90,
+            "dimensions": {"prose": 90, "plot": 88, "character_ooc": 90, "world_conflict": 85,
+                           "logic_consistency": 87, "pace": 82, "foreshadowing": 80},
+            "issues": [],
+            "reader_experience": {"expectation": 82, "conflict": 80, "payoff": 78,
+                                  "emotion_shift": 81, "worth_continuing": 84},
+        },
+        # 重写分支（正常首章评审即通过，不会走到这里；保留以避免 KeyError）。
+        "gen_next_chapter": {"chapter": {"title": "第一章 来信", "body": long_body}},
     }
     return outputs[task_type]
 
