@@ -17,7 +17,7 @@
 - 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。CI 修复已提交并推送为 `07a8c0f`。
 - 生产地址：<https://novel.xyjin.xyz>
 - 重要：生产已于 **2026-07-30** 首次部署 `9400ca3`（回滚 tag `backup-pre-20260730-111824`，已于 2026-07-30 清理删除），同日按用户要求做**全局部署刷新**：git fast-forward 到 `1bb697a`、应用容器 `up -d --build --force-recreate --scale flower=0` 干净重建（postgres/redis 保留），重建后 smoke 仍 **14/14 全绿**。
-- **即时刷新约定（2026-07-30 起）**：用户要求「以后每一个改动都要即时刷新生产」。即每次代码改动提交推送后，立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当前生产 HEAD = `69e2d59`（含评分阈值85/AI建议排版/审阅问题评分+改写按钮/AI建议apply保留段落格式/全部建议润色改写），地址 <https://novel.xyjin.xyz>，smoke **14/14 全绿**。§7 #1–#6 据此转「已验收」。
+- **即时刷新约定（2026-07-30 起）**：用户要求「以后每一个改动都要即时刷新生产」。即每次代码改动提交推送后，立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当前生产 HEAD = `237d7ef`（**根因修复 AI 建议应用后段落丢失**：实证模型对 editor_rewrite/polish 返回零换行，新增后端 `_ensure_editor_paragraphs` 兜底按句切 2-3 句/段 + 强化 prompt 排版硬要求 + 前端 `normalizeParagraphBreaks` 无换行兜底；生产真实调用 `editor/rewrite` 返回 `count(\n\n)=5`），地址 <https://novel.xyjin.xyz>，smoke **14/14 全绿**。§7 #1–#6 据此转「已验收」。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
@@ -104,6 +104,7 @@
 - 即时刷新约定（2026-07-30 起）：用户要求「以后每一个改动都要即时刷新生产」。每次代码改动提交推送后立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当日已执行：
   - 推送 `20a129a`（评分阈值85/AI建议排版/审阅问题评分+改写按钮）后立即刷新到生产，smoke 仍 **14/14 全绿**。
   - 推送 `69e2d59`（修复 AI 建议 apply 后段落折叠 + 审阅问题区「按全部建议润色/改写」总按钮）后立即刷新到生产，smoke 仍 **14/14 全绿**，生产 HEAD = `69e2d59`。
+  - 推送 `237d7ef`（**根因修复段落丢失**：实证模型对 editor_rewrite/polish 返回零换行，textarea 软换行制造分段假象、TipTap 一整块 `<p>` 即「一大段」；后端新增 `_ensure_editor_paragraphs` 按句切 2-3 句/段兜底 + 强化 prompt 排版硬要求 + 前端 `normalizeParagraphBreaks` 无换行兜底；生产真实调用 `editor/rewrite` 返回 `count(\n\n)=5`）后立即刷新到生产，smoke 仍 **14/14 全绿**，生产 HEAD = `237d7ef`。
 
 ## 2. 当前产品契约
 
