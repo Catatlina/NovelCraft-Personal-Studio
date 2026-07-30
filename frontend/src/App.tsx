@@ -12,7 +12,7 @@ import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listM
 import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
 import { RankingCenter } from "./components/RankingCenter";
 import { NotFoundPage } from "./components/NotFoundPage";
-import { buildAiEditPreview } from "./lib/editorPreview";
+import { buildAiEditPreview, normalizeParagraphBreaks } from "./lib/editorPreview";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
@@ -511,8 +511,9 @@ export default function App() {
         const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
           delta => setStreamPreview(previous => previous + delta));
         setStreamPreview("");
-        const nextText = buildAiEditPreview(sourceText, selectedText, text, op, Boolean(selection));
-        setPendingAiEdit({ op, originalText: selectedText, proposedText: text, nextText });
+        const normalizedText = normalizeParagraphBreaks(text);
+        const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
+        setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
         if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
         return;
       }
@@ -527,8 +528,9 @@ export default function App() {
     }
     try {
       const output = await api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) });
-      const nextText = buildAiEditPreview(sourceText, selectedText, output.text, op, Boolean(selection));
-      setPendingAiEdit({ op, originalText: selectedText, proposedText: output.text, nextText });
+      const normalizedText = normalizeParagraphBreaks(output.text);
+      const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
+      setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
       setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
       if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
     } catch (caught) {
@@ -571,17 +573,17 @@ export default function App() {
             if (conflictContentId) await cacheDelete(`offline-content:${conflictContentId}`);
             setOfflineNotice("检测到离线版本冲突，草稿已保存在版本树");
             if (chapter?.id && mutation.url.includes(chapter.id)) await loadVersions(chapter.id);
-          } else if (mutation.kind === "ai_operation") {
-            const selectedText = String(mutation.body.selection || "");
-            if (chapter?.id && mutation.url.includes(chapter.id) && editorTextRef.current.includes(selectedText)) {
-              const proposedText = String(response.data.text || "");
-              setPendingAiEdit({
-                op: mutation.url.split("/").at(-1) || "ai",
-                originalText: selectedText,
-                proposedText,
-                nextText: editorTextRef.current.replace(selectedText, proposedText),
-                sourceMutationId: mutation.id,
-              });
+            } else if (mutation.kind === "ai_operation") {
+              const selectedText = String(mutation.body.selection || "");
+              if (chapter?.id && mutation.url.includes(chapter.id) && editorTextRef.current.includes(selectedText)) {
+                const proposedText = normalizeParagraphBreaks(String(response.data.text || ""));
+                setPendingAiEdit({
+                  op: mutation.url.split("/").at(-1) || "ai",
+                  originalText: selectedText,
+                  proposedText,
+                  nextText: buildAiEditPreview(editorTextRef.current, selectedText, proposedText, mutation.url.split("/").at(-1) || "ai", true),
+                  sourceMutationId: mutation.id,
+                });
               await updateMutation(mutation.id, { status: "completed", result: response.data });
               setOfflineNotice("离线 AI 操作已完成，请预览后决定是否应用");
             } else {
@@ -634,11 +636,12 @@ export default function App() {
 
   async function applyOfflineAiResult(id: string, text: string) {
     if (!text) return;
+    const normalizedText = normalizeParagraphBreaks(text);
     setPendingAiEdit({
       op: "offline_ai",
       originalText: "",
-      proposedText: text,
-      nextText: `${editorTextRef.current}\n\n${text}`.trim(),
+      proposedText: normalizedText,
+      nextText: `${editorTextRef.current}\n\n${normalizedText}`.trim(),
       sourceMutationId: id,
     });
     setOfflineNotice("离线 AI 结果已载入预览，正文尚未改变");

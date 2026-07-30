@@ -291,6 +291,10 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                   <strong>本次建议的审阅问题</strong>
                   <span className="badge">评分：{editorAiReview.review.score ?? "--"}</span>
                 </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("polish", editorAiReview.review.issues.join("\n"))}>按全部建议润色</button>
+                  <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("rewrite", editorAiReview.review.issues.join("\n"))}>按全部建议改写</button>
+                </div>
                 {editorAiReview.review.issues.map((issue: string, index: number) => (
                   <div key={`${issue}-${index}`} style={{ marginBottom: 8 }}>
                     <div>• {issue}</div>

@@ -24,4 +24,10 @@ describe("AI 编辑预览", () => {
     const next = buildAiEditPreview("原文。", "原文。", proposed, "polish", true);
     expect(next).toBe("第一句。\n\n第二句。\n\n第三句。");
   });
+
+  it("AI 文本中的 $ 不会被 String.replace 特殊解释而破坏结构", () => {
+    const proposed = "价格是 $100。\n第二段。";
+    const next = buildAiEditPreview("原文。", "原文。", proposed, "polish", true);
+    expect(next).toBe("价格是 $100。\n\n第二段。");
+  });
 });
