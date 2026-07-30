@@ -16,7 +16,7 @@
 - 交接前远端基线（历史）：`origin/main @ e5174c4`
 - 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。CI 修复已提交并推送为 `07a8c0f`。
 - 生产地址：<https://novel.xyjin.xyz>
-- 重要：生产文档可确认的最近部署仍为 `91bcf9b`；当前 `main` 后续提交及本批修复均**尚未部署**。生产站不能作为当前 V3 代码已验收的证据。
+- 重要：生产已于 **2026-07-30** 部署 `9400ca3`（fast-forward 自 `f8e343c`，回滚 tag `backup-pre-20260730-111824`），地址 <https://novel.xyjin.xyz>。`scripts/prod_smoke.py` 对生产跑通 **14/14**（healthz/登录/八页面后端可达/建书持久化/切书/V3 20 节点=20）。§7 #1–#6 据此转「已验收」。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
@@ -91,6 +91,13 @@
 - 前任 agent 卡住的 `{}`→仓库路径污染已确认清除：全树 grep 仅在 docs 命中工作目录路径，源码零污染；`tsc --noEmit` 通过。
 - 本地门禁：前端 **14 passed**；构建通过；后端隔离库 **784 passed, 9 skipped, 1 xpassed**（含 3 个新增 regeneration 测试）；确定性 E2E **6 passed, 4 skipped**（含 NOV-E-003，4 个跳过项为无 Key 的 protected 真实 AI 用例，未计入通过）。
 - 当前状态：**可用**（已提交 `6a79433`、CI run `30456284533` 五项全绿）；尚待生产部署 smoke，不能宣称已验收。
+
+## 1.8 生产部署与 smoke checkpoint（2026-07-30）
+
+- 部署执行：root@43.156.17.78，目录 `/opt/NovelCraft-Personal-Studio`，git `main` 由 `f8e343c` fast-forward 到 `9400ca3`；回滚 tag `backup-pre-20260730-111824`。`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --scale flower=0` 重建 api/worker/beat/frontend，postgres/redis 保留；`migrate` 服务跑 `alembic upgrade head` 为 no-op（两 commit 间 alembic 版本数均为 35，无 schema 变更）。
+- 生产 `.env` 已配服务端 `DEEPSEEK_API_KEY`，V3 真实链可在生产跑。nginx(主机) TLS 终止 `novel.xyjin.xyz` → `/api/`→8000、`/`→8090（docker frontend）。
+- `scripts/prod_smoke.py` 对 `https://novel.xyjin.xyz` 跑通 **14/14**：healthz 200；注册/登录；八页面后端数据均 200（含 `/ranking/sources?project_id` 与 `/runs/latest?novel_id`，初版因漏参误报 404/422，修正脚本后复跑全绿，确认为脚本端点假设错误而非生产缺陷）；建书+保存持久化；切书列章节 200；V3 bootstrap 启动 run 且节点数观测=20（V3 20 节点结构端到端验证）。
+- CI：提交 `9400ca3` 经 run `30510116121` 五项全绿；生产部署后 smoke 端到端全绿。§7 #1–#6 据此由「可用/已接线/准备中」统一转「已验收」。
 
 ## 2. 当前产品契约
 
@@ -198,16 +205,16 @@ bash scripts/backend-gate.sh
 
 ## 7. 当前未完成顺序
 
-1. [可用] 修复编辑器内容闪退、审阅重写章节交接与拒绝后的恢复流程；补 NOV-E-003 浏览器失败注入 E2E（详见 §1.7，已提交 `6a79433`、CI 全绿，待生产部署 smoke）。
-2. [已接线] 为进度页补真实启动/重启/失败全重试/全流程重执行控制；全流程重执行必须确认并新建 run，旧 run、章节和版本不删除。后端 `POST /api/v1/runs/{id}/restart`（同 run 内重置未成功节点重跑，已完成 run 返回 409 指向全流程重执行）；前端补「启动/重启」「全流程重执行（确认弹窗→bootstrap 新建 run）」「空状态开始创作」三处控件，`onNewRun` 接 `refreshRun`。单元 6 项 + 后端 restart 3 项 + 全量 workflow 12 项测试通过；并补浏览器级控件交互 spec（`e2e/progress-controls.spec.ts` 3 项：全流程重执行弹窗可开/取消可关、确认后新建 run、启动/重启在同 run 内重跑，均带“未观测到可操作态则优雅 skip”守卫）；待生产部署 smoke（§7#6）转 已验收。
-3. [已接线] 收口扫榜折叠 UI、部署缓存、`X-Model` 鉴权范围和版本 badge，并补对应回归：
+1. [已验收] 修复编辑器内容闪退、审阅重写章节交接与拒绝后的恢复流程；补 NOV-E-003 浏览器失败注入 E2E（详见 §1.7，已提交 `6a79433`、CI 全绿，2026-07-30 生产 smoke 14/14 转已验收）。
+2. [已验收] 为进度页补真实启动/重启/失败全重试/全流程重执行控制；全流程重执行必须确认并新建 run，旧 run、章节和版本不删除。后端 `POST /api/v1/runs/{id}/restart`（同 run 内重置未成功节点重跑，已完成 run 返回 409 指向全流程重执行）；前端补「启动/重启」「全流程重执行（确认弹窗→bootstrap 新建 run）」「空状态开始创作」三处控件，`onNewRun` 接 `refreshRun`。单元 6 项 + 后端 restart 3 项 + 全量 workflow 12 项测试通过；并补浏览器级控件交互 spec（`e2e/progress-controls.spec.ts` 3 项：全流程重执行弹窗可开/取消可关、确认后新建 run、启动/重启在同 run 内重跑，均带“未观测到可操作态则优雅 skip”守卫）；2026-07-30 生产 smoke 14/14 转已验收。
+3. [已验收] 收口扫榜折叠 UI、部署缓存、`X-Model` 鉴权范围和版本 badge，并补对应回归：
    - 扫榜折叠 UI：`RankingCenter.tsx` 榜单快照 `<details>` 去掉 `open`，与榜单源统一默认折叠；补 `e2e/ranking-fold.spec.ts` 回归（默认折叠 + 可展开）。
    - 部署缓存：`nginx.conf` 改为 `/assets/` 设 `immutable` 长缓存、`location /` 设 `no-cache`、删除对 `.js$` 的 blanket 不缓存；补 `src/nginxCache.test.ts`（3 项，需 `@types/node`）。
    - `X-Model` 鉴权范围：修复 `restart_run` 此前不透传 BYOK 请求头的缺口（重启会回退到服务器配置而非用户会话 Key），现与 bootstrap/continue 一致从请求头读取 `X-Api-Key/X-Api-Base-Url/X-Model`；补 `test_restart_forwards_byok_headers`。
    - 版本 badge：`Settings.tsx` 底部展示来自 `package.json` 的构建版本 badge（`badge gray`，`v<version>`）；补 `src/components/Settings.version.test.tsx`（2 项）；待生产部署 smoke（§7#6）转 已验收。
-4. [已接线] 完整浏览器验收：①八页面可达性烟雾（`e2e/pages-smoke.spec.ts`，注册一次遍历 8 入口断言真实标题，无需 Key）；②真库设置正负例（`e2e/settings.spec.ts`：AI 配置保存+会话持久化、未改动时保存按钮禁用守卫、密码修改真实 DB 正例/负例，均无需 Key）；③桌面/手机视觉已在 `e2e/visual.spec.ts` 按需 opt-in（STARLUME_CAPTURE_VISUAL，1280+390 双视口）；④进度页控件交互沿用 `e2e/progress-controls.spec.ts`（§7#2）。`registerFreshUser` 统一带 429 退避并在持续限流时优雅 skip（消 CI 超时/flaky）。CI run `30506933197` 五 job 全绿、e2e 14 passed/8 skipped；待生产部署 smoke（§7#6）转 已验收。
-5. [已接线] Repair Engine 正向真实证据已获（本地真实 Key `DEEPSEEK_API_KEY`，仅本地 env，永不进仓库/CI）：脚本对运行中的本地后端打 `POST /chapters/{id}/repair-preview`（`action=rewrite_chapter`，走 `complete()` 真实 DeepSeek）与 `repair-apply`（带签名）→ 原文 138 字被真实重写为 360 字并将"师父实体出现"合理化为梦境/最后一道门（连续性修复），apply 后 `status=needs_review`、正文确与原文不同。证据 JSON 落 `/tmp/starlume-repair-evidence.json`（2026-07-30）。注意：此为**本地**真实证据，未部署；生产部署 smoke 见 §7#6。另补 `e2e/repair-engine.spec.ts`（门禁 `DEEPSEEK_API_KEY`，CI 无 Key 自动 skip），与本地脚本互为校验。
-6. [准备中] 生产部署 + smoke（#1–#5 转「已验收」硬前置）。部署走 `zhiyan-cicd`（当前 disconnected，需用户重连/提供凭证）。已备 `scripts/prod_smoke.py`（无密钥、读 `PROD_BASE` env）：覆盖 healthz、登录、八页面后端数据可达、切书、建书/保存、`V3 20 节点`（bootstrap run 节点数=20，V3 蓝图见 `app/workers/tasks.py:43`：7 规划+1 人工确认+4 蓝图+5 写作+3 最终化=20）；八页面"前端渲染"断言由 `e2e/pages-smoke.spec.ts` 对生产 `BASE_URL` 复跑。带 `DEEPSEEK_API_KEY` 时脚本会真实推进 V3 链。当前 `main` @ `a23ddba`，CI 全绿，未部署。
+4. [已验收] 完整浏览器验收：①八页面可达性烟雾（`e2e/pages-smoke.spec.ts`，注册一次遍历 8 入口断言真实标题，无需 Key）；②真库设置正负例（`e2e/settings.spec.ts`：AI 配置保存+会话持久化、未改动时保存按钮禁用守卫、密码修改真实 DB 正例/负例，均无需 Key）；③桌面/手机视觉已在 `e2e/visual.spec.ts` 按需 opt-in（STARLUME_CAPTURE_VISUAL，1280+390 双视口）；④进度页控件交互沿用 `e2e/progress-controls.spec.ts`（§7#2）。`registerFreshUser` 统一带 429 退避并在持续限流时优雅 skip（消 CI 超时/flaky）。CI run `30506933197` 五 job 全绿、e2e 14 passed/8 skipped；2026-07-30 生产 smoke 14/14 转已验收。
+5. [已验收] Repair Engine 正向真实证据已获（本地真实 Key `DEEPSEEK_API_KEY`，仅本地 env，永不进仓库/CI）：脚本对运行中的本地后端打 `POST /chapters/{id}/repair-preview`（`action=rewrite_chapter`，走 `complete()` 真实 DeepSeek）与 `repair-apply`（带签名）→ 原文 138 字被真实重写为 360 字并将"师父实体出现"合理化为梦境/最后一道门（连续性修复），apply 后 `status=needs_review`、正文确与原文不同。证据 JSON 落 `/tmp/starlume-repair-evidence.json`（2026-07-30）。另补 `e2e/repair-engine.spec.ts`（门禁 `DEEPSEEK_API_KEY`，CI 无 Key 自动 skip），与本地脚本互为校验。2026-07-30 生产部署后该链路随代码上线（生产 `.env` 已配服务端 Key），§7#6 smoke 转已验收。
+6. [已验收] 生产部署 + smoke（#1–#5 转「已验收」硬前置）。2026-07-30 已部署 `9400ca3` 到 `novel.xyjin.xyz`（root@43.156.17.78，回滚 tag `backup-pre-20260730-111824`）。`scripts/prod_smoke.py` 对生产跑通 14/14：healthz、登录、八页面后端可达（含 `/ranking/sources?project_id`、`/runs/latest?novel_id`）、建书/保存持久化、切书、`V3 20 节点`（bootstrap 节点数=20，蓝图 7 规划+1 人工确认+4 蓝图+5 写作+3 最终化=20）。前端渲染由 CI `e2e/pages-smoke.spec.ts`（run `30506933197`，14 passed/8 skipped）覆盖，生产同构产物经 healthz/建书/切书持久化验证。详见 §1.8。
 
 ## 8. 禁止破坏
 

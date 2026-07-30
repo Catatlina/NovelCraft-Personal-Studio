@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """§7 #6 生产部署 smoke（无密钥，读 PROD_BASE env；可选 DEEPSEEK_API_KEY 跑真实 V3 链）。
 
-覆盖：healthz / 登录 / 八页面后端数据可达 / 切书 / 建书+保存 / V3 20 节点。
+覆盖：healthz / 登录 / 建书+保存 / V3 bootstrap(20 节点) / 八页面后端数据可达 / 切书。
 八页面的"前端渲染"断言已在 e2e/pages-smoke.spec.ts 覆盖（CI 对 dev 后端跑过）；
 部署后可用 `BASE_URL=<PROD_BASE> npx playwright test e2e/pages-smoke.spec.ts`
 对生产 SPA 复跑同样的 8 页可达性检查。
+
+端点参数说明（避免误报）：
+- `/api/v1/ranking/sources` 的 `project_id` 为必填 query 参数。
+- `/api/v1/runs/latest` 无 run 时返回 404；故须在建书 + V3 bootstrap 产生 run 之后，
+  带 `?novel_id=` 校验「创作进度」页面。
+- 因此流程为：登录 → 建书(取 project_id/novel_id) → V3 bootstrap(产生 run) → 八页面(带参) → 切书。
 
 用法：
   PROD_BASE=https://starlume.example.com python3 scripts/prod_smoke.py
@@ -52,12 +58,35 @@ def main() -> None:
     s.headers.update({"Authorization": f"Bearer {token}"})
     log("register/login", True)
 
-    # 3) 八页面后端数据可达（各页对应的核心数据接口）
+    # 3) 取首个 project + 建书/保存（为后续页面参数与 V3 run 准备）
+    r = s.get(f"{api}/projects", timeout=10)
+    if r.status_code != 200 or not r.json().get("data"):
+        log("建书/保存", False, "无可用 project"); return
+    project_id = r.json()["data"][0]["id"]
+    r = s.post(f"{api}/projects/{project_id}/novels",
+               json={"idea": "生产 smoke 建书", "genre": "都市", "style": "现代"}, timeout=15)
+    if r.status_code != 200:
+        log("建书/保存", False, f"HTTP {r.status_code} {r.text[:120]}"); return
+    novel_id = r.json()["data"]["id"]
+    log("建书/保存", True, f"novel_id={novel_id}")
+
+    # 4) V3 bootstrap：启动向导 run（产生 run 记录，供「创作进度」页面校验）
+    r = s.post(f"{api}/novels/{novel_id}/bootstrap",
+               headers={"X-Api-Key": os.environ.get("DEEPSEEK_API_KEY", ""),
+                        "X-Api-Base-Url": os.environ.get("DEEPSEEK_API_BASE", ""),
+                        "X-Model": os.environ.get("DEEPSEEK_MODEL", "")},
+               timeout=20)
+    if r.status_code != 200:
+        log("V3 启动 run", False, f"HTTP {r.status_code} {r.text[:160]}"); return
+    run_id = r.json()["data"]["run_id"]
+    log("V3 启动 run", True, f"run_id={run_id}")
+
+    # 5) 八页面后端数据可达（此时已建书 + 有 V3 run，参数齐全）
     pages = {
         "小说首页": f"{api}/projects",
         "我的书库": f"{api}/projects",
-        "创作进度": f"{api}/runs/latest",
-        "扫榜选书": f"{api}/ranking/sources",
+        "创作进度": f"{api}/runs/latest?novel_id={novel_id}",
+        "扫榜选书": f"{api}/ranking/sources?project_id={project_id}",
         "创作向导": None,  # SPA 路由，数据由 bootstrap 提供，渲染见 pages-smoke
         "章节编辑器": f"{api}/projects",
         "审阅与一致性": f"{api}/projects",
@@ -73,30 +102,11 @@ def main() -> None:
         except Exception as e:
             log(f"页面可达[{name}]", False, str(e))
 
-    # 4) 建书 + 保存（create novel -> 持久化）
-    r = s.get(f"{api}/projects", timeout=10)
-    project_id = r.json()["data"][0]["id"]
-    r = s.post(f"{api}/projects/{project_id}/novels",
-               json={"idea": "生产 smoke 建书", "genre": "都市", "style": "现代"}, timeout=15)
-    if r.status_code != 200:
-        log("建书/保存", False, f"HTTP {r.status_code} {r.text[:120]}"); return
-    novel_id = r.json()["data"]["id"]
-    log("建书/保存", True, f"novel_id={novel_id}")
-
-    # 5) 切书（在书库内取该书 -> 列章节；空书也算可达）
+    # 6) 切书（在书库内取该书 -> 列章节；空书也算可达）
     r = s.get(f"{api}/contents", params={"project_id": project_id, "parent_id": novel_id}, timeout=10)
     log("切书(列章节)", r.status_code == 200, f"HTTP {r.status_code}")
 
-    # 6) V3 20 节点：启动向导 run，断言节点数=20
-    r = s.post(f"{api}/novels/{novel_id}/bootstrap",
-               headers={"X-Api-Key": os.environ.get("DEEPSEEK_API_KEY", ""),
-                         "X-Api-Base-Url": os.environ.get("DEEPSEEK_API_BASE", ""),
-                         "X-Model": os.environ.get("DEEPSEEK_MODEL", "")},
-               timeout=20)
-    if r.status_code != 200:
-        log("V3 启动 run", False, f"HTTP {r.status_code} {r.text[:160]}"); return
-    run_id = r.json()["data"]["run_id"]
-    # 轮询节点数
+    # 7) V3 20 节点：轮询 run 节点数
     nodes = 0
     for _ in range(20):
         r = s.get(f"{api}/runs/{run_id}", timeout=10)
