@@ -16,7 +16,7 @@
 - 交接前远端基线（历史）：`origin/main @ e5174c4`
 - 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。CI 修复已提交并推送为 `07a8c0f`。
 - 生产地址：<https://novel.xyjin.xyz>
-- 重要：生产已于 **2026-07-30** 部署 `9400ca3`（fast-forward 自 `f8e343c`，回滚 tag `backup-pre-20260730-111824`），地址 <https://novel.xyjin.xyz>。`scripts/prod_smoke.py` 对生产跑通 **14/14**（healthz/登录/八页面后端可达/建书持久化/切书/V3 20 节点=20）。§7 #1–#6 据此转「已验收」。
+- 重要：生产已于 **2026-07-30** 首次部署 `9400ca3`（回滚 tag `backup-pre-20260730-111824`），同日按用户要求做**全局部署刷新**：git fast-forward 到 `1bb697a`、应用容器 `up -d --build --force-recreate --scale flower=0` 干净重建（postgres/redis 保留），重建后 smoke 仍 **14/14 全绿**。当前生产 HEAD = `1bb697a`，地址 <https://novel.xyjin.xyz>。§7 #1–#6 据此转「已验收」。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
@@ -98,6 +98,7 @@
 - 生产 `.env` 已配服务端 `DEEPSEEK_API_KEY`，V3 真实链可在生产跑。nginx(主机) TLS 终止 `novel.xyjin.xyz` → `/api/`→8000、`/`→8090（docker frontend）。
 - `scripts/prod_smoke.py` 对 `https://novel.xyjin.xyz` 跑通 **14/14**：healthz 200；注册/登录；八页面后端数据均 200（含 `/ranking/sources?project_id` 与 `/runs/latest?novel_id`，初版因漏参误报 404/422，修正脚本后复跑全绿，确认为脚本端点假设错误而非生产缺陷）；建书+保存持久化；切书列章节 200；V3 bootstrap 启动 run 且节点数观测=20（V3 20 节点结构端到端验证）。
 - CI：提交 `9400ca3` 经 run `30510116121` 五项全绿；生产部署后 smoke 端到端全绿。§7 #1–#6 据此由「可用/已接线/准备中」统一转「已验收」。
+- 全局部署刷新（2026-07-30 后续）：用户要求「全局部署、重新构建」，git `main` 由 `9400ca3` fast-forward 到 `1bb697a`（仅文档+smoke 脚本，无运行时代码），应用容器 `--force-recreate --build` 干净重建，postgres/redis 不动；重建后 `prod_smoke.py` 复跑 **14/14 全绿**，公网 healthz 200。
 
 ## 2. 当前产品契约
 
