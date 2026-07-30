@@ -1,38 +1,69 @@
-"""书名生成 prompt 质量门禁（对齐番茄/起点真实爆款范式）。
+"""书名/标题/简介/去AI味 prompt 质量门禁（对齐真实爆款范式）。
 
-防止书名 prompt 退化回「关键词堆砌 + 4-8字硬卡」的老土风格。
+防止相关 prompt 退化回「关键词堆砌 + 字数硬卡 + 空泛要求」的老土风格。
+覆盖全量审计发现的三类同类问题：
+- P0 标题三处（plan_idea / regenerate_titles / shortstory.gen_titles）对齐 gen_titles 爆款范式
+- P1 去AI味（editor.deai 复用 deai.rewrite 方法论；deai.detect 干净则可不改）
+- P2 简介/自媒体标题（gen_synopsis / social.* 补范式）
 """
 import pytest
 
 from app.prompt_registry import PROMPT_SEEDS
 
+SEED_BY_NAME = {s[0]: s for s in PROMPT_SEEDS}
 
-def _gen_titles_body() -> str:
-    seed = next(s for s in PROMPT_SEEDS if s[0] == "bootstrap.gen_titles")
-    assert seed[1] == "3.1.0", "gen_titles prompt 版本应已升级到 3.1.0（注入爆款范式）"
+
+def _body(name, version):
+    seed = SEED_BY_NAME[name]
+    assert seed[1] == version, f"{name} prompt 版本应已升级到 {version}（注入爆款范式）"
     return seed[3]
 
 
-def test_title_prompt_uses_bestseller_paradigms():
-    body = _gen_titles_body()
-    # 必须引用真实爆款范式，而非泛泛的「商业感」
-    assert "爆款书名范式" in body
-    assert "我真没想重生啊" in body
-    assert "1979黄金时代" in body
-    # 必须禁止关键词平铺堆砌（用户吐槽的老土根因）
-    assert "禁止把" in body and "平铺堆砌" in body
-    # 字数约束放宽到 6-14，不再卡死 4-8
-    assert "6-14 字" in body
-    # 不得再出现旧版的「控制在 4-8 个字」
-    assert "4-8 个字" not in body
-    # 不得再出现旧版空泛的「商业感和时代感」
-    assert "商业感和时代感" not in body
+# (name, version, 必须出现的范式标记, 不得出现的退化标记)
+PROMPT_CONTRACTS = [
+    ("bootstrap.gen_titles", "3.1.0",
+     ["爆款书名范式", "我真没想重生啊", "1979黄金时代", "平铺堆砌", "6-14 字"],
+     ["4-8 个字", "商业感和时代感"]),
+    ("bootstrap.plan_idea", "1.1.0",
+     ["我真没想重生啊", "1979黄金时代", "平铺堆砌", "6-14 字"],
+     []),
+    ("bootstrap.regenerate_titles", "1.1.0",
+     ["我真没想重生啊", "1979黄金时代", "平铺堆砌", "6-14 字"],
+     []),
+    ("shortstory.gen_titles", "3.1.0",
+     ["像真人在榜单", "平铺堆砌", "烂俗模板词", "4-12 字"],
+     []),
+    ("bootstrap.gen_synopsis", "3.1.0",
+     ["我不是戏神", "反差/悬念", "空泛总结"],
+     ["制造期待感和好奇心"]),
+    ("editor.deai", "3.1.0",
+     ["段落炸碎", "口语化", "人味注入", "只改「味」不改「事」"],
+     []),
+    ("deai.detect", "1.1.0",
+     ["干净则可为空", "切勿为凑数"],
+     ["changes至少3条"]),
+    ("social.hm_title_variants", "1.1.0",
+     ["真实爆款", "平铺堆砌", "真的会谢"],
+     []),
+    ("social.gen_hotspot_content", "3.1.0",
+     ["钩子", "平铺堆砌", "无依据夸张词"],
+     []),
+]
+
+
+@pytest.mark.parametrize("name,version,required,forbidden", PROMPT_CONTRACTS)
+def test_prompt_keeps_bestseller_paradigm(name, version, required, forbidden):
+    body = _body(name, version)
+    for marker in required:
+        assert marker in body, f"{name} 缺少范式标记：{marker}"
+    for marker in forbidden:
+        assert marker not in body, f"{name} 仍含退化标记：{marker}"
 
 
 def test_title_prompt_renders_with_variables():
     from app.prompt_registry import render_prompt
 
-    body = _gen_titles_body()
+    body = _body("bootstrap.gen_titles", "3.1.0")
     out = render_prompt(body, {"genre": "都市", "style": "重生爽文", "idea": "重生2010创业"})
     assert "题材：都市" in out
     assert "风格：重生爽文" in out
