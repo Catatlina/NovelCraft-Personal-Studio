@@ -683,15 +683,15 @@ export default function App() {
   async function applyOfflineAiResult(id: string, text: string) {
     if (!text) return;
     const normalizedText = normalizeParagraphBreaks(text);
-    setPendingAiEdit({
-      op: "offline_ai",
-      originalText: "",
-      proposedText: normalizedText,
-      nextText: `${editorTextRef.current}\n\n${normalizedText}`.trim(),
-      sourceMutationId: id,
-    });
+    const nextText = `${editorTextRef.current}\n\n${normalizedText}`.trim();
+    setEditorText(nextText);
     setEditorResetNonce(n => n + 1);
-    setOfflineNotice("离线 AI 结果已载入预览，正文尚未改变");
+    if (id) {
+      await deleteMutation(id);
+      setOfflineAiResults(results => results.filter(result => result.id !== id));
+      setOfflineQueueCount((await listMutations()).length);
+    }
+    setOfflineNotice("离线 AI 结果已应用到草稿，自动保存会创建可恢复版本");
   }
 
   async function applyPendingAiEdit() {

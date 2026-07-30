@@ -204,14 +204,16 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               暂无章节
             </div>
           )}
-          <Pagination
-            page={chapterTreePager.page}
-            pageSize={chapterTreePager.pageSize}
-            total={chapterTree.length}
-            onPageChange={chapterTreePager.setPage}
-            onPageSizeChange={chapterTreePager.setPageSize}
-            pageSizeOptions={[10, 20, 50, 100]}
-          />
+          {chapterTreePager.totalPages > 1 && (
+            <Pagination
+              page={chapterTreePager.page}
+              pageSize={chapterTreePager.pageSize}
+              total={chapterTree.length}
+              onPageChange={chapterTreePager.setPage}
+              onPageSizeChange={chapterTreePager.setPageSize}
+              pageSizeOptions={[10, 20, 50, 100]}
+            />
+          )}
 
           {/* V3 §11.2: pacing curve over persisted per-chapter rhythm scores */}
           {(chapter?.parent_id || chapters[0]?.parent_id) ? (
@@ -392,14 +394,16 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                     </button>
                   ))}
                 </div>
-                <Pagination
-                  page={offlineResultsPager.page}
-                  pageSize={offlineResultsPager.pageSize}
-                  total={offlineAiResults?.length ?? 0}
-                  onPageChange={offlineResultsPager.setPage}
-                  onPageSizeChange={offlineResultsPager.setPageSize}
-                  pageSizeOptions={[10, 20, 50, 100]}
-                />
+                {offlineResultsPager.totalPages > 1 && (
+                  <Pagination
+                    page={offlineResultsPager.page}
+                    pageSize={offlineResultsPager.pageSize}
+                    total={offlineAiResults?.length ?? 0}
+                    onPageChange={offlineResultsPager.setPage}
+                    onPageSizeChange={offlineResultsPager.setPageSize}
+                    pageSizeOptions={[10, 20, 50, 100]}
+                  />
+                )}
               </>
             ) : null}
           </div>
