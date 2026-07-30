@@ -25,7 +25,9 @@
 
 - **当前生产 HEAD = `bbbab9a`（2026-07-30 追加）：书名 prompt 再升级——硬禁令 + 正反面 few-shot。** 用户反馈 3.1.0 版书名仍土（截图：《重生2010：AI教我当首富》《我的AI能预知未来》《重生2010：科技帝国从比特币开始》《都重生了还带什么AI》《重生之算法为王》）。根因：3.1.0 只说「禁止平铺堆砌」，但无硬禁令 + 无具体反例，模型被输入里的 AI/2010/重生绑架。已重写 `bootstrap.gen_titles` 3.1.0→**3.2.0**：新增【绝对禁止】清单（书名不得直接出现 AI/2010/重生/穿越/系统/算法/科技帝国/比特币等题材关键词，除非彻底口语化）、给出 5 个用户吐槽的土味反例并明确判零分、要求从人物状态/情绪/时代符号/反差切入而非设定切入；`bootstrap.plan_idea` 1.1.0→**1.2.0** 与 `bootstrap.regenerate_titles` 1.1.0→**1.2.0** 的 title_candidates 同步硬禁令与反例。`tests/test_title_prompt_quality.py` 更新契约（10/10 本地过）。CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**，DB 已 re-upsert 三个 prompt 新版本。
 
-- **历史 HEAD：** `1b0620c`=全量 prompt 审计修复 8 处（plan_idea/regenerate_titles/shortstory.gen_titles/editor.deai/deai.detect/gen_synopsis/social.*）；`2634c23`=章节硬门禁；`8755bef`=书名生成首次爆款范式修复；`c194ccf`=番茄四榜+仿写工坊。
+- **当前生产 HEAD = `a7a8001`（2026-07-30 追加）：修复 AI 建议应用到编辑器 + 版本历史中文化精简。** 用户反馈：①点「应用到草稿」后编辑区不刷新；②版本历史一堆英文标签（before_restore/ai_edit/offline_save）太乱。修复：RichEditor 同步 useEffect 去掉误判的 `lastEmittedValue` 早期返回，改为每次直接比较编辑器真实文本再 setContent；新增 `editorResetNonce`，`applyPendingAiEdit`/`applyOfflineAiResult` 时 +1 并纳入 RichEditor key，强制用最新正文重建一次，确保应用后编辑区立即显示新内容。版本历史：标签中文化（回滚前备份/AI 编辑/自动保存/离线冲突等）、只显示最新一个版本（按 created_at 倒序）、下方加明确的「回滚到此版本」按钮。前端 `tsc --noEmit` 通过，CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**。
+
+- **历史 HEAD：** `bbbab9a`=书名硬禁令升级；`1b0620c`=全量 prompt 审计修复 8 处；`2634c23`=章节硬门禁；`8755bef`=书名生成首次爆款范式修复；`c194ccf`=番茄四榜+仿写工坊。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
