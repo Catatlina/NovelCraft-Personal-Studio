@@ -27,7 +27,9 @@
 
 - **当前生产 HEAD = `420c615`（2026-07-30 追加）：编辑器修复——单页分页器隐藏 + 离线 AI 结果一键直接应用。** ①用户选 A：章节目录分页器与离线 AI 结果分页器在 `totalPages<=1` 时隐藏（`Editor.tsx` 两处 `<Pagination>` 包 `totalPages > 1` 条件）。②根因定位：离线 AI 结果按钮文字写「应用 AI 结果」，但 `applyOfflineAiResult` 实际只「载入预览、正文尚未改变」，需再去顶部预览面板点「应用到草稿」才进编辑区，造成「点了应用但编辑区没变」的体感。改为：`applyOfflineAiResult` 直接 `setEditorText(nextText)` + `setEditorResetNonce` 一键进编辑区并删除对应离线 mutation。前端 `tsc --noEmit` 通过、`vitest` 25 项全绿，CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**。
 
-- **历史 HEAD：** `a7a8001`=AI 应用+版本历史中文化；`bbbab9a`=书名硬禁令升级；`1b0620c`=全量 prompt 审计修复 8 处；`2634c23`=章节硬门禁；`8755bef`=书名生成首次爆款范式修复；`c194ccf`=番茄四榜+仿写工坊。
+- **当前生产 HEAD = `1ab83cc`（2026-07-30 追加）：字数门禁 3000→2000、七维评分 85→80、编辑器实时审阅加七维重写循环。** 用户三诉求：①实时审阅「按全部建议润色/改写」后字数缩到~1400，需≥2000；②其它字数门禁也降到 2000（3000 太多）；③实时审阅与首章/其他章节生成都跑七维审查，评分<80 自动打回并按审查建议重写直到≥80，且同步去 AI 味。改动：`tasks.py` 的 `MIN_CHAPTER_CHARS` 默认 3000→**2000**、`REVIEW_SCORE_THRESHOLD` 默认 85→**80**（覆盖首章/续章/批量/手动重写的统一 `_review_and_finalize_chapter` 门禁）；`prompt_registry.py` 章节生成类 prompt（`bootstrap.gen_chapter1` 3.1.0 / `narrative.gen_next_chapter` 3.3.0 / `bootstrap.write_chapter_draft` 1.1.0 / `bootstrap.write_polish` 1.1.0 / `bootstrap.write_length_check` 1.1.0）字数下限 3000→2000 并补显式去 AI 味，`editor.polish`/`editor.rewrite` 3.1.0 加「保篇幅≥2000+去 AI 味」；`main.py` 的 `ai_edit` 端点对 polish/rewrite/rewrite_chapter 生成后跑 `review_7dim`，score<80 或字数<2000 则带审查建议+去 AI 味要求重跑（最多 3 次），最终 `review_7dim` 随结果返回。`test_chapter_review_gate.py` 6/6 过；`test_audit_round2.py` 适配循环（打桩 `count_content_chars` 模拟长章节走单次通过）。生产 `.env` 未覆盖这两个常量，代码默认即生效。CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**。
+
+- **历史 HEAD：** `1ab83cc`=字数/评分门禁下调+实时审阅七维循环；`a7a8001`=AI 应用+版本历史中文化；`420c615`=单页分页隐藏+离线AI一键应用；`bbbab9a`=书名硬禁令升级；`1b0620c`=全量 prompt 审计修复 8 处；`2634c23`=章节硬门禁；`8755bef`=书名生成首次爆款范式修复；`c194ccf`=番茄四榜+仿写工坊。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
