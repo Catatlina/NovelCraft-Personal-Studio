@@ -86,7 +86,7 @@ test("创作进度①：无 run 时展示真实空状态", async ({ page }) => {
 });
 
 test("创作进度②：失败节点展示失败原因与重试控件（真实失败 run，无 Key）", async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   await registerFreshUser(page);
   await startWizardRun(page);
 

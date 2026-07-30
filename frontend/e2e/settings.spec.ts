@@ -90,6 +90,9 @@ test("设置-密码修改真实 DB 正例（旧密码正确）", async ({ page }
 test("设置-密码修改真实 DB 负例（旧密码错误被拒）", async ({ page }) => {
   await registerFreshUser(page);
   await openSettings(page);
+  // 密码字段在「账号安全」tab 下，默认停在 AI 连接 tab，需先切换
+  await page.getByRole("button", { name: "账号安全" }).click();
+  await expect(page.getByRole("heading", { name: "修改密码", exact: true })).toBeVisible({ timeout: 10_000 });
 
   await page.locator("label.settings-field", { hasText: "当前密码" }).locator("input").fill("wrong-password-0000");
   await page.locator("label.settings-field", { hasText: "新密码" }).locator("input").fill("Starlume-new-5678");

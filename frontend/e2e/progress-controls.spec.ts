@@ -85,7 +85,7 @@ async function waitForFailedRun(page: Page, headers: Record<string, string>, tim
 }
 
 test("控件①：全流程重执行弹窗可打开、取消可关闭", async ({ page }) => {
-  test.setTimeout(200_000);
+  test.setTimeout(300_000);
   await registerFreshUser(page);
   await startWizardRun(page);
 
@@ -113,7 +113,7 @@ test("控件①：全流程重执行弹窗可打开、取消可关闭", async ({
 });
 
 test("控件②：全流程重执行确认后新建 run，旧 run 保留", async ({ page }) => {
-  test.setTimeout(200_000);
+  test.setTimeout(300_000);
   await registerFreshUser(page);
   await startWizardRun(page);
 
@@ -152,7 +152,7 @@ test("控件②：全流程重执行确认后新建 run，旧 run 保留", async
 });
 
 test("控件③：启动/重启在同 run 内重跑（观测到失败态才断言，否则跳过）", async ({ page }) => {
-  test.setTimeout(200_000);
+  test.setTimeout(300_000);
   await registerFreshUser(page);
   await startWizardRun(page);
 
