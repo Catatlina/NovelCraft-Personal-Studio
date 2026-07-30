@@ -16,7 +16,8 @@
 - 交接前远端基线（历史）：`origin/main @ e5174c4`
 - 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。CI 修复已提交并推送为 `07a8c0f`。
 - 生产地址：<https://novel.xyjin.xyz>
-- 重要：生产已于 **2026-07-30** 首次部署 `9400ca3`（回滚 tag `backup-pre-20260730-111824`，已于 2026-07-30 清理删除），同日按用户要求做**全局部署刷新**：git fast-forward 到 `1bb697a`、应用容器 `up -d --build --force-recreate --scale flower=0` 干净重建（postgres/redis 保留），重建后 smoke 仍 **14/14 全绿**。当前生产 HEAD = `1bb697a`，地址 <https://novel.xyjin.xyz>。§7 #1–#6 据此转「已验收」。
+- 重要：生产已于 **2026-07-30** 首次部署 `9400ca3`（回滚 tag `backup-pre-20260730-111824`，已于 2026-07-30 清理删除），同日按用户要求做**全局部署刷新**：git fast-forward 到 `1bb697a`、应用容器 `up -d --build --force-recreate --scale flower=0` 干净重建（postgres/redis 保留），重建后 smoke 仍 **14/14 全绿**。
+- **即时刷新约定（2026-07-30 起）**：用户要求「以后每一个改动都要即时刷新生产」。即每次代码改动提交推送后，立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当前生产 HEAD = `20a129a`（含评分阈值85/AI建议排版/审阅问题评分+改写按钮），地址 <https://novel.xyjin.xyz>，smoke **14/14 全绿**。§7 #1–#6 据此转「已验收」。
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
@@ -100,6 +101,7 @@
 - CI：提交 `9400ca3` 经 run `30510116121` 五项全绿；生产部署后 smoke 端到端全绿。§7 #1–#6 据此由「可用/已接线/准备中」统一转「已验收」。
 - 全局部署刷新（2026-07-30 后续）：用户要求「全局部署、重新构建」，git `main` 由 `9400ca3` fast-forward 到 `1bb697a`（仅文档+smoke 脚本，无运行时代码），应用容器 `--force-recreate --build` 干净重建，postgres/redis 不动；重建后 `prod_smoke.py` 复跑 **14/14 全绿**，公网 healthz 200。
 - 生产机清理（2026-07-30）：① 删除回滚 tag `backup-pre-20260730-111824`（仅本地、未推 origin；`f8e343c` 仍为当前 HEAD 祖先，回退经 hash 仍可达，零风险）。② 杀除 host 级孤儿进程树（父 `sh ../scripts/e2e-backend.sh` 866081 及其子 866083 celery / 866084 uvicorn 127.0.0.1:8100 / 866088-9 celery 子进程，启动于部署日、非 systemd 不重生）；该 orphan celery 此前与 docker celery 共用 redis(127.0.0.1:6379) 抢同一任务队列，清理后竞争消除。nginx 本就不引用 8100（仅 127.0.0.1），外网不可达；docker 活动部署(api/worker/beat/frontend)未受影响，公网 healthz 仍 200。
+- 即时刷新约定（2026-07-30 起）：用户要求「以后每一个改动都要即时刷新生产」。每次代码改动提交推送后立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当日已执行：推送 `20a129a`（评分阈值85/AI建议排版/审阅问题评分+改写按钮）后立即刷新到生产，smoke 仍 **14/14 全绿**，生产 HEAD = `20a129a`。
 
 ## 2. 当前产品契约
 
