@@ -11,7 +11,7 @@ type Content = { id: string; title: string; body: { content?: { text?: string }[
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -29,6 +29,8 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   deaiLoading?: boolean;
   markLiked?: (text: string) => void;
   projectId?: string;
+  liveReviewing?: boolean;
+  onRequestReview?: () => void;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
   const docText = (body: any) => body?.content?.map((item: any) => item?.text || "").join("\n\n") || "";
@@ -276,7 +278,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", marginBottom: 8 }}>
-            <p className="editor-ai-help">选中正文后可润色、改写或去 AI 味；续写与整章重写可直接运行。所有结果都会先进入预览，不会直接覆盖正文。</p>
+            <p className="editor-ai-help">选中正文后可润色、改写或去 AI 味；续写与整章重写可直接运行。所有结果都会先进入预览，不会直接覆盖正文。右侧为实时审阅，章节打开即自动审计，随文字更新持续审计。</p>
             <div className="editor-ai-tools">
               <button type="button" onClick={() => runEditorOp("continue")}><Bot size={15} /><span><strong>续写本章</strong><small>沿当前正文继续</small></span></button>
               <button type="button" onClick={() => runEditorOp("rewrite_chapter")}><RefreshCcw size={15} /><span><strong>整章重写</strong><small>保留核心剧情</small></span></button>
@@ -285,25 +287,43 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               <button type="button" disabled={!selection.trim()} onClick={() => markLiked?.(selection.trim())}><Check size={15} /><span><strong>标记喜欢</strong><small>{selection.trim() ? "记录为偏好表达" : "请先选择文字"}</small></span></button>
             </div>
 
-            {editorAiReview?.review?.issues?.length ? (
+            {editorAiReview?.review ? (
               <div className="ai-msg">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <strong>本次建议的审阅问题</strong>
-                  <span className="badge">评分：{editorAiReview.review.score ?? "--"}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                  <strong>
+                    实时审阅
+                    {liveReviewing && (
+                      <span className="badge" style={{ marginLeft: 6 }}>
+                        <RefreshCcw size={11} style={{ animation: "spin 1s linear infinite", marginRight: 4 }} />审计中…
+                      </span>
+                    )}
+                  </strong>
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className="badge">评分：{editorAiReview.review.score ?? "--"}</span>
+                    <button type="button" className="btn-sm btn-ghost" onClick={() => onRequestReview?.()} disabled={liveReviewing}>
+                      <RefreshCcw size={12} />重新审计
+                    </button>
+                  </span>
                 </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                  <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("polish", editorAiReview.review.issues.join("\n"))}>按全部建议润色</button>
-                  <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("rewrite", editorAiReview.review.issues.join("\n"))}>按全部建议改写</button>
-                </div>
-                {editorAiReview.review.issues.map((issue: string, index: number) => (
-                  <div key={`${issue}-${index}`} style={{ marginBottom: 8 }}>
-                    <div>• {issue}</div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("polish", issue)}>按此建议润色</button>
-                      <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("rewrite", issue)}>按此建议改写</button>
+                {editorAiReview.review.issues?.length ? (
+                  <>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("polish", editorAiReview.review.issues.join("\n"))}>按全部建议润色</button>
+                      <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("rewrite", editorAiReview.review.issues.join("\n"))}>按全部建议改写</button>
                     </div>
-                  </div>
-                ))}
+                    {editorAiReview.review.issues.map((issue: string, index: number) => (
+                      <div key={`${issue}-${index}`} style={{ marginBottom: 8 }}>
+                        <div>• {issue}</div>
+                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                          <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("polish", issue)}>按此建议润色</button>
+                          <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("rewrite", issue)}>按此建议改写</button>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--text-2)" }}>✅ 当前文本暂无审阅问题</div>
+                )}
               </div>
             ) : null}
 

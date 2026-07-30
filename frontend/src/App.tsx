@@ -111,8 +111,16 @@ export default function App() {
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
+  const [liveReviewing, setLiveReviewing] = useState(false);
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
+  // NC-LIVE-AUDIT: refs so the debounced live reviewer always reads fresh guards.
+  const pendingAiEditRef = useRef(pendingAiEdit);
+  const streamPreviewRef = useRef(streamPreview);
+  const lastReviewTextRef = useRef("");
+  const reviewTimerRef = useRef<number | null>(null);
+  useEffect(() => { pendingAiEditRef.current = pendingAiEdit; }, [pendingAiEdit]);
+  useEffect(() => { streamPreviewRef.current = streamPreview; }, [streamPreview]);
   const projectsCacheKey = `projects:${userEmail || "signed-out"}`;
   const currentNovelCacheKey = `currentNovel:${userEmail || "signed-out"}`;
 
@@ -330,6 +338,19 @@ export default function App() {
 
   useEffect(() => { editorTextRef.current = editorText; }, [editorText]);
 
+  // NC-LIVE-AUDIT: 打开章节 + 打字停顿时自动审计（1.5s 防抖）；待确认/流式时跳过。
+  useEffect(() => {
+    if (!chapter?.id) return;
+    if (editorText.trim().length < 30) return;
+    if (pendingAiEditRef.current || streamPreviewRef.current) return;
+    if (editorText.trim() === lastReviewTextRef.current) return;
+    if (reviewTimerRef.current) window.clearTimeout(reviewTimerRef.current);
+    reviewTimerRef.current = window.setTimeout(() => {
+      void requestReview(chapter.id, editorText);
+    }, 1500);
+    return () => { if (reviewTimerRef.current) window.clearTimeout(reviewTimerRef.current); };
+  }, [editorText, chapter?.id]);
+
   async function refreshRun(runId: string) {
     const r = await api<Run>(`/api/v1/runs/${runId}`);
     setRun(r);
@@ -477,6 +498,29 @@ export default function App() {
       setOfflineNotice("已记录为偏好表达，将用于强化风格卡");
     } catch {
       /* 标记失败静默 */
+    }
+  }
+
+  // NC-LIVE-AUDIT: 实时审计——对当前章节文本打分并取回审阅问题，不修改正文。
+  // 章节打开（editorText 变化）与打字停顿都会触发；AI 建议待确认/流式生成时暂停。
+  async function requestReview(chapterId: string, text: string) {
+    const trimmed = text.trim();
+    if (trimmed.length < 30) return;
+    if (!navigator.onLine) return;
+    if (pendingAiEditRef.current || streamPreviewRef.current) return;
+    if (trimmed === lastReviewTextRef.current) return;
+    lastReviewTextRef.current = trimmed;
+    setLiveReviewing(true);
+    try {
+      const output = await api<{ review_7dim?: any; next_chapter_plan?: any }>(
+        `/api/v1/contents/${chapterId}/review`,
+        { method: "POST", body: JSON.stringify({ selection: text, client_mutation_id: crypto.randomUUID() }) },
+      );
+      setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
+    } catch {
+      /* 实时审计失败静默，绝不阻断写作 */
+    } finally {
+      setLiveReviewing(false);
     }
   }
 
@@ -778,7 +822,7 @@ export default function App() {
       }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorText); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}

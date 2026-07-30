@@ -1430,6 +1430,77 @@ def ai_edit(
     return ok(output)
 
 
+@app.post("/api/v1/contents/{content_id}/review")
+@limiter.limit("40/minute")
+def ai_chapter_review(
+    request: Request,
+    content_id: str,
+    payload: AiEditRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Live audit: score the current chapter text and surface review issues.
+
+    Analysis only — does not edit text and does not enforce the word-generation
+    quota (it is a read-only audit). Each *distinct* result is recorded as an
+    'ai_review' version branch so the audit trail stays traceable; identical
+    consecutive results are deduped to avoid version-tree spam."""
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
+    conn.close()
+    text = (payload.selection or "").strip()
+    if len(text) < 10:
+        return ok({"review_7dim": None, "next_chapter_plan": None, "skipped": "too_short"})
+    review_context = _chapter_review_context(content, text)
+    review_7dim = None
+    next_chapter_plan = None
+    try:
+        review_7dim = complete(
+            run_id=None, node_key=None, project_id=content["project_id"],
+            task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+            variables=review_context,
+            client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
+        )
+        next_chapter_plan = complete(
+            run_id=None, node_key=None, project_id=content["project_id"],
+            task_type="plan_next_chapter", prompt_name="narrative.plan_next_chapter",
+            variables=review_context,
+            client_mutation_id=f"{payload.client_mutation_id}:next" if payload.client_mutation_id else None,
+        )
+    except Exception:
+        # Live audit must never break the editor; fall back to a null review.
+        review_7dim = review_7dim or None
+        next_chapter_plan = next_chapter_plan or None
+    # C5-03-audit: record each distinct audit as a version branch (dedupe identical).
+    try:
+        conn = connect()
+        last = conn.execute(
+            """SELECT snapshot FROM versions WHERE entity_id=%s AND label='ai_review'
+               ORDER BY created_at DESC LIMIT 1""",
+            (content_id,),
+        ).fetchone()
+        same = False
+        if last and last.get("snapshot") is not None:
+            try:
+                snap = decode(last["snapshot"], {}) if not isinstance(last["snapshot"], dict) else last["snapshot"]
+                prev = snap.get("review", {}) if isinstance(snap, dict) else {}
+                if prev.get("score") == (review_7dim or {}).get("score") and \
+                        prev.get("issues") == (review_7dim or {}).get("issues"):
+                    same = True
+            except Exception:
+                same = False
+        if not same and review_7dim is not None:
+            conn.execute(
+                """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id)
+                   VALUES (%s, 'content', %s, 'ai_review', %s, 'live_audit', %s)""",
+                (new_id("ver"), content_id,
+                 encode({"review": review_7dim, "next": next_chapter_plan, "text_len": len(text)}),
+                 user["id"]),
+            )
+            conn.commit()
+    finally:
+        conn.close()
+    return ok({"review_7dim": review_7dim, "next_chapter_plan": next_chapter_plan})
+
+
 def _chapter_review_context(content: dict, text: str) -> dict:
     conn = connect()
     try:
