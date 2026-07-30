@@ -32,7 +32,7 @@ async function registerFreshUser(page: Page, attempt = 0): Promise<void> {
 async function openSettings(page: Page): Promise<void> {
   const nav = page.getByRole("navigation", { name: "小说创作主导航" });
   await nav.getByRole("button", { name: "小说设置", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "小说设置", exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("heading", { name: "小说设置", exact: true }).first()).toBeVisible({ timeout: 10_000 });
 }
 
 const KEY_INPUT = "输入 DeepSeek / OpenAI / Claude / Gemini Key";

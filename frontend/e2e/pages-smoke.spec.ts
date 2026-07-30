@@ -35,7 +35,7 @@ test("八页面可达性：遍历全部八个入口均渲染真实标题", async
   for (const tab of TABS) {
     await nav.getByRole("button", { name: tab.label, exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: tab.expectText, exact: true }),
+      page.getByRole("heading", { name: tab.expectText, exact: true }).first(),
     ).toBeVisible({ timeout: 10_000 });
   }
 });
