@@ -108,6 +108,8 @@ export default function App() {
   const [offlineNotice, setOfflineNotice] = useState("");
   const [streamPreview, setStreamPreview] = useState("");
   const [pendingAiEdit, setPendingAiEdit] = useState<PendingAiEdit | null>(null);
+  // 应用 AI 建议后强制 RichEditor 用最新正文重建一次，确保编辑区立即显示新内容（修复受控同步竞态）。
+  const [editorResetNonce, setEditorResetNonce] = useState(0);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
@@ -688,6 +690,7 @@ export default function App() {
       nextText: `${editorTextRef.current}\n\n${normalizedText}`.trim(),
       sourceMutationId: id,
     });
+    setEditorResetNonce(n => n + 1);
     setOfflineNotice("离线 AI 结果已载入预览，正文尚未改变");
   }
 
@@ -701,6 +704,7 @@ export default function App() {
       setOfflineQueueCount((await listMutations()).length);
     }
     setPendingAiEdit(null);
+    setEditorResetNonce(n => n + 1);
     setOfflineNotice("AI 建议已应用到草稿，自动保存会创建可恢复版本");
   }
 
@@ -822,7 +826,7 @@ export default function App() {
       }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorText); } }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, editorResetNonce, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorText); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}

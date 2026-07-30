@@ -76,11 +76,14 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
     // React StrictMode may reconnect passive effects after Tiptap has already
     // destroyed this editor instance. Calling getHTML() in that window reaches
     // a disposed ProseMirror schema and crashes the entire editor route.
-    if (value === lastEmittedValue.current) return;
-    if (editor && !editor.isDestroyed && value !== editor.getText({ blockSeparator: "\n\n" })) {
-      editor.commands.setContent(toEditorHtml(value));
+    if (!editor || editor.isDestroyed) return;
+    const currentText = editor.getText({ blockSeparator: "\n\n" });
+    if (value === currentText) {
       lastEmittedValue.current = value;
+      return;
     }
+    editor.commands.setContent(toEditorHtml(value));
+    lastEmittedValue.current = value;
   }, [value, editor]);
 
   if (!editor) return <div>Loading editor...</div>;

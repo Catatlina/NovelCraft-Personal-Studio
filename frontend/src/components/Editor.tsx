@@ -11,7 +11,7 @@ type Content = { id: string; title: string; body: { content?: { text?: string }[
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -30,6 +30,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   markLiked?: (text: string) => void;
   projectId?: string;
   liveReviewing?: boolean;
+  editorResetNonce?: number;
   onRequestReview?: () => void;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
@@ -81,9 +82,8 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
     }));
   }, [chapters]);
 
-  // Paginate the outline / version / offline-result lists.
+  // Paginate the outline / offline-result lists.
   const chapterTreePager = usePagination({ items: chapterTree, pageSize: 10, mode: "client" });
-  const versionsPager = usePagination({ items: versions, pageSize: 10, mode: "client" });
   const offlineResultsPager = usePagination({ items: offlineAiResults ?? [], pageSize: 10, mode: "client" });
 
   // ── Word count ──
@@ -246,7 +246,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         {/* CENTER: Novel prose editor */}
         <div className="ed-main" style={{ padding: 0, display: "flex", flexDirection: "column" }}>
           <RichEditor
-            key={`${chapter?.id ?? "empty"}:${(chapter as any)?.updated_at ?? ""}`}
+            key={`${chapter?.id ?? "empty"}:${(chapter as any)?.updated_at ?? ""}:${editorResetNonce ?? 0}`}
             value={editorText}
             onChange={setEditorText}
             onSelection={setSelection}
@@ -354,50 +354,57 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
       </div>
 
       {/* ── Bottom: Version history ── */}
-      {versions.length > 0 && (
-        <div className="card" style={{ marginTop: 12, padding: "14px 18px" }}>
-          <div className="card-title" style={{ marginBottom: 10 }}>
-            版本历史
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {versionsPager.pageData.map(v => (
-              <button key={v.id} data-version-id={v.id} onClick={() => restoreVersion(v.id)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
-                <RotateCcw size={12} /> {v.label}
-                <small style={{ color: "var(--text-3)", marginLeft: 4 }}>{new Date(v.created_at).toLocaleString()}</small>
-              </button>
-            ))}
-          </div>
-          <Pagination
-            page={versionsPager.page}
-            pageSize={versionsPager.pageSize}
-            total={versions.length}
-            onPageChange={versionsPager.setPage}
-            onPageSizeChange={versionsPager.setPageSize}
-            pageSizeOptions={[10, 20, 50, 100]}
-          />
-          {offlineAiResults?.length ? (
-            <>
-              <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>离线 AI 结果</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {offlineResultsPager.pageData.map(result => (
-                  <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
-                    应用 AI 结果
-                    <small style={{ color: "var(--text-3)", marginLeft: 4, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.text.slice(0, 36)}…</small>
-                  </button>
-                ))}
+      {versions.length > 0 && (() => {
+        const sorted = [...versions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const latest = sorted[0];
+        const cnLabel: Record<string, string> = {
+          before_restore: "回滚前备份",
+          ai_edit: "AI 编辑",
+          offline_save: "自动保存",
+          offline_conflict: "离线冲突",
+          initial_idea: "初始构思",
+          manual_save: "手动保存",
+          ai_generate: "AI 生成",
+        };
+        const labelText = cnLabel[latest.label] || latest.label;
+        return (
+          <div className="card" style={{ marginTop: 12, padding: "14px 18px" }}>
+            <div className="card-title" style={{ marginBottom: 10 }}>
+              版本历史
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontSize: 13 }}>
+                <span className="badge gray" style={{ marginRight: 8 }}>{labelText}</span>
+                <small style={{ color: "var(--text-3)" }}>{new Date(latest.created_at).toLocaleString()}</small>
               </div>
-              <Pagination
-                page={offlineResultsPager.page}
-                pageSize={offlineResultsPager.pageSize}
-                total={offlineAiResults?.length ?? 0}
-                onPageChange={offlineResultsPager.setPage}
-                onPageSizeChange={offlineResultsPager.setPageSize}
-                pageSizeOptions={[10, 20, 50, 100]}
-              />
-            </>
-          ) : null}
-        </div>
-      )}
+              <button type="button" onClick={() => restoreVersion(latest.id)} className="btn-sm btn-primary" style={{ fontSize: 12 }}>
+                <RotateCcw size={12} /> 回滚到此版本
+              </button>
+            </div>
+            {offlineAiResults?.length ? (
+              <>
+                <div className="card-title" style={{ marginTop: 12, marginBottom: 8 }}>离线 AI 结果</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {offlineResultsPager.pageData.map(result => (
+                    <button key={result.id} onClick={() => applyOfflineAiResult?.(result.id, result.text)} className="btn-sm btn-ghost" style={{ fontSize: 12 }}>
+                      应用 AI 结果
+                      <small style={{ color: "var(--text-3)", marginLeft: 4, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.text.slice(0, 36)}…</small>
+                    </button>
+                  ))}
+                </div>
+                <Pagination
+                  page={offlineResultsPager.page}
+                  pageSize={offlineResultsPager.pageSize}
+                  total={offlineAiResults?.length ?? 0}
+                  onPageChange={offlineResultsPager.setPage}
+                  onPageSizeChange={offlineResultsPager.setPageSize}
+                  pageSizeOptions={[10, 20, 50, 100]}
+                />
+              </>
+            ) : null}
+          </div>
+        );
+      })()}
 
       {/* ── Fullscreen overlay ── */}
       {isFullscreen && (
@@ -407,7 +414,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           display: "flex", flexDirection: "column"
         }}>
           <RichEditor
-            key={`${chapter?.id ?? "empty"}:${(chapter as any)?.updated_at ?? ""}:fullscreen`}
+            key={`${chapter?.id ?? "empty"}:${(chapter as any)?.updated_at ?? ""}:${editorResetNonce ?? 0}:fullscreen`}
             value={editorText}
             onChange={setEditorText}
             onSelection={setSelection}
