@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowRight, BookOpen, Feather, Loader2, Sparkles } from "lucide-react";
-import { apiRaw, getApiKey } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowRight, BookOpen, Copy, Feather, FileUp, Link2, Loader2, Sparkles, Wand2 } from "lucide-react";
+import { api, apiRaw, getApiKey } from "../lib/api";
 
 const GENRES = ["都市", "科幻", "玄幻", "仙侠", "悬疑", "历史", "游戏", "轻小说", "短篇", "其他"];
 const WORD_PRESETS = [
@@ -21,6 +21,7 @@ export function Wizard({
   setTargetWords,
   busy,
   startBootstrap,
+  projectId,
 }: {
   idea: string;
   setIdea: (value: string) => void;
@@ -32,9 +33,78 @@ export function Wizard({
   setTargetWords: (value: number) => void;
   busy: boolean;
   startBootstrap: () => void;
+  projectId?: string;
 }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [keyMissing, setKeyMissing] = useState(false);
+  // 仿写/润色状态
+  const [imitText, setImitText] = useState("");
+  const [imitUrl, setImitUrl] = useState("");
+  const [imitInstruction, setImitInstruction] = useState("");
+  const [imitFileName, setImitFileName] = useState("");
+  const [imitBusy, setImitBusy] = useState<"" | "imitate" | "polish">("");
+  const [imitError, setImitError] = useState("");
+  const [imitResult, setImitResult] = useState<{
+    mode: "imitate" | "polish";
+    text: string;
+    similarity?: { verdict?: string; max_similarity?: number };
+    copyright_warning?: string;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleImitFile(file: File | undefined) {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (!/\.(txt|md|json)$/.test(name)) {
+      setImitError("暂只支持 .txt / .md / .json 文件；docx/pdf 请将内容粘贴到文本框。");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setImitError("文件过大（上限 2MB），请截取需要的片段。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result || "");
+      setImitText(raw.slice(0, 20000));
+      setImitFileName(file.name + (raw.length > 20000 ? "（已截取前 2 万字）" : ""));
+      setImitError("");
+    };
+    reader.onerror = () => setImitError("文件读取失败，请重试或改用粘贴文本。");
+    reader.readAsText(file);
+  }
+
+  async function runImitation(mode: "imitate" | "polish") {
+    setImitError("");
+    setImitResult(null);
+    if (!projectId) { setImitError("项目尚未加载完成，请稍后再试。"); return; }
+    const text = imitText.trim();
+    const url = imitUrl.trim();
+    if (!text && !url) { setImitError("请先粘贴文本、上传文档或填写链接。"); return; }
+    if (text && text.length < (mode === "imitate" ? 200 : 50)) {
+      setImitError(mode === "imitate" ? "仿写需要至少 200 字的原文素材。" : "润色需要至少 50 字的文本。");
+      return;
+    }
+    if (url && !/^https:\/\//.test(url)) { setImitError("链接必须以 https:// 开头。"); return; }
+    setImitBusy(mode);
+    try {
+      const payload: Record<string, string> = { project_id: projectId, source_text: text, source_url: text ? "" : url };
+      if (mode === "imitate" && imitInstruction.trim()) payload.instruction = imitInstruction.trim();
+      const data = await api<{ text?: string; sample?: string; similarity?: { verdict?: string; max_similarity?: number }; copyright_warning?: string }>(
+        mode === "imitate" ? "/api/v1/imitation" : "/api/v1/imitation/polish",
+        { method: "POST", body: JSON.stringify(payload) },
+      );
+      const outText = String(data?.text || (data as any)?.sample || "").trim();
+      if (!outText) throw new Error("AI 未返回有效文本");
+      setImitResult({ mode, text: outText, similarity: data?.similarity, copyright_warning: data?.copyright_warning });
+    } catch (error: any) {
+      const detail = error?.payload?.detail ?? error?.payload?.message ?? error?.message ?? String(error);
+      const detailText = typeof detail === "object" ? (detail.code === "IMITATION_SIMILARITY_BLOCKED" ? `与原文相似度过高（${Math.round((detail.max_similarity || 0) * 100)}%），已按版权红线拦截，请调整仿写指令后重试。` : JSON.stringify(detail)) : String(detail);
+      setImitError(`${mode === "imitate" ? "仿写" : "润色"}失败：${detailText}`);
+    } finally {
+      setImitBusy("");
+    }
+  }
 
   useEffect(() => {
     if (getApiKey()) {
@@ -189,6 +259,108 @@ export function Wizard({
           </div>
         </aside>
       </div>
+
+      <section className="wizard-form starlume-card" style={{ marginTop: 24 }}>
+        <div className="wizard-step">
+          <span><Wand2 size={18} /></span>
+          <div>
+            <h3>仿写工坊（可选）</h3>
+            <p>粘贴一段范文、上传文档或给出链接，一键仿写其文风，或直接润色这段文字。仿写只学习文风，不复制内容，高相似输出会被版权红线拦截。</p>
+          </div>
+        </div>
+
+        <label className="wizard-field">
+          <span>范文 / 待润色文本</span>
+          <textarea
+            value={imitText}
+            onChange={event => { setImitText(event.target.value); setImitFileName(""); }}
+            rows={6}
+            maxLength={20000}
+            placeholder="粘贴 200 字以上的范文用于仿写，或 50 字以上的文本用于润色……"
+          />
+          <small>{imitFileName ? `已读取：${imitFileName}` : `${imitText.length} / 20000`}</small>
+        </label>
+
+        <div className="wizard-fields-grid">
+          <label className="wizard-field">
+            <span><Link2 size={13} style={{ verticalAlign: "-2px" }} /> 或者填写文章链接（HTTPS）</span>
+            <input
+              value={imitUrl}
+              onChange={event => setImitUrl(event.target.value)}
+              placeholder="https://…（填写文本后优先使用文本）"
+              maxLength={1000}
+            />
+          </label>
+          <label className="wizard-field">
+            <span><FileUp size={13} style={{ verticalAlign: "-2px" }} /> 或者上传文档（.txt / .md / .json）</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.md,.json,text/plain,text/markdown,application/json"
+              onChange={event => { handleImitFile(event.target.files?.[0]); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+            />
+          </label>
+        </div>
+
+        <label className="wizard-field">
+          <span>仿写指令（可选）</span>
+          <input
+            value={imitInstruction}
+            onChange={event => setImitInstruction(event.target.value)}
+            placeholder="例如：用这个文风写一段都市悬疑的开头，主角是外卖骑手"
+            maxLength={1000}
+          />
+        </label>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="wizard-submit"
+            style={{ flex: 1, minWidth: 180 }}
+            disabled={!!imitBusy || keyMissing || !projectId}
+            onClick={() => void runImitation("imitate")}
+          >
+            {imitBusy === "imitate" ? <><Loader2 className="spin" size={18} /> 正在仿写…</> : <><Sparkles size={18} /> 一键仿写</>}
+          </button>
+          <button
+            type="button"
+            className="wizard-submit"
+            style={{ flex: 1, minWidth: 180, opacity: 0.92 }}
+            disabled={!!imitBusy || keyMissing || !projectId}
+            onClick={() => void runImitation("polish")}
+          >
+            {imitBusy === "polish" ? <><Loader2 className="spin" size={18} /> 正在润色…</> : <><Feather size={18} /> 一键润色</>}
+          </button>
+        </div>
+        {imitError && <p className="field-error" role="alert" style={{ marginTop: 10 }}>{imitError}</p>}
+
+        {imitResult && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+              <strong>{imitResult.mode === "imitate" ? "仿写样稿" : "润色结果"}（{imitResult.text.length.toLocaleString("zh-CN")} 字）</strong>
+              {imitResult.similarity?.max_similarity !== undefined && (
+                <small>与原文相似度 {Math.round((imitResult.similarity.max_similarity || 0) * 100)}%{imitResult.similarity.verdict === "warning" ? " · 建议人工复核" : ""}</small>
+              )}
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => { void navigator.clipboard?.writeText(imitResult.text); }}
+              >
+                <Copy size={13} style={{ verticalAlign: "-2px" }} /> 复制
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => { setIdea(imitResult.text.slice(0, 3000)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              >
+                <ArrowRight size={13} style={{ verticalAlign: "-2px" }} /> 用作故事灵感
+              </button>
+            </div>
+            <textarea readOnly value={imitResult.text} rows={12} style={{ width: "100%", fontSize: 13, lineHeight: 1.8 }} />
+            {imitResult.copyright_warning && <small style={{ display: "block", marginTop: 6, opacity: 0.75 }}>{imitResult.copyright_warning}</small>}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

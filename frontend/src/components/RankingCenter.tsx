@@ -9,7 +9,7 @@ type Source = { source_key: string; display_name: string; last_success_at?: stri
 type Snapshot = { id: string; source_key: string; display_name: string; status: string; capture_status?: string; collector?: string; confidence?: number; validation_summary?: Record<string, unknown>; item_count: number; error?: string; captured_at: string };
 type Evidence = Record<string, unknown>;
 type UnifiedMetrics = { readers?: number; word_count?: number; completion_status?: string; engagement_index?: number };
-type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string; metadata_status?: string; collector?: string; confidence?: number; evidence?: Evidence; metrics?: { collector?: string; confidence?: number; evidence?: Evidence; validation?: Evidence }; unified_metrics?: UnifiedMetrics };
+type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string; metadata_status?: string; collector?: string; confidence?: number; evidence?: Evidence; metrics?: { collector?: string; confidence?: number; evidence?: Evidence; validation?: Evidence; leaderboard?: string; leaderboards?: string[] }; unified_metrics?: UnifiedMetrics };
 type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals?: Array<{ signal?: string; evidence?: string }>; audience?: { primary?: string; needs?: string[] }; title_patterns?: Array<{ pattern?: string }>; pacing?: { opening?: string; retention_hooks?: string[] }; originality_constraints?: string[]; signals?: any; layers?: any; heatmap?: any; keywords?: any; candidates?: Topic[]; market_score_avg?: number | null; trend?: { direction?: string; delta?: number } };
 type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
 type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string; originality_notes?: string; novel_id?: string };
@@ -271,8 +271,9 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   }
 
   async function toggleSnapshot(snapshot: Snapshot) {
-    if (openSnapshotId === snapshot.id) { setOpenSnapshotId(""); return; }
+    if (openSnapshotId === snapshot.id) { setOpenSnapshotId(""); setBoardFilter(""); return; }
     setOpenSnapshotId(snapshot.id);
+    setBoardFilter("");
     if (snapshot.status !== "succeeded" || snapshotDetails[snapshot.id]) return;
     setBusy(`detail:${snapshot.id}`); setMessage("");
     try {
@@ -347,7 +348,19 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const snapshotsPager = usePagination({ items: snapshots, pageSize: 10, mode: "client" });
   const topicsView = topicTab === "bookmarked" ? bookmarkedTopics : topics;
   const topicsPager = usePagination({ items: topicsView, pageSize: 10, mode: "client" });
-  const openItems = openSnapshotId ? (snapshotDetails[openSnapshotId]?.items || []) : [];
+  const [boardFilter, setBoardFilter] = useState("");
+  const allOpenItems = openSnapshotId ? (snapshotDetails[openSnapshotId]?.items || []) : [];
+  const boardOptions = (() => {
+    const set = new Set<string>();
+    for (const it of allOpenItems) {
+      for (const lb of (it.metrics?.leaderboards || (it.metrics?.leaderboard ? [it.metrics.leaderboard] : []))) set.add(lb);
+    }
+    const preferred = ["巅峰榜", "推荐榜·聚合", "新书榜", "完本榜·聚合"];
+    return [...preferred.filter(p => set.has(p)), ...[...set].filter(s => !preferred.includes(s)).sort()];
+  })();
+  const openItems = boardFilter
+    ? allOpenItems.filter(it => (it.metrics?.leaderboards || (it.metrics?.leaderboard ? [it.metrics.leaderboard] : [])).includes(boardFilter))
+    : allOpenItems;
   const snapshotItemsPager = usePagination({ items: openItems, pageSize: 10, mode: "client" });
 
   return <div style={{ display: "grid", gap: 20 }}>
@@ -617,6 +630,38 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                       ) : (
                         <div>
                           <strong style={{ fontSize: 14 }}>榜单条目</strong>
+                          {boardOptions.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "10px 0 4px" }}>
+                              <button
+                                className="btn-sm"
+                                style={{
+                                  background: boardFilter === "" ? "var(--primary-dim)" : "var(--bg-hover)",
+                                  color: boardFilter === "" ? "var(--primary-light)" : "var(--text-2)",
+                                  border: boardFilter === "" ? "1px solid var(--border-strong)" : "1px solid transparent",
+                                }}
+                                onClick={() => { setBoardFilter(""); snapshotItemsPager.setPage(1); }}
+                              >
+                                全部（{allOpenItems.length}）
+                              </button>
+                              {boardOptions.map(lb => {
+                                const count = allOpenItems.filter(it => (it.metrics?.leaderboards || (it.metrics?.leaderboard ? [it.metrics.leaderboard] : [])).includes(lb)).length;
+                                return (
+                                  <button
+                                    key={lb}
+                                    className="btn-sm"
+                                    style={{
+                                      background: boardFilter === lb ? "var(--primary-dim)" : "var(--bg-hover)",
+                                      color: boardFilter === lb ? "var(--primary-light)" : "var(--text-2)",
+                                      border: boardFilter === lb ? "1px solid var(--border-strong)" : "1px solid transparent",
+                                    }}
+                                    onClick={() => { setBoardFilter(lb); snapshotItemsPager.setPage(1); }}
+                                  >
+                                    {lb}（{count}）
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                           <ol style={{ margin: "10px 0 0", paddingLeft: 24, fontSize: 13 }}>
                             {snapshotItemsPager.pageData.map(item => {
                               const collector = item.collector || item.metrics?.collector || "未记录";
@@ -626,6 +671,9 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                               return <li key={item.id} style={{ marginBottom: 10, lineHeight: 1.7 }}>
                                 {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary-light)" }}>{item.title || "未命名作品"}</a> : (item.title || "未命名作品")}
                                 <small style={{ color: "var(--text-2)" }}> · {item.author || "未知作者"}{item.category ? ` · ${item.category}` : ""}</small>
+                                {(item.metrics?.leaderboards || (item.metrics?.leaderboard ? [item.metrics.leaderboard] : [])).map(lb => (
+                                  <span key={lb} className="badge purple" style={{ marginLeft: 6, fontSize: 11 }}>{lb}</span>
+                                ))}
                                 <div><small style={{ color: "var(--text-3)" }}>采集器：{collector} · 置信度：{confidence === undefined ? "未记录" : `${Math.round(confidence * 100)}%`} · 证据：{evidenceText(evidence)}</small></div>
                                 {item.unified_metrics && (
                                   <div style={{ marginTop: 4, display: "flex", gap: 12 }}>

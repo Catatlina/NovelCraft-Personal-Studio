@@ -313,80 +313,64 @@ def _fetch_fanqie_rank_list(rv: str, max_count: int = 10) -> list[dict]:
         return []
 
 
-def _fetch_fanqie_via_browser() -> list[dict]:
-    """Use Playwright to scrape the rendered rank page for full leaderboard data.
-    Fallback when /api/rank/list only returns 7 books."""
+def _fanqie_read_num(value) -> int:
+    """Parse fanqie readCount which may be int, numeric string, or '123.4万'."""
+    if value in (None, ""):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    s = str(value).strip()
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return []
-
-    results: list[dict] = []
-    rank_urls = [
-        ("https://fanqienovel.com/rank/all", "巅峰榜"),
-        ("https://fanqienovel.com/rank/hotsales", "热销榜"),
-        ("https://fanqienovel.com/rank/newbook", "新书榜"),
-        ("https://fanqienovel.com/rank/read", "阅读榜"),
-    ]
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            )
-            seen = set()
-
-            for url, label in rank_urls:
-                try:
-                    page = context.new_page()
-                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(2000)  # Wait for JS render
-
-                    # Extract book cards — tomato uses a[href*='/page/'] for book links
-                    anchors = page.locator("a[href*='/page/']").all()
-                    for a in anchors[:30]:  # Max 30 per leaderboard
-                        try:
-                            title = (a.get_attribute("title") or a.inner_text()).strip()
-                            href = a.get_attribute("href") or ""
-                        except Exception:
-                            continue
-                        if not title or len(title) < 2 or len(title) > 40:
-                            continue
-                        # Skip non-book links
-                        if any(w in title for w in ["排行榜", "更多", "全部", "分类"]):
-                            continue
-                        dk = hashlib.sha256(title.encode()).hexdigest()
-                        if dk in seen:
-                            continue
-                        seen.add(dk)
-                        bid = href.rsplit("/", 1)[-1] if "/page/" in href else ""
-                        results.append({
-                            "rank": len(results) + 1,
-                            "title": title,
-                            "author": "",
-                            "source": "fanqie",
-                            "source_book_id": bid,
-                            "url": f"https://fanqienovel.com{href}" if href.startswith("/") else href,
-                            "leaderboard": label,
-                        })
-                    page.close()
-                except Exception:
-                    pass
-
-            browser.close()
-    except Exception:
+        return int(float(s))
+    except (TypeError, ValueError):
         pass
+    m = re.match(r"([\d.]+)\s*(万|亿)?", s)
+    if m and m.group(1):
+        try:
+            n = float(m.group(1))
+        except ValueError:
+            return 0
+        if m.group(2) == "万":
+            n *= 10_000
+        elif m.group(2) == "亿":
+            n *= 100_000_000
+        return int(n)
+    return 0
 
-    return results
+
+def _aggregate_board(pool: list[dict], label: str, cap: int) -> list[dict]:
+    """Aggregate per-category items into one leaderboard: dedup by book id,
+    sort by read count desc, take top ``cap``, assign 1-based ranks."""
+    best: dict[str, dict] = {}
+    for it in pool:
+        bid = it.get("source_book_id", "")
+        if not bid:
+            continue
+        prev = best.get(bid)
+        if prev is None or _fanqie_read_num(it.get("read_count")) > _fanqie_read_num(prev.get("read_count")):
+            best[bid] = it
+    ranked = sorted(best.values(), key=lambda x: _fanqie_read_num(x.get("read_count")), reverse=True)[:cap]
+    out = []
+    for i, it in enumerate(ranked, 1):
+        c = dict(it)
+        c["rank"] = i
+        c["leaderboard"] = label
+        out.append(c)
+    return out
 
 
 def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = None) -> list[dict]:
-    """Fetch 番茄小说: 巅峰榜API + 全分类排名.
+    """Fetch 番茄小说 four real leaderboards, merged into one item list.
 
-    Data sources:
-    1. /api/rank/list — real cross-category default leaderboard (~7-10 books)
-    2. /api/rank/category/list — per-category rankings (37 cats × both genders)
+    Boards (per user-confirmed design 2026-07-30):
+    1. 巅峰榜   — /api/rank/list (real cross-category board, ~7 books)
+    2. 新书榜   — /api/rank/category/list rankMold=1, aggregated across all
+                  categories/genders, sorted by read count
+    3. 推荐榜·聚合 — rankMold=2 (阅读/热门榜) aggregated top N
+    4. 完本榜·聚合 — rankMold=2 items with creationStatus=='1' (完结)
+
+    Each item carries ``leaderboard`` (primary label) and ``leaderboards``
+    (all labels the book appears on). No browser scraping, no mock data.
     """
     target = max_count or _RANKING_FANQIE_COUNT
     meta = _fanqie_meta()
@@ -395,43 +379,56 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
         return [{"source": "fanqie", "degraded": True,
                  "error": "Fanqie unreachable"}]
 
-    all_results: list[dict] = []
-    seen: set[str] = set()
+    per_board = max(20, target // 3)
 
-    # Phase 1: Real leaderboard API + browser scraping
-    for item in _fetch_fanqie_rank_list(rv):
-        dk = _make_dedup_key(item["title"], item["author"])
-        if dk not in seen:
-            seen.add(dk)
-            all_results.append(item)
+    # Phase 1: 巅峰榜 (real direct API)
+    peak_items = []
+    for it in _fetch_fanqie_rank_list(rv):
+        it["leaderboard"] = "巅峰榜"
+        peak_items.append(it)
 
-    # Phase 1b: Browser scraping (Playwright) — optional, skipped if unavailable
-    try:
-        browser_items = _fetch_fanqie_via_browser()
-    except Exception:
-        browser_items = []
-    for item in browser_items:
-        dk = _make_dedup_key(item["title"], item["author"])
-        if dk not in seen:
-            seen.add(dk)
-            all_results.append(item)
-
-    # Phase 2: Category rankings (3 per category, ~37×2×3 = ~222 books)
-    targets = _build_category_targets(meta, leaderboard)
-    per_cat = max(2, target // len(targets))
-    rank_mold = _FANQIE_MOLD_MAP.get(leaderboard, "2")
-
+    # Phase 2: per-category fetches — rankMold=1 (新书) + rankMold=2 (热门/阅读)
+    targets = _build_category_targets(meta, "all")
+    per_cat = 10
+    new_pool: list[dict] = []
+    hot_pool: list[dict] = []
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {}
         for cid, cname, g in targets:
-            futs[ex.submit(_fetch_fanqie_one_category, cid, cname, g, rank_mold, per_cat)] = cname
+            futs[ex.submit(_fetch_fanqie_one_category, cid, cname, g, "1", per_cat)] = "new"
+            futs[ex.submit(_fetch_fanqie_one_category, cid, cname, g, "2", per_cat)] = "hot"
         for fut in as_completed(futs):
-            for item in fut.result() or []:
-                dk = _make_dedup_key(item["title"], item["author"])
-                if dk not in seen:
-                    seen.add(dk)
-                    item["rank"] = len(all_results) + 1
-                    all_results.append(item)
+            pool = new_pool if futs[fut] == "new" else hot_pool
+            pool.extend(fut.result() or [])
+
+    newbook = _aggregate_board(new_pool, "新书榜", per_board)
+    recommend = _aggregate_board(hot_pool, "推荐榜·聚合", per_board)
+    completed = _aggregate_board(
+        [i for i in hot_pool if str(i.get("creation_status", "")) == "1"],
+        "完本榜·聚合", per_board)
+
+    # Merge boards in priority order; a book on multiple boards keeps its first
+    # position and accumulates all labels in ``leaderboards``.
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for board in (peak_items, recommend, newbook, completed):
+        for it in board:
+            bid = it.get("source_book_id", "") or _make_dedup_key(it.get("title", ""), it.get("author", ""))
+            if bid in merged:
+                labels = merged[bid].setdefault("leaderboards", [merged[bid]["leaderboard"]])
+                if it["leaderboard"] not in labels:
+                    labels.append(it["leaderboard"])
+            else:
+                it = dict(it)
+                it["leaderboards"] = [it["leaderboard"]]
+                merged[bid] = it
+                order.append(bid)
+
+    all_results = []
+    for i, bid in enumerate(order, 1):
+        item = merged[bid]
+        item["rank"] = i
+        all_results.append(item)
 
     return all_results if all_results else [{"source": "fanqie", "degraded": True, "error": "No results"}]
 
@@ -1071,6 +1068,10 @@ def normalize_ranking_items(source: str, items: list[dict],
             metrics["word_count"] = raw.get("word_count", raw.get("wordCount", 0))
         if raw.get("intro"):
             metrics["intro"] = str(raw.get("intro", ""))[:200]
+        if raw.get("leaderboard"):
+            metrics["leaderboard"] = str(raw.get("leaderboard", ""))
+        if raw.get("leaderboards"):
+            metrics["leaderboards"] = [str(x) for x in raw.get("leaderboards", [])][:8]
         if any(key in raw for key in ("collector", "confidence", "evidence")):
             metrics.update({
                 "collector": str(raw.get("collector", "http")),

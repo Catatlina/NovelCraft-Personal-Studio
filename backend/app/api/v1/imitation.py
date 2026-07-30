@@ -65,6 +65,35 @@ def _extract_text(html: str) -> str:
     return "\n\n".join(paras[:50]) if paras else " ".join(lines)[:30000]
 
 
+@router.post("/polish")
+def polish(payload: ImitationRequest, user: dict = Depends(get_current_user)):
+    """Polish user-provided text (from paste/upload/link). Unlike imitation,
+    polish output is expected to stay close to the source, so no similarity
+    red-line applies — but the copyright notice is still returned."""
+    db = connect()
+    member = db.execute("SELECT role FROM project_members WHERE project_id=%s AND user_id=%s",
+                        (payload.project_id, user["id"])).fetchone()
+    db.close()
+    if not member or member["role"] not in {"owner", "editor"}:
+        raise HTTPException(403, "insufficient permissions")
+    source = payload.source_text.strip() or (_fetch_source(payload.source_url.strip()) if payload.source_url.strip() else "")
+    if len(source.strip()) < 50:
+        raise HTTPException(422, "source text must contain at least 50 characters")
+    try:
+        output = complete(
+            run_id=None, node_key=None, project_id=payload.project_id,
+            task_type="novel_continuation", prompt_name="novel.polish",
+            variables={"text": source[:16000]},
+        )
+    except (ProviderError, BudgetExceeded) as exc:
+        raise HTTPException(502, {"code": "AI_PROVIDER_FAILED", "detail": str(exc)}) from exc
+    text = str(output.get("text") or output.get("sample") or "").strip()
+    if not text:
+        raise HTTPException(502, {"code": "AI_OUTPUT_INVALID", "detail": "polish output text is empty"})
+    return {"code": 0, "message": "ok", "data": {"text": text,
+                                                  "copyright_warning": COPYRIGHT_WARNING}}
+
+
 @router.post("")
 def imitate(payload: ImitationRequest, user: dict = Depends(get_current_user)):
     db = connect()
