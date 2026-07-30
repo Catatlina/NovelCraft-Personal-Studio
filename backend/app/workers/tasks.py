@@ -109,9 +109,9 @@ DEFAULT_CHAPTER_BUDGET_CNY = 0.50
 
 # ── Hard AI gates (code-level, NOT prompt suggestions) ──
 # 每章非空白字符（中文字数）下限；低于则进入重写循环，用尽后标记「待人工重写」。
-MIN_CHAPTER_CHARS = int(os.getenv("MIN_CHAPTER_CHARS", "3000"))
+MIN_CHAPTER_CHARS = int(os.getenv("MIN_CHAPTER_CHARS", "2000"))
 # 七维评分阈值；低于则进入重写循环，用尽后标记「待人工重写」。
-REVIEW_SCORE_THRESHOLD = float(os.getenv("CHAPTER_QUALITY_THRESHOLD", "85"))
+REVIEW_SCORE_THRESHOLD = float(os.getenv("CHAPTER_QUALITY_THRESHOLD", "80"))
 # 低于阈值时最多重写的次数（共 max_rewrites+1 轮评审）。
 MAX_CHAPTER_REWRITES = int(os.getenv("CHAPTER_MAX_REWRITES", "3"))
 
@@ -2082,7 +2082,7 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
     # Flush the draft so the review gate (separate connection) can UPDATE the
     # same row without blocking on an uncommitted-insert row lock.
     db.commit()
-    # 硬门禁（与续章/批量一致）：首章同样必须 ≥3000 字且 7 维评分 ≥85，不达标自动重写
+    # 硬门禁（与续章/批量一致）：首章同样必须 ≥2000 字且 7 维评分 ≥80，不达标自动重写
     # （最多 3 次）；用尽仍不达标则标记 needs_rewrite 交付，不硬失败整次建书。
     continuity = _continuity_report(novel_id, chapter_seq)
     review = _review_and_finalize_chapter(

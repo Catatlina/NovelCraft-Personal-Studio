@@ -1380,6 +1380,11 @@ def ai_edit(
     enforce_quota(user["id"], None, "max_words_per_month")
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
     # V3 deai → use the new DeaiPipeline (web novel style rewrite)
+    IMPROVE_OPS = {"polish", "rewrite", "rewrite_chapter"}
+    EDITOR_MIN_CHARS = int(os.getenv("MIN_CHAPTER_CHARS", "2000"))
+    EDITOR_REVIEW_PASS = 80
+    MAX_EDITOR_RETRIES = 3
+
     if str(op) == "deai":
         from app.services.deai_pipeline import DeaiPipeline
         pipeline = DeaiPipeline(
@@ -1388,26 +1393,59 @@ def ai_edit(
             chapter_title=str(content.get("title", "")),
         )
         result = pipeline.run(payload.selection)
-        output = {"text": _ensure_editor_paragraphs(result.get("final_text", payload.selection))}
+        candidate_text = _ensure_editor_paragraphs(result.get("final_text", payload.selection))
+        output = {"text": candidate_text}
     else:
-        output = complete(
-            run_id=None,
-            node_key=None,
-            project_id=content["project_id"],
-            task_type=f"editor_{task_op}",
-            prompt_name=f"editor.{task_op}",
-            variables={"selection": payload.selection, "instruction": payload.instruction},
-            client_mutation_id=payload.client_mutation_id,
-        )
-        output["text"] = _ensure_editor_paragraphs(output.get("text") or payload.selection)
+        instruction = payload.instruction
+        best = None
+        best_score = -1.0
+        from app.services.text_metrics import count_content_chars
+        for attempt in range(MAX_EDITOR_RETRIES + 1):
+            gen = complete(
+                run_id=None, node_key=None, project_id=content["project_id"],
+                task_type=f"editor_{task_op}", prompt_name=f"editor.{task_op}",
+                variables={"selection": payload.selection, "instruction": instruction},
+                client_mutation_id=(f"{payload.client_mutation_id}:gen:{attempt}" if payload.client_mutation_id else None),
+            )
+            candidate_text = _ensure_editor_paragraphs(gen.get("text") or payload.selection)
+            if str(op) in IMPROVE_OPS:
+                review = complete(
+                    run_id=None, node_key=None, project_id=content["project_id"],
+                    task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+                    variables=_chapter_review_context(content, candidate_text),
+                    client_mutation_id=(f"{payload.client_mutation_id}:review:{attempt}" if payload.client_mutation_id else None),
+                )
+                score = float(review.get("score") or 0)
+                chars = count_content_chars(candidate_text)
+                length_ok = chars >= EDITOR_MIN_CHARS
+                if score > best_score:
+                    best_score = score
+                    best = {"text": candidate_text, "review_7dim": review}
+                if score >= EDITOR_REVIEW_PASS and length_ok:
+                    best = {"text": candidate_text, "review_7dim": review}
+                    break
+                # 评分/字数不达标 → 用审查建议 + 去 AI 味要求重跑（最多 3 次）
+                issues = list(review.get("issues", []))
+                if not length_ok:
+                    issues.append(f"字数不足：当前 {chars} 字，必须扩写到 {EDITOR_MIN_CHARS} 字以上，不得压缩或总结情节")
+                issues.append("必须去除 AI 味：避免过于工整的句式、章末总结体、套话，增加口语停顿、具体动作与对话")
+                instruction = "；".join(issues)
+            else:
+                # continue 等非改善操作：单遍生成
+                best = {"text": candidate_text}
+                break
+        output = best or {"text": candidate_text}
+
+    # 附七维审查（deai 单遍在此补算）与续章规划
     if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
         review_context = _chapter_review_context(content, output.get("text") or payload.selection)
-        output["review_7dim"] = complete(
-            run_id=None, node_key=None, project_id=content["project_id"],
-            task_type="review_7dim", prompt_name="bootstrap.review_7dim",
-            variables=review_context,
-            client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
-        )
+        if output.get("review_7dim") is None:
+            output["review_7dim"] = complete(
+                run_id=None, node_key=None, project_id=content["project_id"],
+                task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+                variables=review_context,
+                client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
+            )
         output["next_chapter_plan"] = complete(
             run_id=None, node_key=None, project_id=content["project_id"],
             task_type="plan_next_chapter", prompt_name="narrative.plan_next_chapter",
