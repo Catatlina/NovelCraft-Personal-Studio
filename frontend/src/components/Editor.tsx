@@ -15,7 +15,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
-  saveChapter: () => void; runEditorOp: (op: string) => void;
+  saveChapter: () => void; runEditorOp: (op: string, instruction?: string) => void;
   versions: Version[]; restoreVersion: (id: string) => void;
   offlineNotice?: string; offlineQueueCount?: number;
   offlineAiResults?: Array<{ id: string; text: string }>;
@@ -249,7 +249,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onChange={setEditorText}
             onSelection={setSelection}
             selection={selection}
-            onAiOp={op => runEditorOp(op)}
+            onAiOp={(op, instruction) => runEditorOp(op, instruction)}
             aiReview={editorAiReview ?? null}
             deaiResult={deaiResult ?? null}
             deaiLoading={deaiLoading ?? false}
@@ -287,8 +287,19 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
 
             {editorAiReview?.review?.issues?.length ? (
               <div className="ai-msg">
-                <strong>本次建议的审阅问题</strong>
-                {editorAiReview.review.issues.map((issue: string, index: number) => <div key={`${issue}-${index}`}>• {issue}</div>)}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <strong>本次建议的审阅问题</strong>
+                  <span className="badge">评分：{editorAiReview.review.score ?? "--"}</span>
+                </div>
+                {editorAiReview.review.issues.map((issue: string, index: number) => (
+                  <div key={`${issue}-${index}`} style={{ marginBottom: 8 }}>
+                    <div>• {issue}</div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                      <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("polish", issue)}>按此建议润色</button>
+                      <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("rewrite", issue)}>按此建议改写</button>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : null}
 
@@ -377,7 +388,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onChange={setEditorText}
             onSelection={setSelection}
             selection={selection}
-            onAiOp={(op: string) => runEditorOp(op)}
+            onAiOp={(op: string, instruction?: string) => runEditorOp(op, instruction)}
             aiReview={editorAiReview ?? null}
             deaiResult={deaiResult ?? null}
             deaiLoading={deaiLoading ?? false}

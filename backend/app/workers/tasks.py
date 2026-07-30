@@ -2374,7 +2374,7 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
             "rewrite_attempts": review["rewrite_attempts"]}
 def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str, chapter_seq: int,
                                  generation_key: str, title: str, paragraphs: list[str],
-                                 continuity: dict, threshold: float = 80, max_rewrites: int = 2) -> dict:
+                                 continuity: dict, threshold: float = 85, max_rewrites: int = 2) -> dict:
     """Review every generated chapter; rewrites must be reviewed again before acceptance."""
     current_title = title
     current_body = list(paragraphs)

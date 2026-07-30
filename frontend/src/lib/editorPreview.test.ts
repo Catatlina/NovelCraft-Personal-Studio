@@ -18,4 +18,10 @@ describe("AI 编辑预览", () => {
   it("整章重写候选不会混入旧正文", () => {
     expect(buildAiEditPreview("旧章", "旧章", "新章", "rewrite_chapter", false)).toBe("新章");
   });
+
+  it("把模型返回的单换行归一化为段落分隔，避免应用到草稿后折叠成一段", () => {
+    const proposed = "第一句。\n第二句。\n第三句。";
+    const next = buildAiEditPreview("原文。", "原文。", proposed, "polish", true);
+    expect(next).toBe("第一句。\n\n第二句。\n\n第三句。");
+  });
 });

@@ -1,3 +1,8 @@
+function normalizeParagraphBreaks(text: string): string {
+  // 把任意连续换行统一成标准段落分隔（空行），避免后端/模型返回单换行时前端折叠成一段。
+  return text.replace(/\n+/g, "\n\n").trim();
+}
+
 export function buildAiEditPreview(
   sourceText: string,
   selectedText: string,
@@ -5,12 +10,13 @@ export function buildAiEditPreview(
   operation: string,
   hasExplicitSelection: boolean,
 ): string {
-  if (operation === "rewrite_chapter") return proposedText;
+  const normalizedProposed = normalizeParagraphBreaks(proposedText);
+  if (operation === "rewrite_chapter") return normalizedProposed;
   if (operation === "continue") {
     if (hasExplicitSelection && selectedText) {
-      return sourceText.replace(selectedText, `${selectedText}\n\n${proposedText}`);
+      return sourceText.replace(selectedText, `${selectedText}\n\n${normalizedProposed}`);
     }
-    return `${sourceText}\n\n${proposedText}`.trim();
+    return `${sourceText}\n\n${normalizedProposed}`.trim();
   }
-  return sourceText.replace(selectedText, proposedText);
+  return sourceText.replace(selectedText, normalizedProposed);
 }

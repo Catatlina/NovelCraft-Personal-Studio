@@ -480,10 +480,10 @@ export default function App() {
     }
   }
 
-  async function runEditorOp(op: string) {
+  async function runEditorOp(op: string, instructionOverride?: string) {
     if (!chapter) return;
     const sourceText = editorTextRef.current;
-    const selectedText = op === "rewrite_chapter"
+    const selectedText = op === "rewrite_chapter" || instructionOverride
       ? sourceText
       : selection || (op === "continue" ? sourceText : "");
     if (!selectedText.trim()) {
@@ -494,7 +494,11 @@ export default function App() {
     setPendingAiEdit(null);
     const mutationId = crypto.randomUUID();
     const url = `/api/v1/contents/${chapter.id}/ai/${op}`;
-    const body = { selection: selectedText, instruction: op === "rewrite_chapter" ? "整章重写，保留核心剧情，优化小说平台阅读体验" : "保持当前风格", client_mutation_id: mutationId };
+    const body = {
+      selection: selectedText,
+      instruction: instructionOverride || (op === "rewrite_chapter" ? "整章重写，保留核心剧情，优化小说平台阅读体验" : "保持当前风格"),
+      client_mutation_id: mutationId,
+    };
     if (!navigator.onLine) {
       await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
       setOfflineNotice("AI 操作已排队，联网后自动执行");

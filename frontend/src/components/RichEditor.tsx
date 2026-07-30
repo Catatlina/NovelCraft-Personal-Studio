@@ -9,7 +9,7 @@ type Props = {
   onChange: (v: string) => void;
   onSelection?: (s: string) => void;
   selection?: string;
-  onAiOp?: (op: string) => void;
+  onAiOp?: (op: string, instruction?: string) => void;
   aiReview?: any;
   deaiResult?: any;
   deaiLoading?: boolean;
