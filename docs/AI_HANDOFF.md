@@ -205,7 +205,7 @@ bash scripts/backend-gate.sh
    - 部署缓存：`nginx.conf` 改为 `/assets/` 设 `immutable` 长缓存、`location /` 设 `no-cache`、删除对 `.js$` 的 blanket 不缓存；补 `src/nginxCache.test.ts`（3 项，需 `@types/node`）。
    - `X-Model` 鉴权范围：修复 `restart_run` 此前不透传 BYOK 请求头的缺口（重启会回退到服务器配置而非用户会话 Key），现与 bootstrap/continue 一致从请求头读取 `X-Api-Key/X-Api-Base-Url/X-Model`；补 `test_restart_forwards_byok_headers`。
    - 版本 badge：`Settings.tsx` 底部展示来自 `package.json` 的构建版本 badge（`badge gray`，`v<version>`）；补 `src/components/Settings.version.test.tsx`（2 项）；待生产部署 smoke（§7#6）转 已验收。
-4. 跑八页面桌面/手机视觉、真库设置正负例、完整浏览器验收；每个批次独立提交推送并等 CI。
+4. [已接线] 完整浏览器验收：①八页面可达性烟雾（`e2e/pages-smoke.spec.ts`，注册一次遍历 8 入口断言真实标题，无需 Key）；②真库设置正负例（`e2e/settings.spec.ts`：AI 配置保存+会话持久化、未改动时保存按钮禁用守卫、密码修改真实 DB 正例/负例，均无需 Key）；③桌面/手机视觉已在 `e2e/visual.spec.ts` 按需 opt-in（STARLUME_CAPTURE_VISUAL，1280+390 双视口）；④进度页控件交互沿用 `e2e/progress-controls.spec.ts`（§7#2）。`registerFreshUser` 统一带 429 退避并在持续限流时优雅 skip（消 CI 超时/flaky）。CI run `30506933197` 五 job 全绿、e2e 14 passed/8 skipped；待生产部署 smoke（§7#6）转 已验收。
 5. 有 Provider 密钥时补 Repair Engine 正向真实预览应用证据。
 6. 仅在最终绿色提交完成真实 Provider 链后部署；生产检查 healthz、登录、八页面、切书、建书/保存和 V3 20 节点 smoke。
 
