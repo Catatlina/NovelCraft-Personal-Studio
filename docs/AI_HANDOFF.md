@@ -1,6 +1,6 @@
 # Starlume AI 项目交接说明
 
-> 更新时间：2026-07-29
+> 更新时间：2026-07-30
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
 ## 1. 唯一正确的工作目录
@@ -17,7 +17,7 @@
 - 本轮接手基线（2026-07-29）：同步后 `git rev-parse HEAD` = `f8e343c` = `origin/main`；接手前工作树干净。CI 修复已提交并推送为 `07a8c0f`。
 - 生产地址：<https://novel.xyjin.xyz>
 - 重要：生产已于 **2026-07-30** 首次部署 `9400ca3`（回滚 tag `backup-pre-20260730-111824`，已于 2026-07-30 清理删除），同日按用户要求做**全局部署刷新**：git fast-forward 到 `1bb697a`、应用容器 `up -d --build --force-recreate --scale flower=0` 干净重建（postgres/redis 保留），重建后 smoke 仍 **14/14 全绿**。
-- **即时刷新约定（2026-07-30 起）**：用户要求「以后每一个改动都要即时刷新生产」。即每次代码改动提交推送后，立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当前生产 HEAD = `0b23596`（**实时审计**：新增后端 `POST /api/v1/contents/{id}/review`（纯分析、不卡字数配额、每轮不同结果写 `ai_review` 版本分支留痕、相同结果去重）+ 前端 `requestReview` 防抖(1.5s)自动审计——章节打开/切换、打字停顿、应用 AI 建议后均自动重审，AI 建议待确认或流式生成时暂停；右侧面板改为常显评分+「审计中」指示+「重新审计」按钮，无问题显示「暂无审阅问题」。生产真实调用 `/review` 返回 `review_7dim`（score 70 / 3 条建议）+ `next_chapter_plan`，smoke **14/14 全绿**），地址 <https://novel.xyjin.xyz>。§7 #1–#6 据此转「已验收」。
+- **即时刷新约定（2026-07-30 起）**：用户要求「以后每一个改动都要即时刷新生产」。即每次代码改动提交推送后，立即对生产做 `git ff-pull` + 应用容器 `--force-recreate --build` 重建（postgres/redis 保留）+ `prod_smoke` 复跑。当前生产 HEAD = `c194ccf`（**番茄四榜真实扫榜 + 仿写/润色工坊**：ranking_adapter 重写——巅峰榜/新书榜用真实直连接口、推荐榜·聚合与完本榜·聚合用各分类 `rankMold=2` 阅读/热门榜聚合（完本额外过滤 `creationStatus=='1'`），单 source=fanqie 总快照、每条 item 打 `leaderboards` 多榜标签、详情页按榜筛选；RankingCenter 新增筛选 chips 与多榜徽章；仿写后端新增 `POST /api/v1/imitation/polish`（无相似度红线、保留版权提示），Wizard 新增「仿写工坊」区块支持链接/文本/上传 `.txt/.md/.json` 一键仿写与一键润色。生产 smoke **14/14 全绿**），地址 <https://novel.xyjin.xyz>。§7 #1–#6 据此转「已验收」。（历史 HEAD：`0b23596`=实时审计、`1bb697a`=首次全局刷新基线。）
 
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
