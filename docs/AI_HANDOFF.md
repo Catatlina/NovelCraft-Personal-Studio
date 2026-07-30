@@ -207,7 +207,7 @@ bash scripts/backend-gate.sh
    - 版本 badge：`Settings.tsx` 底部展示来自 `package.json` 的构建版本 badge（`badge gray`，`v<version>`）；补 `src/components/Settings.version.test.tsx`（2 项）；待生产部署 smoke（§7#6）转 已验收。
 4. [已接线] 完整浏览器验收：①八页面可达性烟雾（`e2e/pages-smoke.spec.ts`，注册一次遍历 8 入口断言真实标题，无需 Key）；②真库设置正负例（`e2e/settings.spec.ts`：AI 配置保存+会话持久化、未改动时保存按钮禁用守卫、密码修改真实 DB 正例/负例，均无需 Key）；③桌面/手机视觉已在 `e2e/visual.spec.ts` 按需 opt-in（STARLUME_CAPTURE_VISUAL，1280+390 双视口）；④进度页控件交互沿用 `e2e/progress-controls.spec.ts`（§7#2）。`registerFreshUser` 统一带 429 退避并在持续限流时优雅 skip（消 CI 超时/flaky）。CI run `30506933197` 五 job 全绿、e2e 14 passed/8 skipped；待生产部署 smoke（§7#6）转 已验收。
 5. [已接线] Repair Engine 正向真实证据已获（本地真实 Key `DEEPSEEK_API_KEY`，仅本地 env，永不进仓库/CI）：脚本对运行中的本地后端打 `POST /chapters/{id}/repair-preview`（`action=rewrite_chapter`，走 `complete()` 真实 DeepSeek）与 `repair-apply`（带签名）→ 原文 138 字被真实重写为 360 字并将"师父实体出现"合理化为梦境/最后一道门（连续性修复），apply 后 `status=needs_review`、正文确与原文不同。证据 JSON 落 `/tmp/starlume-repair-evidence.json`（2026-07-30）。注意：此为**本地**真实证据，未部署；生产部署 smoke 见 §7#6。另补 `e2e/repair-engine.spec.ts`（门禁 `DEEPSEEK_API_KEY`，CI 无 Key 自动 skip），与本地脚本互为校验。
-6. 仅在最终绿色提交完成真实 Provider 链后部署；生产检查 healthz、登录、八页面、切书、建书/保存和 V3 20 节点 smoke。
+6. [准备中] 生产部署 + smoke（#1–#5 转「已验收」硬前置）。部署走 `zhiyan-cicd`（当前 disconnected，需用户重连/提供凭证）。已备 `scripts/prod_smoke.py`（无密钥、读 `PROD_BASE` env）：覆盖 healthz、登录、八页面后端数据可达、切书、建书/保存、`V3 20 节点`（bootstrap run 节点数=20，V3 蓝图见 `app/workers/tasks.py:43`：7 规划+1 人工确认+4 蓝图+5 写作+3 最终化=20）；八页面"前端渲染"断言由 `e2e/pages-smoke.spec.ts` 对生产 `BASE_URL` 复跑。带 `DEEPSEEK_API_KEY` 时脚本会真实推进 V3 链。当前 `main` @ `a23ddba`，CI 全绿，未部署。
 
 ## 8. 禁止破坏
 
