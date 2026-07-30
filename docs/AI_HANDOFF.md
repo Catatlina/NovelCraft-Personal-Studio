@@ -23,6 +23,8 @@
 
 - **当前生产 HEAD = `8755bef`（2026-07-30 追加）：书名生成对齐番茄/起点爆款。** 用户吐槽 AI 生成的书名老土（如《重生2010：AI笔记本》关键词堆砌）。根因在 `bootstrap.gen_titles` prompt：字数卡死 4-8 字 + 只说"避免模板词"却没教风格，退化成 SEO 式标题。已重写该 prompt 升 `3.1.0`：注入真实爆款范式（第一人称吐槽/具体时代符号如「黄金时代/千禧/诺基亚」而非裸年份/反差悬念/人物状态情绪），**禁止把「重生/穿越/系统/AI/年份」关键词平铺堆砌成标题**，字数放宽 6-14，去掉空泛的「商业感和时代感」。新增 `tests/test_title_prompt_quality.py` 锁定范式（2/2 本地过）。CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**，DB 已 re-upsert `bootstrap.gen_titles | 3.1.0`。
 
+- **当前生产 HEAD = `1b0620c`（2026-07-30 追加）：全量 prompt 审计修复 8 处同类问题。** 用户要求全量检查 78 条 prompt。审计结论：去AI味核心引擎 `deai.*`（尤其 `deai.rewrite`）其实扎实、章节写作类（`gen_next_chapter`/`gen_chapter1`/`write_chapter_draft`/`final_humanize`）也有明确 anti-AI 铁律；但发现 3 处标题与已修 `gen_titles` 是同一类老土 bug（`bootstrap.plan_idea`/`bootstrap.regenerate_titles`/`shortstory.gen_titles` 用旧弱指令、无爆款范式）、`editor.deai` 手动去味按钮远弱于内部 `deai.rewrite` 方法论、`deai.detect` 强制 changes≥3 会过度修改干净文本、`bootstrap.gen_synopsis` 与 `social.*` 标题为弱指令。已批量修复并 bump 版本（plan_idea 1.1.0 / regenerate_titles 1.1.0 / shortstory.gen_titles 3.1.0 / editor.deai 3.1.0 / deai.detect 1.1.0 / gen_synopsis 3.1.0 / hm_title_variants 1.1.0 / gen_hotspot_content 3.1.0）；`tests/test_title_prompt_quality.py` 扩展为 9 个 prompt 契约（10/10 本地过）。CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**，DB 已 re-upsert 全部 8 个新版本。
+
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
 ## 1.1 接手复验 checkpoint（2026-07-28）
