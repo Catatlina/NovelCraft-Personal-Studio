@@ -38,6 +38,12 @@ async function authHeaders(page: Page) {
 }
 
 async function startWizardRun(page: Page) {
+  // 服务端无 DEEPSEEK_API_KEY 时向导按钮会因 keyMissing 被禁用；
+  // 注入一个"无效 BYOK Key"解禁向导——后端用它真实调用 DeepSeek 必然 401 失败，
+  // run 进入真实 failed 态（不 mock、不伪造成功）。
+  if (!process.env.DEEPSEEK_API_KEY) {
+    await page.evaluate(() => sessionStorage.setItem("nc_api_key", "sk-e2e-invalid-key-for-real-failure"));
+  }
   await page.getByRole("navigation", { name: "小说创作主导航" })
     .getByRole("button", { name: "创作向导", exact: true }).click();
   await page.getByRole("textbox", { name: /用几句话描述你的故事/ }).fill(
