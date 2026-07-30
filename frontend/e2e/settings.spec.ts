@@ -5,20 +5,28 @@
  *  - AI 连接（BYOK）保存正例 + 会话持久化；未改动时保存按钮禁用（守卫）。
  *  - 密码修改（真实 DB）正例（旧密码正确）/ 负例（旧密码错误）。
  *
- * 注册密码与 main-chain 保持一致：Starlume-e2e-1234。
+ * 注册密码与 main-chain 保持一致：Starlume-e2e-1234。registerFreshUser 带
+ * 429 退避重试，规避后端 5/min 注册限流。
  */
 import { expect, type Page, test } from "@playwright/test";
 
 const REG_PASSWORD = "Starlume-e2e-1234";
 
-async function registerFreshUser(page: Page): Promise<void> {
+async function registerFreshUser(page: Page, attempt = 0): Promise<void> {
   const email = `starlume-settings-${Date.now()}-${Math.floor(Math.random() * 1e4)}@example.com`;
   await page.goto("/");
   await page.getByRole("button", { name: "没有账号？注册" }).click();
   await page.getByPlaceholder("name@example.com").fill(email);
   await page.getByPlaceholder("至少 8 位").fill(REG_PASSWORD);
   await page.getByRole("button", { name: "注册", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "小说首页", exact: true })).toBeVisible({ timeout: 15_000 });
+  try {
+    await expect(page.getByRole("heading", { name: "小说首页", exact: true })).toBeVisible({ timeout: 15_000 });
+  } catch (e) {
+    if (attempt >= 3) throw e;
+    console.warn(`[registerFreshUser] 注册后未出现首页（可能触发限流 429），第 ${attempt + 1} 次退避重试`);
+    await page.waitForTimeout(65_000);
+    return registerFreshUser(page, attempt + 1);
+  }
 }
 
 async function openSettings(page: Page): Promise<void> {

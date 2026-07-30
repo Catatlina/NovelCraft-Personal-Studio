@@ -1,8 +1,9 @@
 /**
  * §7 #4 完整浏览器验收：八页面可达性烟雾测试（KI-006）。
  *
- * 遍历左侧主导航全部八个入口，断言每个页面都渲染了真实的标题/空状态，
- * 而非白屏或崩溃。空态文案与 nav 标签不同，断言使用页面真实 h1/h2/空态文本。
+ * 单次注册后遍历左侧主导航全部八个入口，断言每个页面都渲染了真实的标题
+ * （h1/h2），而非白屏或崩溃。空态文案与 nav 标签不同，断言使用页面真实标题。
+ * 断言用 getByRole("heading")，避免同时命中 nav 按钮上的同名文案。
  * 无需 Provider Key，CI 确定性通过。
  */
 import { expect, type Page, test } from "@playwright/test";
@@ -28,11 +29,13 @@ async function registerFreshUser(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "小说首页", exact: true })).toBeVisible({ timeout: 15_000 });
 }
 
-for (const tab of TABS) {
-  test(`八页面可达性：${tab.label}`, async ({ page }) => {
-    await registerFreshUser(page);
-    const nav = page.getByRole("navigation", { name: "小说创作主导航" });
+test("八页面可达性：遍历全部八个入口均渲染真实标题", async ({ page }) => {
+  await registerFreshUser(page);
+  const nav = page.getByRole("navigation", { name: "小说创作主导航" });
+  for (const tab of TABS) {
     await nav.getByRole("button", { name: tab.label, exact: true }).click();
-    await expect(page.getByText(tab.expectText, { exact: true })).toBeVisible({ timeout: 10_000 });
-  });
-}
+    await expect(
+      page.getByRole("heading", { name: tab.expectText, exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
+  }
+});
