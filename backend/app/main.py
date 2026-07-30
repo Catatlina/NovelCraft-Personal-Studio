@@ -1,5 +1,6 @@
 import json
 import os
+import re as _re
 import secrets
 import uuid
 from typing import Any
@@ -1332,6 +1333,36 @@ def restore_version(content_id: str, payload: VersionRestore, user: dict = Depen
     return ok(row)
 
 
+def _ensure_editor_paragraphs(text: str) -> str:
+    """保证编辑器 AI 文本带段落分隔（空行），避免应用后折叠成一大段。
+
+    模型经常忽略 prompt 里的「用空行分隔段落」，对短文本尤其返回一整块
+    无换行的文本。textarea 靠软换行看起来分段，但 TipTap 里一整块 <p>
+    就是「一大段」。所以这里做一个确定性兜底：
+    - 若文本已含任意换行，原样返回（交给前端 normalizeParagraphBreaks 统一成 \\n\\n）；
+    - 否则按句末标点切句，每 2-3 句并成一段（网文短段落节奏），长句单独成段。
+    """
+    if not text:
+        return text
+    text = text.replace("\r\n", "\n").strip()
+    if "\n" in text:
+        return text
+    sentences = [s.strip() for s in _re.split(r"(?<=[\u3002\uff01\uff1f!?])", text) if s.strip()]
+    if len(sentences) <= 1:
+        return text
+    grouped: list[str] = []
+    buf: list[str] = []
+    for s in sentences:
+        buf.append(s)
+        # 每 2-3 句并一段；长句（>40 字）或累计 >90 字立即收一段
+        if len(buf) >= 3 or len(buf[-1]) > 40 or len("".join(buf)) > 90:
+            grouped.append("".join(buf))
+            buf = []
+    if buf:
+        grouped.append("".join(buf))
+    return "\n\n".join(grouped)
+
+
 @app.post("/api/v1/contents/{content_id}/ai/{op}")
 @limiter.limit("30/minute")
 def ai_edit(
@@ -1357,7 +1388,7 @@ def ai_edit(
             chapter_title=str(content.get("title", "")),
         )
         result = pipeline.run(payload.selection)
-        output = {"text": result.get("final_text", payload.selection)}
+        output = {"text": _ensure_editor_paragraphs(result.get("final_text", payload.selection))}
     else:
         output = complete(
             run_id=None,
@@ -1368,6 +1399,7 @@ def ai_edit(
             variables={"selection": payload.selection, "instruction": payload.instruction},
             client_mutation_id=payload.client_mutation_id,
         )
+        output["text"] = _ensure_editor_paragraphs(output.get("text") or payload.selection)
     if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
         review_context = _chapter_review_context(content, output.get("text") or payload.selection)
         output["review_7dim"] = complete(

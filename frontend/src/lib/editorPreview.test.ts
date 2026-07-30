@@ -30,4 +30,12 @@ describe("AI 编辑预览", () => {
     const next = buildAiEditPreview("原文。", "原文。", proposed, "polish", true);
     expect(next).toBe("价格是 $100。\n\n第二段。");
   });
+
+  it("模型返回一整块无换行的文本时按句切成短段落，避免应用后折叠成一段", () => {
+    const proposed = "林晚星站在天台边。她低头瞅了瞅楼下的霓虹。心里突然冒出一个念头。命运这玩意儿是不是安排好了。她深吸一口气下了天台。第二天一早收到一条陌生短信。";
+    const next = buildAiEditPreview("原文。", "原文。", proposed, "polish", true);
+    // 至少被切成多段（含 \n\n），不再是单一大段
+    expect(next.includes("\n\n")).toBe(true);
+    expect(next.split("\n\n").length).toBeGreaterThanOrEqual(2);
+  });
 });
