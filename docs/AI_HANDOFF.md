@@ -21,6 +21,8 @@
 
 - **当前生产 HEAD = `2634c23`（2026-07-30 追加）：章节硬门禁。** 用户明确要求「每章≥3000字、评分<85 自动拒绝重写」做成**代码级硬门禁**（非软提示）。`backend/app/workers/tasks.py` 的 `_review_and_finalize_chapter` 重写为真门禁：字数（非空白中文字，`MIN_CHAPTER_CHARS` 默认 3000，可配）与 7 维评分（`CHAPTER_QUALITY_THRESHOLD` 默认 85，可配）任一不达标即重写，最多 `CHAPTER_MAX_REWRITES=3` 次（共 4 轮评审）；通过才标 `reviewed`，用尽配额标 `needs_rewrite` 仍照样交付（不硬失败整次任务，仅待人工重写）。首章（`_persist_chapter_draft`）接入同一硬门禁（此前缺失，是本次修复重点）；`gen_next_chapter`/批量/`regenerate_chapter_task` 统一走该循环；`gen_next_chapter` 冗余硬 raise 已移除，交由重写循环处理（与「交付+标记」决策一致）。`prompt_registry.py` 的 `narrative.gen_next_chapter` 升 `3.2.0`，正文下限改 3000 字并强制重写扩写。CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**。
 
+- **当前生产 HEAD = `8755bef`（2026-07-30 追加）：书名生成对齐番茄/起点爆款。** 用户吐槽 AI 生成的书名老土（如《重生2010：AI笔记本》关键词堆砌）。根因在 `bootstrap.gen_titles` prompt：字数卡死 4-8 字 + 只说"避免模板词"却没教风格，退化成 SEO 式标题。已重写该 prompt 升 `3.1.0`：注入真实爆款范式（第一人称吐槽/具体时代符号如「黄金时代/千禧/诺基亚」而非裸年份/反差悬念/人物状态情绪），**禁止把「重生/穿越/系统/AI/年份」关键词平铺堆砌成标题**，字数放宽 6-14，去掉空泛的「商业感和时代感」。新增 `tests/test_title_prompt_quality.py` 锁定范式（2/2 本地过）。CI 5/5 全绿，生产 `ff-pull`+重建后 smoke **14/14 全绿**，DB 已 re-upsert `bootstrap.gen_titles | 3.1.0`。
+
 交接提交完成后，以 `git status`、`git log --oneline --decorate -12` 和 `git rev-parse HEAD` 的实时输出为准，不要把本文中的旧 HEAD 当作不可变事实。
 
 ## 1.1 接手复验 checkpoint（2026-07-28）
