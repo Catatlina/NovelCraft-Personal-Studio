@@ -231,6 +231,8 @@ def test_ai_edit_returns_review_and_next_chapter_plan(authed, monkeypatch):
 
     import app.main as main_module
     monkeypatch.setattr(main_module, "complete", fake_complete)
+    # 编辑器实时审阅现按七维审查+字数门禁循环；模拟真实长章节以走单次通过分支
+    monkeypatch.setattr("app.services.text_metrics.count_content_chars", lambda text: 9999)
 
     response = client.post(
         f"/api/v1/contents/{content_id}/ai/rewrite_chapter",
