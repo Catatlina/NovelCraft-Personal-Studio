@@ -241,7 +241,7 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
         layers["story_bible"] = len(sb)
 
     # recent summaries are the short-term layer (not the full chapter text)
-    recent = repo.get_recent_summaries(novel_id, limit=10)
+    recent = repo.get_recent_summaries(novel_id, limit=10, max_seq=chapter_seq)
     if recent:
         sm = "\n".join(
             f"第{r['chapter_seq']}章：{r['summary']}" for r in reversed(recent)
@@ -250,11 +250,24 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
         included.append("recent_summary_10")
         layers["recent_summary"] = len(sm)
 
+    # Carry the previous chapter's tail so the next chapter opens by continuing
+    # the prior scene/hook rather than inventing a new one (Defect: CH2 sofa vs
+    # CH1 car-ending). Only meaningful for chapter 2+.
+    if chapter_seq > 1:
+        prev_tail = repo.get_previous_chapter_tail(novel_id, chapter_seq, tail_chars=800)
+        if prev_tail:
+            parts.append(
+                "【上一章结尾】必须紧接以下结尾继续写，保持同一场景/状态/视角，"
+                "不得另起炉灶：\n" + prev_tail
+            )
+            included.append("prev_chapter_tail")
+            layers["prev_chapter_tail"] = len(prev_tail)
+
     # protagonist + canonical names anchor (Defects 1 & 2): keep the same lead/POV
     # across chapters, and force the model to reuse existing spellings instead of
     # inventing near-duplicate names.
     prot = repo.get_protagonist(project_id, novel_id)
-    canon = repo.get_canonical_names(project_id, novel_id)
+    canon = repo.get_canonical_names(project_id, novel_id, max_seq=chapter_seq)
     if prot or canon:
         anchor_bits = []
         if prot:
@@ -267,7 +280,8 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
         layers["anchor"] = len(blob)
 
     # Foreshadowing ledger (架构 §4.5): overdue items are a hard constraint for
-    # this chapter, due_soon must at least be pushed forward.
+    # this chapter, due_soon must at least be pushed forward. Planting chapters
+    # are bounded to <= current_seq so future-planted foreshadowings don't leak in.
     open_fs = repo.get_open_foreshadowings(novel_id, chapter_seq)
     if open_fs:
         overdue = [f for f in open_fs if f["state"] == "overdue"]
@@ -290,9 +304,10 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
         layers["foreshadowing"] = len(blob)
 
     # Capability tree (架构 §4.3, 防降智): what the cast can and cannot do.
-    cap_tree = repo.get_capability_tree(novel_id, [prot["name"]] if prot else None)
+    cap_tree = repo.get_capability_tree(novel_id, [prot["name"]] if prot else None,
+                                        max_seq=chapter_seq)
     if not cap_tree and canon:
-        cap_tree = repo.get_capability_tree(novel_id, canon[:8])
+        cap_tree = repo.get_capability_tree(novel_id, canon[:8], max_seq=chapter_seq)
     if cap_tree:
         cap_bits = []
         for name, caps in list(cap_tree.items())[:6]:
@@ -310,8 +325,9 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
             layers["capability_tree"] = len(blob)
 
     # Relation arcs (§4.2): inject current relationship state so the model
-    # maintains consistency and can naturally evolve relationships.
-    rel_arcs = repo.get_relation_arcs(novel_id, limit=20)
+    # maintains consistency and can naturally evolve relationships. Bounded to
+    # arcs last updated strictly before this chapter.
+    rel_arcs = repo.get_relation_arcs(novel_id, limit=20, max_seq=chapter_seq)
     if rel_arcs:
         rel_bits = []
         for r in rel_arcs[:12]:
@@ -437,7 +453,12 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     author_card = decode(style_cards.get("author_card"), {}) or {}
     genre_card = decode(style_cards.get("genre_card"), {}) or {}
     style = ctx.get("style") or json.dumps({**genre_card, **author_card}, ensure_ascii=False)
-    bible = repo.get_story_bible(project_id, novel_id)
+    bible = repo.get_story_bible(project_id, novel_id, max_seq=chapter_seq)
+    # previous-chapter hard facts (fact-lock): injected into gen_next_chapter as a
+    # non-negotiable constraint when the novel opts in via author_intent.continuity_facts.
+    _bcfg = repo.get_book_config(project_id, novel_id)
+    _bai = decode(_bcfg.get("author_intent"), {}) or {} if _bcfg else {}
+    prev_facts_var = str(_bai.get("continuity_facts") or "") if isinstance(_bai, dict) else ""
     context_text, context_hash, included, layers = _build_context_pkg(
         project_id, novel_id, chapter_seq, style, bible
     )
@@ -483,6 +504,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         "current_title": f"第{chapter_seq}章",
                         "current_body": "",
                         "review_feedback": "",
+                        "prev_facts": prev_facts_var,
                     },
                 )
             chapter = out.get("chapter", {})
@@ -534,6 +556,131 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "chars_first_pass": gen_chars, "expand_attempts": expand_attempts,
         "length_ok": len(text) >= MIN_CHAPTER_CHARS,
     })
+
+    # 1c. POV hard gate (Defect: CH2 wrote 3rd-person "他" under a 1st-person
+    # setting, breaking continuity with CH1). The soft flag in _domain_logic_check
+    # is not enough, so force a single rewrite when the configured POV is violated.
+    if chapter_seq > 1:
+        _cfg = repo.get_book_config(project_id, novel_id)
+        _pov = ""
+        if _cfg:
+            _ai = decode(_cfg.get("author_intent"), {}) or {}
+            _pov = (_ai.get("protagonist") or {}).get("pov", "") if isinstance(_ai, dict) else ""
+        if "第一" in _pov and (text.count("我") == 0 or text.count("他") > text.count("我") * 2):
+            _rp = gateway.complete(
+                run_id=run_id, node_key="pov_fix", project_id=project_id,
+                task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
+                user_id=user_id,
+                variables={"context": context_text, "current_title": title,
+                           "current_body": text,
+                           "review_feedback": "严重违规：本书设定为第一人称，但本章误用第三人称“他”叙述。"
+                                             "必须严格用第一人称“我”重写全章，保持同一主角、场景与已发生情节，不得改变剧情。"},
+            )
+            _rp_ch = _rp.get("chapter", {}) or {}
+            _rp_paras = _rp_ch.get("body", []) if isinstance(_rp_ch, dict) else []
+            _rp_text = "\n\n".join(_rp_paras) if _rp_paras else text
+            if len(_rp_text) >= MIN_CHAPTER_CHARS:
+                paragraphs, text = _rp_paras, _rp_text
+                title = _rp_ch.get("title") or title
+                _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
+                report["steps"].append({"step": "pov_fix", "applied": True,
+                                        "my": text.count("我"), "he": text.count("他")})
+            else:
+                report["steps"].append({"step": "pov_fix", "applied": False,
+                                        "reason": "rewrite too short"})
+
+    # 1d. continuity fact-lock guard (deterministic backstop for model priors that
+    # ignore soft prompt rules). Active only when the novel opts in via
+    # author_intent.continuity_* config. Forces a rewrite anchored to the previous
+    # chapter's ACTUAL tail until the chapter respects the locked facts.
+    if chapter_seq > 1:
+        _cfg = repo.get_book_config(project_id, novel_id)
+        _ai = decode(_cfg.get("author_intent"), {}) or {} if _cfg else {}
+        banned = repo.get_continuity_banned_tokens(project_id, novel_id) or []
+        rules = repo.get_continuity_rules(project_id, novel_id) or []
+        facts = repo.get_continuity_facts(project_id, novel_id) or ""
+        chars = repo.get_continuity_characters(project_id, novel_id) or []
+        if banned or rules or facts:
+            import re as _re
+            _death_toks = ["尸体", "丧命", "遇难", "砸死", "压死", "断气",
+                           "没了呼吸", "死了", "死掉", "死在", "死人", "死了一"]
+            _magic_toks = ["像活的一样", "活的一样", "会发热", "发热", "发烫",
+                           "在提醒我", "提醒我这块", "会预警", "暗红色的光",
+                           "隔着衣服都烫", "烫了一下", "绿光的眼睛", "泛着暗红",
+                           "会说话的", "活物一样"]
+            _surname = ("赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹"
+                        "严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马"
+                        "苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬"
+                        "安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪"
+                        "祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜"
+                        "阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏"
+                        "蔡田樊胡凌霍万柯卢莫房裘缪干解应宗丁宣贲邓郁单杭洪"
+                        "包诸左石崔吉钮龚程嵇邢滑裴陆荣翁荀羊惠甄加封芮羿储"
+                        "靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰"
+                        "秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜"
+                        "黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴郁胥能"
+                        "苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿"
+                        "通边扈燕冀郏浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容"
+                        "向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧"
+                        "殳沃利蔚越夔隆师巩厍聂晁勾敖融冷訾辛阚那简饶空曾毋"
+                        "沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓")
+            _name_re = _re.compile(r'老[' + _surname + r']|[' + _surname + r'][' + _surname + r']?')
+
+            def _violations(t: str) -> list[str]:
+                v: list[str] = []
+                for b in banned:
+                    if b and b in t:
+                        v.append(f"出现禁用词『{b}』")
+                if "no_new_deaths" in rules:
+                    for d in _death_toks:
+                        if d in t:
+                            v.append(f"违禁新增死亡（含『{d}』）；上一章全员生还，本章严禁出现伤亡")
+                            break
+                if "no_magic_items" in rules:
+                    for m in _magic_toks:
+                        if m in t:
+                            v.append(f"违禁引入超自然/魔法元素（含『{m}』）；上一章为纯现实背景")
+                            break
+                if "no_new_named_characters" in rules:
+                    for nm in _name_re.findall(t):
+                        if nm not in chars:
+                            v.append(f"新增未授权命名角色（『{nm}』）；本章只允许沿用：{('、'.join(chars) or '无')}")
+                return v
+
+            prev_tail = repo.get_previous_chapter_tail(novel_id, chapter_seq, tail_chars=800)
+            v0 = _violations(text)
+            if v0:
+                report["steps"].append({"step": "continuity_guard", "triggered": True,
+                                        "violations": v0[:5]})
+                fb = ("【情节承接严重违规】你违背了上一章已确认的硬事实，必须重写：\n"
+                      + "\n".join(f"- {x}" for x in v0) + "\n")
+                if facts:
+                    fb += "\n上一章已确认事实（严禁违背）：\n" + facts + "\n"
+                fb += "\n必须紧接上一章结尾原文继续：\n" + (prev_tail or "")
+                for _cg in range(max_rewrites):
+                    cg = gateway.complete(
+                        run_id=run_id, node_key=f"continuity_fix{_cg+1}",
+                        project_id=project_id, task_type="gen_next_chapter",
+                        prompt_name="narrative.gen_next_chapter", user_id=user_id,
+                        variables={"context": context_text, "current_title": title,
+                                   "current_body": "", "review_feedback": fb,
+                                   "prev_facts": facts},
+                    )
+                    cg_ch = cg.get("chapter", {}) or {}
+                    cg_paras = cg_ch.get("body", []) if isinstance(cg_ch, dict) else []
+                    cg_text = "\n\n".join(cg_paras) if cg_paras else ""
+                    if cg_text and len(cg_text) >= MIN_CHAPTER_CHARS and not _violations(cg_text):
+                        paragraphs, text = cg_paras, cg_text
+                        title = cg_ch.get("title") or title
+                        _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
+                        report["steps"].append({"step": "continuity_guard", "applied": True,
+                                                "attempt": _cg + 1,
+                                                "my": text.count("我"), "he": text.count("他")})
+                        break
+                else:
+                    report["steps"].append({"step": "continuity_guard", "applied": False,
+                                            "reason": "exhausted retries; violations remain",
+                                            "remaining": _violations(text)[:5]})
 
     # 2. review (structured)
     rev = gateway.complete(
@@ -897,11 +1044,15 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     })
 
     # 4b. chapter summary — the short-term memory layer consumed by later chapters
+    prot_for_summary = repo.get_protagonist(project_id, novel_id)
+    prot_summary_var = ""
+    if isinstance(prot_for_summary, dict) and prot_for_summary.get("name"):
+        prot_summary_var = f"{prot_for_summary['name']}（视角：{prot_for_summary.get('pov') or '第三人称'}）"
     smy = gateway.complete(
         run_id=run_id, node_key="summarize", project_id=project_id,
         task_type="summarize_chapter", prompt_name="narrative.summarize_chapter",
         user_id=user_id,
-        variables={"body": text, "chapter_seq": chapter_seq},
+        variables={"body": text, "chapter_seq": chapter_seq, "protagonist": prot_summary_var},
     )
     summary_text = str(smy.get("summary") or "").strip()
     if summary_text:

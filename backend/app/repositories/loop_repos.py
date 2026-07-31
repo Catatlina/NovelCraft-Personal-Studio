@@ -355,18 +355,85 @@ def get_protagonist(project_id: str, novel_id: str) -> dict | None:
     return p if isinstance(p, dict) and p.get("name") else None
 
 
-def get_canonical_names(project_id: str, novel_id: str) -> list[str]:
+def get_continuity_banned_tokens(project_id: str, novel_id: str) -> list[str]:
+    """Novel-scoped forbidden tokens for the continuity guard (chapter_loop).
+
+    Stored in author_intent.continuity_banned_tokens (JSON array of substrings).
+    When the generated chapter for chapter_seq>1 contains any of these, the loop
+    forces a rewrite. This is the deterministic backstop for model priors that
+    ignore soft prompt rules (e.g. a model that keeps drifting a urban 伏笔账本
+    story into a rural-horror template despite explicit instructions). Empty by
+    default so other novels are unaffected.
+    """
+    cfg = get_book_config(project_id, novel_id)
+    if not cfg:
+        return []
+    intent = decode(cfg.get("author_intent"), {}) or {}
+    toks = intent.get("continuity_banned_tokens") if isinstance(intent, dict) else None
+    if not isinstance(toks, list):
+        return []
+    return [str(t).strip() for t in toks if str(t).strip()]
+
+
+def _continuity_field(project_id: str, novel_id: str, key: str, default):
+    """Read a single author_intent.continuity_* JSON field for the fact-lock."""
+    cfg = get_book_config(project_id, novel_id)
+    if not cfg:
+        return default
+    intent = decode(cfg.get("author_intent"), {}) or {}
+    val = intent.get(key) if isinstance(intent, dict) else None
+    if val is None:
+        return default
+    return val
+
+
+def get_continuity_facts(project_id: str, novel_id: str) -> str:
+    """Hard, non-negotiable facts from the previous chapter(s), injected into the
+    gen_next_chapter prompt as a 【上一章已确认事实】 block. Empty by default."""
+    v = _continuity_field(project_id, novel_id, "continuity_facts", "")
+    return str(v) if v else ""
+
+
+def get_continuity_rules(project_id: str, novel_id: str) -> list[str]:
+    """List of deterministic rules enforced by the post-gen fact-lock gate, e.g.
+    ['no_new_deaths','no_magic_items','no_new_named_characters']. Empty by default."""
+    v = _continuity_field(project_id, novel_id, "continuity_rules", [])
+    return [str(r).strip() for r in v if str(r).strip()] if isinstance(v, list) else []
+
+
+def get_continuity_characters(project_id: str, novel_id: str) -> list[str]:
+    """Allowed named-character list for the no_new_named_characters rule. Empty by
+    default (rule is skipped when empty)."""
+    v = _continuity_field(project_id, novel_id, "continuity_characters", [])
+    return [str(c).strip() for c in v if str(c).strip()] if isinstance(v, list) else []
+
+
+def get_canonical_names(project_id: str, novel_id: str,
+                         max_seq: int | None = None) -> list[str]:
     """Distinct character names already in the Story Bible — the model must reuse
-    these exact spellings (Defect 2: name confusion)."""
+    these exact spellings (Defect 2: name confusion).
+
+    max_seq bounds to chapters strictly before the one being written so a rerun
+    does not treat characters invented in FUTURE chapters as canonical. The
+    book_config protagonist name is always included so the lead is never renamed.
+    """
+    seq_filter = " AND c.seq < %s" if max_seq is not None else ""
+    seq_param = (max_seq,) if max_seq is not None else ()
     rows = _q(
         "SELECT DISTINCT es.entity_name FROM entity_states es "
         "JOIN contents c ON c.id = es.chapter_id "
-        "WHERE c.parent_id=%s AND c.is_deleted=FALSE "
+        f"WHERE c.parent_id=%s AND c.is_deleted=FALSE{seq_filter} "
         "AND es.entity_type='character' AND es.importance_level >= 4 "
         "ORDER BY es.entity_name",
-        (novel_id,),
+        (novel_id, *seq_param),
     )
-    return [r["entity_name"] for r in rows if r.get("entity_name")]
+    names = [r["entity_name"] for r in rows if r.get("entity_name")]
+    prot = get_protagonist(project_id, novel_id)
+    if prot and prot.get("name"):
+        nm = prot["name"]
+        if nm not in names:
+            names.insert(0, nm)
+    return names
 
 
 # ── Foreshadowing ledger (架构 §4.5) ─────────────────────────────────────────
@@ -469,8 +536,9 @@ def get_open_foreshadowings(novel_id: str, current_seq: int) -> list[dict]:
         "f.reader_awareness, f.expected_payoff_window, c.seq AS planted_seq "
         "FROM foreshadowings f JOIN contents c ON c.id=f.chapter_id "
         "WHERE c.parent_id=%s AND c.is_deleted=FALSE AND f.status <> 'resolved' "
+        "AND c.seq <= %s "
         "ORDER BY f.planned_resolve_chapter, f.importance DESC",
-        (novel_id,),
+        (novel_id, current_seq),
     )
     out = []
     for r in rows:
@@ -582,18 +650,22 @@ def upsert_character_arc(chapter_id: str, entity_name: str, arc: dict) -> None:
         conn.close()
 
 
-def get_capability_tree(novel_id: str, names: list[str] | None = None) -> dict[str, list[dict]]:
+def get_capability_tree(novel_id: str, names: list[str] | None = None,
+                         max_seq: int | None = None) -> dict[str, list[dict]]:
     """Latest capability tree per character across the whole novel.
 
     Rows are ordered oldest-first so later chapters overwrite earlier snapshots.
+    max_seq bounds to chapters strictly before the one being written.
     """
+    seq_filter = " AND c.seq < %s" if max_seq is not None else ""
+    seq_param = (max_seq,) if max_seq is not None else ()
     rows = _q(
         "SELECT es.entity_name, es.capability_tree, c.seq AS seq "
         "FROM entity_states es JOIN contents c ON c.id=es.chapter_id "
-        "WHERE c.parent_id=%s AND c.is_deleted=FALSE AND es.entity_type='character' "
+        f"WHERE c.parent_id=%s AND c.is_deleted=FALSE AND es.entity_type='character'{seq_filter} "
         "AND es.capability_tree <> '[]'::jsonb "
         "ORDER BY c.seq",
-        (novel_id,),
+        (novel_id, *seq_param),
     )
     out: dict[str, list[dict]] = {}
     wanted = {str(n).strip() for n in (names or []) if str(n).strip()}
@@ -765,9 +837,15 @@ def save_style_relearn(project_id: str, novel_id: str, card: dict) -> dict:
     return {"learn_count": intent["style_learn_count"], "applied": applied}
 
 
-def get_story_bible(project_id: str, novel_id: str) -> dict:
+def get_story_bible(project_id: str, novel_id: str, max_seq: int | None = None) -> dict:
     # entity_states is per-chapter; take the latest snapshot per (type, name)
     # by walking chapters of this novel in reverse order.
+    # NOTE: max_seq bounds the walk to chapters strictly BEFORE the one being
+    # written — otherwise a chapter rerun would ingest entities planted in
+    # FUTURE chapters (Defect: CH2 rerun kept re-drifting toward the rural-horror
+    # template that later chapters had wandered into).
+    seq_filter = " AND c.seq < %s" if max_seq is not None else ""
+    seq_param = (max_seq,) if max_seq is not None else ()
     entities = _q(
         "SELECT * FROM ("
         "  SELECT DISTINCT ON (es.entity_type, es.entity_name)"
@@ -775,12 +853,12 @@ def get_story_bible(project_id: str, novel_id: str) -> dict:
         "         es.relationships, es.confidence::float8 AS confidence,"
         "         es.importance_level, c.seq AS chapter_seq"
         "  FROM entity_states es JOIN contents c ON c.id = es.chapter_id"
-        "  WHERE c.parent_id=%s AND c.is_deleted=FALSE"
+        f"  WHERE c.parent_id=%s AND c.is_deleted=FALSE{seq_filter}"
         "  ORDER BY es.entity_type, es.entity_name, c.seq DESC NULLS LAST,"
         "           es.updated_at DESC"
         ") t WHERE t.importance_level >= 4 "
         "ORDER BY t.importance_level DESC, t.chapter_seq DESC NULLS LAST LIMIT 40",
-        (novel_id,),
+        (novel_id, *seq_param),
     )
     facts = _q(
         "SELECT kind, title, body FROM knowledge_items "
@@ -835,15 +913,44 @@ def save_chapter_summary(project_id: str, content_id: str, chapter_seq: int,
         conn.close()
 
 
-def get_recent_summaries(novel_id: str, limit: int = 10) -> list[dict]:
-    """Latest chapter summaries of one novel, newest first."""
+def get_recent_summaries(novel_id: str, limit: int = 10,
+                          max_seq: int | None = None) -> list[dict]:
+    """Latest chapter summaries of one novel, newest first.
+
+    max_seq bounds to chapters strictly before the one being written so a rerun
+    does not ingest summaries of FUTURE chapters (which can pull the plot off in
+    a different direction than the current chapter should continue).
+    """
+    seq_filter = " AND c.seq < %s" if max_seq is not None else ""
+    seq_param = (max_seq,) if max_seq is not None else ()
     return _q(
         "SELECT cs.content_id, cs.chapter_seq, cs.summary FROM chapter_summaries cs "
         "JOIN contents c ON c.id = cs.content_id "
-        "WHERE c.parent_id=%s AND cs.is_deleted=FALSE AND cs.summary_type='chapter' "
+        f"WHERE c.parent_id=%s AND cs.is_deleted=FALSE AND cs.summary_type='chapter'{seq_filter} "
         "ORDER BY cs.chapter_seq DESC LIMIT %s",
-        (novel_id, limit),
+        (novel_id, *seq_param, limit),
     )
+
+
+def get_previous_chapter_tail(novel_id: str, chapter_seq: int, tail_chars: int = 800) -> str:
+    """Last N chars of the previous chapter's body — fed into the next chapter's
+    context so it continues the prior scene/hook instead of inventing a new opener
+    (Defect: CH2 opened on a sofa, disconnected from CH1's car-ending). Returns ''
+    for chapter 1."""
+    if chapter_seq <= 1:
+        return ""
+    rows = _q(
+        "SELECT body FROM contents WHERE parent_id=%s AND type='chapter' "
+        "AND seq=%s AND is_deleted=FALSE ORDER BY seq LIMIT 1",
+        (novel_id, chapter_seq - 1),
+    )
+    if not rows:
+        return ""
+    raw = rows[0].get("body")
+    if not raw:
+        return ""
+    text = raw.get("text") if isinstance(raw, dict) else str(raw)
+    return text[-tail_chars:] if text else ""
 
 
 def save_generation_cost_log(project_id: str, rows: list[dict]) -> None:
@@ -988,14 +1095,21 @@ def upsert_relation_arc(project_id: str, novel_id: str, chapter_seq: int,
         conn.close()
 
 
-def get_relation_arcs(novel_id: str, limit: int = 30) -> list[dict]:
-    """All active relation arcs for this novel."""
+def get_relation_arcs(novel_id: str, limit: int = 30,
+                      max_seq: int | None = None) -> list[dict]:
+    """All active relation arcs for this novel.
+
+    max_seq bounds to arcs last updated strictly before the chapter being
+    written, so a rerun does not inherit relationship states invented later.
+    """
+    seq_filter = " AND last_chapter_seq < %s" if max_seq is not None else ""
+    seq_param = (max_seq,) if max_seq is not None else ()
     return _q(
         "SELECT entity_a, entity_b, relation_type, stage, turning_points, "
         "last_chapter_seq FROM relation_arcs "
-        "WHERE novel_id=%s AND is_deleted=FALSE "
+        f"WHERE novel_id=%s AND is_deleted=FALSE{seq_filter} "
         "ORDER BY last_chapter_seq DESC LIMIT %s",
-        (novel_id, limit),
+        (novel_id, *seq_param, limit),
     )
 
 
