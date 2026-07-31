@@ -395,9 +395,9 @@ def save_foreshadowing(chapter_id: str, seq: int, item: dict) -> str | None:
     if awareness not in ("hidden", "suspected", "known"):
         awareness = "hidden"
     try:
-        window = int(item.get("expected_payoff_window", 5))
+        window = int(item.get("expected_payoff_window", 10))
     except (TypeError, ValueError):
-        window = 5
+        window = 10
     window = max(1, window)
     planned = seq + window
 
@@ -863,6 +863,85 @@ def save_generation_cost_log(project_id: str, rows: list[dict]) -> None:
                  (r.get("prompt_tokens", 0) + r.get("completion_tokens", 0)),
                  r.get("cost_cny", 0.0), bool(r.get("success", True))),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Emotion curve (架构 §5.2) ────────────────────────────────────────────────
+# Deterministic mapping from review dimensions → reader emotion state.
+# Pure rule, zero LLM cost.
+_EMOTION_MAP = [
+    # (condition_fn, state) — evaluated top-down, first match wins
+    (lambda d: d.get("emotion", {}).get("score", 100) < 68, "压抑"),
+    (lambda d: d.get("plot", {}).get("score", 0) >= 88
+     and d.get("emotion", {}).get("score", 0) >= 82, "爆发"),
+    (lambda d: d.get("pacing", {}).get("score", 0) >= 85
+     and d.get("emotion", {}).get("score", 0) >= 80, "爽"),
+    (lambda d: d.get("conflict", d.get("plot", {})).get("score", 0) >= 80
+     and d.get("emotion", {}).get("score", 0) < 80, "冲突"),
+    (lambda d: d.get("plot", {}).get("score", 0) >= 80
+     and d.get("pacing", {}).get("score", 0) >= 75, "期待"),
+    (lambda _d: True, "缓冲"),  # fallback
+]
+
+
+def classify_emotion(dimensions: dict) -> str:
+    """Map review 7-dim scores → one of 压抑/冲突/爆发/爽/缓冲/期待."""
+    for cond, state in _EMOTION_MAP:
+        if cond(dimensions):
+            return state
+    return "缓冲"
+
+
+def save_emotion_state(project_id: str, content_id: str,
+                       chapter_seq: int, state: str) -> None:
+    """Upsert emotion state for one chapter (unique on content_id)."""
+    conn = connect()
+    try:
+        conn.execute(
+            "INSERT INTO chapter_emotion_state (id, project_id, content_id, chapter_seq, state) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (content_id) DO UPDATE SET state=EXCLUDED.state",
+            (new_id("emo"), project_id, content_id, chapter_seq, state),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_recent_emotions(novel_id: str, limit: int = 20) -> list[dict]:
+    """Recent emotion states for balance warning."""
+    return _q(
+        "SELECT ces.chapter_seq, ces.state FROM chapter_emotion_state ces "
+        "JOIN contents c ON c.id=ces.content_id "
+        "WHERE c.parent_id=%s AND c.is_deleted=FALSE "
+        "ORDER BY ces.chapter_seq DESC LIMIT %s",
+        (novel_id, limit),
+    )
+
+
+# ── Audit report (架构 §10.3, 零 LLM 规则聚合) ──────────────────────────────
+def save_audit_report(project_id: str, novel_id: str, at_chapter: int,
+                      character_changes: list, capability_changes: list,
+                      foreshadowing_status: dict, style_drift: dict) -> None:
+    """Upsert a rule-aggregated audit report (ON CONFLICT on novel+chapter)."""
+    conn = connect()
+    try:
+        conn.execute(
+            "INSERT INTO chapter_audit_report "
+            "(id, project_id, novel_id, at_chapter, character_changes, "
+            "capability_changes, foreshadowing_status, style_drift) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (novel_id, at_chapter) DO UPDATE SET "
+            "character_changes=EXCLUDED.character_changes, "
+            "capability_changes=EXCLUDED.capability_changes, "
+            "foreshadowing_status=EXCLUDED.foreshadowing_status, "
+            "style_drift=EXCLUDED.style_drift",
+            (new_id("audit"), project_id, novel_id, at_chapter,
+             encode(character_changes), encode(capability_changes),
+             encode(foreshadowing_status), encode(style_drift)),
+        )
         conn.commit()
     finally:
         conn.close()

@@ -561,7 +561,7 @@ $instruction
      '2. foreshadowings（本章新埋设的伏笔）：\n'
      '   - importance 用 1-10 整数（8 以上表示主线级关键伏笔，会进入修复保护区不可被改写）。\n'
      '   - reader_awareness 只能是 hidden（读者完全没察觉）/ suspected（读者隐约起疑）/ known（读者已明确知道但角色不知）。\n'
-     '   - expected_payoff_window 是"还需多少章内回收"的整数（如 5 表示第 $seq+5 章前应回收），主线级伏笔可给大值。\n'
+     '   - expected_payoff_window 是"还需多少章内回收"的整数（如 10 表示第 $seq+10 章前应回收），主线级伏笔可给更大的值。\n'
      '3. resolved（本章回收/揭晓的既有伏笔）：从下面【待回收伏笔】里挑，用其原文 content 精确匹配，'
      '本章确实揭晓了才写；没有回收任何伏笔就返回空数组，禁止硬凑。\n'
      '4. capability_changes（本章人物新获得/升级的能力）：\n'
@@ -574,7 +574,7 @@ $instruction
      '【待回收伏笔】\n$open_foreshadowings\n'
      '【已有能力】\n$known_capabilities\n'
      '【本章正文】\n$body\n'
-     '输出 JSON: {"foreshadowings":[{"content":"伏笔内容","importance":7,"reader_awareness":"hidden","expected_payoff_window":5}],'
+     '输出 JSON: {"foreshadowings":[{"content":"伏笔内容","importance":7,"reader_awareness":"hidden","expected_payoff_window":10}],'
      '"resolved":[{"content":"被回收的伏笔原文","how":"本章如何揭晓"}],'
      '"capability_changes":[{"entity":"人物名","skill":"能力名","level":"初级","evidence":"正文证据","limitations":"做不到什么"}],'
      '"arc_updates":[{"entity":"人物名","current_arc_stage":"当前弧线阶段","turning_point":"本章转折或空"}]}'),

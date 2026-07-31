@@ -103,10 +103,17 @@ def _domain_logic_check(text: str, protagonist: dict | None,
         elif name not in text:
             flags.append(f"主角「{name}」未在本章正文出现（可能漂移）")
     if canon:
+        # Only check tokens whose length equals the canonical name length.
+        # Without this, "那老太太"(4 chars) falsely matches "老太太"(3 chars)
+        # because SequenceMatcher gives high substring similarity.
         tokens = set(re.findall(r"[一-龥]{2,4}", text))
+        name_by_len: dict[int, list[str]] = {}
+        for n in canon:
+            name_by_len.setdefault(len(n), []).append(n)
         for tok in tokens:
-            for name in canon:
-                if tok != name and difflib.SequenceMatcher(None, tok, name).ratio() >= 0.8:
+            candidates = name_by_len.get(len(tok), [])
+            for name in candidates:
+                if tok != name and difflib.SequenceMatcher(None, tok, name).ratio() >= 0.85:
                     flags.append(f"近似人名「{tok}」与既有「{name}」高度相似，疑似混淆")
                     break
             if len(flags) >= 4:
@@ -299,6 +306,29 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
             included.append("capability_tree")
             layers["capability_tree"] = len(blob)
 
+    # Emotion balance warning (§5.2): soft suggestion only, not a hard gate.
+    # Warns if the recent 20 chapters are heavily skewed toward one emotion.
+    recent_emo = repo.get_recent_emotions(novel_id, limit=20)
+    if len(recent_emo) >= 8:
+        from collections import Counter
+        counts = Counter(e["state"] for e in recent_emo)
+        total = len(recent_emo)
+        dominant, cnt = counts.most_common(1)[0]
+        pct = cnt / total * 100
+        # Flag if any emotion exceeds 60% of recent chapters
+        if pct >= 60:
+            hint = (f"近{total}章「{dominant}」占比{pct:.0f}%，"
+                    f"建议安排情绪释放或转换（仅供参考，不强制）")
+            blob = json.dumps({
+                "emotion_balance_warning": {"triggered": True, "dominant": dominant,
+                                            "pct": round(pct), "hint": hint},
+                "recent_5": [{"ch": e["chapter_seq"], "s": e["state"]}
+                             for e in recent_emo[:5]],
+            }, ensure_ascii=False)
+            parts.append("【情绪曲线】" + blob)
+            included.append("emotion_balance")
+            layers["emotion_balance"] = len(blob)
+
     context_text = "\n\n".join(parts)
     return context_text, _hash(context_text), included, layers
 
@@ -478,6 +508,10 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                      model="deepseek-chat", overall=overall, run_id=run_id,
                      review_type="bootstrap")
     report["steps"].append({"step": "review", "overall_score": overall, "issues": len(issues)})
+
+    # 2b. emotion curve writeback (§5.2): zero LLM, pure rule from review dims
+    emo_state = repo.classify_emotion(score_7dim)
+    repo.save_emotion_state(project_id, content_id, chapter_seq, emo_state)
 
     # 3. classify + repair if below threshold
     repairs_done = 0
@@ -840,6 +874,59 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                 report["steps"].append({"step": "style_relearn",
                                         "learn_count": res["learn_count"],
                                         "applied": res["applied"]})
+
+    # 5a. audit report every 100 chapters (§10.3): zero LLM, rule-aggregated
+    if chapter_seq % 100 == 0 and chapter_seq > 0:
+        # character_changes: compare arc stages at ch1 and ch100
+        arc_rows = repo._q(
+            "SELECT es.entity_name, es.character_arc, c.seq FROM entity_states es "
+            "JOIN contents c ON c.id=es.chapter_id "
+            "WHERE c.parent_id=%s AND c.is_deleted=FALSE AND es.entity_type='character' "
+            "AND es.character_arc <> '{}'::jsonb ORDER BY c.seq",
+            (novel_id,),
+        )
+        seen_names: dict[str, dict] = {}
+        for r in arc_rows:
+            n = r.get("entity_name")
+            if n and n not in seen_names:
+                seen_names[n] = {"first_seq": r.get("seq"), "first_arc": r.get("character_arc", {})}
+            if n:
+                seen_names[n]["last_arc"] = r.get("character_arc", {})
+        char_changes = []
+        for name, info in seen_names.items():
+            fa = info.get("first_arc", {})
+            la = info.get("last_arc", {})
+            if isinstance(fa, dict) and isinstance(la, dict):
+                fs = fa.get("current_arc_stage", "")
+                ls = la.get("current_arc_stage", "")
+                if fs and ls and fs != ls:
+                    char_changes.append(f"{name}：{fs}→{ls}")
+        # capability_changes: aggregate all caps from Story Bible
+        cap_tree_all = repo.get_capability_tree(novel_id)
+        cap_changes = []
+        for cname, caps in cap_tree_all.items():
+            for c in caps:
+                if isinstance(c, dict) and c.get("skill"):
+                    cap_changes.append(
+                        f"{cname}：{c['skill']}({c.get('level','?')}@第{c.get('acquired_chapter','?')}章)")
+        # foreshadowing status
+        open_fs = repo.get_open_foreshadowings(novel_id, chapter_seq)
+        fs_status = {"open": 0, "overdue": 0, "due_soon": 0}
+        for f in open_fs:
+            st = f.get("state", "open")
+            if st in fs_status:
+                fs_status[st] += 1
+        repo.save_audit_report(
+            project_id, novel_id, chapter_seq,
+            character_changes=char_changes[:20],
+            capability_changes=cap_changes[:20],
+            foreshadowing_status=fs_status,
+            style_drift={},
+        )
+        report["steps"].append({"step": "audit_report", "at_chapter": chapter_seq,
+                                "char_changes": len(char_changes),
+                                "cap_changes": len(cap_changes),
+                                "foreshadowing": fs_status})
 
     # 5. accounting: context_package + generation_cost_log (from ai_calls of this run)
     repo.save_context_package(project_id, content_id, chapter_seq, context_hash, included,

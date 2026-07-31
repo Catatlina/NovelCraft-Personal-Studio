@@ -17,8 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.chapter_loop import REVIEW_SCORE_THRESHOLD, run_single_chapter
 
-NOVEL = os.getenv("LOOP_NOVEL_ID", "58051d25-c719-489d-a34c-e65fb2b15abe")
-PROJECT = os.getenv("LOOP_PROJECT_ID", "06445add-098d-4a80-b657-ff99fd7262b0")
+NOVEL = os.getenv("NOVEL_ID") or os.getenv("LOOP_NOVEL_ID", "58051d25-c719-489d-a34c-e65fb2b15abe")
+PROJECT = os.getenv("PROJECT_ID") or os.getenv("LOOP_PROJECT_ID", "06445add-098d-4a80-b657-ff99fd7262b0")
 FROM = int(os.getenv("LOOP_FROM", os.getenv("LOOP_CHAPTER_SEQ", "1")))
 TO = int(os.getenv("LOOP_TO", str(FROM)))
 OUT = os.getenv("LOOP_REPORT", "")
