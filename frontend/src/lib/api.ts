@@ -83,7 +83,15 @@ export async function apiEnvelope<T = unknown>(url: string, init?: RequestInit):
     headers["Authorization"] = `Bearer ${sessionStorage.getItem("nc_token") || ""}`;
     r = await fetch(fullUrl, { ...init, headers, credentials: "include" });
   }
-  const payload = await r.json() as ApiEnvelope<T>;
+  // Guard: non-JSON responses (nginx 502 HTML, uvicorn crash pages) would cause
+  // r.json() to throw "Unexpected token '<'" — read as text first, then parse.
+  const text = await r.text();
+  let payload: ApiEnvelope<T>;
+  try {
+    payload = JSON.parse(text) as ApiEnvelope<T>;
+  } catch {
+    throw new ApiError(r.status, { code: r.status, message: `Server returned non-JSON (${r.status}): ${text.slice(0, 120)}`, data: null } as any);
+  }
   if (!r.ok) throw new ApiError(r.status, payload);
   return payload;
 }
