@@ -288,7 +288,7 @@ def seeded_novel():
     db = connect()
     chapter_id = new_id()
     db.execute(
-        "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s,%s,%s,'chapter','第一章',%s,%s,'draft')",
+        "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, seq, status) VALUES (%s,%s,%s,'chapter','第一章',%s,%s,1,'draft')",
         (chapter_id, project_id, novel_id, encode({"type": "doc", "content": []}), encode({"seq": 1})),
     )
     db.commit()
