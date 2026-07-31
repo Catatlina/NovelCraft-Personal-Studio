@@ -2104,3 +2104,6 @@ except ImportError:
 # ---- Module Marketplace ----
 from app.api.v1.modules import router as modules_router
 app.include_router(modules_router)
+
+from app.api.v1.checkpoint import router as checkpoint_router
+app.include_router(checkpoint_router, prefix="/api/v1")

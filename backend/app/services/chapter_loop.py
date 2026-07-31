@@ -309,6 +309,25 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
             included.append("capability_tree")
             layers["capability_tree"] = len(blob)
 
+    # Relation arcs (§4.2): inject current relationship state so the model
+    # maintains consistency and can naturally evolve relationships.
+    rel_arcs = repo.get_relation_arcs(novel_id, limit=20)
+    if rel_arcs:
+        rel_bits = []
+        for r in rel_arcs[:12]:
+            tp = r.get("turning_points")
+            tp_str = ""
+            if isinstance(tp, list) and tp:
+                tp_str = f"（转折：{'→'.join(str(t) for t in tp[-3:])}）"
+            rel_bits.append(
+                f"{r['entity_a']} ↔ {r['entity_b']}：{r.get('relation_type','?')}，"
+                f"阶段「{r.get('stage','')}」{tp_str}"
+            )
+        blob = "\n".join(rel_bits)[:2000]
+        parts.append("【人物关系】（保持一致性，可自然推进但不可突变）" + blob)
+        included.append("relation_arcs")
+        layers["relation_arcs"] = len(blob)
+
     # Emotion balance warning (§5.2): soft suggestion only, not a hard gate.
     # Warns if the recent 20 chapters are heavily skewed toward one emotion.
     recent_emo = repo.get_recent_emotions(novel_id, limit=20)
@@ -424,36 +443,60 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     )
     repo.ensure_book_config(project_id, novel_id, genre=ctx.get("genre", "都市重生"))
 
-    # 1. generate
-    if chapter_seq == 1:
-        out = gateway.complete(
-            run_id=run_id, node_key="gen_chapter1", project_id=project_id,
-            task_type="gen_chapter1", prompt_name="bootstrap.gen_chapter1",
-            user_id=user_id,
-            variables={
-                "selected_title": ctx.get("title", ""),
-                "style": style,
-                "idea": ctx.get("idea", ""),
-                "synopsis": ctx.get("synopsis", ""),
-                "selling_points": "",
-                "worldview": ctx.get("worldview", ""),
-                "characters": ctx.get("characters", ""),
-                "outline": "",
-            },
-        )
-    else:
-        out = gateway.complete(
-            run_id=run_id, node_key="gen_next", project_id=project_id,
-            task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
-            user_id=user_id,
-            variables={
-                "context": context_text,
-                "current_title": f"第{chapter_seq}章",
-                "current_body": "",
-                "review_feedback": "",
-            },
-        )
-    chapter = out.get("chapter", {})
+    # 1. generate with layered retry (§6.3 task_retry_policy)
+    # Strategy: retry_same → reduce_context → fallback_prompt
+    _gen_max = 3
+    _gen_exc = None
+    out = {}
+    for _gen_attempt in range(_gen_max):
+        try:
+            if chapter_seq == 1:
+                out = gateway.complete(
+                    run_id=run_id, node_key="gen_chapter1", project_id=project_id,
+                    task_type="gen_chapter1", prompt_name="bootstrap.gen_chapter1",
+                    user_id=user_id,
+                    variables={
+                        "selected_title": ctx.get("title", ""),
+                        "style": style,
+                        "idea": ctx.get("idea", ""),
+                        "synopsis": ctx.get("synopsis", ""),
+                        "selling_points": "",
+                        "worldview": ctx.get("worldview", ""),
+                        "characters": ctx.get("characters", ""),
+                        "outline": "",
+                    },
+                )
+            else:
+                # reduce_context: on 2nd+ attempt, trim context to 60% of original
+                gen_ctx = context_text
+                if _gen_attempt == 1:
+                    gen_ctx = context_text[:int(len(context_text) * 0.6)]
+                elif _gen_attempt >= 2:
+                    # fallback_prompt: use minimal context
+                    gen_ctx = context_text[:2000]
+                out = gateway.complete(
+                    run_id=run_id, node_key="gen_next", project_id=project_id,
+                    task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
+                    user_id=user_id,
+                    variables={
+                        "context": gen_ctx,
+                        "current_title": f"第{chapter_seq}章",
+                        "current_body": "",
+                        "review_feedback": "",
+                    },
+                )
+            chapter = out.get("chapter", {})
+            if chapter:
+                break  # success
+        except Exception as exc:
+            _gen_exc = exc
+            if _gen_attempt < _gen_max - 1:
+                report["steps"].append({"step": "gen_retry",
+                                        "attempt": _gen_attempt + 1,
+                                        "error": f"{type(exc).__name__}: {str(exc)[:80]}"})
+                continue
+            raise
+    chapter = out.get("chapter", {}) if out else {}
     paragraphs = chapter.get("body", []) if isinstance(chapter, dict) else []
     title = chapter.get("title", f"第{chapter_seq}章") if isinstance(chapter, dict) else f"第{chapter_seq}章"
     text = "\n\n".join(paragraphs)
@@ -527,14 +570,39 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                 f"[{i.get('type')}/{i.get('severity')}] {i.get('description','')} (位置：{i.get('location','')})"
                 for i in local_issues
             )
+            # §6.4 protected_elements: high-importance foreshadowings must not be
+            # altered by repair. Extract from open foreshadowings + first chapter events.
+            protected = []
+            for f in open_before:
+                if isinstance(f, dict) and f.get("importance", 0) >= 8:
+                    protected.append(f["content"][:60])
+            # Also protect the protagonist's first appearance (ch1 anchor)
+            if chapter_seq == 1:
+                prot_known = repo.get_protagonist(project_id, novel_id)
+                if prot_known and prot_known.get("name"):
+                    protected.append(f"主角{prot_known['name']}首次出场的关键段落")
+            protect_text = "\n".join(f"- {p}" for p in protected[:10]) if protected else ""
             rp = gateway.complete(
                 run_id=run_id, node_key="repair", project_id=project_id,
                 task_type="repair_local", prompt_name="bootstrap.repair_local",
                 user_id=user_id,
-                variables={"chapter_text": text, "repair_issues": repair_text, "_chapter_outline": ""},
+                variables={"chapter_text": text, "repair_issues": repair_text,
+                           "_chapter_outline": "", "_protected_elements": protect_text},
             )
             replacements = rp.get("replacements", []) or []
+            # §6.4 post-repair check: verify protected elements survived
             new_text, applied = _apply_replacements(text, replacements)
+            if protected:
+                for p in protected:
+                    # Check if a protected substring was removed (not present in new text)
+                    # but was present in old text. Allow if it was modified in-place.
+                    if p in text and p not in new_text:
+                        report["steps"].append({"step": "protected_violation",
+                                                "element": p[:40], "action": "reverted"})
+                        # Revert: use original text for this repair attempt
+                        new_text = text
+                        applied = 0
+                        break
             # 2nd review on repaired text
             rev2 = gateway.complete(
                 run_id=run_id, node_key="review2", project_id=project_id,
@@ -603,6 +671,12 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                            "_book_state": context_text[:2000] or "（无）", "_arc_summary": ""},
             )
             revised = rp.get("revised_outline") or {}
+            # §5.4 outline versioning: save each replan as a versioned outline
+            if revised:
+                repo.save_outline_version(
+                    project_id, novel_id, chapter_seq, chapter_seq,
+                    revised, rationale=f"replan due to {len(major_issues)} major issues",
+                )
             feedback = "按重新规划的细纲重写本章：" + json.dumps(
                 {k: revised.get(k) for k in ("outline", "chapter_goal", "beats", "function_type") if revised.get(k)},
                 ensure_ascii=False,
@@ -799,6 +873,17 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         if isinstance(a, dict) and a.get("entity"):
             repo.upsert_character_arc(content_id, a["entity"], a)
             arc_written += 1
+    rel_written = 0
+    for rc in ledger.get("relation_changes", []) or []:
+        if isinstance(rc, dict) and rc.get("entity_a") and rc.get("entity_b"):
+            repo.upsert_relation_arc(
+                project_id, novel_id, chapter_seq,
+                rc["entity_a"], rc["entity_b"],
+                rc.get("relation_type", "unknown"),
+                rc.get("stage", ""),
+                rc.get("turning_point", ""),
+            )
+            rel_written += 1
     # honest accounting: how many overdue items the chapter was told to clear
     overdue_before = [f for f in open_before if f["state"] == "overdue"]
     report["steps"].append({
@@ -808,6 +893,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "overdue_at_start": len(overdue_before),
         "capabilities_written": cap_written,
         "arcs_written": arc_written,
+        "relations_written": rel_written,
     })
 
     # 4b. chapter summary — the short-term memory layer consumed by later chapters
@@ -851,7 +937,8 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         report["steps"].append({"step": "arc_summary", "volume_seq": chapter_seq // 10})
 
     # Step 7: offline domain_logic gate (no LLM) — protagonist presence, name
-    # confusion, un-cleared overdue foreshadowings, and capability over-reach.
+    # confusion, un-cleared overdue foreshadowings, capability over-reach,
+    # and genre-specific checks (§6.2 domain plugins).
     dom_flags = _domain_logic_check(
         text, repo.get_protagonist(project_id, novel_id),
         repo.get_canonical_names(project_id, novel_id),
@@ -859,6 +946,14 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         open_after=repo.get_open_foreshadowings(novel_id, chapter_seq),
         cap_tree=repo.get_capability_tree(novel_id),
     )
+    # Genre-specific plugin checks (§6.2): load plugin based on book_config.genre
+    from app.services.domain_plugins import run_domain_checks
+    cfg_for_genre = repo.get_book_config(project_id, novel_id)
+    genre = ""
+    if cfg_for_genre:
+        genre = decode(cfg_for_genre.get("genre"), "") or ""
+    genre_flags = run_domain_checks(text, genre)
+    dom_flags.extend(genre_flags)
     if dom_flags:
         report["steps"].append({"step": "domain_logic", "flags": dom_flags})
 

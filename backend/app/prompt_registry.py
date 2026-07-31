@@ -575,6 +575,10 @@ $instruction
      '   - level 用 初级/中级/高级/宗师 之一。已在【已有能力】列出的不要重复登记，除非本章确实升级了。\n'
      '5. arc_updates（人物弧线推进）：current_arc_stage 描述该人物当前处于成长的哪个阶段，'
      'turning_point 只在本章确实发生转折时填写，否则留空字符串。\n'
+     '6. relation_changes（人物关系变化）：只记录本章正文明确体现的关系变化。'
+     'relation_type 用简短标签（如"师徒""对手""恋人""父子"），'
+     'stage 描述当前关系阶段（如"初识→信任""信任→背叛"），'
+     'turning_point 只在关系发生转折时填写。没有关系变化就返回空数组。\n'
      '当前章序：$seq\n'
      '【待回收伏笔】\n$open_foreshadowings\n'
      '【已有能力】\n$known_capabilities\n'
@@ -582,7 +586,8 @@ $instruction
      '输出 JSON: {"foreshadowings":[{"content":"伏笔内容","importance":7,"reader_awareness":"hidden","expected_payoff_window":10}],'
      '"resolved":[{"content":"被回收的伏笔原文","how":"本章如何揭晓"}],'
      '"capability_changes":[{"entity":"人物名","skill":"能力名","level":"初级","evidence":"正文证据","limitations":"做不到什么"}],'
-     '"arc_updates":[{"entity":"人物名","current_arc_stage":"当前弧线阶段","turning_point":"本章转折或空"}]}'),
+     '"arc_updates":[{"entity":"人物名","current_arc_stage":"当前弧线阶段","turning_point":"本章转折或空"}],'
+     '"relation_changes":[{"entity_a":"人物A","entity_b":"人物B","relation_type":"关系标签","stage":"当前阶段","turning_point":"转折或空"}]}'),
 
     # ── Short story (M3) ──
     ("shortstory.gen_titles", "3.1.0", "deepseek",

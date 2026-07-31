@@ -945,3 +945,103 @@ def save_audit_report(project_id: str, novel_id: str, at_chapter: int,
         conn.commit()
     finally:
         conn.close()
+
+
+# ── Relation arcs (架构 §4.2) ────────────────────────────────────────────────
+def upsert_relation_arc(project_id: str, novel_id: str, chapter_seq: int,
+                        entity_a: str, entity_b: str, relation_type: str,
+                        stage: str, turning_point: str = "") -> None:
+    """Upsert a relation arc between two characters.
+
+    Canonical pair order: sorted alphabetically so (A,B) == (B,A).
+    """
+    a, b = sorted([str(entity_a).strip(), str(entity_b).strip()])
+    if not a or not b or a == b:
+        return
+    conn = connect()
+    try:
+        existing = row_to_dict(conn.execute(
+            "SELECT id, turning_points FROM relation_arcs "
+            "WHERE novel_id=%s AND entity_a=%s AND entity_b=%s AND is_deleted=FALSE",
+            (novel_id, a, b),
+        ).fetchone())
+        if existing:
+            tp = decode(existing.get("turning_points"), []) or []
+            if turning_point and turning_point not in tp:
+                tp.append(turning_point)
+            conn.execute(
+                "UPDATE relation_arcs SET relation_type=%s, stage=%s, "
+                "turning_points=%s, last_chapter_seq=%s, updated_at=now() WHERE id=%s",
+                (relation_type, stage, encode(tp), chapter_seq, existing["id"]),
+            )
+        else:
+            tp = [turning_point] if turning_point else []
+            conn.execute(
+                "INSERT INTO relation_arcs (id, project_id, novel_id, entity_a, entity_b, "
+                "relation_type, stage, turning_points, last_chapter_seq) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (new_id("ra"), project_id, novel_id, a, b,
+                 relation_type, stage, encode(tp), chapter_seq),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_relation_arcs(novel_id: str, limit: int = 30) -> list[dict]:
+    """All active relation arcs for this novel."""
+    return _q(
+        "SELECT entity_a, entity_b, relation_type, stage, turning_points, "
+        "last_chapter_seq FROM relation_arcs "
+        "WHERE novel_id=%s AND is_deleted=FALSE "
+        "ORDER BY last_chapter_seq DESC LIMIT %s",
+        (novel_id, limit),
+    )
+
+
+# ── Outline versions (架构 §5.4) ─────────────────────────────────────────────
+def save_outline_version(project_id: str, novel_id: str,
+                         chapter_from: int, chapter_to: int,
+                         outline_json: dict, *,
+                         parent_version_id: str | None = None,
+                         rationale: str = "") -> str:
+    """Save a new outline version, superseding any active version for the same range."""
+    conn = connect()
+    try:
+        # supersede existing active version for this range
+        conn.execute(
+            "UPDATE outline_versions SET status='superseded', is_deleted=TRUE "
+            "WHERE novel_id=%s AND chapter_from=%s AND chapter_to=%s "
+            "AND status='active' AND is_deleted=FALSE",
+            (novel_id, chapter_from, chapter_to),
+        )
+        # get next version number
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 AS next_ver FROM outline_versions "
+            "WHERE novel_id=%s AND chapter_from=%s AND chapter_to=%s",
+            (novel_id, chapter_from, chapter_to),
+        ).fetchone()
+        ver = row_to_dict(row)["next_ver"] if row else 1
+        vid = new_id("ov")
+        conn.execute(
+            "INSERT INTO outline_versions (id, project_id, novel_id, chapter_from, "
+            "chapter_to, version, outline_json, status, parent_version_id, rationale) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, 'active', %s, %s)",
+            (vid, project_id, novel_id, chapter_from, chapter_to,
+             ver, encode(outline_json), parent_version_id, rationale),
+        )
+        conn.commit()
+        return vid
+    finally:
+        conn.close()
+
+
+def get_active_outline(novel_id: str, chapter_from: int, chapter_to: int) -> dict | None:
+    """Get the active outline version for a chapter range."""
+    row = _q(
+        "SELECT id, version, outline_json, rationale, created_at FROM outline_versions "
+        "WHERE novel_id=%s AND chapter_from=%s AND chapter_to=%s "
+        "AND status='active' AND is_deleted=FALSE ORDER BY version DESC LIMIT 1",
+        (novel_id, chapter_from, chapter_to),
+    )
+    return row[0] if row else None

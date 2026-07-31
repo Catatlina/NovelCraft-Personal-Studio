@@ -118,3 +118,83 @@ PROVIDERS = {
     "openai": call_openai,
     "gemini": call_gemini,
 }
+
+
+# ═══ LLMProvider 抽象接口 (§9.1) ══════════════════════════════════════════════
+from abc import ABC, abstractmethod
+
+
+class LLMProvider(ABC):
+    """Abstract base class for LLM providers.
+
+    Concrete implementations must implement ``complete`` which returns a dict
+    with at minimum a top-level JSON-serializable output.  The gateway calls
+    ``provider.complete(task_type, prompt, model, params)`` instead of writing
+    provider-specific code inline.
+    """
+
+    @abstractmethod
+    def complete(self, task_type: str, prompt: str, model: str,
+                 params: dict[str, Any] | None = None,
+                 project_id: str | None = None) -> tuple[dict, int, int]:
+        """Send a prompt and return (parsed_output, prompt_tokens, completion_tokens).
+
+        Raises:
+            ProviderError on transport/auth failures.
+            OutputValidationError on malformed responses.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Provider identifier (e.g. 'deepseek', 'claude')."""
+        ...
+
+    @property
+    def default_model(self) -> str:
+        """Default model if none specified in params."""
+        return ""
+
+
+class DeepSeekProvider(LLMProvider):
+    """DeepSeek implementation — delegates to the existing _deepseek_complete in gateway."""
+
+    def __init__(self):
+        # Lazy import to avoid circular dependency
+        self._impl = None
+
+    def _get_impl(self):
+        if self._impl is None:
+            from app.gateway import _deepseek_complete
+            self._impl = _deepseek_complete
+        return self._impl
+
+    def complete(self, task_type: str, prompt: str, model: str,
+                 params: dict[str, Any] | None = None,
+                 project_id: str | None = None) -> tuple[dict, int, int]:
+        impl = self._get_impl()
+        parsed, pt, ct = impl(task_type, prompt, model, params or {})
+        return parsed, pt, ct
+
+    @property
+    def name(self) -> str:
+        return "deepseek"
+
+    @property
+    def default_model(self) -> str:
+        return "deepseek-chat"
+
+
+# Provider registry (ABC-based)
+PROVIDER_REGISTRY: dict[str, LLMProvider] = {
+    "deepseek": DeepSeekProvider(),
+}
+
+
+def get_provider(name: str) -> LLMProvider:
+    """Get a registered LLMProvider by name."""
+    p = PROVIDER_REGISTRY.get(name)
+    if not p:
+        raise ValueError(f"Unknown provider: {name}. Registered: {list(PROVIDER_REGISTRY)}")
+    return p
