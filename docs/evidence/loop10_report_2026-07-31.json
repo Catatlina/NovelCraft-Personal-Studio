@@ -1,0 +1,521 @@
+{
+  "summary": {
+    "chapters_attempted": 10,
+    "chapters_ok": 10,
+    "avg_score": 82.17,
+    "min_score": 79.43,
+    "total_chars": 24674,
+    "total_repairs": 1,
+    "total_cost_cny": 0.368452,
+    "total_tokens": 154325,
+    "elapsed_s": 1040.6
+  },
+  "reports": [
+    {
+      "run_id": "99a1264f-7f04-4834-92c2-a2d7aee8310e",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 1,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "846432d0-8f76-4036-a0db-0938d5dcb9c1",
+          "chars": 2320,
+          "chars_first_pass": 2320,
+          "expand_attempts": 0,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 85.0,
+          "issues": 5
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 12,
+          "entities_written": 12,
+          "facts_written": 5
+        },
+        {
+          "step": "summary",
+          "chars": 88
+        }
+      ],
+      "final_score": 85.0,
+      "chars": 2320,
+      "repairs_done": 0,
+      "content_id": "846432d0-8f76-4036-a0db-0938d5dcb9c1",
+      "cost": {
+        "calls": 4,
+        "tokens": 9406,
+        "cost_cny": 0.022868,
+        "by_task": {
+          "chapter_generate": 1,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 105.0
+    },
+    {
+      "run_id": "49bf4759-d283-4fca-b5cf-4bc3093f1973",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 2,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "5299ca0e-b539-4836-9836-ab91c6275f14",
+          "chars": 2942,
+          "chars_first_pass": 1771,
+          "expand_attempts": 2,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 81.71,
+          "issues": 5
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 13,
+          "entities_written": 13,
+          "facts_written": 2
+        },
+        {
+          "step": "summary",
+          "chars": 107
+        }
+      ],
+      "final_score": 81.71,
+      "chars": 2942,
+      "repairs_done": 0,
+      "content_id": "5299ca0e-b539-4836-9836-ab91c6275f14",
+      "cost": {
+        "calls": 6,
+        "tokens": 18887,
+        "cost_cny": 0.045038,
+        "by_task": {
+          "chapter_generate": 3,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 119.3
+    },
+    {
+      "run_id": "9dfeb76a-627f-45cf-b560-94a69b4e1b9b",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 3,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "460493dd-8450-4970-a2b7-d1332606ee8b",
+          "chars": 2015,
+          "chars_first_pass": 2015,
+          "expand_attempts": 0,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 79.0,
+          "issues": 6
+        },
+        {
+          "step": "repair_local",
+          "candidates": 4,
+          "replacements_applied": 4,
+          "second_score": 82.14,
+          "rolled_back": false
+        },
+        {
+          "step": "fact_reconcile",
+          "candidates": 2
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 12,
+          "entities_written": 12,
+          "facts_written": 7
+        },
+        {
+          "step": "summary",
+          "chars": 99
+        }
+      ],
+      "final_score": 82.14,
+      "chars": 2113,
+      "repairs_done": 1,
+      "content_id": "460493dd-8450-4970-a2b7-d1332606ee8b",
+      "cost": {
+        "calls": 7,
+        "tokens": 17568,
+        "cost_cny": 0.041031,
+        "by_task": {
+          "chapter_generate": 1,
+          "chapter_review": 2,
+          "chapter_summary": 1,
+          "entity_extract": 1,
+          "fact_reconcile": 1,
+          "repair_local": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 105.2
+    },
+    {
+      "run_id": "041d64df-808d-4967-b7e5-b920e1fe71f8",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 4,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "65723fdf-d384-45b0-8c83-3f880f7d491a",
+          "chars": 2905,
+          "chars_first_pass": 2905,
+          "expand_attempts": 0,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 79.43,
+          "issues": 5
+        },
+        {
+          "step": "repair_local",
+          "candidates": 4,
+          "replacements_applied": 5,
+          "second_score": 77.43,
+          "rolled_back": true
+        },
+        {
+          "step": "fact_reconcile",
+          "candidates": 4
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 9,
+          "entities_written": 9,
+          "facts_written": 5
+        },
+        {
+          "step": "summary",
+          "chars": 161
+        }
+      ],
+      "final_score": 79.43,
+      "chars": 2905,
+      "repairs_done": 0,
+      "content_id": "65723fdf-d384-45b0-8c83-3f880f7d491a",
+      "cost": {
+        "calls": 7,
+        "tokens": 20950,
+        "cost_cny": 0.048874,
+        "by_task": {
+          "chapter_generate": 1,
+          "chapter_review": 2,
+          "chapter_summary": 1,
+          "entity_extract": 1,
+          "fact_reconcile": 1,
+          "repair_local": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 100.2
+    },
+    {
+      "run_id": "ec3f20c9-531c-492a-94c8-b7bb13e41d63",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 5,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "cb467162-eae6-40f3-bbae-b09b85eaf53c",
+          "chars": 2237,
+          "chars_first_pass": 2237,
+          "expand_attempts": 0,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 81.43,
+          "issues": 6
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 10,
+          "entities_written": 10,
+          "facts_written": 8
+        },
+        {
+          "step": "summary",
+          "chars": 140
+        }
+      ],
+      "final_score": 81.43,
+      "chars": 2237,
+      "repairs_done": 0,
+      "content_id": "cb467162-eae6-40f3-bbae-b09b85eaf53c",
+      "cost": {
+        "calls": 4,
+        "tokens": 11272,
+        "cost_cny": 0.027478,
+        "by_task": {
+          "chapter_generate": 1,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 140.4
+    },
+    {
+      "run_id": "26ebf25c-18b7-4edb-b6a7-4a70ea88a6dd",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 6,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "5cb9a44f-cfb9-41dc-960e-b10cc6b5f5e5",
+          "chars": 2349,
+          "chars_first_pass": 1513,
+          "expand_attempts": 1,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 82.57,
+          "issues": 7
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 8,
+          "entities_written": 8,
+          "facts_written": 5
+        },
+        {
+          "step": "summary",
+          "chars": 117
+        }
+      ],
+      "final_score": 82.57,
+      "chars": 2349,
+      "repairs_done": 0,
+      "content_id": "5cb9a44f-cfb9-41dc-960e-b10cc6b5f5e5",
+      "cost": {
+        "calls": 5,
+        "tokens": 14433,
+        "cost_cny": 0.034389,
+        "by_task": {
+          "chapter_generate": 2,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 71.0
+    },
+    {
+      "run_id": "b4555c6f-7673-4440-8793-dc926bb5a594",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 7,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "7c3916af-7bb5-4a8d-80c3-6ff24a77d3a8",
+          "chars": 2772,
+          "chars_first_pass": 1580,
+          "expand_attempts": 1,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 81.57,
+          "issues": 6
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 9,
+          "entities_written": 9,
+          "facts_written": 8
+        },
+        {
+          "step": "summary",
+          "chars": 133
+        }
+      ],
+      "final_score": 81.57,
+      "chars": 2772,
+      "repairs_done": 0,
+      "content_id": "7c3916af-7bb5-4a8d-80c3-6ff24a77d3a8",
+      "cost": {
+        "calls": 5,
+        "tokens": 15537,
+        "cost_cny": 0.037337,
+        "by_task": {
+          "chapter_generate": 2,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 78.3
+    },
+    {
+      "run_id": "0ccda90e-cead-47a0-af7e-089306b07698",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 8,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "e2a5d140-7a74-4152-a36c-8d3a7902a8ec",
+          "chars": 1968,
+          "chars_first_pass": 1611,
+          "expand_attempts": 2,
+          "length_ok": false
+        },
+        {
+          "step": "review",
+          "overall_score": 81.14,
+          "issues": 7
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 14,
+          "entities_written": 14,
+          "facts_written": 4
+        },
+        {
+          "step": "summary",
+          "chars": 226
+        }
+      ],
+      "final_score": 81.14,
+      "chars": 1968,
+      "repairs_done": 0,
+      "content_id": "e2a5d140-7a74-4152-a36c-8d3a7902a8ec",
+      "cost": {
+        "calls": 6,
+        "tokens": 19414,
+        "cost_cny": 0.046805,
+        "by_task": {
+          "chapter_generate": 3,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 123.8
+    },
+    {
+      "run_id": "f880ced0-1911-4e29-9d5a-3bbf557ddc0d",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 9,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "ba22c686-c12f-4638-aba8-605d75c4bd4a",
+          "chars": 2479,
+          "chars_first_pass": 2479,
+          "expand_attempts": 0,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 81.14,
+          "issues": 4
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 11,
+          "entities_written": 11,
+          "facts_written": 2
+        },
+        {
+          "step": "summary",
+          "chars": 128
+        }
+      ],
+      "final_score": 81.14,
+      "chars": 2479,
+      "repairs_done": 0,
+      "content_id": "ba22c686-c12f-4638-aba8-605d75c4bd4a",
+      "cost": {
+        "calls": 4,
+        "tokens": 11135,
+        "cost_cny": 0.026884,
+        "by_task": {
+          "chapter_generate": 1,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 118.9
+    },
+    {
+      "run_id": "e5fd0b35-ebbc-4f79-91ad-8579552de2f2",
+      "project_id": "06445add-098d-4a80-b657-ff99fd7262b0",
+      "novel_id": "58051d25-c719-489d-a34c-e65fb2b15abe",
+      "chapter_seq": 10,
+      "steps": [
+        {
+          "step": "generate",
+          "content_id": "0a59b5ed-a90b-4a1d-b14c-73837fafb8b8",
+          "chars": 2589,
+          "chars_first_pass": 1865,
+          "expand_attempts": 1,
+          "length_ok": true
+        },
+        {
+          "step": "review",
+          "overall_score": 85.57,
+          "issues": 6
+        },
+        {
+          "step": "story_bible",
+          "entities_extracted": 13,
+          "entities_written": 13,
+          "facts_written": 1
+        },
+        {
+          "step": "summary",
+          "chars": 150
+        }
+      ],
+      "final_score": 85.57,
+      "chars": 2589,
+      "repairs_done": 0,
+      "content_id": "0a59b5ed-a90b-4a1d-b14c-73837fafb8b8",
+      "cost": {
+        "calls": 5,
+        "tokens": 15723,
+        "cost_cny": 0.037748,
+        "by_task": {
+          "chapter_generate": 2,
+          "chapter_review": 1,
+          "chapter_summary": 1,
+          "entity_extract": 1
+        }
+      },
+      "ok": true,
+      "elapsed_s": 78.5
+    }
+  ]
+}

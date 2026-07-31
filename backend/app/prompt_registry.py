@@ -197,6 +197,33 @@ $chapter_text
 
 输出 JSON: {"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题一","问题二"],"reader_experience":{"expectation":80,"conflict":75,"payoff":70,"emotion_shift":78,"worth_continuing":82}}"""),
 
+    ("bootstrap.review_7dim_structured", "1.0.0", "deepseek",
+     """你是严格的文学编辑。请对以下章节做七维结构化审核（V6.1.2 闭环路由版）。
+
+待审章节：
+$chapter_text
+
+人物档案：$characters
+世界观规则：$worldview
+
+审核七个维度（每项 0-100 分，真实打分，不要全员 80），每个维度必须带 reason 解释：
+style（文笔/AI味）、continuity（连续性）、plot（剧情）、logic（逻辑一致性）、character（人物 OOC）、emotion（情绪）、pacing（节奏）。
+
+逐条列出问题 issues，每条必须结构化：
+- type: 上述七维之一
+- severity: high|medium|low
+- location: 问题所在位置（如 chapter_1_scene_2）
+- description: 具体问题描述
+- repair_scope: local（局部替换即可）| section（整段重写）| chapter（需重规划）
+- confidence: 0-1，你对该问题判断的把握
+
+铁律：
+- score_7dim 必须是 {维度:{score,reason}} 对象，禁止扁平 {style:85}
+- 低于 60 分的维度 reason 必须指出具体段落
+- 检测 AI 味：过于工整的句式、每段类似结构、缺乏口语节奏
+
+输出 JSON: {"score_7dim":{"style":{"score":85,"reason":"..."},"continuity":{"score":90,"reason":"..."},"plot":{"score":88,"reason":"..."},"logic":{"score":92,"reason":"..."},"character":{"score":87,"reason":"..."},"emotion":{"score":80,"reason":"..."},"pacing":{"score":84,"reason":"..."}},"issues":[{"type":"continuity","severity":"high","location":"chapter_1_scene_2","description":"问题","repair_scope":"local","confidence":0.91}]}"""),
+
     # ── Editor: oh-story deslop + 润色 ──
     ("editor.polish", "3.2.0", "deepseek",
      """你是网文润色专家。你的任务是把 AI 味浓重的文本改写自然。
@@ -260,7 +287,7 @@ $selection
 输出格式：用空行分隔段落；每个段落 1-3 句话。输出 JSON: {"text":"去AI味后的文本"}"""),
 
     # ── Narrative: 章节管理 (AI_NovelGenerator) ──
-    ("narrative.gen_next_chapter", "3.4.0", "deepseek",
+    ("narrative.gen_next_chapter", "3.5.0", "deepseek",
      """你是职业网文作家。请根据上下文写一个可直接发布的完整章节。
 
 上下文（包含前文章节摘要、人物状态、伏笔状态）：
@@ -276,7 +303,9 @@ $context
    - 口语钩子：「第12章 师父，你坑我的时候可不这样」「第25章 不好意思，这boss我认识」
    - 悬念：「第41章 她死前说的最后一个字」「第58章 那一剑落下的时候，所有人都笑了」
    禁止使用「初入XX」「突破XX」「XX之战」等模板化标题
-3. 保持人物性格一致——参考人物档案
+3. 保持人物性格一致——参考人物档案与【主角锚定】
+3b. 必须严格保持【主角锚定】指定的主角与 POV（叙述视角）一致；禁止更换主角或切换视角
+3c. 必须严格复用【人物名单】中的既有名称，禁止自创近似人名（如把"周远山"另写作"林远山"）
 4. 伏笔要么推进要么回收——不能种了不管
 5. 正文不得低于 2000 字；续写或重写时也必须达到 2000 字，不得因前文短而缩短
 6. 结尾留钩子，但不要用"新的篇章开始了"这类总结句
@@ -487,15 +516,32 @@ $instruction
      '提取本章时间线事件（按发生顺序，含时间标记）。若文中出现明确的真实世界时间点（如"2010年""1998年冬"），在该事件上附加 real_world_anchor 字段；无法确定时省略该字段，不要编造。$instructions\n$body\n输出 JSON: {"events":[{"event":"事件描述","real_world_anchor":"2010年（可选）"}]}'),
     ("narrative.extract_arcs", "3.0.0", "deepseek",
      '提取人物弧线进展。\n$instructions\n$body\n输出 JSON: {"arcs":[{"character":"人物名","stage":"弧线阶段","goal":"目标"}]}'),
-    ("narrative.extract_entities", "3.0.0", "deepseek",
-     '提取章节中的人物/地点/物品实体及其最新状态，并为每个实体提取至少一条认知事实。\n'
-     'known_info 每项必须包含 text 和 layer；layer 只能是：'
+    ("narrative.extract_entities", "3.1.0", "deepseek",
+     '提取章节中的人物/地点/物品实体及其最新状态，并为每个实体提取认知事实。\n'
+     '要求：\n'
+     '1. known_info 每项必须包含 text 和 layer；layer 只能是：'
      'world_facts（客观事实）、reader_known（读者已知）、protagonist_known（主角已知）、'
-     'character_known（该角色已知）、character_misunderstood（该角色误解）。'
-     '人物按正文明确证据区分认知层；地点/物品的客观信息使用 world_facts。'
-     '不得推测正文没有表达的认知。\n$body\n'
-     '输出 JSON: {"entities":[{"type":"character","name":"名称","state":"状态","location":"位置",'
+     'character_known（该角色已知）、character_misunderstood（该角色误解）。\n'
+     '2. 人物按正文明确证据区分认知层；地点/物品的客观信息使用 world_facts。'
+     '不得推测正文没有表达的认知。\n'
+     '3. 每个实体可附 confidence(0-1) 表示状态判断的证据强度（可省略）。\n'
+     '$body\n'
+     '输出 JSON: {"entities":[{"type":"character","name":"名称","state":"状态","location":"位置","confidence":0.9,'
      '"known_info":[{"layer":"reader_known","text":"正文已向读者揭示的事实"}]}]}'),
+
+    ("narrative.extract_story_facts", "1.0.0", "deepseek",
+     '提取本章的剧情线、世界状态、客观事实与主角确认信息（与实体抽取分开，保证字段完整）。\n'
+     '要求：\n'
+     '1. protagonist：本章叙述主角 {"name":"主角名","pov":"第一/第三人称"}；若本章无明显主角变化，pov 用"第三人称"。\n'
+     '2. facts：客观事实清单，每条必含 confidence(0-1) 与 fact_type（"hard"=已证实 / "soft"=待核实或推论）。'
+     '无明确证据的事实 confidence 不得高于 0.7，且 fact_type 必须用 "soft"。\n'
+     '3. plot_threads：本章推进/埋设/回收的剧情线 [{"name":"线名","status":"active/resolved/paused","importance":1-10,"progress":"进展描述"}]。\n'
+     '4. world_state：当前世界动态 {"timeline":"时间线位置","situation":"关键局势","public_info":"已公开信息"}。\n'
+     '$body\n'
+     '输出 JSON: {"protagonist":{"name":"主角名","pov":"第一/第三人称"},'
+     '"facts":[{"text":"客观事实","confidence":0.85,"fact_type":"hard"}],'
+     '"plot_threads":[{"name":"线名","status":"active","importance":7,"progress":"进展描述"}],'
+     '"world_state":{"timeline":"时间线位置","situation":"关键局势","public_info":"已公开信息"}}'),
     ("narrative.extract_foreshadowing", "3.0.0", "deepseek",
      '提取本章伏笔（埋设/推进/回收）。\n$body\n输出 JSON: {"foreshadowings":[{"content":"伏笔","importance":"high/medium/low","hint_chapter":5}]}'),
 
@@ -978,6 +1024,15 @@ body 至少 8 段，每段为完整叙事段落，总字数不得低于 2000 字
 
 输出 JSON: {"reconciliation":{"conflicts_found":0,"issues":[],"passed":true}}"""),
 
+    ("bootstrap.relearn_style", "1.0.0", "deepseek",
+     """你是文风分析师。请基于作者最近若干章的正文，提炼/更新其作者文风卡（Author Style Card）。
+只提炼可从正文稳定观察到的特征，不要凭空发明。
+
+最近章节正文：
+$recent_chapters
+
+输出 JSON: {"author_card":{"voice":"叙述腔调","sentence_rhythm":"句式节奏","lexicon":"典型用词/口头禅","pacing":"段落与场景节奏","taboos":"应避免的写法"}}"""),
+
     # ═══ V2 最终化阶段（3 节点，去味后七维一致性 + 连续性发布门禁） ═══
     ("bootstrap.final_consistency_check", "1.0.0", "deepseek",
      """你是一致性审计员。请对本章做七维一致性检查。你的结论是发布门禁，禁止客套放行。
@@ -1171,6 +1226,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_outline":          '{"core_concept":{"premise":"","golden_finger_rules":[],"world_background":""},"business_roadmap":[],"volume_outlines":[],"chapter_plan":[]}',
     "gen_chapter1":         '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}} (body 至少 6 段)',
     "review_7dim":          '{"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题"],"reader_experience":{"expectation":80,"conflict":75,"payoff":70,"emotion_shift":78,"worth_continuing":82}}',
+    "review_7dim_structured": '{"score_7dim":{"style":{"score":85,"reason":"..."},"continuity":{"score":90,"reason":"..."},"plot":{"score":88,"reason":"..."},"logic":{"score":92,"reason":"..."},"character":{"score":87,"reason":"..."},"emotion":{"score":80,"reason":"..."},"pacing":{"score":84,"reason":"..."}},"issues":[{"type":"continuity|style|plot|logic|character|emotion|pacing","severity":"high|medium|low","location":"chapter_10_scene_3","description":"问题","repair_scope":"local|section|chapter","confidence":0.91}]}',
     "review_ooc":           '{"ooc_count":0,"violations":[{"character":"人物","action":"行为","expected":"符合设定的行为"}]}',
     "review_consistency":   '{"contradictions":[{"type":"类型","this_chapter":"本章","previous":"前文"}]}',
     "review_rhythm":        '{"pacing_score":80,"sections":[{"range":"段1-3","label":"快/慢/适中","advice":"建议"}]}',

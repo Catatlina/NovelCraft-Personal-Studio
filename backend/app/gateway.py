@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -23,6 +24,8 @@ from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
 from .core.billing import get_active_subscription, monthly_window
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
+
+logger = logging.getLogger(__name__)
 
 # Context variable for per-request API key (set by middleware from X-Api-Key header)
 _request_api_key: ContextVar[str | None] = ContextVar("request_api_key", default=None)
@@ -162,6 +165,29 @@ class _RhythmOutput(_StrictOutput):
 # requiring the fields downstream nodes consume.
 class _LenientOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+
+# V6.1.2 structured 7-dim review (closed-loop routing source).
+# score_7dim is fixed {dim:{score,reason}} (never flat {style:85}); issues are
+# structured objects carrying type/severity/location/repair_scope/confidence so
+# the chapter loop can route A(local)/B(fact)/C(replan) without guesswork.
+class _Review7DimIssue(_LenientOutput):
+    type: str = Field(pattern=r"^(style|continuity|plot|logic|character|emotion|pacing)$")
+    severity: str = Field(pattern=r"^(high|medium|low)$")
+    location: str = ""
+    description: str = ""
+    repair_scope: str = Field(default="local", pattern=r"^(local|section|chapter)$")
+    confidence: float = Field(default=0.9, ge=0, le=1)
+
+
+class _Review7DimDim(_LenientOutput):
+    score: float = Field(ge=0, le=100)
+    reason: str = ""
+
+
+class _Review7DimStructuredOutput(_LenientOutput):
+    score_7dim: dict[str, _Review7DimDim]
+    issues: list[_Review7DimIssue] = Field(default_factory=list)
 
 
 class _KnownInfoItem(_LenientOutput):
@@ -507,6 +533,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "gen_chapter1": _ChapterOutput,
     "gen_next_chapter": _ChapterOutput,
     "review_7dim": _ReviewOutput,
+    "review_7dim_structured": _Review7DimStructuredOutput,
     "extract_entities": _ExtractEntitiesOutput,
     "extract_timeline": _ExtractTimelineOutput,
     "review_ooc": _OocOutput,
@@ -973,7 +1000,24 @@ def _load_prompt_and_route(
         ).fetchone()
     )
     conn.close()
-    template = prompt["template"] if prompt else "请执行任务 $task_type，并输出 JSON。"
+    if prompt:
+        template = prompt["template"]
+    else:
+        # A missing prompt used to fall back to a stub that contains none of the
+        # caller's variables — the model then "succeeds" while having seen no
+        # input at all. If the name is a known seed, that is seed/DB drift and
+        # must fail loudly instead of producing fake output.
+        from .prompt_registry import PROMPT_SEEDS
+        if prompt_name in {n for n, *_ in PROMPT_SEEDS}:
+            raise RuntimeError(
+                f"prompt {prompt_name!r} is in PROMPT_SEEDS but missing from the "
+                f"prompts table — run init_db() to sync seeds before generating."
+            )
+        logger.warning(
+            "prompt %s not found; falling back to stub template (task_type=%s)",
+            prompt_name, task_type,
+        )
+        template = "请执行任务 $task_type，并输出 JSON。"
     enriched_variables = {"task_type": task_type, **variables}
     prompt_text = render_prompt(template, enriched_variables)
     contract = OUTPUT_CONTRACTS.get(task_type) or OUTPUT_CONTRACTS.get(task_type.replace("editor_", "editor_"))

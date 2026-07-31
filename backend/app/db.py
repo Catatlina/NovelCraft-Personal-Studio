@@ -251,6 +251,10 @@ def init_db() -> None:
         "write_length_check", "write_fact_reconcile",
         "final_consistency_check", "final_continuity_audit", "final_humanize",
         "repair_local", "replan_chapter",
+        # V6.1.2 chapter closed loop
+        "review_7dim_structured",
+        "relearn_style",
+        "extract_story_facts",
     ]
     # Creative long-form nodes get a slightly higher temperature; structured
     # planning/audit nodes stay at 0.7 default.
