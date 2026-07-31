@@ -1428,7 +1428,11 @@ def ai_edit(
                 issues = list(review.get("issues", []))
                 if not length_ok:
                     issues.append(f"字数不足：当前 {chars} 字，必须扩写到 {EDITOR_MIN_CHARS} 字以上，不得压缩或总结情节")
-                issues.append("必须去除 AI 味：避免过于工整的句式、章末总结体、套话，增加口语停顿、具体动作与对话")
+                issues.append(
+                    "必须去除 AI 味：严格执行【去 AI 味改稿铁律】全部 5 条——段落炸碎（每段 1-3 句）、"
+                    "口语化（删书面连接词、『说』换具体动作、加口语插入语）、人味注入（每 3-5 段一句独白/吐槽、数字模糊化）、"
+                    "节奏控制（紧张处短句短段、场景有画面感细节）、删 AI 痕迹（去公文句式、情绪用动作表现、禁套话与章末总结体）"
+                )
                 instruction = "；".join(issues)
             else:
                 # continue 等非改善操作：单遍生成
