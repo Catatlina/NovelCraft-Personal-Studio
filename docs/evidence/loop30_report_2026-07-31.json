@@ -1,0 +1,254 @@
+{
+  "test_novel": "b37af2dd-5069-443d-ba36-d0bce68064c2",
+  "test_type": "ch1-30_stress_test",
+  "total_chapters": 45,
+  "chapters_ok": 45,
+  "chapters_failed": 0,
+  "avg_score": 80.82,
+  "min_score": 72,
+  "max_score": 90,
+  "total_chars": 124623,
+  "total_cost_cny": 1.5012,
+  "total_tokens": 643716,
+  "total_llm_calls": 229,
+  "emotion_distribution": {
+    "冲突": 10,
+    "期待": 4,
+    "爆发": 3,
+    "压抑": 1
+  },
+  "style_relearn": {
+    "learn_count": 3,
+    "applied": true
+  },
+  "arc_summaries": 3,
+  "protagonist": "林简/第一人称",
+  "foreshadowings_open": 90,
+  "chapters": [
+    {
+      "seq": 1,
+      "score": 81,
+      "chars": 2754
+    },
+    {
+      "seq": 2,
+      "score": 77,
+      "chars": 2721
+    },
+    {
+      "seq": 2,
+      "score": 84,
+      "chars": 2721
+    },
+    {
+      "seq": 2,
+      "score": 83,
+      "chars": 2721
+    },
+    {
+      "seq": 3,
+      "score": 80,
+      "chars": 3022
+    },
+    {
+      "seq": 3,
+      "score": 75,
+      "chars": 3022
+    },
+    {
+      "seq": 3,
+      "score": 77,
+      "chars": 3022
+    },
+    {
+      "seq": 4,
+      "score": 80,
+      "chars": 3152
+    },
+    {
+      "seq": 5,
+      "score": 81,
+      "chars": 2263
+    },
+    {
+      "seq": 6,
+      "score": 84,
+      "chars": 2479
+    },
+    {
+      "seq": 7,
+      "score": 82,
+      "chars": 3533
+    },
+    {
+      "seq": 8,
+      "score": 82,
+      "chars": 2664
+    },
+    {
+      "seq": 8,
+      "score": 79,
+      "chars": 2664
+    },
+    {
+      "seq": 8,
+      "score": 79,
+      "chars": 2664
+    },
+    {
+      "seq": 9,
+      "score": 83,
+      "chars": 3024
+    },
+    {
+      "seq": 10,
+      "score": 80,
+      "chars": 2064
+    },
+    {
+      "seq": 11,
+      "score": 83,
+      "chars": 3963
+    },
+    {
+      "seq": 11,
+      "score": 77,
+      "chars": 3963
+    },
+    {
+      "seq": 11,
+      "score": 84,
+      "chars": 3963
+    },
+    {
+      "seq": 12,
+      "score": 81,
+      "chars": 2511
+    },
+    {
+      "seq": 13,
+      "score": 83,
+      "chars": 2227
+    },
+    {
+      "seq": 14,
+      "score": 80,
+      "chars": 2811
+    },
+    {
+      "seq": 14,
+      "score": 79,
+      "chars": 2811
+    },
+    {
+      "seq": 15,
+      "score": 83,
+      "chars": 2429
+    },
+    {
+      "seq": 15,
+      "score": 75,
+      "chars": 2429
+    },
+    {
+      "seq": 15,
+      "score": 72,
+      "chars": 2429
+    },
+    {
+      "seq": 16,
+      "score": 84,
+      "chars": 2328
+    },
+    {
+      "seq": 17,
+      "score": 85,
+      "chars": 2287
+    },
+    {
+      "seq": 18,
+      "score": 81,
+      "chars": 2040
+    },
+    {
+      "seq": 19,
+      "score": 80,
+      "chars": 2497
+    },
+    {
+      "seq": 20,
+      "score": 83,
+      "chars": 2324
+    },
+    {
+      "seq": 20,
+      "score": 80,
+      "chars": 2324
+    },
+    {
+      "seq": 21,
+      "score": 80,
+      "chars": 2238
+    },
+    {
+      "seq": 21,
+      "score": 78,
+      "chars": 2238
+    },
+    {
+      "seq": 22,
+      "score": 82,
+      "chars": 3294
+    },
+    {
+      "seq": 23,
+      "score": 81,
+      "chars": 2001
+    },
+    {
+      "seq": 24,
+      "score": 80,
+      "chars": 2881
+    },
+    {
+      "seq": 24,
+      "score": 80,
+      "chars": 2881
+    },
+    {
+      "seq": 24,
+      "score": 75,
+      "chars": 2881
+    },
+    {
+      "seq": 25,
+      "score": 81,
+      "chars": 4865
+    },
+    {
+      "seq": 26,
+      "score": 83,
+      "chars": 2919
+    },
+    {
+      "seq": 27,
+      "score": 82,
+      "chars": 3206
+    },
+    {
+      "seq": 28,
+      "score": 87,
+      "chars": 2565
+    },
+    {
+      "seq": 29,
+      "score": 81,
+      "chars": 2342
+    },
+    {
+      "seq": 30,
+      "score": 90,
+      "chars": 2486
+    }
+  ]
+}
