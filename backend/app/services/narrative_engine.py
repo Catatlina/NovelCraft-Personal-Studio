@@ -8,7 +8,7 @@ def check_foreshadow_due(novel_id: str, current_chapter_seq: int) -> list[dict]:
     """Check if any foreshadows are due for resolution at this chapter."""
     db = connect()
     rows = db.execute(
-        """SELECT f.*, (c.meta->>'seq') AS planted_seq FROM foreshadowings f
+        """SELECT f.*, c.seq AS planted_seq FROM foreshadowings f
            JOIN contents c ON c.id = f.chapter_id
            WHERE c.parent_id = %s
            AND f.planned_resolve_chapter <= %s AND f.status != 'resolved'

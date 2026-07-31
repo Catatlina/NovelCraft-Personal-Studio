@@ -77,17 +77,31 @@ def _hash(text: str) -> str:
 
 
 def _domain_logic_check(text: str, protagonist: dict | None,
-                        canon: list[str]) -> list[str]:
+                        canon: list[str], *,
+                        overdue: list[dict] | None = None,
+                        open_after: list[dict] | None = None,
+                        cap_tree: dict[str, list[dict]] | None = None) -> list[str]:
     """Offline (no LLM) genre-agnostic sanity gate. Returns human-readable flags.
 
-    Two cheap, high-signal checks:
+    Cheap, high-signal checks only — this must stay free to run every chapter:
       * protagonist presence — if a lead is anchored, it must appear in the body;
-      * near-duplicate names — a token within the text that is >=0.8 similar to a
-        canonical name but not equal is a likely name-confusion (Defect 2).
+      * near-duplicate names — a token >=0.8 similar to a canonical name but not
+        equal is a likely name-confusion (Defect 2);
+      * overdue foreshadowings that survived the chapter unresolved (§4.5);
+      * capability over-reach — a skill's stated ``limitations`` keyword shows up
+        as something the character just did (§4.3 防降智).
     """
     flags: list[str] = []
-    if isinstance(protagonist, dict) and protagonist.get("name") and protagonist["name"] not in text:
-        flags.append(f"主角「{protagonist['name']}」未在本章正文出现（可能漂移）")
+    if isinstance(protagonist, dict) and protagonist.get("name"):
+        name = protagonist["name"]
+        pov = str(protagonist.get("pov") or "").strip()
+        if "第一" in pov:
+            # First-person narration: the protagonist uses "我", not their name.
+            # Check for "我" instead to avoid false positives.
+            if "我" not in text:
+                flags.append(f"主角「{name}」（第一人称）本章无「我」（可能漂移）")
+        elif name not in text:
+            flags.append(f"主角「{name}」未在本章正文出现（可能漂移）")
     if canon:
         tokens = set(re.findall(r"[一-龥]{2,4}", text))
         for tok in tokens:
@@ -97,6 +111,42 @@ def _domain_logic_check(text: str, protagonist: dict | None,
                     break
             if len(flags) >= 4:
                 break
+
+    # overdue foreshadowings the chapter was asked to clear but did not
+    if overdue:
+        still = {f["id"] for f in (open_after or [])}
+        for f in overdue:
+            if f["id"] in still:
+                flags.append(
+                    f"逾期伏笔未回收：「{f['content'][:40]}」"
+                    f"（应在第{f['planned_resolve_chapter']}章前回收，重要度{f['importance']}）"
+                )
+            if len(flags) >= 8:
+                break
+
+    # capability over-reach: the limitation text names something the character
+    # must NOT be able to do; if that phrase appears as an action in this chapter
+    # alongside the character, flag it for human review (warning only, no block).
+    if cap_tree:
+        for name, caps in list(cap_tree.items())[:6]:
+            if name not in text:
+                continue
+            for cap in caps[:8]:
+                if not isinstance(cap, dict):
+                    continue
+                lim = str(cap.get("limitations") or "").strip()
+                if len(lim) < 4:
+                    continue
+                # take the most content-bearing 2-4 char chunks of the limitation
+                for kw in re.findall(r"[一-龥]{3,5}", lim)[:3]:
+                    if kw in text:
+                        flags.append(
+                            f"疑似能力越界：{name} 的「{cap.get('skill')}」限制为「{lim[:30]}」，"
+                            f"但本章出现「{kw}」相关情节，请确认未越级"
+                        )
+                        break
+                if len(flags) >= 10:
+                    break
     return flags
 
 
@@ -150,6 +200,14 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
     layers: dict[str, int] = {}
     parts: list[str] = []
 
+    # Chapter number is authoritative and must be stated explicitly — without it
+    # the model infers the number from recent summaries and can jump (a rerun of
+    # chapter 1 once came back titled "第10章").
+    seq_blob = f"本章是第 {chapter_seq} 章，标题必须以「第{chapter_seq}章」开头，不得使用其他编号。"
+    parts.append("【当前章序】" + seq_blob)
+    included.append("chapter_seq")
+    layers["chapter_seq"] = len(seq_blob)
+
     cfg = repo.get_book_config(project_id, novel_id)
     if cfg:
         rules = decode(cfg.get("immutable_rules"), []) or []
@@ -198,12 +256,74 @@ def _build_context_pkg(project_id: str, novel_id: str, chapter_seq: int,
         included.append("anchor")
         layers["anchor"] = len(blob)
 
+    # Foreshadowing ledger (架构 §4.5): overdue items are a hard constraint for
+    # this chapter, due_soon must at least be pushed forward.
+    open_fs = repo.get_open_foreshadowings(novel_id, chapter_seq)
+    if open_fs:
+        overdue = [f for f in open_fs if f["state"] == "overdue"]
+        due_soon = [f for f in open_fs if f["state"] == "due_soon"]
+        still_open = [f for f in open_fs if f["state"] == "open"]
+        fs_bits = []
+        if overdue:
+            fs_bits.append("⚠️ 已过期（本章必须回收并给出交代）：" + "；".join(
+                f"{f['content']}（第{f['planted_at'] or '?'}章埋设，应在第{f['planned_resolve_chapter']}章前回收，"
+                f"重要度{f['importance']}）" for f in overdue[:5]))
+        if due_soon:
+            fs_bits.append("即将到期（本章至少推进一步）：" + "；".join(
+                f"{f['content']}（应在第{f['planned_resolve_chapter']}章前回收）" for f in due_soon[:5]))
+        if still_open:
+            fs_bits.append("未到期（保持存在感，不要遗忘）：" + "；".join(
+                f["content"] for f in still_open[:8]))
+        blob = "\n".join(fs_bits)[:2500]
+        parts.append("【伏笔到期】" + blob)
+        included.append("foreshadowing")
+        layers["foreshadowing"] = len(blob)
+
+    # Capability tree (架构 §4.3, 防降智): what the cast can and cannot do.
+    cap_tree = repo.get_capability_tree(novel_id, [prot["name"]] if prot else None)
+    if not cap_tree and canon:
+        cap_tree = repo.get_capability_tree(novel_id, canon[:8])
+    if cap_tree:
+        cap_bits = []
+        for name, caps in list(cap_tree.items())[:6]:
+            items = "；".join(
+                f"{c.get('skill')}（{c.get('level')}，第{c.get('acquired_chapter') or '?'}章习得"
+                + (f"，限制：{c.get('limitations')}" if c.get("limitations") else "") + "）"
+                for c in caps[:8] if isinstance(c, dict)
+            )
+            if items:
+                cap_bits.append(f"{name}：{items}")
+        if cap_bits:
+            blob = "\n".join(cap_bits)[:2500]
+            parts.append("【能力树】（只能使用已列能力且受其限制约束，禁止越级或降智）" + blob)
+            included.append("capability_tree")
+            layers["capability_tree"] = len(blob)
+
     context_text = "\n\n".join(parts)
     return context_text, _hash(context_text), included, layers
 
 
+_TITLE_SEQ_RE = re.compile(r"^\s*第\s*[0-9零一二三四五六七八九十百千两]+\s*章\s*[:：、.\-—]?\s*")
+
+
+def normalize_chapter_title(title: str, chapter_seq: int) -> str:
+    """Force the stored title to carry the *authoritative* chapter number.
+
+    The model is not trustworthy about numbering: ``bootstrap.gen_chapter1``
+    once returned "第10章 ..." for chapter 1, and next-chapter prompts mix
+    "第一章" with "第2章".  The DB seq is the single source of truth, so we
+    strip whatever prefix the model produced and re-stamp it.
+    """
+    raw = str(title or "").strip()
+    subtitle = _TITLE_SEQ_RE.sub("", raw).strip()
+    if not subtitle:
+        subtitle = raw or "无题"
+    return f"第{chapter_seq}章 {subtitle}"
+
+
 def _save_chapter_content(project_id: str, novel_id: str, chapter_seq: int,
                           title: str, paragraphs: list[str]) -> str:
+    title = normalize_chapter_title(title, chapter_seq)
     text = "\n\n".join(paragraphs)
     conn = connect()
     try:
@@ -595,6 +715,63 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "protagonist": prot.get("name"),
     })
 
+    # 4a2. ledger writeback: foreshadowings + capability tree + character arc
+    # (架构 §4.2/§4.3/§4.5). Kept as its own focused call for the same reason as
+    # extract_story_facts — overloading one prompt loses top-level fields.
+    open_before = repo.get_open_foreshadowings(novel_id, chapter_seq)
+    known_caps = repo.get_capability_tree(novel_id)
+    ledger = gateway.complete(
+        run_id=run_id, node_key="extract_ledger", project_id=project_id,
+        task_type="extract_ledger", prompt_name="narrative.extract_ledger",
+        user_id=user_id,
+        variables={
+            "body": text,
+            "seq": chapter_seq,
+            "open_foreshadowings": "\n".join(
+                f"- {f['content']}（重要度{f['importance']}，应在第{f['planned_resolve_chapter']}章前回收）"
+                for f in open_before[:15]
+            ) or "（暂无）",
+            "known_capabilities": "\n".join(
+                f"- {name}：" + "；".join(
+                    f"{c.get('skill')}({c.get('level')})" for c in caps[:8] if isinstance(c, dict)
+                ) for name, caps in list(known_caps.items())[:8]
+            ) or "（暂无）",
+        },
+    )
+    fs_written = 0
+    for item in ledger.get("foreshadowings", []) or []:
+        if isinstance(item, dict) and repo.save_foreshadowing(content_id, chapter_seq, item):
+            fs_written += 1
+    fs_resolved = 0
+    for item in ledger.get("resolved", []) or []:
+        c = item.get("content") if isinstance(item, dict) else str(item)
+        if c and repo.resolve_foreshadowing(novel_id, c, content_id):
+            fs_resolved += 1
+    cap_written = 0
+    for ch in ledger.get("capability_changes", []) or []:
+        if isinstance(ch, dict) and ch.get("entity") and ch.get("skill"):
+            # evidence is mandatory: no evidence => not a real acquisition
+            if not str(ch.get("evidence") or "").strip():
+                continue
+            repo.upsert_capability(content_id, ch["entity"],
+                                   {**ch, "acquired_chapter": chapter_seq})
+            cap_written += 1
+    arc_written = 0
+    for a in ledger.get("arc_updates", []) or []:
+        if isinstance(a, dict) and a.get("entity"):
+            repo.upsert_character_arc(content_id, a["entity"], a)
+            arc_written += 1
+    # honest accounting: how many overdue items the chapter was told to clear
+    overdue_before = [f for f in open_before if f["state"] == "overdue"]
+    report["steps"].append({
+        "step": "ledger",
+        "foreshadowings_planted": fs_written,
+        "foreshadowings_resolved": fs_resolved,
+        "overdue_at_start": len(overdue_before),
+        "capabilities_written": cap_written,
+        "arcs_written": arc_written,
+    })
+
     # 4b. chapter summary — the short-term memory layer consumed by later chapters
     smy = gateway.complete(
         run_id=run_id, node_key="summarize", project_id=project_id,
@@ -617,7 +794,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     repo.save_chapter_snapshot(
         project_id, content_id, chapter_seq, _hash(text),
         entity_state_hash=_hash(json.dumps(bible.get("entities", []), ensure_ascii=False)),
-        prompt_version=("gen_chapter1@3.2.0" if chapter_seq == 1 else "gen_next_chapter@3.5.0"),
+        prompt_version=("gen_chapter1@3.3.0" if chapter_seq == 1 else "gen_next_chapter@3.6.0"),
         model="deepseek-chat",
     )
     if chapter_seq % 10 == 0:
@@ -635,10 +812,14 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                 repo.save_arc_summary(project_id, novel_id, chapter_seq // 10, arc_text)
         report["steps"].append({"step": "arc_summary", "volume_seq": chapter_seq // 10})
 
-    # Step 7: offline domain_logic gate (no LLM) — protagonist presence + name confusion
+    # Step 7: offline domain_logic gate (no LLM) — protagonist presence, name
+    # confusion, un-cleared overdue foreshadowings, and capability over-reach.
     dom_flags = _domain_logic_check(
         text, repo.get_protagonist(project_id, novel_id),
         repo.get_canonical_names(project_id, novel_id),
+        overdue=overdue_before,
+        open_after=repo.get_open_foreshadowings(novel_id, chapter_seq),
+        cap_tree=repo.get_capability_tree(novel_id),
     )
     if dom_flags:
         report["steps"].append({"step": "domain_logic", "flags": dom_flags})
@@ -692,6 +873,7 @@ def _replicate_cost(project_id: str, run_id: str, content_id: str,
         "extract_story_facts": ("other", "fact_extract"),
         "summarize_chapter": ("other", "chapter_summary"),
         "relearn_style": ("other", "style_relearn"),
+        "extract_ledger": ("other", "ledger_extract"),
     }
     conn = connect()
     try:

@@ -1,0 +1,118 @@
+{
+  "test_novel": "b37af2dd-5069-443d-ba36-d0bce68064c2",
+  "test_type": "ch1-12_clean_novel",
+  "total_chapters": 20,
+  "chapters_ok": 20,
+  "avg_score": 80.6,
+  "min_score": 75,
+  "total_chars": 58890,
+  "total_cost_cny": 0.6652,
+  "total_tokens": 284861,
+  "total_llm_calls": 100,
+  "foreshadowing_status": {
+    "planted": 36,
+    "resolved": 6
+  },
+  "chapters": [
+    {
+      "seq": 1,
+      "score": 81,
+      "chars": 2754
+    },
+    {
+      "seq": 2,
+      "score": 77,
+      "chars": 2721
+    },
+    {
+      "seq": 2,
+      "score": 83,
+      "chars": 2721
+    },
+    {
+      "seq": 2,
+      "score": 84,
+      "chars": 2721
+    },
+    {
+      "seq": 3,
+      "score": 80,
+      "chars": 3022
+    },
+    {
+      "seq": 3,
+      "score": 77,
+      "chars": 3022
+    },
+    {
+      "seq": 3,
+      "score": 75,
+      "chars": 3022
+    },
+    {
+      "seq": 4,
+      "score": 80,
+      "chars": 3152
+    },
+    {
+      "seq": 5,
+      "score": 81,
+      "chars": 2263
+    },
+    {
+      "seq": 6,
+      "score": 84,
+      "chars": 2479
+    },
+    {
+      "seq": 7,
+      "score": 82,
+      "chars": 3533
+    },
+    {
+      "seq": 8,
+      "score": 79,
+      "chars": 2664
+    },
+    {
+      "seq": 8,
+      "score": 79,
+      "chars": 2664
+    },
+    {
+      "seq": 8,
+      "score": 82,
+      "chars": 2664
+    },
+    {
+      "seq": 9,
+      "score": 83,
+      "chars": 3024
+    },
+    {
+      "seq": 10,
+      "score": 80,
+      "chars": 2064
+    },
+    {
+      "seq": 11,
+      "score": 83,
+      "chars": 3963
+    },
+    {
+      "seq": 11,
+      "score": 77,
+      "chars": 3963
+    },
+    {
+      "seq": 11,
+      "score": 84,
+      "chars": 3963
+    },
+    {
+      "seq": 12,
+      "score": 81,
+      "chars": 2511
+    }
+  ]
+}

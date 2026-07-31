@@ -130,7 +130,7 @@ PROMPT_SEEDS = [
 
 要求：8-12 卷覆盖百万字、前 30 章单章级详细、每卷有高潮和钩子。"""),
 
-    ("bootstrap.gen_chapter1", "3.2.0", "deepseek",
+    ("bootstrap.gen_chapter1", "3.3.0", "deepseek",
      """你是资深网文作家。请根据完整设定写第一章正文。严格遵守 oh-story 写作方法论。
 
 书名：$selected_title
@@ -151,6 +151,7 @@ PROMPT_SEEDS = [
 5. 情绪曲线：铺垫→升温→冲突→代价/反馈→新期待
 6. 第一章结尾留钩子——制造「这章没白看，下章必须追」的感觉
 7. 正文不少于 2000 字，建议 2200-3200 字，8-15 个叙事段落
+8. 这是全书第 1 章，title 必须以「第1章」开头，禁止写成「第一章」或任何其他编号
 
 """ + DEAI_IRON_RULES + """
 
@@ -160,7 +161,7 @@ PROMPT_SEEDS = [
 - 大段设定说明书
 - 把大纲内容直接复制过来当正文
 
-输出 JSON: {"chapter":{"title":"第一章 标题","body":["段落一","段落二",...]}}
+输出 JSON: {"chapter":{"title":"第1章 标题","body":["段落一","段落二",...]}}
 body 至少 8 段、建议 8-15 段，每段为完整叙事段落，总字数不得低于 2000 字。"""),
 
     ("bootstrap.review_7dim", "3.0.0", "deepseek",
@@ -287,7 +288,7 @@ $selection
 输出格式：用空行分隔段落；每个段落 1-3 句话。输出 JSON: {"text":"去AI味后的文本"}"""),
 
     # ── Narrative: 章节管理 (AI_NovelGenerator) ──
-    ("narrative.gen_next_chapter", "3.5.0", "deepseek",
+    ("narrative.gen_next_chapter", "3.6.0", "deepseek",
      """你是职业网文作家。请根据上下文写一个可直接发布的完整章节。
 
 上下文（包含前文章节摘要、人物状态、伏笔状态）：
@@ -306,7 +307,12 @@ $context
 3. 保持人物性格一致——参考人物档案与【主角锚定】
 3b. 必须严格保持【主角锚定】指定的主角与 POV（叙述视角）一致；禁止更换主角或切换视角
 3c. 必须严格复用【人物名单】中的既有名称，禁止自创近似人名（如把"周远山"另写作"林远山"）
+3d. 严格遵守【能力树】：角色只能使用已列出且等级匹配的能力，并受其 limitations 限制。
+    禁止让角色临时获得没有铺垫的新能力，也禁止让已具备某能力的角色在本章莫名做不到（防降智）。
+    确实需要新能力时，必须在本章正文里写出习得过程作为证据。
 4. 伏笔要么推进要么回收——不能种了不管
+4b. 【伏笔到期】中标记 overdue 的伏笔必须在本章内正面回收给出交代；标记 due_soon 的至少要明确推进一步。
+    回收要落在情节里自然揭晓，不许用旁白一句话草草总结带过。
 5. 正文不得低于 2000 字；续写或重写时也必须达到 2000 字，不得因前文短而缩短
 6. 结尾留钩子，但不要用"新的篇章开始了"这类总结句
 7. 必须写小说正文：用动作、对话、场景细节和心理微反应推进，不写说明文、计划书、创作建议
@@ -544,6 +550,34 @@ $instruction
      '"world_state":{"timeline":"时间线位置","situation":"关键局势","public_info":"已公开信息"}}'),
     ("narrative.extract_foreshadowing", "3.0.0", "deepseek",
      '提取本章伏笔（埋设/推进/回收）。\n$body\n输出 JSON: {"foreshadowings":[{"content":"伏笔","importance":"high/medium/low","hint_chapter":5}]}'),
+
+    # 定稿账本回写：伏笔账本 + 人物能力树 + 人物弧线（架构 §4.2/§4.3/§4.5）
+    # 刻意与 extract_entities / extract_story_facts 分开：顶层字段控制在 3 个以内，
+    # 避免"一个 prompt 塞太多顶层字段导致模型静默只返回主数组"的 schema 过载问题。
+    ("narrative.extract_ledger", "1.0.0", "deepseek",
+     '你在维护一部长篇小说的"定稿账本"。请只依据本章已定稿正文，提取伏笔、人物能力变化与人物弧线推进。\n'
+     '【硬性要求】\n'
+     '1. 只登记正文真实出现的内容，禁止推测、禁止补全作者没写的东西。没有就返回空数组。\n'
+     '2. foreshadowings（本章新埋设的伏笔）：\n'
+     '   - importance 用 1-10 整数（8 以上表示主线级关键伏笔，会进入修复保护区不可被改写）。\n'
+     '   - reader_awareness 只能是 hidden（读者完全没察觉）/ suspected（读者隐约起疑）/ known（读者已明确知道但角色不知）。\n'
+     '   - expected_payoff_window 是"还需多少章内回收"的整数（如 5 表示第 $seq+5 章前应回收），主线级伏笔可给大值。\n'
+     '3. resolved（本章回收/揭晓的既有伏笔）：从下面【待回收伏笔】里挑，用其原文 content 精确匹配，'
+     '本章确实揭晓了才写；没有回收任何伏笔就返回空数组，禁止硬凑。\n'
+     '4. capability_changes（本章人物新获得/升级的能力）：\n'
+     '   - 必须给 evidence（正文中证明其获得该能力的具体情节），无 evidence 不得登记。\n'
+     '   - limitations 必填，写清这个能力"做不到什么"，用于后续防止角色降智或越级发挥。\n'
+     '   - level 用 初级/中级/高级/宗师 之一。已在【已有能力】列出的不要重复登记，除非本章确实升级了。\n'
+     '5. arc_updates（人物弧线推进）：current_arc_stage 描述该人物当前处于成长的哪个阶段，'
+     'turning_point 只在本章确实发生转折时填写，否则留空字符串。\n'
+     '当前章序：$seq\n'
+     '【待回收伏笔】\n$open_foreshadowings\n'
+     '【已有能力】\n$known_capabilities\n'
+     '【本章正文】\n$body\n'
+     '输出 JSON: {"foreshadowings":[{"content":"伏笔内容","importance":7,"reader_awareness":"hidden","expected_payoff_window":5}],'
+     '"resolved":[{"content":"被回收的伏笔原文","how":"本章如何揭晓"}],'
+     '"capability_changes":[{"entity":"人物名","skill":"能力名","level":"初级","evidence":"正文证据","limitations":"做不到什么"}],'
+     '"arc_updates":[{"entity":"人物名","current_arc_stage":"当前弧线阶段","turning_point":"本章转折或空"}]}'),
 
     # ── Short story (M3) ──
     ("shortstory.gen_titles", "3.1.0", "deepseek",

@@ -255,6 +255,7 @@ def init_db() -> None:
         "review_7dim_structured",
         "relearn_style",
         "extract_story_facts",
+        "extract_ledger",
     ]
     # Creative long-form nodes get a slightly higher temperature; structured
     # planning/audit nodes stay at 0.7 default.

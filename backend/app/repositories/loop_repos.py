@@ -369,6 +369,249 @@ def get_canonical_names(project_id: str, novel_id: str) -> list[str]:
     return [r["entity_name"] for r in rows if r.get("entity_name")]
 
 
+# ── Foreshadowing ledger (架构 §4.5) ─────────────────────────────────────────
+# Note: the physical table is ``foreshadowings`` keyed by chapter_id -> contents.id.
+# We keep the legacy ``status`` values ('planted'/'resolved') untouched so the
+# existing ``narrative_engine.check_foreshadow_due`` keeps working, and derive
+# open/due_soon/overdue at read time from planned_resolve_chapter.
+DUE_SOON_WINDOW = 2  # chapters ahead of the deadline where we start pushing
+
+
+def save_foreshadowing(chapter_id: str, seq: int, item: dict) -> str | None:
+    """Register one foreshadowing planted in this chapter.
+
+    item: {content, importance(1-10), reader_awareness, expected_payoff_window}
+    Idempotent per (chapter_id, content) so re-running a chapter does not
+    duplicate the ledger.
+    """
+    content = str(item.get("content") or "").strip()
+    if not content:
+        return None
+    try:
+        importance = min(10, max(1, int(item.get("importance", 5))))
+    except (TypeError, ValueError):
+        importance = 5
+    awareness = str(item.get("reader_awareness") or "hidden").strip()
+    if awareness not in ("hidden", "suspected", "known"):
+        awareness = "hidden"
+    try:
+        window = int(item.get("expected_payoff_window", 5))
+    except (TypeError, ValueError):
+        window = 5
+    window = max(1, window)
+    planned = seq + window
+
+    conn = connect()
+    try:
+        dup = conn.execute(
+            "SELECT id FROM foreshadowings WHERE chapter_id=%s AND content=%s",
+            (chapter_id, content),
+        ).fetchone()
+        if dup:
+            return row_to_dict(dup)["id"]
+        fid = new_id("fs")
+        conn.execute(
+            "INSERT INTO foreshadowings (id, chapter_id, content, planned_resolve_chapter, "
+            "status, importance, reader_awareness, expected_payoff_window) "
+            "VALUES (%s, %s, %s, %s, 'planted', %s, %s, %s)",
+            (fid, chapter_id, content, planned, importance, awareness, window),
+        )
+        conn.commit()
+        return fid
+    finally:
+        conn.close()
+
+
+def resolve_foreshadowing(novel_id: str, content: str, resolve_chapter_id: str) -> bool:
+    """Mark an open foreshadowing as resolved by this chapter.
+
+    Matches on exact content first, then falls back to a prefix match because the
+    model may echo the ledger entry with minor trailing punctuation.
+    """
+    content = str(content or "").strip()
+    if not content:
+        return False
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT f.id FROM foreshadowings f JOIN contents c ON c.id=f.chapter_id "
+            "WHERE c.parent_id=%s AND f.status <> 'resolved' AND f.content=%s LIMIT 1",
+            (novel_id, content),
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT f.id FROM foreshadowings f JOIN contents c ON c.id=f.chapter_id "
+                "WHERE c.parent_id=%s AND f.status <> 'resolved' "
+                "AND (f.content LIKE %s OR %s LIKE f.content || '%%') LIMIT 1",
+                (novel_id, content[:30] + "%", content),
+            ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE foreshadowings SET status='resolved', resolve_chapter_id=%s, "
+            "updated_at=now() WHERE id=%s",
+            (resolve_chapter_id, row_to_dict(row)["id"]),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_open_foreshadowings(novel_id: str, current_seq: int) -> list[dict]:
+    """All unresolved foreshadowings with a derived due-state for this chapter.
+
+    derived status: overdue (deadline already passed) / due_soon (within
+    DUE_SOON_WINDOW) / open.
+    """
+    rows = _q(
+        "SELECT f.id, f.content, f.planned_resolve_chapter, f.importance, "
+        "f.reader_awareness, f.expected_payoff_window, c.seq AS planted_seq "
+        "FROM foreshadowings f JOIN contents c ON c.id=f.chapter_id "
+        "WHERE c.parent_id=%s AND c.is_deleted=FALSE AND f.status <> 'resolved' "
+        "ORDER BY f.planned_resolve_chapter, f.importance DESC",
+        (novel_id,),
+    )
+    out = []
+    for r in rows:
+        try:
+            planned = int(r.get("planned_resolve_chapter") or 0)
+        except (TypeError, ValueError):
+            planned = 0
+        if planned and current_seq >= planned:
+            state = "overdue"
+        elif planned and current_seq >= planned - DUE_SOON_WINDOW:
+            state = "due_soon"
+        else:
+            state = "open"
+        out.append({
+            "id": r["id"], "content": r.get("content", ""),
+            "planned_resolve_chapter": planned,
+            "importance": r.get("importance", 5),
+            "reader_awareness": r.get("reader_awareness", "hidden"),
+            "planted_at": str(r.get("planted_seq") or ""),
+            "state": state,
+        })
+    return out
+
+
+# ── Character capability tree + arc (架构 §4.2 / §4.3) ───────────────────────
+def upsert_capability(chapter_id: str, entity_name: str, change: dict) -> None:
+    """Merge one capability into an entity's capability_tree for this chapter.
+
+    Same skill => upgrade in place (keep the earliest acquired_chapter so the
+    audit trail of "when did they learn it" is not lost).
+    """
+    skill = str(change.get("skill") or "").strip()
+    name = str(entity_name or "").strip()
+    if not skill or not name:
+        return
+    entry = {
+        "skill": skill,
+        "level": str(change.get("level") or "初级").strip(),
+        "acquired_chapter": change.get("acquired_chapter"),
+        "evidence": str(change.get("evidence") or "").strip(),
+        "limitations": str(change.get("limitations") or "").strip(),
+    }
+    conn = connect()
+    try:
+        row = row_to_dict(conn.execute(
+            "SELECT id, capability_tree FROM entity_states "
+            "WHERE chapter_id=%s AND entity_type='character' AND entity_name=%s",
+            (chapter_id, name),
+        ).fetchone())
+        if not row:
+            return  # entity not in this chapter's snapshot; nothing to attach to
+        tree = decode(row.get("capability_tree"), []) or []
+        if not isinstance(tree, list):
+            tree = []
+        merged, found = [], False
+        for old in tree:
+            if isinstance(old, dict) and str(old.get("skill", "")).strip() == skill:
+                found = True
+                entry["acquired_chapter"] = old.get("acquired_chapter") or entry["acquired_chapter"]
+                merged.append(entry)
+            else:
+                merged.append(old)
+        if not found:
+            merged.append(entry)
+        conn.execute(
+            "UPDATE entity_states SET capability_tree=%s, updated_at=now() WHERE id=%s",
+            (encode(merged), row["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def upsert_character_arc(chapter_id: str, entity_name: str, arc: dict) -> None:
+    """Update a character's arc stage; append turning points cumulatively."""
+    name = str(entity_name or "").strip()
+    if not name:
+        return
+    stage = str(arc.get("current_arc_stage") or "").strip()
+    turning = str(arc.get("turning_point") or "").strip()
+    if not stage and not turning:
+        return
+    conn = connect()
+    try:
+        row = row_to_dict(conn.execute(
+            "SELECT id, character_arc FROM entity_states "
+            "WHERE chapter_id=%s AND entity_type='character' AND entity_name=%s",
+            (chapter_id, name),
+        ).fetchone())
+        if not row:
+            return
+        cur = decode(row.get("character_arc"), {}) or {}
+        if not isinstance(cur, dict):
+            cur = {}
+        if stage:
+            cur["current_arc_stage"] = stage
+        if turning:
+            points = cur.get("turning_points")
+            points = points if isinstance(points, list) else []
+            if turning not in points:
+                points.append(turning)
+            cur["turning_points"] = points
+        conn.execute(
+            "UPDATE entity_states SET character_arc=%s, updated_at=now() WHERE id=%s",
+            (encode(cur), row["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_capability_tree(novel_id: str, names: list[str] | None = None) -> dict[str, list[dict]]:
+    """Latest capability tree per character across the whole novel.
+
+    Rows are ordered oldest-first so later chapters overwrite earlier snapshots.
+    """
+    rows = _q(
+        "SELECT es.entity_name, es.capability_tree, c.seq AS seq "
+        "FROM entity_states es JOIN contents c ON c.id=es.chapter_id "
+        "WHERE c.parent_id=%s AND c.is_deleted=FALSE AND es.entity_type='character' "
+        "AND es.capability_tree <> '[]'::jsonb "
+        "ORDER BY c.seq",
+        (novel_id,),
+    )
+    out: dict[str, list[dict]] = {}
+    wanted = {str(n).strip() for n in (names or []) if str(n).strip()}
+    for r in rows:
+        name = r.get("entity_name")
+        if not name or (wanted and name not in wanted):
+            continue
+        tree = decode(r.get("capability_tree"), []) or []
+        if not isinstance(tree, list) or not tree:
+            continue
+        by_skill = {str(c.get("skill", "")): c for c in out.get(name, []) if isinstance(c, dict)}
+        for cap in tree:
+            if isinstance(cap, dict) and cap.get("skill"):
+                by_skill[str(cap["skill"])] = cap
+        out[name] = list(by_skill.values())
+    return out
+
+
 # ── Step 4: richer Story Bible writeback (plot_threads/world_state/snapshot/arc)
 def save_plot_thread(project_id: str, novel_id: str, thread: dict) -> None:
     name = str(thread.get("name") or "").strip()
