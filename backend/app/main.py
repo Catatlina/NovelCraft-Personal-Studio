@@ -1336,31 +1336,54 @@ def restore_version(content_id: str, payload: VersionRestore, user: dict = Depen
 def _ensure_editor_paragraphs(text: str) -> str:
     """保证编辑器 AI 文本带段落分隔（空行），避免应用后折叠成一大段。
 
-    模型经常忽略 prompt 里的「用空行分隔段落」，对短文本尤其返回一整块
-    无换行的文本。textarea 靠软换行看起来分段，但 TipTap 里一整块 <p>
-    就是「一大段」。所以这里做一个确定性兜底：
-    - 若文本已含任意换行，原样返回（交给前端 normalizeParagraphBreaks 统一成 \\n\\n）；
-    - 否则按句末标点切句，每 2-3 句并成一段（网文短段落节奏），长句单独成段。
+    网文风格分段规则：
+    - 对话（「」包裹）必须独立成段
+    - 每段 1-2 句，不超过 80 字
+    - 标点规范化（破折号/省略号/引号）
     """
     if not text:
         return text
+    import re as _re2
+    # 标点规范化
     text = text.replace("\r\n", "\n").strip()
+    text = _re2.sub(r"\.{3,}", "……", text)
+    text = text.replace("。。。", "……")
+    text = _re2.sub(r"…{3}", "……", text)
+    text = _re2.sub(r"—{2,}", "——", text)
+    text = text.replace("\u201c", "「").replace("\u201d", "」")
+    text = text.replace("\u2018", "『").replace("\u2019", "』")
+
     if "\n" in text:
         return text
-    sentences = [s.strip() for s in _re.split(r"(?<=[\u3002\uff01\uff1f!?])", text) if s.strip()]
-    if len(sentences) <= 1:
-        return text
+
+    # 按对话边界拆分：「」包裹的内容独立成段
+    parts: list[str] = []
+    dialog_re = _re2.compile(r"「[^」]*」")
+    last_end = 0
+    for m in dialog_re.finditer(text):
+        if m.start() > last_end:
+            parts.append(text[last_end:m.start()])
+        parts.append(m.group())
+        last_end = m.end()
+    if last_end < len(text):
+        parts.append(text[last_end:])
+
+    # 对每个非对话片段按句末标点切短段
     grouped: list[str] = []
-    buf: list[str] = []
-    for s in sentences:
-        buf.append(s)
-        # 每 2-3 句并一段；长句（>40 字）或累计 >90 字立即收一段
-        if len(buf) >= 3 or len(buf[-1]) > 40 or len("".join(buf)) > 90:
+    for part in parts:
+        if part.startswith("「"):
+            grouped.append(part)
+            continue
+        sentences = [s.strip() for s in _re.split(r"(?<=[\u3002\uff01\uff1f!?])", part) if s.strip()]
+        buf: list[str] = []
+        for s in sentences:
+            buf.append(s)
+            if len(buf) >= 2 or len("".join(buf)) > 80:
+                grouped.append("".join(buf))
+                buf = []
+        if buf:
             grouped.append("".join(buf))
-            buf = []
-    if buf:
-        grouped.append("".join(buf))
-    return "\n\n".join(grouped)
+    return "\n\n".join(g for g in grouped if g)
 
 
 @app.post("/api/v1/contents/{content_id}/ai/{op}")
