@@ -106,10 +106,13 @@ def _domain_logic_check(text: str, protagonist: dict | None,
         # Only check tokens whose length equals the canonical name length.
         # Without this, "那老太太"(4 chars) falsely matches "老太太"(3 chars)
         # because SequenceMatcher gives high substring similarity.
-        tokens = set(re.findall(r"[一-龥]{2,4}", text))
+        # Skip 2-char names entirely — in Chinese, 2-char words are common nouns
+        # ("线球","毛线","老太太" fragments) and produce too many false positives.
+        tokens = set(re.findall(r"[一-龥]{3,4}", text))
         name_by_len: dict[int, list[str]] = {}
         for n in canon:
-            name_by_len.setdefault(len(n), []).append(n)
+            if len(n) >= 3:
+                name_by_len.setdefault(len(n), []).append(n)
         for tok in tokens:
             candidates = name_by_len.get(len(tok), [])
             for name in candidates:
@@ -761,6 +764,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         variables={
             "body": text,
             "seq": chapter_seq,
+            "open_count": len(open_before),
             "open_foreshadowings": "\n".join(
                 f"- {f['content']}（重要度{f['importance']}，应在第{f['planned_resolve_chapter']}章前回收）"
                 for f in open_before[:15]

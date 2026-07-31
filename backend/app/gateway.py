@@ -1148,8 +1148,25 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
     usage = payload.get("usage", {})
     try:
         parsed = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise OutputValidationError(f"deepseek returned non-json for {task_type}") from exc
+    except json.JSONDecodeError:
+        # Fallback: deepseek sometimes prefixes JSON with explanation text or
+        # includes invalid control characters. Try to extract the first JSON
+        # object from the response before giving up.
+        import re
+        # Strip invalid control characters (common deepseek quirk)
+        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', content)
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Try to find first {...} block
+            m = re.search(r'\{[\s\S]*\}', cleaned)
+            if m:
+                try:
+                    parsed = json.loads(m.group())
+                except json.JSONDecodeError as exc:
+                    raise OutputValidationError(f"deepseek returned non-json for {task_type}") from exc
+            else:
+                raise OutputValidationError(f"deepseek returned non-json for {task_type}")
     return parsed, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 

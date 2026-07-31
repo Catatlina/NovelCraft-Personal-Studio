@@ -554,19 +554,24 @@ $instruction
     # 定稿账本回写：伏笔账本 + 人物能力树 + 人物弧线（架构 §4.2/§4.3/§4.5）
     # 刻意与 extract_entities / extract_story_facts 分开：顶层字段控制在 3 个以内，
     # 避免"一个 prompt 塞太多顶层字段导致模型静默只返回主数组"的 schema 过载问题。
-    ("narrative.extract_ledger", "1.0.0", "deepseek",
+    ("narrative.extract_ledger", "1.1.0", "deepseek",
      '你在维护一部长篇小说的"定稿账本"。请只依据本章已定稿正文，提取伏笔、人物能力变化与人物弧线推进。\n'
      '【硬性要求】\n'
      '1. 只登记正文真实出现的内容，禁止推测、禁止补全作者没写的东西。没有就返回空数组。\n'
      '2. foreshadowings（本章新埋设的伏笔）：\n'
+     '   - ⚠️ 当前已有 $open_count 条未关闭伏笔。若 $open_count >= 20，本章禁止种植新伏笔，foreshadowings 必须返回空数组！\n'
+     '   - 只有当 $open_count < 20 时才允许种植，且每章最多 2 条新伏笔。\n'
      '   - importance 用 1-10 整数（8 以上表示主线级关键伏笔，会进入修复保护区不可被改写）。\n'
-     '   - reader_awareness 只能是 hidden（读者完全没察觉）/ suspected（读者隐约起疑）/ known（读者已明确知道但角色不知）。\n'
+     '   - reader_awareness 只能是 hidden / suspected / known。\n'
      '   - expected_payoff_window 是"还需多少章内回收"的整数（如 10 表示第 $seq+10 章前应回收），主线级伏笔可给更大的值。\n'
-     '3. resolved（本章回收/揭晓的既有伏笔）：从下面【待回收伏笔】里挑，用其原文 content 精确匹配，'
-     '本章确实揭晓了才写；没有回收任何伏笔就返回空数组，禁止硬凑。\n'
+     '3. resolved（本章回收/揭晓的既有伏笔）：\n'
+     '   - 从下面【待回收伏笔】里挑，用其原文 content 匹配。\n'
+     '   - ⚠️ 这是最重要的一条！你必须仔细检查正文，看哪些伏笔在本章得到了解答或推进。不要轻易返回空数组。\n'
+     '   - 即使只是部分揭晓（如暗示了答案、给出了关键线索），也算回收，how 字段写清楚如何揭晓。\n'
+     '   - 每章至少回收 1 条到期或即将到期的伏笔（如果有的话）。\n'
      '4. capability_changes（本章人物新获得/升级的能力）：\n'
      '   - 必须给 evidence（正文中证明其获得该能力的具体情节），无 evidence 不得登记。\n'
-     '   - limitations 必填，写清这个能力"做不到什么"，用于后续防止角色降智或越级发挥。\n'
+     '   - limitations 必填，写清这个能力"做不到什么"。\n'
      '   - level 用 初级/中级/高级/宗师 之一。已在【已有能力】列出的不要重复登记，除非本章确实升级了。\n'
      '5. arc_updates（人物弧线推进）：current_arc_stage 描述该人物当前处于成长的哪个阶段，'
      'turning_point 只在本章确实发生转折时填写，否则留空字符串。\n'
