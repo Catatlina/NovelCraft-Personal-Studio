@@ -624,7 +624,11 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         "向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧"
                         "殳沃利蔚越夔隆师巩厍聂晁勾敖融冷訾辛阚那简饶空曾毋"
                         "沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓")
-            _name_re = _re.compile(r'老[' + _surname + r']|[' + _surname + r'][' + _surname + r']?')
+            # Only flag the "老X" form (老陈/老孙/老李…) where X is a surname —
+            # a strong signal of a newly-named character. We deliberately do NOT
+            # match a lone surname char (江/石/陈…) because those appear constantly
+            # inside ordinary words (江衍, 石头, 矿工) and would cause false positives.
+            _name_re = _re.compile(r'老[' + _surname + r']')
 
             def _violations(t: str) -> list[str]:
                 v: list[str] = []
