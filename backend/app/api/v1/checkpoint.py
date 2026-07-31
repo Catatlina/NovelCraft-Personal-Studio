@@ -14,9 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from ..db import connect, row_to_dict, decode
-from ..repositories.loop_repos import record_book_status, get_book_config
-from ..api.v1.auth import get_current_user
+from app.db import connect, row_to_dict, decode
+from app.repositories.loop_repos import record_book_status, get_book_config
+from app.api.v1.auth import get_current_user
 
 router = APIRouter(prefix="/checkpoint", tags=["checkpoint"])
 
