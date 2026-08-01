@@ -89,7 +89,13 @@ class ConstraintSystem:
             "id": str(constraint.id),
             "name": constraint.constraint_name,
             "type": constraint.constraint_type,
+            "description": constraint.description,
+            "value": constraint.constraint_value,
             "severity": constraint.severity,
+            "check_method": constraint.check_method,
+            "priority": constraint.priority,
+            "violation_count": constraint.violation_count,
+            "last_violation_at": constraint.last_violation_at.isoformat() if constraint.last_violation_at else None,
         }
 
     async def update_constraint(

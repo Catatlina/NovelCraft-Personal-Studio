@@ -104,8 +104,15 @@ class GoalSystem:
             "id": str(goal.id),
             "name": goal.goal_name,
             "type": goal.goal_type,
+            "description": goal.description,
+            "parent_goal_id": str(goal.parent_goal_id) if goal.parent_goal_id else None,
+            "order": goal.goal_order,
             "status": goal.status,
             "progress": goal.progress,
+            "target_chapter": goal.target_chapter,
+            "completed_chapter": goal.completed_chapter,
+            "priority": goal.priority,
+            "confidence": goal.confidence,
         }
 
     async def update_goal(
