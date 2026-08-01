@@ -1431,6 +1431,10 @@ def ai_edit(
             candidate2 = _ensure_editor_paragraphs(result2.get("final_text", payload.selection))
             if count_content_chars(candidate2) > count_content_chars(candidate_text):
                 candidate_text = candidate2
+        # 最终兜底：重跑后仍不足 2000 → 宁可少改也不压缩剧情。
+        # 「去AI味」的目标是改表达，绝不是删内容；压缩原文属于破坏性操作。
+        if count_content_chars(candidate_text) < EDITOR_MIN_CHARS:
+            candidate_text = _ensure_editor_paragraphs(payload.selection)
         output = {"text": candidate_text}
     else:
         instruction = payload.instruction
@@ -1476,6 +1480,11 @@ def ai_edit(
                 best = {"text": candidate_text}
                 break
         output = best or {"text": candidate_text}
+        # 最终兜底：润色/改写重跑耗尽后仍不足 2000 → 回退原文。
+        # 润色的目的是改表达，压缩/删减情节属于破坏性操作，宁可少改。
+        if str(op) in IMPROVE_OPS and count_content_chars(output.get("text") or "") < EDITOR_MIN_CHARS:
+            if count_content_chars(payload.selection) >= EDITOR_MIN_CHARS:
+                output = {"text": _ensure_editor_paragraphs(payload.selection)}
 
     # 附七维审查（deai 单遍在此补算）与续章规划
     if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
