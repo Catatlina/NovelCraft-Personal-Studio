@@ -1412,6 +1412,7 @@ def ai_edit(
 
     if str(op) == "deai":
         from app.services.deai_pipeline import DeaiPipeline
+        from app.services.text_metrics import count_content_chars
         pipeline = DeaiPipeline(
             project_id=content["project_id"],
             content_id=content_id,
@@ -1419,6 +1420,17 @@ def ai_edit(
         )
         result = pipeline.run(payload.selection)
         candidate_text = _ensure_editor_paragraphs(result.get("final_text", payload.selection))
+        # 字数硬门禁：去 AI 味不得压缩篇幅。不足则带反馈重跑一次
+        # （deai.rewrite 1.1.0 已含篇幅硬要求，此兜底防模型不执行）。
+        if count_content_chars(candidate_text) < EDITOR_MIN_CHARS:
+            result2 = pipeline.run(
+                payload.selection
+                + f"\n\n【上一版去AI味字数不足（{count_content_chars(candidate_text)}字 < {EDITOR_MIN_CHARS}字）。"
+                + "请保持原文全部信息与字数，只改表达方式，不得压缩、总结或删减情节。】"
+            )
+            candidate2 = _ensure_editor_paragraphs(result2.get("final_text", payload.selection))
+            if count_content_chars(candidate2) > count_content_chars(candidate_text):
+                candidate_text = candidate2
         output = {"text": candidate_text}
     else:
         instruction = payload.instruction

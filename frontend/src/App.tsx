@@ -434,12 +434,13 @@ export default function App() {
     }
   }
 
-  async function saveChapter() {
+  async function saveChapter(textOverride?: string) {
     if (!chapter) return;
     const prevText = docToText(chapter.body);
+    const nextText = textOverride ?? editorText;
     const mutationId = crypto.randomUUID();
     const body = {
-      body: textToDoc(editorText), label: "offline_save",
+      body: textToDoc(nextText), label: "offline_save",
       base_updated_at: chapter.updated_at, client_mutation_id: mutationId,
     };
     if (!navigator.onLine) {
@@ -460,7 +461,7 @@ export default function App() {
         return;
       }
       setChapter(updated); await cacheDelete(`offline-content:${chapter.id}`); loadVersions(updated.id);
-      sendEditSignal(updated.id, prevText, editorText);
+      sendEditSignal(updated.id, prevText, nextText);
     } catch (caught) {
       if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
       await queueOfflineMutation(mutationId, "content_update", `/api/v1/contents/${chapter.id}`, "PUT", body);
@@ -706,6 +707,15 @@ export default function App() {
     }
     setPendingAiEdit(null);
     setEditorResetNonce(n => n + 1);
+    // AI 建议应用后立即落库一次：拿到最新 updated_at 作为后续 autosave 的
+    // base 基准，否则 3 秒 debounce autosave 会用过期 base_updated_at 提交，
+    // 服务器判定 offline_conflict 并把 AI 文本回滚成旧内容（用户看到
+    // "建议应用不上"）。保存失败不阻塞 UI，冲突仍走版本树。
+    try {
+      await saveChapter(pendingAiEdit.nextText);
+    } catch {
+      // 保留原行为：autosave 或手动保存会兜底
+    }
     setOfflineNotice("AI 建议已应用到草稿，自动保存会创建可恢复版本");
   }
 
