@@ -1,4 +1,84 @@
 # Starlume AI 项目交接说明
+> 更新时间：2026-08-01
+> 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
+
+## 0. V7.0 Alpha 最新状态（2026-08-01 新增）
+
+### 0.1 概述
+V7.0 Alpha 完整实现已完成代码编写，状态为**已接线**（代码写完但未验收）。
+
+- 代码位置：`backend/app/v7/`、`frontend/src/v7/`
+- 数据库迁移：`backend/alembic/versions/v7_001_init_all_tables.py`
+- 表前缀：`v7_`（与 V6 完全隔离，不修改 V6 表）
+- 提交：`a2e5e79`（70 files changed, 11503 insertions(+)）
+- 本地已 commit，**尚未推送**（需要 GitHub 认证）
+
+### 0.2 后端（52 文件，6,098 行）
+
+**数据库层（18 张表）**
+- v7_story_versions / v7_brain_snapshots — 版本控制
+- v7_story_states / v7_state_changes — 状态管理 + 置信度门控
+- v7_author_intents / v7_story_goals — 目标系统
+- v7_constraints — 约束系统
+- v7_decision_permissions / v7_decision_logs — 决策权限 + 日志
+- v7_human_interventions — 人工干预
+- v7_plot_nodes — 剧情节点
+- v7_agent_runs / v7_agent_traces — 执行追踪
+- v7_prompt_versions / v7_prompt_executions — Prompt 版本
+- v7_cost_budgets — 成本预算
+- v7_event_logs — 事件日志
+- v7_seed_data — 种子数据
+
+**核心模块**
+- Novel Brain — 状态管理 / 目标系统 / 约束系统 / 版本控制
+- Story Director — 决策层 + 权限系统（auto/notify/approve/forbidden）
+- 三大引擎 — PlotEngine / MemoryEngine / ReviewEngine（统一 5 方法接口）
+- 生成引擎 — ContextAssembler / SceneDirector / DeAIPipeline / AIGateway
+- EventBus — 事件驱动 + 永久记录 + 事件重放
+- ExecutionTracer — 完整执行追踪
+- PromptVersionManager — Prompt 版本管理
+- CostBudgetManager — 成本预算 + 两级预警
+
+**API 层（30+ 端点）**
+- Brain API — 状态/目标/约束/版本/决策/事件
+- Trace API — Run 管理 / 步骤追踪
+- Director API — 章节生成 / 决策审批 / 状态查询
+
+### 0.3 前端（17 文件，4,870 行）
+
+**12 个页面，分三组导航**
+- Brain 组：Overview / States / Goals / Constraints / Versions / Event Log
+- Generation 组：Generation Console / Trace Viewer / Decision Log
+- Engineering 组：Cost Monitor / Prompt Manager / Config
+
+### 0.4 核心机制（全部已实现）
+1. 置信度门控（0.9 自动 / 0.7-0.9 待审核 / 0.5-0.7 待审核 / <0.5 丢弃）
+2. 决策权限分级（auto / notify / approve / forbidden）
+3. 版本控制 + 快照 + 回滚标记
+4. 状态变更流水（可追溯）
+5. 事件驱动（EventBus + 永久记录）
+6. 执行追踪（Agent Run + Trace Step）
+7. Prompt 版本管理（hash 校验 + 版本号递增）
+8. 成本预算 + 两级预警（80%/95%）
+9. 统一引擎接口（BaseEngine + 5 方法）
+10. 结构化输出（result/confidence/reason/schema_version）
+
+### 0.5 未完成门禁（升级到「可用」需完成）
+1. 数据库会话集成 — V6 psycopg2 与 V7 SQLAlchemy 协调
+2. API 路由注册 — 在主 FastAPI app 中注册 v7 路由
+3. 前端路由接入 — 在主 App 中接入 V7 页面
+4. 单元测试 — Repository 层 + Brain 核心 + API 集成测试
+5. 端到端测试 — 完整的章节生成闭环测试
+6. 真实 AI 调用 — 接入 DeepSeek API，替换 mock 实现
+7. V6 Adapter — 复用 V6 的生成引擎、去 AI 味管线等成熟代码
+8. CI 通过 — GitHub Actions 五项全绿
+9. 生产部署 — 部署到 novel.xyjin.xyz 并 smoke 通过
+
+### 0.6 下一步建议
+优先做：数据库会话集成 → API 路由注册 → 前端路由接入 → 单元测试 → V6 Adapter → 真实 AI 调用
+
+---
+
 
 > 更新时间：2026-07-30
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。

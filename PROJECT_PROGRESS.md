@@ -2,6 +2,111 @@
 
 <!-- delivery-claims: strict -->
 
+## 2026-08-01 V7.0 Alpha 完整实现 — Novel Intelligence System
+> 本轮按 V7.0.2.2 最终冻结架构执行：全局状态驱动 + 因果链约束 + 读者体验曲线控制的全书级智能体。代码全部完成，尚未接入主 app、未跑测试、未做真实 AI 验证，状态为**已接线**。
+
+### 后端（52 文件，6,098 行）
+
+#### 数据库层（18 张表，v7_ 前缀，与 V6 完全隔离）
+- `v7_story_versions` / `v7_brain_snapshots` — 版本控制 + 快照
+- `v7_story_states` / `v7_state_changes` — 状态管理 + 置信度门控（0.9/0.7/0.5 三级）
+- `v7_author_intents` / `v7_story_goals` — 作者意图 + 目标系统（目标树）
+- `v7_constraints` — 约束系统 + 违规记录
+- `v7_decision_permissions` / `v7_decision_logs` — 决策权限分级（auto/notify/approve/forbidden）+ 决策日志
+- `v7_human_interventions` — 人工干预记录
+- `v7_plot_nodes` — 剧情节点
+- `v7_agent_runs` / `v7_agent_traces` — 执行追踪（Agent Run + Trace Step）
+- `v7_prompt_versions` / `v7_prompt_executions` — Prompt 版本管理 + 执行历史
+- `v7_cost_budgets` — 成本预算 + 两级预警（80%/95%）
+- `v7_event_logs` — 事件日志（永久记录 + 事件重放）
+- `v7_seed_data` — 种子数据
+
+#### 核心模块
+- **Novel Brain** — 状态管理 / 目标系统 / 约束系统 / 版本控制 四大子系统 + 主类
+- **Story Director** — 决策层 + 权限系统 + 章节生成闭环
+- **三大引擎** — PlotEngine / MemoryEngine / ReviewEngine（统一 5 方法接口：analyze/plan/execute/validate/update）
+- **生成引擎** — ContextAssembler / SceneDirector / DeAIPipeline / AIGateway（Alpha 版，Adapter 模式）
+- **EventBus** — 事件驱动 + 永久记录 + 事件重放
+- **ExecutionTracer** — 完整执行追踪（自动记录 token/cost/时长）
+- **PromptVersionManager** — Prompt 版本管理 + 执行历史 + golden cases
+- **CostBudgetManager** — 成本预算 + 两级预警 + 超限动作（notify/block）
+
+#### API 层（30+ 端点，v7/ 前缀）
+- Brain API — 状态/目标/约束/版本/决策/事件
+- Trace API — Run 管理 / 步骤追踪
+- Director API — 章节生成 / 决策审批 / 状态查询
+
+### 前端（17 文件，4,870 行）
+
+#### 12 个页面，分三组导航
+
+**Brain 组**
+- Overview — 统计概览 + 目标进度 + 最近事件 + 状态分布
+- States — 5 种状态类型 + 置信度标签 + 待审核审批 + 变更历史时间线
+- Goals — 列表/树视图切换 + 进度条 + 优先级 + 创建模态框
+- Constraints — 严重程度筛选 + 违规计数 + 约束详情
+- Versions — 版本时间线 + 快照管理 + 回滚功能 + 分支/标签
+- Event Log — 严重程度/分类筛选 + 自动刷新 + 事件详情
+
+**Generation 组**
+- Generation Console — 7 步流程可视化 + 实时进度 + 生成设置 + 结果展示
+- Trace Viewer — Run 列表 + 步骤时间线 + 详情展开 + token/cost 统计
+- Decision Log — 状态筛选 + 审批操作 + 详情展开 + 上下文查看
+
+**Engineering 组**
+- Cost Monitor — 预算总览 + 进度条 + 预警 + 新建预算
+- Prompt Manager — 版本分组 + 默认设置 + 执行历史
+- Config — 配置页面（占位）
+
+### 核心机制（全部已实现）
+- 置信度门控（0.9 自动 / 0.7-0.9 待审核 / 0.5-0.7 待审核 / <0.5 丢弃）
+- 决策权限分级（auto / notify / approve / forbidden）
+- 版本控制 + 快照 + 回滚标记
+- 状态变更流水（可追溯，类似 Git commit）
+- 事件驱动（EventBus + event_logs 永久记录）
+- 执行追踪（Agent Run + Trace Step + 自动统计）
+- Prompt 版本管理（hash 校验 + 版本号递增 + golden cases）
+- 成本预算 + 两级预警（80% warning / 95% critical）
+- 统一引擎接口（BaseEngine + EngineCapability + EngineResult）
+- 结构化输出（result / confidence / reason / warnings / schema_version）
+
+### 工程约束（全部遵守）
+- UUID 主键：所有核心对象均为 UUID
+- 结构化输出：所有 AI 输出含 result/confidence/reason/schema_version
+- 统一接口：所有 Engine 实现 BaseEngine 的 5 个统一方法
+- 事件驱动：状态更新通过 EventBus 触发并永久记录
+- 迁移安全：v7_ 前缀，与 V6 完全隔离，不修改 V6 表
+
+### 当前状态：**已接线**
+- 代码全部写完，目录结构完整
+- 数据库 migration 已写好（18 张表）
+- API 路由已写好但**未注册到主 FastAPI app**
+- 前端页面已写好但**未接入主 App 路由**
+- **未跑单元测试**
+- **未跑集成测试**
+- **未做真实 AI 调用验证**
+- **未做 CI 验证**
+- **未部署生产**
+
+### 未完成门禁（升级到「可用」需完成）
+1. 数据库会话集成 — V6 psycopg2 与 V7 SQLAlchemy 协调
+2. API 路由注册 — 在主 FastAPI app 中注册 v7 路由
+3. 前端路由接入 — 在主 App 中接入 V7 页面
+4. 单元测试 — Repository 层 + Brain 核心 + API 集成测试
+5. 端到端测试 — 完整的章节生成闭环测试
+6. 真实 AI 调用 — 接入 DeepSeek API，替换 mock 实现
+7. V6 Adapter — 复用 V6 的生成引擎、去 AI 味管线等成熟代码
+8. CI 通过 — GitHub Actions 五项全绿
+9. 生产部署 — 部署到 novel.xyjin.xyz 并 smoke 通过
+
+### 提交信息
+- Commit：`a2e5e79`
+- 70 files changed, 11503 insertions(+)
+- 本地已 commit，**尚未推送**（需要 GitHub 认证）
+- 代码位置：`backend/app/v7/`、`frontend/src/v7/`、`backend/alembic/versions/v7_001_init_all_tables.py`
+
+---
+
 > 更新：2026-07-29（多书选择器与公共页面一致性）｜ 权威摘要 ｜ 状态遵循《23-AI开发边界与交付真实性规范》
 
 ## 2026-07-29 多书选择器与公共页面一致性
