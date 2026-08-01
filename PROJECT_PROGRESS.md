@@ -2,6 +2,59 @@
 
 <!-- delivery-claims: strict -->
 
+## 2026-08-01 V7.0 Alpha 真实 AI 调用验证通过
+> 本轮完成 V7.0 Alpha 的真实 AI 调用集成：AIGateway 接入 DeepSeek API，测试通过。代码已推送到 GitHub。
+
+### 已完成
+
+#### 真实 AI 调用 ✅
+- AIGateway 从 mock 实现升级为真实 DeepSeek API 调用
+- 支持参数：
+  - system_prompt — 系统提示词
+  - model — 模型选择（默认 deepseek-chat）
+  - temperature — 温度参数
+  - max_tokens — 最大 token 数
+  - output_schema — 结构化输出（JSON mode）
+- 自动计算：
+  - 输入/输出 token 数
+  - 成本估算（输入 ¥1/M tokens，输出 ¥2/M tokens）
+- 错误处理：
+  - 超时处理（60s）
+  - 异常捕获和降级
+  - 返回错误信息
+
+#### 测试结果 ✅
+- 导入测试：V7 所有模块导入正常
+- API 调用测试：DeepSeek API 调用成功
+  - 输入：24 tokens
+  - 输出：10 tokens
+  - 成本：¥0.000044
+  - 状态：正常返回
+
+### 当前状态：**可启动 + 真实 AI 可用**
+- 代码全部写完，集成全部完成
+- 真实 AI 调用已验证通过
+- 代码已推送到 GitHub（`972d78a`）
+- **未部署到生产**：需要服务器 SSH 权限
+
+### 剩余门禁
+1. ~~数据库会话集成~~ ✅
+2. ~~API 路由注册~~ ✅
+3. ~~前端路由接入~~ ✅
+4. ~~单元测试~~ ✅
+5. ~~V6 Adapter~~ ✅
+6. ~~真实 AI 调用~~ ✅
+7. ⏳ 端到端测试 — 需生产环境运行
+8. ❌ 生产部署 — 需服务器 SSH 权限
+9. ❌ CI 通过 — 需 GitHub Actions 运行
+
+### 提交信息
+- Commit：`972d78a` — feat(v7): AIGateway接入真实DeepSeek API调用
+- 已推送到 GitHub main 分支
+- 代码位置：`backend/app/v7/generation/generation_engine.py`
+
+---
+
 ## 2026-08-01 V7.0 Alpha 集成完成 — 数据库/API/前端/测试/Adapter
 > 本轮完成 V7.0 Alpha 的系统集成：数据库会话、API 路由、前端路由、单元测试、V6 Adapter 全部就位。代码全部提交，状态从「已接线」升级为「可启动」。
 
