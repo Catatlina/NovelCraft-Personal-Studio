@@ -598,10 +598,22 @@ class AIGateway:
         last_error: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(url, headers=headers, json=payload)
-                    response.raise_for_status()
-                    result = response.json()
+                # Total-duration hard cap: httpx's ``timeout`` only guards the
+                # idle gap between two socket reads, so a slow-but-chatty LLM
+                # stream can hang the chapter forever (observed: DeepSeek slow
+                # window left generate_chapter stuck >30min with no timeout
+                # firing). wrap the whole request in asyncio.wait_for so the
+                # call can never exceed ``self.timeout`` wall-clock seconds.
+                async def _one_request() -> dict[str, Any]:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(
+                        connect=self.timeout, read=self.timeout,
+                        write=self.timeout, pool=self.timeout,
+                    )) as client:
+                        response = await client.post(url, headers=headers, json=payload)
+                        response.raise_for_status()
+                        return response.json()
+
+                result = await asyncio.wait_for(_one_request(), timeout=self.timeout)
 
                 choice = result["choices"][0]
                 content = choice["message"]["content"]
