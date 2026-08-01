@@ -4,7 +4,7 @@ V7 Alpha 初始化：18 张表一次性建齐。
 使用原始 SQL DDL（非 SQLAlchemy ORM），与现有 migration 风格保持一致。
 
 Revision ID: v7_001_init
-Revises: a70d10a931fb
+Revises: f1b2c3d4e5a6
 Create Date: 2026-08-01
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = 'v7_001_init'
-down_revision: Union[str, None] = 'a70d10a931fb'
+down_revision: Union[str, None] = 'f1b2c3d4e5a6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
