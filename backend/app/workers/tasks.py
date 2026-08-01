@@ -22,7 +22,7 @@ import os
 import re
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any
 
@@ -3053,6 +3053,10 @@ def patrol_check() -> dict:
 # resumes from the failed one (checkpoint-safe, idempotent).
 
 STALE_RUN_STALL_MINUTES = int(os.getenv("STALE_RUN_STALL_MINUTES", "10"))
+# Runs older than this while stuck in 'running' are treated as abandoned
+# zombies and terminated instead of resurrected (avoid burning AI budget on
+# long-dead test runs after a deploy).
+STALE_RUN_MAX_AGE_HOURS = int(os.getenv("STALE_RUN_MAX_AGE_HOURS", "24"))
 
 
 @celery_app.task(name="app.workers.tasks.resume_stale_bootstrap_runs")
@@ -3060,7 +3064,7 @@ def resume_stale_bootstrap_runs() -> dict:
     """Re-dispatch bootstrap runs stuck in 'running' past the stall threshold."""
     db = connect()
     stale = db.execute(
-        """SELECT id, current_node_key, updated_at
+        """SELECT id, current_node_key, created_at, updated_at
            FROM workflow_runs
            WHERE status = 'running'
              AND updated_at < now() - make_interval(mins => %s)
@@ -3073,6 +3077,27 @@ def resume_stale_bootstrap_runs() -> dict:
     for run in stale:
         run_id = run["id"]
         node_key = run["current_node_key"] or "plan_idea"
+
+        # Abandoned run: created too long ago to be a live book being built
+        # right now — terminate it instead of spending AI budget re-running it.
+        if run["created_at"] < datetime.now(timezone.utc) - timedelta(hours=STALE_RUN_MAX_AGE_HOURS):
+            db = connect()
+            db.execute(
+                """UPDATE workflow_runs SET status = 'failed', finished_at = now(),
+                           updated_at = now(),
+                           dispatch_error = 'abandoned run (age > %s h); terminated by resume_stale_bootstrap_runs'
+                   WHERE id = %s""",
+                (STALE_RUN_MAX_AGE_HOURS, run_id),
+            )
+            db.commit()
+            db.close()
+            _record_bootstrap_event(
+                run_id, "run.terminated_abandoned",
+                node_key=node_key,
+                payload={"reason": "abandoned", "age_hours": STALE_RUN_MAX_AGE_HOURS},
+            )
+            terminated.append({"run_id": run_id, "reason": "abandoned"})
+            continue
 
         # A live worker heartbeats the run while executing: if updated_at is
         # stale AND no node is currently 'running' with a recent started_at,
