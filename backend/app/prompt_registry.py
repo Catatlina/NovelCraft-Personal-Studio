@@ -395,6 +395,54 @@ $context
 输出 JSON: {"chapter":{"title":"第N章 创意标题","body":["段落一","段落二",...]}}
 body 至少 8 段，建议 10-18 段；每段 1-3 句；总字数不得低于 2000 字；低于 2000 字视为失败。"""),
 
+    ("narrative.archive_update", "1.0.0", "deepseek",
+     """你是长篇小说永久档案维护员。系统每生成一章后调用你，把本章信息萃取并合并进小说永久档案，供后续章节生成时严格遵循，从而保证人物/剧情/章节跨章连贯。
+
+上一章结束时的档案（JSON 字符串；若是"（空，本书首次建立永久档案）"则表示本书首次建立）：
+$prev_archive
+
+当前章节序号：第$chapter_seq章
+当前章节正文：
+$chapter_text
+
+任务：基于【上一章档案】与【当前章节正文】，输出更新后的永久档案 JSON。规则：
+1. character_cards（人物卡）：数组，每项 {name, aliases:[], role, traits, must_use_canonical:bool}。
+   - 保留所有已建立角色；可据本章更新其 role/traits（如状态、关系变化）。
+   - 仅当本章出现且有持续意义的新角色才新增；路人/一次性工具人不必入档。
+   - 已建立角色必须保留原名，must_use_canonical 设为 true（名字绝不可改、绝不可被近似名/外号替代为本名）。
+   - aliases 只允许收录正文里实际出现过的称呼；不得自创昵称/外号。
+2. plot_timeline（剧情时间线）：数组，每项 {chapter, summary}。保留旧条目，追加本章极简摘要（谁、在哪、发生了什么关键转折）；可合并润色旧条目。
+3. foreshadow_list（伏笔清单）：数组，每项 {id, description, status}，status 取 open/resolved/pending。保留旧伏笔并更新状态；把本章新埋的伏笔加入（status:"open"）；已揭晓的标 "resolved"。
+4. continuity_facts（已确认硬事实）：字符串。保留上一章档案里的硬事实，并据本章补充必须长期成立的事实（例如"全员生还，无死亡""纯现实背景无魔法/超自然""角色名单：江衍/石头/老矿工"）。这些事实后续章节严禁违背。
+5. hard_constraints（硬红线）：数组（字符串）。保留旧红线，可据本章补充绝对禁止的走向（如"禁止主角突然觉醒灵根"）。
+
+只输出合法 JSON（不得包含 JSON 以外的任何文本），结构：
+{"character_cards":[...],"plot_timeline":[...],"foreshadow_list":[...],"continuity_facts":"...","hard_constraints":[...]}"""),
+
+    ("narrative.coherence_verify", "1.0.0", "deepseek",
+     """你是长篇小说连贯性审查员。系统每生成一章后调用你，对照【永久档案】与【上一章结尾】，检测本章是否存在连贯性断裂。你只负责"找问题"，不负责改写。
+
+永久档案（人物卡/时间线/伏笔/已确认事实/硬红线；可能为空）：
+$archive
+
+上一章结尾原文（用于核对本章开头是否衔接）：
+$prev_tail
+
+待审章节正文：
+$chapter_text
+
+请严格审查以下维度，只报告真实存在的问题（附原文证据），不要吹毛求疵、不要评文笔：
+- name_drift：角色被改名或用非档案标注的近似名/外号当作本名（如档案叫"石头"本章却用"瘦猴"当本名）。
+- ooc：角色行为/语言明显违背档案中的性格 traits。
+- plot_contradiction：本章情节与档案已确认事实/时间线冲突（如档案说全员生还本章却写死了人）。
+- foreshadow_dropped：档案中标记为 open 的重要伏笔在本章被无声丢弃且无任何交代。
+- bridge_broken：本章开头没有承接上一章结尾的场景/角色状态/未解悬念，出现生硬跳场或另起炉灶。
+- factual_error：本章出现与档案硬事实矛盾的设定（如档案为纯现实背景却出现魔法）。
+
+只输出合法 JSON（不得包含 JSON 以外的任何文本），结构：
+{"violations":[{"type":"name_drift|ooc|plot_contradiction|foreshadow_dropped|bridge_broken|factual_error","severity":"high|medium|low","detail":"问题描述","evidence":"原文证据（尽量引用原句）"}]}
+若本章连贯无问题，输出 {"violations":[]}。"""),
+
     ("narrative.plan_next_chapter", "3.0.0", "deepseek",
      """你是长篇小说责编。请基于当前章节和七维审查视角，规划下一章。
 

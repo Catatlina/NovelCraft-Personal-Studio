@@ -527,6 +527,51 @@ def _apply_replacements(text: str, replacements: list[dict]) -> str:
     return out, applied
 
 
+def _semantic_coherence_check(run_id: str, project_id: str, user_id: str | None, text: str,
+                              prev_tail: str, archive_text: str, facts: str) -> tuple[list[str], list[dict]]:
+    """⑤ Semantic coherence judge (replaces lexical-only blind spots).
+
+    Cross-references the freshly generated chapter against the curated archive
+    (character cards / timeline / foreshadow list / established facts) and the
+    previous chapter's tail. Returns (high_severity_violations, all_violations).
+
+    Violation types: name_drift / ooc / plot_contradiction / foreshadow_dropped
+    / bridge_broken / factual_error. Only `high` severity (or the structural
+    types name_drift / bridge_broken / plot_contradiction) forces a rewrite.
+
+    Never raises: on any failure we return clean so generation is not blocked.
+    """
+    try:
+        out = gateway.complete(
+            run_id=run_id, node_key="coherence_verify", project_id=project_id,
+            task_type="coherence_verify", prompt_name="narrative.coherence_verify",
+            user_id=user_id,
+            variables={
+                "archive": archive_text or "（无永久档案）",
+                "prev_tail": prev_tail or "（首章，无前章结尾）",
+                "chapter_text": text,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - judge must never block generation
+        return [], [{"type": "_error", "severity": "low",
+                     "detail": f"coherence judge failed: {type(exc).__name__}"}]
+    vs = out.get("violations") or []
+    high: list[str] = []
+    for v in vs:
+        if not isinstance(v, dict):
+            continue
+        sev = str(v.get("severity", "")).strip().lower()
+        t = str(v.get("type", "")).strip()
+        is_structural = t in ("name_drift", "bridge_broken", "plot_contradiction")
+        if sev == "high" or is_structural:
+            ev = str(v.get("evidence", "")).strip()
+            line = f"[{t}] {v.get('detail', '')}"
+            if ev:
+                line += f" 证据：{ev}"
+            high.append(line)
+    return high, vs
+
+
 def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                        *, user_id: str | None = None, run_id: str | None = None,
                        max_rewrites: int = 3) -> dict:
@@ -758,14 +803,28 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
 
             prev_tail = repo.get_previous_chapter_tail(novel_id, chapter_seq, tail_chars=800)
             v0 = _violations(text, prev_tail)
+            # ⑤ semantic coherence verify (only when lexical is clean, to bound cost)
+            semantic_high: list[str] = []
+            if not v0:
+                semantic_high, _all_sem = _semantic_coherence_check(
+                    run_id, project_id, user_id, text, prev_tail, archive_var, facts)
+            fb = ""
             if v0:
-                report["steps"].append({"step": "continuity_guard", "triggered": True,
-                                        "violations": v0[:5]})
                 fb = ("【情节承接严重违规】你违背了上一章已确认的硬事实，必须重写：\n"
                       + "\n".join(f"- {x}" for x in v0) + "\n")
                 if facts:
                     fb += "\n上一章已确认事实（严禁违背）：\n" + facts + "\n"
                 fb += "\n必须紧接上一章结尾原文继续：\n" + (prev_tail or "")
+            elif semantic_high:
+                fb = ("【语义连贯校验未通过】本章与永久档案/上一章存在连贯性冲突，必须重写：\n"
+                      + "\n".join(f"- {x}" for x in semantic_high) + "\n")
+                if facts:
+                    fb += "\n上一章已确认事实（严禁违背）：\n" + facts + "\n"
+                fb += "\n必须紧接上一章结尾原文继续：\n" + (prev_tail or "")
+            if fb:
+                report["steps"].append({"step": "continuity_guard", "triggered": True,
+                                        "lexical": v0[:5], "semantic": semantic_high[:5]})
+                applied = False
                 for _cg in range(max_rewrites):
                     cg = gateway.complete(
                         run_id=run_id, node_key=f"continuity_fix{_cg+1}",
@@ -778,18 +837,25 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                     cg_ch = cg.get("chapter", {}) or {}
                     cg_paras = cg_ch.get("body", []) if isinstance(cg_ch, dict) else []
                     cg_text = "\n\n".join(cg_paras) if cg_paras else ""
+                    # accept only when BOTH lexical and semantic are clean
                     if cg_text and len(cg_text) >= MIN_CHAPTER_CHARS and not _violations(cg_text, prev_tail):
-                        paragraphs, text = cg_paras, cg_text
-                        title = cg_ch.get("title") or title
-                        _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
-                        report["steps"].append({"step": "continuity_guard", "applied": True,
-                                                "attempt": _cg + 1,
-                                                "my": text.count("我"), "he": text.count("他")})
-                        break
-                else:
-                    report["steps"].append({"step": "continuity_guard", "applied": False,
-                                            "reason": "exhausted retries; violations remain",
-                                            "remaining": _violations(text)[:5]})
+                        sem2, _ = _semantic_coherence_check(
+                            run_id, project_id, user_id, cg_text, prev_tail, archive_var, facts)
+                        if not sem2:
+                            paragraphs, text = cg_paras, cg_text
+                            title = cg_ch.get("title") or title
+                            _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
+                            report["steps"].append({"step": "continuity_guard", "applied": True,
+                                                    "attempt": _cg + 1})
+                            applied = True
+                            break
+                report["steps"].append({
+                    "step": "continuity_guard",
+                    "applied": applied,
+                    "reason": None if applied else "exhausted retries; violations remain",
+                    "remaining_lexical": _violations(text)[:5] if (not applied and v0) else [],
+                    "remaining_semantic": semantic_high[:5] if (not applied and not v0) else [],
+                })
 
     # 2. review (structured)
     rev = gateway.complete(
@@ -1151,6 +1217,29 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "arcs_written": arc_written,
         "relations_written": rel_written,
     })
+
+    # 4a3. 永久档案自动回写（④）：每章生成后由 AI 萃取并合并写回 author_intent，
+    # 使命名门禁与 $archive 注入的真相源由系统自动维护，不再依赖手工策展；
+    # 首章也会自动建立档案，使后续章节天然连贯。
+    try:
+        prev_archive_txt = _build_archive_text(_bai) or "（空，本书首次建立永久档案）"
+        au = gateway.complete(
+            run_id=run_id, node_key="archive_update", project_id=project_id,
+            task_type="archive_update", prompt_name="narrative.archive_update",
+            user_id=user_id,
+            variables={"prev_archive": prev_archive_txt,
+                       "chapter_seq": chapter_seq, "chapter_text": text},
+        )
+        derived = {k: au.get(k) for k in ("character_cards", "plot_timeline",
+                                          "foreshadow_list", "continuity_facts",
+                                          "hard_constraints")}
+        if any(v is not None for v in derived.values()):
+            repo.write_archive_derived(project_id, novel_id, derived)
+            report["steps"].append({"step": "archive_update",
+                                    "derived": [k for k, v in derived.items() if v is not None]})
+    except Exception as exc:
+        report["steps"].append({"step": "archive_update", "applied": False,
+                                "error": f"{type(exc).__name__}: {str(exc)[:80]}"})
 
     # 4b. chapter summary — the short-term memory layer consumed by later chapters
     prot_for_summary = repo.get_protagonist(project_id, novel_id)

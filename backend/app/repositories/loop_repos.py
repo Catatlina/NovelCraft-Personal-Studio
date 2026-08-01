@@ -436,6 +436,57 @@ def get_hard_constraints(project_id: str, novel_id: str) -> list:
     return v if isinstance(v, list) else []
 
 
+def write_archive_derived(project_id: str, novel_id: str, derived: dict) -> None:
+    """④ Auto-writeback: merge AI-extracted curated archive fields into
+    book_config.author_intent so the name-consistency gate and $archive injection
+    are system-maintained (not hand-curated).
+
+    Preserves the opt-in safety config that is NOT derived by the model:
+    protagonist / continuity_rules / continuity_banned_tokens / genre / pov, etc.
+    Also keeps prior ``must_use_canonical`` flags on character cards (defensive),
+    and syncs continuity_characters to the card name list so the
+    no_new_named_characters rule works generically.
+    """
+    cfg = get_book_config(project_id, novel_id)
+    if not cfg:
+        return
+    intent = decode(cfg.get("author_intent"), {}) or {}
+    if not isinstance(intent, dict):
+        intent = {}
+    new_intent = dict(intent)
+    derived = derived or {}
+    for k in ("character_cards", "plot_timeline", "foreshadow_list",
+              "continuity_facts", "hard_constraints"):
+        if k in derived and derived[k] is not None:
+            new_intent[k] = derived[k]
+    # sync continuity_characters to card names (generic new-character guard)
+    cards = new_intent.get("character_cards")
+    if isinstance(cards, list) and cards:
+        new_intent["continuity_characters"] = [
+            c["name"] for c in cards if isinstance(c, dict) and c.get("name")
+        ]
+        # preserve must_use_canonical flags from the previous cards
+        prev_cards = intent.get("character_cards") or []
+        if isinstance(prev_cards, list):
+            prev_must = {
+                c["name"]: c.get("must_use_canonical")
+                for c in prev_cards if isinstance(c, dict) and c.get("name")
+            }
+            for c in new_intent["character_cards"]:
+                if isinstance(c, dict) and c.get("name") in prev_must \
+                        and "must_use_canonical" not in c:
+                    c["must_use_canonical"] = prev_must[c["name"]]
+    conn = connect()
+    try:
+        conn.execute(
+            "UPDATE book_config SET author_intent=%s, updated_at=now() WHERE id=%s",
+            (encode(new_intent), cfg["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_canonical_names(project_id: str, novel_id: str,
                          max_seq: int | None = None) -> list[str]:
     """Distinct character names already in the Story Bible — the model must reuse
