@@ -148,7 +148,6 @@ export function Layout({
         <header className="app-header">
           <div className="app-header-title">
             <h1>{title}</h1>
-            <span style={{ fontSize: 10, color: "var(--danger)", background: "var(--danger-soft)", padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>v9</span>
             {runStatus && <span className={`run-state ${runStatus}`}>{RUN_LABELS[runStatus] || runStatus}</span>}
           </div>
           <div className="header-actions">
