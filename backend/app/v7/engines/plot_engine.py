@@ -120,7 +120,7 @@ class PlotEngine(BaseEngine):
         result = output.result or {}
         
         validation = {
-            ...result,
+            **result,
             "validation_passed": True,
             "validation_notes": ["Alpha: Basic validation only"],
         }

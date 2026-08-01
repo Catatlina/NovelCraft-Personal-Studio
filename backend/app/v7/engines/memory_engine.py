@@ -113,7 +113,7 @@ class MemoryEngine(BaseEngine):
         result = output.result or {}
         
         validation = {
-            ...result,
+            **result,
             "validation_passed": True,
             "conflicts_resolved": 0,
             "validation_notes": ["Alpha: Basic validation only"],

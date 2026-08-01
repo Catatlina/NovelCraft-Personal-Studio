@@ -138,7 +138,7 @@ class ReviewEngine(BaseEngine):
         result = output.result or {}
         
         validation = {
-            ...result,
+            **result,
             "review_valid": True,
             "score_in_range": 0 <= result.get("overall_score", 0) <= 100,
         }
