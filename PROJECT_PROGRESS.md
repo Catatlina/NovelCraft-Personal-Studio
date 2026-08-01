@@ -2,6 +2,90 @@
 
 <!-- delivery-claims: strict -->
 
+## 2026-08-01 V7.0 Alpha 生产部署成功 + Smoke Test 通过
+> 本轮完成 V7.0 Alpha 的生产环境部署：代码拉取、镜像构建、容器启动、数据库迁移全部成功。API 端点 smoke test 通过，V7 功能正式上线。
+
+### 已完成
+
+#### 生产部署 ✅
+- 服务器：43.156.17.78（新加坡）
+- 部署方式：Docker Compose（生产配置）
+- 代码版本：`302bd23`（main 分支最新）
+- 容器状态：全部 healthy
+  - api — healthy
+  - worker — running
+  - beat — running
+  - frontend — healthy
+  - postgres — healthy
+  - redis — healthy
+
+#### 数据库迁移 ✅
+- V7 迁移文件：`v7_001_init_all_tables.py`
+- 修复：down_revision 从 `a70d10a931fb` 改为 `f1b2c3d4e5a6`（正确的 V6 head）
+- 迁移执行成功，18 张 V7 表已创建
+
+#### Smoke Test 通过 ✅
+- **Brain Overview** — `GET /api/v7/brain/{novel_id}/overview` ✅
+  - 返回正确的 JSON 结构
+  - states/goals/constraints/versions/events 全部正常
+- **Goals List** — `GET /api/v7/brain/{novel_id}/goals` ✅
+  - 返回空数组（无数据时正常）
+- **Versions List** — `GET /api/v7/brain/{novel_id}/versions` ✅
+  - 返回空数组（无数据时正常）
+
+#### 修复的问题
+1. **前端 TypeScript 类型错误** — 修复 10+ 个类型错误
+   - 添加缺失的类型别名（DecisionLogItem/Run）
+   - 添加缺失的字段（prompt_version/decision_reason 等）
+   - 添加缺失的类型（StateUpdateRequest/GoalTreeResponse/VersionCreateRequest）
+   - 修复重复导出（index.ts 移除 types 导出）
+   - 修复隐式 any 类型（DecisionLog.tsx）
+   - 修复 AppTab 类型（添加 v7）
+   - 修复 titles Record（添加 v7）
+
+2. **后端语法错误** — 修复 3 个引擎文件的 JavaScript 风格展开语法
+   - plot_engine.py: `...result` → `**result`
+   - memory_engine.py: `...result` → `**result`
+   - review_engine.py: `...result` → `**result`
+
+3. **API 路由前缀重复** — 修复路由前缀问题
+   - brain.py/trace.py/director.py: 移除 `/v7/brain` 等前缀
+   - 由 router.py 统一管理 `/api/v7` 前缀
+
+4. **数据库会话未配置** — 配置真正的异步数据库会话
+   - db.py: 添加异步 SQLAlchemy 支持（async_engine + AsyncSessionLocal）
+   - brain.py/trace.py/director.py: 使用 `get_async_db` 依赖
+   - requirements.txt: 添加 asyncpg 依赖
+
+### 当前状态：**生产可用**
+- ✅ 代码全部写完
+- ✅ 集成全部完成
+- ✅ 真实 AI 调用已验证
+- ✅ 生产部署成功
+- ✅ API 端点 smoke test 通过
+- ⏳ 端到端测试 — 待完整流程测试
+- ⏳ CI 通过 — 待 GitHub Actions 运行
+
+### 剩余门禁
+1. ~~数据库会话集成~~ ✅
+2. ~~API 路由注册~~ ✅
+3. ~~前端路由接入~~ ✅
+4. ~~单元测试~~ ✅
+5. ~~V6 Adapter~~ ✅
+6. ~~真实 AI 调用~~ ✅
+7. ~~生产部署~~ ✅
+8. ~~Smoke Test~~ ✅
+9. ⏳ 端到端测试 — 需完整章节生成流程测试
+10. ❌ CI 通过 — 需 GitHub Actions 运行
+
+### 提交信息
+- 最新 Commit：`302bd23` — feat(v7): 添加asyncpg依赖，支持异步PostgreSQL
+- 已推送到 GitHub main 分支
+- 生产地址：https://novel.xyjin.xyz
+- V7 API 前缀：`/api/v7`
+
+---
+
 ## 2026-08-01 V7.0 Alpha 真实 AI 调用验证通过
 > 本轮完成 V7.0 Alpha 的真实 AI 调用集成：AIGateway 接入 DeepSeek API，测试通过。代码已推送到 GitHub。
 
