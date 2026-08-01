@@ -19,7 +19,7 @@ from .schemas import (
     SuccessResponse,
 )
 
-router = APIRouter(prefix="/v7/brain", tags=["v7-brain"])
+router = APIRouter(prefix="", tags=["v7-brain"])
 
 
 # ── Dependency ───────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..trace.tracer import ExecutionTracer
 from .schemas import RunResponse, TraceStepResponse, SuccessResponse
 
-router = APIRouter(prefix="/v7/trace", tags=["v7-trace"])
+router = APIRouter(prefix="", tags=["v7-trace"])
 
 
 # ── Dependency ───────────────────────────────────────────────────────────

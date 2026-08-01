@@ -14,7 +14,7 @@ from ..trace.tracer import ExecutionTracer
 from ..events.event_bus import EventBus
 from .schemas import SuccessResponse
 
-router = APIRouter(prefix="/v7/director", tags=["v7-director"])
+router = APIRouter(prefix="", tags=["v7-director"])
 
 
 # ── Request Models ───────────────────────────────────────────────────────
