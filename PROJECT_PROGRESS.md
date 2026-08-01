@@ -1,5 +1,50 @@
 # Starlume AI — 真实进度
 
+## 2026-08-01 V7.0 Alpha 端到端测试完成 + API Bug 修复
+
+### 修复内容
+1. **数据库会话自动提交事务**
+   - 文件：`backend/app/v7/db.py`
+   - 问题：异步数据库会话没有自动提交事务，导致数据不持久化
+   - 修复：`get_async_db` 依赖添加 try/except 逻辑，成功时自动 commit，失败时自动 rollback
+
+2. **Goal 创建 API 响应验证错误**
+   - 文件：`backend/app/v7/brain/goal_system.py`
+   - 问题：`create_goal` 返回的字段不完整，与 `GoalResponse` schema 不匹配
+   - 修复：返回完整字段（description/parent_goal_id/order/target_chapter/completed_chapter/priority/confidence）
+
+3. **Constraint 创建 API 响应验证错误**
+   - 文件：`backend/app/v7/brain/constraint_system.py`
+   - 问题：`create_constraint` 返回的字段不完整，与 `ConstraintResponse` schema 不匹配
+   - 修复：返回完整字段（description/value/check_method/priority/violation_count/last_violation_at）
+
+4. **Version 创建 API 响应验证错误**
+   - 文件：`backend/app/v7/brain/version_control.py`
+   - 问题：`create_version` 返回的字段缺少 `created_by`，与 `VersionResponse` schema 不匹配
+   - 修复：返回值添加 `created_by` 字段
+
+### 门禁证据
+- **端到端 API 测试通过**：10/10 测试项全部通过
+  - ✅ State 创建 + 列表查询
+  - ✅ Goal 创建 + 列表查询
+  - ✅ Constraint 创建 + 列表查询
+  - ✅ Version 创建 + 列表查询
+  - ✅ Overview 统计正确
+  - ✅ Event Log 记录完整
+  - ✅ Decision Log 正常
+
+### 当前状态
+- **V7 API 完整可用**：所有 Brain API 端点都已验证通过
+- **数据持久化正常**：自动提交事务已修复
+- **响应格式正确**：所有 API 返回值与 schema 匹配
+
+### 未完成项
+- **CI 验证**：需 GitHub Actions 运行验证
+- **前端页面完整测试**：需登录后在浏览器中验证 V7 Dashboard 各页面功能
+- **完整章节生成流程测试**：需验证 Director → Generation → Review → Update 完整闭环
+
+---
+
 <!-- delivery-claims: strict -->
 
 ## 2026-08-01 V7.0 Alpha 生产部署成功 + Smoke Test 通过
