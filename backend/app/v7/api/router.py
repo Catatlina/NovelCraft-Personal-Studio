@@ -9,6 +9,8 @@ from fastapi import APIRouter
 from .brain import router as brain_router
 from .trace import router as trace_router
 from .director import router as director_router
+from .cost import router as cost_router
+from .prompt import router as prompt_router
 
 router = APIRouter(prefix="/api/v7", tags=["v7"])
 
@@ -20,3 +22,9 @@ router.include_router(trace_router, prefix="/trace", tags=["trace"])
 
 # Director API
 router.include_router(director_router, prefix="/director", tags=["director"])
+
+# Cost API
+router.include_router(cost_router, prefix="/cost", tags=["cost"])
+
+# Prompt API
+router.include_router(prompt_router, prefix="/prompt", tags=["prompt"])

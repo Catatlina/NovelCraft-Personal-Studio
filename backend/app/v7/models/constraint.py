@@ -27,5 +27,7 @@ class Constraint(BaseModel, NovelScopedMixin):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     is_active: Mapped[bool] = mapped_column(default=True)
     violation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_violation_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_violation_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

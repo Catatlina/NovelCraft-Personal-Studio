@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..db import get_async_db as get_db
 from ..trace.tracer import ExecutionTracer
 from .schemas import RunResponse, TraceStepResponse, SuccessResponse
 
@@ -14,13 +15,6 @@ router = APIRouter(prefix="", tags=["v7-trace"])
 
 
 # ── Dependency ───────────────────────────────────────────────────────────
-
-async def get_db() -> AsyncSession:
-    """Get database session.
-    
-    NOTE: Placeholder - replace with actual DB session dependency.
-    """
-    raise HTTPException(status_code=501, detail="Database session not configured")
 
 
 def get_tracer(novel_id: str, db: AsyncSession = Depends(get_db)) -> ExecutionTracer:

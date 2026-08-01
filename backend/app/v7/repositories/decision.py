@@ -121,7 +121,20 @@ class DecisionLogRepository(BaseRepository[DecisionLog]):
         alternatives: list[dict[str, Any]] | None = None,
         decided_by: str = "ai",
     ) -> DecisionLog:
-        """Record a decision."""
+        """Record a decision.
+
+        ``decision`` is a short verb column (varchar 50). Long text is moved
+        into ``decision_reason`` instead of overflowing the column, so a verbose
+        caller degrades gracefully rather than aborting the transaction.
+        """
+        decision = (decision or "").strip()
+        if len(decision) > 50:
+            overflow = decision
+            decision = decision[:47] + "..."
+            decision_reason = (
+                f"{overflow}\n{decision_reason}" if decision_reason else overflow
+            )
+
         return await self.create({
             "novel_id": novel_id,
             "decision_type": decision_type,

@@ -183,8 +183,30 @@ class RollbackResponse(BaseModel):
     version_id: str
     version_number: int
     snapshot_id: str
+    safety_snapshot_id: str
     status: str
-    note: str
+    restored_states: int
+    recreated_states: int
+    deactivated_states: int
+    unchanged_states: int
+    restored: list[dict[str, Any]] = Field(default_factory=list)
+    recreated: list[dict[str, Any]] = Field(default_factory=list)
+    deactivated: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SnapshotCompareRequest(BaseModel):
+    snapshot_a_id: str
+    snapshot_b_id: str
+
+
+class SnapshotCompareResponse(BaseModel):
+    snapshot_a: dict[str, Any]
+    snapshot_b: dict[str, Any]
+    added: list[dict[str, Any]]
+    removed: list[dict[str, Any]]
+    modified: list[dict[str, Any]]
+    unchanged_count: int
+    summary: dict[str, Any]
 
 
 # ── Decisions ────────────────────────────────────────────────────────────
@@ -246,3 +268,141 @@ class TraceStepResponse(BaseModel):
     cost: float
     model: str | None = None
     confidence: float | None = None
+
+
+# ── Human interventions ──────────────────────────────────────────────────
+
+class HumanInterventionResponse(BaseModel):
+    id: str
+    novel_id: str
+    intervention_type: str
+    target_type: str
+    target_id: str | None = None
+    action: str
+    description: str | None = None
+    old_value: dict[str, Any] | None = None
+    new_value: dict[str, Any] | None = None
+    reason: str | None = None
+    user_id: str | None = None
+    run_id: str | None = None
+    result: str
+    extra_metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+class HumanInterventionListResponse(BaseModel):
+    items: list[HumanInterventionResponse]
+    total: int
+    stats: dict[str, Any]
+
+
+class ReviewRequest(BaseModel):
+    """Payload for human approve/reject actions."""
+    reason: str | None = None
+    user_id: str | None = None
+
+
+class InstructionRequest(BaseModel):
+    instruction: str = Field(..., min_length=1)
+    scope: str = Field("next_chapter", max_length=50)
+    target_chapter: int | None = None
+    priority: int = Field(50, ge=0, le=100)
+    reason: str | None = None
+    user_id: str | None = None
+
+
+class InstructionResponse(BaseModel):
+    intervention: HumanInterventionResponse
+    instruction: dict[str, Any]
+    state_id: str
+    pending_count: int
+
+
+# ── Decisions (human review) ─────────────────────────────────────────────
+
+class DecisionReviewResponse(BaseModel):
+    decision_id: str
+    decision_type: str
+    decision: str
+    status: str
+    previous_status: str
+    decided_by: str
+    decided_at: str | None = None
+    decision_reason: str | None = None
+    intervention_id: str
+
+
+# ── Cost ─────────────────────────────────────────────────────────────────
+
+class BudgetCreateRequest(BaseModel):
+    budget_type: str = Field(..., min_length=1, max_length=50)
+    budget_scope: str = Field("novel", min_length=1, max_length=50)
+    limit_cny: float = Field(..., gt=0)
+    limit_tokens: int | None = Field(None, gt=0)
+    period_days: int | None = Field(None, gt=0)
+    action_on_exceed: str = Field("warn", max_length=20)
+    description: str | None = None
+    cost_policy: dict[str, Any] | None = None
+
+
+class BudgetUpdateRequest(BaseModel):
+    limit_cny: float | None = Field(None, gt=0)
+    limit_tokens: int | None = Field(None, gt=0)
+    action_on_exceed: str | None = None
+    is_active: bool | None = None
+    description: str | None = None
+    cost_policy: dict[str, Any] | None = None
+
+
+class CostRecordRequest(BaseModel):
+    cost_cny: float = Field(0.0, ge=0)
+    tokens: int = Field(0, ge=0)
+    budget_type: str | None = None
+    run_id: str | None = None
+    source: str = "system"
+    description: str | None = None
+
+
+# ── Prompt ───────────────────────────────────────────────────────────────
+
+class PromptVersionCreateRequest(BaseModel):
+    prompt_name: str = Field(..., min_length=1, max_length=200)
+    template: str = Field(..., min_length=1)
+    model: str = Field("deepseek-chat", max_length=100)
+    parameters: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    description: str | None = None
+    change_notes: str | None = None
+    created_by: str = "human"
+    make_default: bool = True
+    force_new: bool = False
+
+
+class PromptChangeDetectRequest(BaseModel):
+    prompt_name: str = Field(..., min_length=1, max_length=200)
+    template: str = Field(..., min_length=1)
+    model: str = Field("deepseek-chat", max_length=100)
+    parameters: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+
+
+class PromptExecutionCreateRequest(BaseModel):
+    prompt_name: str = Field(..., min_length=1, max_length=200)
+    prompt_version_id: str | None = None
+    version: int | None = None
+    novel_id: str | None = None
+    input_variables: dict[str, Any] | None = None
+    rendered_prompt: str | None = None
+    output: dict[str, Any] | None = None
+    output_raw: str | None = None
+    model: str | None = None
+    tokens_input: int = Field(0, ge=0)
+    tokens_output: int = Field(0, ge=0)
+    cost: float = Field(0.0, ge=0)
+    duration_seconds: float | None = None
+    status: str = "success"
+    error_message: str | None = None
+    run_id: str | None = None
+    step_id: str | None = None
+    validation_passed: bool | None = None
+    validation_errors: list[str] | None = None

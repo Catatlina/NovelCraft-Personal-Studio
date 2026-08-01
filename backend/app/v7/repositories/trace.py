@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -81,7 +81,7 @@ class AgentRunRepository(BaseRepository[AgentRun]):
             run.status = "completed"
             run.output_data = output_data
         
-        run.completed_at = datetime.utcnow()
+        run.completed_at = datetime.now(timezone.utc)
         if run.started_at and run.completed_at:
             run.duration_seconds = (run.completed_at - run.started_at).total_seconds()
         
@@ -166,25 +166,30 @@ class AgentTraceRepository(BaseRepository[AgentTrace]):
         prompt_version: str | None = None,
         confidence: float | None = None,
         error_message: str | None = None,
+        error_type: str | None = None,
     ) -> AgentTrace:
         """Complete a trace step."""
         step = await self.get_or_404(step_id)
-        
+
+        # Token/cost accounting must be recorded even for failed steps,
+        # otherwise run-level cost statistics silently under-count.
+        step.tokens_input = tokens_input
+        step.tokens_output = tokens_output
+        step.cost = cost
+        step.model = model
+        step.prompt_version = prompt_version
+
         if error_message:
             step.status = "failed"
             step.error_message = error_message
+            step.error_type = error_type
         else:
             step.status = "completed"
             step.output_summary = output_summary
             step.output_data = output_data
-            step.tokens_input = tokens_input
-            step.tokens_output = tokens_output
-            step.cost = cost
-            step.model = model
-            step.prompt_version = prompt_version
             step.confidence = confidence
         
-        step.completed_at = datetime.utcnow()
+        step.completed_at = datetime.now(timezone.utc)
         if step.started_at and step.completed_at:
             step.duration_seconds = (step.completed_at - step.started_at).total_seconds()
         

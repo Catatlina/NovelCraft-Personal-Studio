@@ -8,11 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
+from ..db import get_async_db as get_db
 from ..director.story_director import StoryDirector
 from ..brain.novel_brain import NovelBrain
 from ..trace.tracer import ExecutionTracer
 from ..events.event_bus import EventBus
 from .schemas import SuccessResponse
+from ..human.intervention_service import HumanInterventionService
+from .schemas import DecisionReviewResponse, ReviewRequest
 
 router = APIRouter(prefix="", tags=["v7-director"])
 
@@ -26,13 +29,6 @@ class GenerateChapterRequest(BaseModel):
 
 
 # ── Dependency ───────────────────────────────────────────────────────────
-
-async def get_db() -> AsyncSession:
-    """Get database session.
-    
-    NOTE: Placeholder - replace with actual DB session dependency.
-    """
-    raise HTTPException(status_code=501, detail="Database session not configured")
 
 
 def get_director(novel_id: str, db: AsyncSession = Depends(get_db)) -> StoryDirector:
@@ -82,26 +78,73 @@ async def get_pending_decisions(
     return {"decisions": decisions, "count": len(decisions)}
 
 
-@router.post("/{novel_id}/decisions/{decision_id}/approve")
+@router.post(
+    "/{novel_id}/decisions/{decision_id}/approve",
+    response_model=DecisionReviewResponse,
+)
 async def approve_decision(
     novel_id: str,
     decision_id: str,
-    director: StoryDirector = Depends(get_director),
+    request: ReviewRequest | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Approve a pending decision."""
-    # Alpha: Placeholder
-    return {"status": "approved", "decision_id": decision_id}
+    """Approve a pending decision.
+
+    Flips ``v7_decision_logs.status`` pending -> approved, stamps
+    ``decided_by='human'`` and records a human intervention.
+    """
+    return await _review_decision(novel_id, decision_id, True, request, db)
 
 
-@router.post("/{novel_id}/decisions/{decision_id}/reject")
+@router.post(
+    "/{novel_id}/decisions/{decision_id}/reject",
+    response_model=DecisionReviewResponse,
+)
 async def reject_decision(
     novel_id: str,
     decision_id: str,
-    director: StoryDirector = Depends(get_director),
+    request: ReviewRequest | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Reject a pending decision."""
-    # Alpha: Placeholder
-    return {"status": "rejected", "decision_id": decision_id}
+    """Reject a pending decision.
+
+    Flips ``v7_decision_logs.status`` pending -> rejected, stamps
+    ``decided_by='human'`` and records a human intervention.
+    """
+    return await _review_decision(novel_id, decision_id, False, request, db)
+
+
+async def _review_decision(
+    novel_id: str,
+    decision_id: str,
+    approved: bool,
+    request: ReviewRequest | None,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    """Shared human approve/reject state transition."""
+    try:
+        novel_uuid = uuid.UUID(novel_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid novel_id")
+    try:
+        decision_uuid = uuid.UUID(decision_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid decision_id")
+
+    payload = request or ReviewRequest()
+
+    service = HumanInterventionService(db, novel_uuid)
+    try:
+        return await service.review_decision(
+            decision_uuid,
+            approved,
+            reason=payload.reason,
+            user_id=payload.user_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 # ── Status ───────────────────────────────────────────────────────────────

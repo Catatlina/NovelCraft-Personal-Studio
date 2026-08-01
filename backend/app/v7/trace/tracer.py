@@ -12,6 +12,63 @@ from ..repositories.trace import AgentRunRepository, AgentTraceRepository
 from ..repositories.event import EventLogRepository
 
 
+class TraceStepContext:
+    """Mutable handle yielded by :meth:`ExecutionTracer.trace_step`.
+
+    Lets the code inside a ``async with`` block report what the step produced
+    (summary, structured output, token usage, cost, model, confidence) so the
+    tracer can persist real values instead of zeros.
+    """
+
+    __slots__ = (
+        "step_id",
+        "output_summary",
+        "output_data",
+        "tokens_input",
+        "tokens_output",
+        "cost",
+        "model",
+        "confidence",
+    )
+
+    def __init__(self, step_id: uuid.UUID):
+        self.step_id = step_id
+        self.output_summary: str | None = None
+        self.output_data: dict[str, Any] | None = None
+        self.tokens_input: int = 0
+        self.tokens_output: int = 0
+        self.cost: float = 0.0
+        self.model: str | None = None
+        self.confidence: float | None = None
+
+    def set_output(
+        self,
+        summary: str | None = None,
+        *,
+        data: dict[str, Any] | None = None,
+        tokens_input: int = 0,
+        tokens_output: int = 0,
+        cost: float = 0.0,
+        model: str | None = None,
+        confidence: float | None = None,
+    ) -> None:
+        """Record the step outcome; persisted when the context block exits."""
+        if summary is not None:
+            self.output_summary = summary
+        if data is not None:
+            self.output_data = data
+        self.tokens_input += tokens_input
+        self.tokens_output += tokens_output
+        self.cost += cost
+        if model:
+            self.model = model
+        if confidence is not None:
+            self.confidence = confidence
+
+    def __str__(self) -> str:  # pragma: no cover - convenience only
+        return str(self.step_id)
+
+
 class ExecutionTracer:
     """
     Execution tracer for tracking AI agent execution.
@@ -28,6 +85,8 @@ class ExecutionTracer:
         self.event_repo = EventLogRepository(db)
         self._current_run: uuid.UUID | None = None
         self._step_counter: int = 0
+        # Stack of currently open steps so nested steps get a parent_step_id.
+        self._step_stack: list[uuid.UUID] = []
 
     async def start_run(
         self,
@@ -47,6 +106,7 @@ class ExecutionTracer:
         )
         self._current_run = run.id
         self._step_counter = 0
+        self._step_stack = []
 
         await self.event_repo.record_event(
             self.novel_id,
@@ -97,6 +157,7 @@ class ExecutionTracer:
 
         self._current_run = None
         self._step_counter = 0
+        self._step_stack = []
 
         return {
             "id": str(run.id),
@@ -115,6 +176,7 @@ class ExecutionTracer:
         input_summary: str | None = None,
         input_data: dict[str, Any] | None = None,
         run_id: uuid.UUID | None = None,
+        parent_step_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Start a new trace step."""
         run_id = run_id or self._current_run
@@ -122,6 +184,8 @@ class ExecutionTracer:
             raise ValueError("No active run")
 
         self._step_counter += 1
+        if parent_step_id is None and self._step_stack:
+            parent_step_id = self._step_stack[-1]
 
         step = await self.trace_repo.start_step(
             self.novel_id,
@@ -131,6 +195,7 @@ class ExecutionTracer:
             step_order=self._step_counter,
             input_summary=input_summary,
             input_data=input_data,
+            parent_step_id=parent_step_id,
         )
 
         return step.id
@@ -147,6 +212,7 @@ class ExecutionTracer:
         model: str | None = None,
         confidence: float | None = None,
         error_message: str | None = None,
+        error_type: str | None = None,
         run_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Complete a trace step."""
@@ -162,6 +228,7 @@ class ExecutionTracer:
             model=model,
             confidence=confidence,
             error_message=error_message,
+            error_type=error_type,
         )
 
         # Update run stats
@@ -181,6 +248,12 @@ class ExecutionTracer:
             "cost": step.cost,
         }
 
+    def _pop_step(self, step_id: uuid.UUID) -> None:
+        """Remove a step from the open-step stack (tolerates out-of-order exits)."""
+        if step_id in self._step_stack:
+            index = len(self._step_stack) - 1 - self._step_stack[::-1].index(step_id)
+            del self._step_stack[index:]
+
     @asynccontextmanager
     async def trace_step(
         self,
@@ -190,23 +263,53 @@ class ExecutionTracer:
         input_summary: str | None = None,
         input_data: dict[str, Any] | None = None,
     ):
-        """Context manager for tracing a step."""
+        """Context manager for tracing a step.
+
+        Yields a :class:`TraceStepContext`; callers can attach output summary,
+        token usage, cost, model and confidence to it and those values are
+        persisted when the block exits::
+
+            async with tracer.trace_step("generate", "ai_generation") as step:
+                res = await gateway.generate(prompt)
+                step.set_output("3120 chars", tokens_input=..., cost=...)
+
+        The context object also behaves like the step UUID for legacy callers
+        that only need ``step.step_id``.
+        """
         step_id = await self.start_step(
             step_name,
             step_type,
             input_summary=input_summary,
             input_data=input_data,
         )
+        ctx = TraceStepContext(step_id)
+        self._step_stack.append(step_id)
         try:
-            yield step_id
-            await self.complete_step(step_id)
+            yield ctx
         except Exception as e:
+            self._pop_step(step_id)
             await self.complete_step(
                 step_id,
+                tokens_input=ctx.tokens_input,
+                tokens_output=ctx.tokens_output,
+                cost=ctx.cost,
+                model=ctx.model,
                 error_message=str(e),
                 error_type=type(e).__name__,
             )
             raise
+        else:
+            self._pop_step(step_id)
+            await self.complete_step(
+                step_id,
+                output_summary=ctx.output_summary,
+                output_data=ctx.output_data,
+                tokens_input=ctx.tokens_input,
+                tokens_output=ctx.tokens_output,
+                cost=ctx.cost,
+                model=ctx.model,
+                confidence=ctx.confidence,
+            )
 
     async def get_run(
         self,

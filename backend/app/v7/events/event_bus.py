@@ -12,6 +12,7 @@ from typing import Any, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..repositories.event import EventLogRepository
+from .schemas import validate_event_data
 
 
 class EventBus:
@@ -27,6 +28,8 @@ class EventBus:
         self.novel_id = novel_id
         self.event_repo = EventLogRepository(db)
         self._subscribers: dict[str, list[Callable]] = {}
+        self.dispatch_count: int = 0
+        self.dispatch_errors: list[dict[str, Any]] = []
 
     async def publish(
         self,
@@ -45,16 +48,19 @@ class EventBus:
     ) -> uuid.UUID:
         """
         Publish an event.
-        
-        1. Record event to database (permanent log)
-        2. Notify all subscribers
+
+        1. Validate the payload against the registered Pydantic model (if any)
+        2. Record event to database (permanent log)
+        3. Notify all subscribers; subscriber failures are recorded, not hidden
         """
+        payload = validate_event_data(event_type, event_data)
+
         event = await self.event_repo.record_event(
             self.novel_id,
             event_type,
             event_name,
             event_category,
-            event_data=event_data or {},
+            event_data=payload,
             source=source,
             source_run_id=source_run_id,
             source_step_id=source_step_id,
@@ -64,22 +70,35 @@ class EventBus:
             correlation_id=correlation_id,
         )
 
-        # Notify subscribers (synchronous in Alpha)
-        subscribers = self._subscribers.get(event_type, [])
-        for callback in subscribers:
-            try:
-                await callback(event)
-            except Exception:
-                # Don't let subscriber errors break the event flow
-                pass
+        # Notify subscribers (synchronous, in-process)
+        callbacks = list(self._subscribers.get(event_type, []))
+        callbacks.extend(self._subscribers.get("*", []))
 
-        # Also notify wildcard subscribers
-        wildcard_subscribers = self._subscribers.get("*", [])
-        for callback in wildcard_subscribers:
+        for callback in callbacks:
             try:
                 await callback(event)
-            except Exception:
-                pass
+                self.dispatch_count += 1
+            except Exception as exc:  # noqa: BLE001 - recorded, never silently dropped
+                self.dispatch_errors.append(
+                    {
+                        "event_type": event_type,
+                        "subscriber": getattr(callback, "__qualname__", str(callback)),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                await self.event_repo.record_event(
+                    self.novel_id,
+                    "subscriber_failed",
+                    f"Subscriber failed for {event_type}",
+                    "system",
+                    source="event_bus",
+                    severity="error",
+                    event_data={
+                        "event_type": event_type,
+                        "subscriber": getattr(callback, "__qualname__", str(callback)),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
 
         return event.id
 
