@@ -15,11 +15,15 @@ from typing import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 # Reuse V6's DATABASE_URL
 DB_URL = os.getenv("DATABASE_URL", "postgresql://genius@localhost/novelcraft_dev")
 
-# Create engine
+# Convert to async URL if needed
+ASYNC_DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://") if DB_URL.startswith("postgresql://") else DB_URL
+
+# Create sync engine
 engine = create_engine(
     DB_URL,
     pool_size=10,
@@ -28,16 +32,32 @@ engine = create_engine(
     echo=False,
 )
 
-# Session factory
+# Create async engine
+async_engine = create_async_engine(
+    ASYNC_DB_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    echo=False,
+)
+
+# Sync session factory
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine,
 )
 
+# Async session factory
+AsyncSessionLocal = async_sessionmaker(
+    async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency: get database session.
+    """FastAPI dependency: get sync database session.
 
     Usage:
         @app.get("/items")
@@ -49,6 +69,18 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+async def get_async_db() -> AsyncSession:
+    """FastAPI dependency: get async database session.
+
+    Usage:
+        @app.get("/items")
+        async def list_items(db: AsyncSession = Depends(get_async_db)):
+            ...
+    """
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 @contextmanager

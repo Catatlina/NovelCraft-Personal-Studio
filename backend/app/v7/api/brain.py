@@ -24,14 +24,7 @@ router = APIRouter(prefix="", tags=["v7-brain"])
 
 # ── Dependency ───────────────────────────────────────────────────────────
 
-async def get_db() -> AsyncSession:
-    """Get database session.
-    
-    NOTE: This is a placeholder. In production, use proper dependency injection
-    with your existing database session management.
-    """
-    # This should be replaced with your actual database session dependency
-    raise HTTPException(status_code=501, detail="Database session not configured")
+from ..db import get_async_db as get_db
 
 
 def get_brain(novel_id: str, db: AsyncSession = Depends(get_db)) -> NovelBrain:
