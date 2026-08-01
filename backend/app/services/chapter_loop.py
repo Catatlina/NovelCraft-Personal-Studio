@@ -389,6 +389,27 @@ def normalize_chapter_title(title: str, chapter_seq: int) -> str:
     return f"第{chapter_seq}章 {subtitle}"
 
 
+def _chapter_tiptap_body(paragraphs: list[str], text: str) -> dict:
+    """Canonical chapter body.
+
+    The frontend editor/reader renders via a TipTap doc (top-level `content`),
+    exactly like the original generation flow writes (see CH1). An earlier
+    regen path persisted only `{paragraphs, text}`, which the frontend's
+    docToText() could not render -> the chapter showed a blank body. We keep
+    `text`/`paragraphs` as siblings for any backend reader, but ALWAYS include
+    the TipTap `content` so the chapter displays.
+    """
+    return {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": p}]}
+            for p in paragraphs if p
+        ],
+        "paragraphs": paragraphs,
+        "text": text,
+    }
+
+
 def _save_chapter_content(project_id: str, novel_id: str, chapter_seq: int,
                           title: str, paragraphs: list[str]) -> str:
     title = normalize_chapter_title(title, chapter_seq)
@@ -407,14 +428,14 @@ def _save_chapter_content(project_id: str, novel_id: str, chapter_seq: int,
             cid = existing["id"]
             conn.execute(
                 "UPDATE contents SET title=%s, body=%s, updated_at=now() WHERE id=%s",
-                (title, encode({"paragraphs": paragraphs, "text": text}), cid),
+                (title, encode(_chapter_tiptap_body(paragraphs, text)), cid),
             )
         else:
             cid = new_id("content")
             conn.execute(
                 "INSERT INTO contents (id, project_id, parent_id, type, title, body, seq, status, created_at) "
                 "VALUES (%s, %s, %s, 'chapter', %s, %s, %s, 'draft', now())",
-                (cid, project_id, novel_id, title, encode({"paragraphs": paragraphs, "text": text}), chapter_seq),
+                (cid, project_id, novel_id, title, encode(_chapter_tiptap_body(paragraphs, text)), chapter_seq),
             )
         conn.commit()
     finally:
