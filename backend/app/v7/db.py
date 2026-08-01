@@ -78,9 +78,16 @@ async def get_async_db() -> AsyncSession:
         @app.get("/items")
         async def list_items(db: AsyncSession = Depends(get_async_db)):
             ...
+    
+    Auto-commits on success, auto-rollbacks on error.
     """
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 @contextmanager
