@@ -408,6 +408,34 @@ def get_continuity_characters(project_id: str, novel_id: str) -> list[str]:
     return [str(c).strip() for c in v if str(c).strip()] if isinstance(v, list) else []
 
 
+def get_character_cards(project_id: str, novel_id: str) -> list:
+    """Curated character cards (name/aliases/role/traits) from author_intent.
+    Drives name-consistency enforcement in chapter_loop. Empty by default."""
+    v = _continuity_field(project_id, novel_id, "character_cards", [])
+    return v if isinstance(v, list) else []
+
+
+def get_plot_timeline(project_id: str, novel_id: str) -> list:
+    """Curated per-chapter plot timeline (chapter/summary) from author_intent.
+    Empty by default."""
+    v = _continuity_field(project_id, novel_id, "plot_timeline", [])
+    return v if isinstance(v, list) else []
+
+
+def get_foreshadow_list(project_id: str, novel_id: str) -> list:
+    """Curated active foreshadow list (id/description) from author_intent.
+    Empty by default."""
+    v = _continuity_field(project_id, novel_id, "foreshadow_list", [])
+    return v if isinstance(v, list) else []
+
+
+def get_hard_constraints(project_id: str, novel_id: str) -> list:
+    """Curated hard constraints (forbidden moves) from author_intent.
+    Empty by default."""
+    v = _continuity_field(project_id, novel_id, "hard_constraints", [])
+    return v if isinstance(v, list) else []
+
+
 def get_canonical_names(project_id: str, novel_id: str,
                          max_seq: int | None = None) -> list[str]:
     """Distinct character names already in the Story Bible — the model must reuse

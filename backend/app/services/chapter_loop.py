@@ -413,6 +413,75 @@ def _chapter_tiptap_body(paragraphs: list[str], text: str) -> dict:
     }
 
 
+def _build_archive_text(ai: dict) -> str:
+    """Render the curated 小说永久档案 (author_intent) into a prompt block.
+
+    Consumed by narrative.gen_next_chapter as $archive. Returns "" when the novel
+    has no archive configured (other novels are unaffected). See author_intent
+    keys: character_cards / plot_timeline / foreshadow_list / hard_constraints.
+    """
+    if not isinstance(ai, dict):
+        return ""
+    blocks: list[str] = []
+
+    cards = ai.get("character_cards") or []
+    if isinstance(cards, list) and cards:
+        lines = ["一、人物卡（严禁改名/另起称呼；外号仅可用括号内标注的别名）："]
+        for c in cards:
+            if not isinstance(c, dict):
+                continue
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+            aliases = c.get("aliases") or []
+            alias_txt = "（外号：" + "、".join(str(a) for a in aliases if str(a).strip()) + "）" if aliases else ""
+            role = (c.get("role") or "").strip()
+            traits = (c.get("traits") or "").strip()
+            bits = [name + alias_txt]
+            if role:
+                bits.append("身份：" + role)
+            if traits:
+                bits.append(traits)
+            lines.append("- " + "；".join(bits))
+        blocks.append("\n".join(lines))
+
+    tl = ai.get("plot_timeline") or []
+    if isinstance(tl, list) and tl:
+        lines = ["二、已发生剧情时间线（本章须承接最新一章结尾，不得跳脱）："]
+        for t in tl:
+            if isinstance(t, dict):
+                ch = t.get("chapter") or t.get("seq") or ""
+                summary = t.get("summary") or ""
+                if str(ch).strip() and summary.strip():
+                    lines.append(f"- 第{str(ch).strip()}章：{summary.strip()}")
+            elif isinstance(t, str) and t.strip():
+                lines.append("- " + t.strip())
+        blocks.append("\n".join(lines))
+
+    fs = ai.get("foreshadow_list") or []
+    if isinstance(fs, list) and fs:
+        lines = ["三、当前伏笔清单（须持续推进；可埋新伏笔，但勿强行回收已有伏笔）："]
+        for f in fs:
+            if isinstance(f, dict):
+                fid = f.get("id") or ""
+                desc = f.get("description") or f.get("desc") or ""
+                if desc.strip():
+                    lines.append(f"- 伏笔{fid}：{desc.strip()}" if str(fid).strip() else f"- {desc.strip()}")
+            elif isinstance(f, str) and f.strip():
+                lines.append("- " + f.strip())
+        blocks.append("\n".join(lines))
+
+    hc = ai.get("hard_constraints") or []
+    if isinstance(hc, list) and hc:
+        lines = ["四、硬红线（绝对禁止，违反即判违规）："]
+        for h in hc:
+            if isinstance(h, str) and h.strip():
+                lines.append("- " + h.strip())
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks)
+
+
 def _save_chapter_content(project_id: str, novel_id: str, chapter_seq: int,
                           title: str, paragraphs: list[str]) -> str:
     title = normalize_chapter_title(title, chapter_seq)
@@ -483,6 +552,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     _bcfg = repo.get_book_config(project_id, novel_id)
     _bai = decode(_bcfg.get("author_intent"), {}) or {} if _bcfg else {}
     prev_facts_var = str(_bai.get("continuity_facts") or "") if isinstance(_bai, dict) else ""
+    archive_var = _build_archive_text(_bai) or "（本书未配置永久档案，按既有设定与上下文续写）"
     context_text, context_hash, included, layers = _build_context_pkg(
         project_id, novel_id, chapter_seq, style, bible
     )
@@ -529,6 +599,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         "current_body": "",
                         "review_feedback": "",
                         "prev_facts": prev_facts_var,
+                        "archive": archive_var,
                     },
                 )
             chapter = out.get("chapter", {})
@@ -559,9 +630,11 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             user_id=user_id,
             variables={
                 "context": context_text,
-                "current_title": title,
-                "current_body": text,
-                "review_feedback": (
+                        "current_title": title,
+                        "current_body": text,
+                        "archive": archive_var,
+                        "prev_facts": prev_facts_var,
+                        "review_feedback": (
                     f"字数不足：当前 {len(text)} 字，必须扩写至 {MIN_CHAPTER_CHARS} 字以上，"
                     "不得删减既有情节，只做加密加细。"
                 ),
@@ -624,6 +697,9 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         rules = repo.get_continuity_rules(project_id, novel_id) or []
         facts = repo.get_continuity_facts(project_id, novel_id) or ""
         chars = repo.get_continuity_characters(project_id, novel_id) or []
+        cards_raw = repo.get_character_cards(project_id, novel_id) or []
+        must_names = [c["name"] for c in cards_raw
+                      if isinstance(c, dict) and c.get("must_use_canonical") and c.get("name")]
         if banned or rules or facts:
             import re as _re
             _death_toks = ["尸体", "丧命", "遇难", "砸死", "压死", "断气",
@@ -654,7 +730,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             # inside ordinary words (江衍, 石头, 矿工) and would cause false positives.
             _name_re = _re.compile(r'老[' + _surname + r']')
 
-            def _violations(t: str) -> list[str]:
+            def _violations(t: str, prev_tail: str = "") -> list[str]:
                 v: list[str] = []
                 for b in banned:
                     if b and b in t:
@@ -673,10 +749,15 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                     for nm in _name_re.findall(t):
                         if nm not in chars:
                             v.append(f"新增未授权命名角色（『{nm}』）；本章只允许沿用：{('、'.join(chars) or '无')}")
+                if must_names and prev_tail:
+                    for mn in must_names:
+                        if mn and mn in prev_tail and mn not in t:
+                            v.append(f"上一章结尾出现的『{mn}』本章必须沿用其本名，严禁改名或改用其他称呼（外号仅可用档案标注的别名）")
+                            break
                 return v
 
             prev_tail = repo.get_previous_chapter_tail(novel_id, chapter_seq, tail_chars=800)
-            v0 = _violations(text)
+            v0 = _violations(text, prev_tail)
             if v0:
                 report["steps"].append({"step": "continuity_guard", "triggered": True,
                                         "violations": v0[:5]})
@@ -692,12 +773,12 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         prompt_name="narrative.gen_next_chapter", user_id=user_id,
                         variables={"context": context_text, "current_title": title,
                                    "current_body": "", "review_feedback": fb,
-                                   "prev_facts": facts},
+                                   "prev_facts": facts, "archive": archive_var},
                     )
                     cg_ch = cg.get("chapter", {}) or {}
                     cg_paras = cg_ch.get("body", []) if isinstance(cg_ch, dict) else []
                     cg_text = "\n\n".join(cg_paras) if cg_paras else ""
-                    if cg_text and len(cg_text) >= MIN_CHAPTER_CHARS and not _violations(cg_text):
+                    if cg_text and len(cg_text) >= MIN_CHAPTER_CHARS and not _violations(cg_text, prev_tail):
                         paragraphs, text = cg_paras, cg_text
                         title = cg_ch.get("title") or title
                         _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
