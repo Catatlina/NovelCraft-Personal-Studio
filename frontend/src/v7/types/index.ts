@@ -56,6 +56,12 @@ export interface StateCreateRequest {
   reason?: string;
 }
 
+export interface StateUpdateRequest {
+  state_value?: Record<string, any>;
+  confidence?: number;
+  reason?: string;
+}
+
 export interface StateUpdateResponse {
   action: 'updated' | 'pending_review' | 'created' | 'discarded';
   state: StoryState | null;
@@ -97,6 +103,11 @@ export interface GoalUpdateRequest {
   status?: string;
   progress?: number;
   priority?: number;
+}
+
+export interface GoalTreeResponse {
+  tree: GoalTreeNode[];
+  total: number;
 }
 
 export interface GoalTreeNode {
@@ -154,6 +165,14 @@ export interface Version {
   created_at?: string;
 }
 
+export interface VersionCreateRequest {
+  version_type: string;
+  description?: string;
+  branch_name?: string;
+  tag_name?: string;
+  created_by?: string;
+}
+
 export interface Snapshot {
   id: string;
   snapshot_type: string;
@@ -180,12 +199,16 @@ export interface DecisionLog {
   id: string;
   decision_type: string;
   decision: string;
+  decision_reason?: string;
   reason?: string;
   confidence: number;
   permission_level: string;
   status: string;
   decided_by: string;
+  decided_at?: string;
   created_at?: string;
+  context?: Record<string, any>;
+  alternatives?: string[];
 }
 
 // Events
@@ -231,4 +254,9 @@ export interface TraceStep {
   cost: number;
   model?: string;
   confidence?: number;
+  prompt_version?: string;
 }
+
+// Type aliases for compatibility
+export type DecisionLogItem = DecisionLog;
+export type Run = AgentRun;

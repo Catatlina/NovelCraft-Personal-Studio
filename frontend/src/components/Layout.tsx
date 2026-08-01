@@ -22,7 +22,7 @@ export type AppTab =
   | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag"
   | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout"
   | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins"
-  | "skills" | "chat" | "marketplace";
+  | "skills" | "chat" | "marketplace" | "v7";
 
 const NAV_ITEMS: Array<{ id: AppTab; label: string; icon: React.ReactNode }> = [
   { id: "dashboard", label: "小说首页", icon: <Sparkles size={19} /> },

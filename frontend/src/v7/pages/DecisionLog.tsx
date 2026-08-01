@@ -307,7 +307,7 @@ export function DecisionLog({ novelId }: DecisionLogProps) {
                           <div className="mt-3">
                             <h4 className="text-sm font-medium text-gray-700 mb-2">Alternatives Considered</h4>
                             <ul className="text-sm text-gray-600 list-disc list-inside">
-                              {decision.alternatives.map((alt, i) => (
+                              {decision.alternatives.map((alt: string, i: number) => (
                                 <li key={i}>{alt}</li>
                               ))}
                             </ul>
