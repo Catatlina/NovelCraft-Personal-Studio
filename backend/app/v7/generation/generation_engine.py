@@ -4,6 +4,7 @@ Handles text generation with context assembly, scene direction, and de-AI pipeli
 Alpha: Adapter pattern to reuse V6 generation code.
 """
 from __future__ import annotations
+import os
 
 import uuid
 from typing import Any
@@ -127,17 +128,20 @@ class AIGateway:
     """
     AI Gateway for calling LLM APIs.
     
-    Alpha: Adapter that will use V6's gateway.py.
+    Alpha: Real DeepSeek API calls.
     Full: Model routing, cost tracking, prompt versioning.
     """
 
     def __init__(self, tracer: ExecutionTracer):
         self.tracer = tracer
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 
     async def generate(
         self,
         prompt: str,
         *,
+        system_prompt: str = "你是一个专业的小说创作助手。",
         model: str = "deepseek-chat",
         temperature: float = 0.7,
         max_tokens: int = 2000,
@@ -146,22 +150,69 @@ class AIGateway:
         """
         Generate text using AI.
         
-        Alpha: Placeholder that returns mock text.
-        Full: Real API calls with structured output validation.
+        Alpha: Real DeepSeek API calls.
+        Full: Model routing, cost tracking, structured output validation.
         """
-        # Alpha: Return placeholder
-        # NOTE: In real implementation, this will call V6's gateway.py
-        mock_text = f"[Alpha placeholder - chapter content would be here]\n\nPrompt length: {len(prompt)} chars\nModel: {model}\nTemperature: {temperature}"
-
-        return {
-            "text": mock_text,
-            "model": model,
-            "tokens_input": len(prompt) // 4,  # rough estimate
-            "tokens_output": len(mock_text) // 4,
-            "cost": 0.0,  # Alpha: no real cost
-            "finish_reason": "stop",
-            "notes": "Alpha: Mock generation, not real API call",
+        import requests
+        
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
         }
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        
+        data = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        
+        # Add structured output if schema is provided
+        if output_schema:
+            data["response_format"] = {
+                "type": "json_object",
+            }
+        
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=60)
+            response.raise_for_status()
+            result = response.json()
+            
+            content = result["choices"][0]["message"]["content"]
+            usage = result.get("usage", {})
+            
+            # Calculate cost (approximate)
+            # DeepSeek: input ¥1/M tokens, output ¥2/M tokens
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+            cost = (input_tokens / 1_000_000 * 1.0) + (output_tokens / 1_000_000 * 2.0)
+            
+            return {
+                "text": content,
+                "model": model,
+                "tokens_input": input_tokens,
+                "tokens_output": output_tokens,
+                "cost": cost,
+                "finish_reason": result["choices"][0].get("finish_reason", "stop"),
+                "raw_response": result,
+            }
+        except Exception as e:
+            # Fallback: return error info
+            return {
+                "text": f"[Error] AI generation failed: {str(e)}",
+                "model": model,
+                "tokens_input": 0,
+                "tokens_output": 0,
+                "cost": 0.0,
+                "finish_reason": "error",
+                "error": str(e),
+            }
 
 
 class GenerationEngine:
