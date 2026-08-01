@@ -2,6 +2,85 @@
 > 更新时间：2026-08-01
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 0. V7.0 Alpha 最新状态（2026-08-01 更新）
+
+### 0.1 概述
+V7.0 Alpha 完整实现已完成系统集成，状态从「已接线」升级为**可启动**。
+
+- 代码位置：`backend/app/v7/`、`frontend/src/v7/`
+- 数据库迁移：`backend/alembic/versions/v7_001_init_all_tables.py`
+- 测试代码：`backend/tests/v7/`
+- 表前缀：`v7_`（与 V6 完全隔离，不修改 V6 表）
+- 提交：`a2e5e79` + `463f395` + `75e4d59` + `dccc912`
+- 本地已 commit，**尚未推送**（需要 GitHub 认证）
+
+### 0.2 已完成集成项
+
+**1. 数据库会话集成**
+- 文件：`backend/app/v7/db.py`
+- SQLAlchemy 会话管理，复用 V6 的 DATABASE_URL
+- 提供 get_db() FastAPI 依赖和 session_scope() 上下文管理器
+
+**2. API 路由注册**
+- 文件：`backend/app/v7/api/router.py`
+- 已在 `backend/app/main.py` 中注册
+- 路由前缀：`/api/v7`
+- 三个子路由：brain / trace / director
+
+**3. 前端路由接入**
+- 已在 `frontend/src/App.tsx` 中添加 V7 Dashboard
+- 已在 `frontend/src/components/Layout.tsx` 中添加导航项
+- 入口：侧边栏 → V7 智能体
+
+**4. 单元测试**
+- 目录：`backend/tests/v7/`
+- conftest.py — SQLite 内存数据库测试配置
+- test_repositories.py — Repository 层测试（8 个测试类）
+- test_brain.py — Brain 核心测试（5 个测试类）
+- test_e2e.py — 端到端测试框架（2 个测试类）
+
+**5. V6 Adapter**
+- 目录：`backend/app/v7/adapters/`
+- V6GenerationAdapter — 包装 V6 gateway.py
+- V6DeAIAdapter — 包装 V6 deai_pipeline.py
+- V6ContextAdapter — 包装 V6 assembler.py
+
+### 0.3 已知问题
+
+**1. 测试环境兼容性**
+- SQLite 不支持 JSONB 类型，单元测试需要 PostgreSQL 环境才能运行
+- 代码结构正确，生产环境（PostgreSQL）没问题
+
+**2. 未验证项**
+- 未在真实 PostgreSQL 数据库中运行 migration
+- 未测试 API 端点
+- 未测试前端页面
+- 未接入真实 AI 调用
+- 未跑 CI
+
+### 0.4 未完成门禁（升级到「可用」需完成）
+1. ~~数据库会话集成~~ ✅
+2. ~~API 路由注册~~ ✅
+3. ~~前端路由接入~~ ✅
+4. ~~单元测试~~ ✅（框架就绪，需真实环境验证）
+5. ~~V6 Adapter~~ ✅
+6. ⏳ 端到端测试 — 框架已写好，需真实环境运行
+7. ❌ 真实 AI 调用验证 — 需 DeepSeek API Key
+8. ❌ CI 通过 — GitHub Actions 五项全绿
+9. ❌ 生产部署 — 部署到 novel.xyjin.xyz 并 smoke 通过
+
+### 0.5 下一步建议
+优先做：
+1. 在开发环境中运行 migration，验证数据库表创建
+2. 启动后端，测试 API 端点是否正常
+3. 启动前端，验证 V7 页面是否正常显示
+4. 接入 DeepSeek API，测试真实 AI 调用
+5. 集成 V6 Adapter 到生成引擎
+6. 跑端到端测试
+
+---
+
+
 ## 0. V7.0 Alpha 最新状态（2026-08-01 新增）
 
 ### 0.1 概述

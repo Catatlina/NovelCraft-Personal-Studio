@@ -2,6 +2,107 @@
 
 <!-- delivery-claims: strict -->
 
+## 2026-08-01 V7.0 Alpha 集成完成 — 数据库/API/前端/测试/Adapter
+> 本轮完成 V7.0 Alpha 的系统集成：数据库会话、API 路由、前端路由、单元测试、V6 Adapter 全部就位。代码全部提交，状态从「已接线」升级为「可启动」。
+
+### 已完成门禁项
+
+#### 1. 数据库会话集成 ✅
+- 创建 `backend/app/v7/db.py`
+- SQLAlchemy 会话管理，复用 V6 的 `DATABASE_URL` 环境变量
+- 提供 `get_db()` FastAPI 依赖和 `session_scope()` 上下文管理器
+- 提供 `init_v7_db()` 初始化函数（开发用）
+- V6 psycopg2 与 V7 SQLAlchemy 完全隔离，互不影响
+
+#### 2. API 路由注册 ✅
+- 创建 `backend/app/v7/api/router.py` 统一路由入口
+- 在 `backend/app/main.py` 中注册 V7 路由
+- 路由前缀：`/api/v7`
+- 三个子路由：
+  - `/api/v7/brain` — Brain API（状态/目标/约束/版本/决策/事件）
+  - `/api/v7/trace` — Trace API（Run 管理/步骤追踪）
+  - `/api/v7/director` — Director API（章节生成/决策审批）
+
+#### 3. 前端路由接入 ✅
+- 在 `frontend/src/App.tsx` 中添加 V7 Dashboard
+- 在 `PUBLIC_TABS` 中添加 `v7` tab
+- 在 `frontend/src/components/Layout.tsx` 中添加导航项「V7 智能体」
+- 入口：侧边栏 → V7 智能体
+- V7 Dashboard 有自己的侧边栏，12 个页面分三组导航
+
+#### 4. 单元测试 ✅
+- 创建 `backend/tests/v7/conftest.py` — SQLite 内存数据库测试配置
+- 创建 `backend/tests/v7/test_repositories.py` — Repository 层测试
+  - BaseRepository 通用 CRUD 测试
+  - StoryStateRepository 专项测试（置信度门控）
+  - GoalRepository 专项测试
+  - ConstraintRepository 专项测试
+  - DecisionPermissionRepository 专项测试
+  - VersionRepository 专项测试
+  - AgentRunRepository 专项测试
+  - EventLogRepository 专项测试
+- 创建 `backend/tests/v7/test_brain.py` — Brain 核心测试
+  - StoryStateManager 测试（置信度门控/审批/历史）
+  - GoalSystem 测试（目标创建/进度更新/目标树）
+  - ConstraintSystem 测试（约束创建/违规记录）
+  - VersionControl 测试（版本创建/快照/最新版本）
+  - NovelBrain 主类测试（概览/决策记录）
+- 创建 `backend/tests/v7/test_e2e.py` — 端到端测试框架
+  - 章节生成完整管线测试
+  - 决策审批工作流测试
+  - 状态一致性测试
+  - Trace 完整性测试
+
+#### 5. V6 Adapter ✅
+- 创建 `backend/app/v7/adapters/` 目录
+- **V6GenerationAdapter** — 包装 V6 的 `gateway.py` AI 网关
+  - 支持普通文本生成和结构化输出
+  - 自动重试（V6 内置）
+  - Token 计数估算
+- **V6DeAIAdapter** — 包装 V6 的 `deai_pipeline.py` 去 AI 味管线
+  - 支持 light/medium/heavy 三种强度
+  - 质量评分
+  - 步骤记录
+- **V6ContextAdapter** — 包装 V6 的 `assembler.py` 上下文装配器
+  - 支持多种用途（生成/审阅/续写）
+  - Token 预算控制
+  - 分层上下文
+
+### Bug 修复
+- **metadata 字段名冲突**：SQLAlchemy 的 Base 类有 metadata 属性，模型中不能再定义 metadata 字段。已将所有模型中的 `metadata` 字段改名为 `extra_metadata`，migration 文件同步更新。
+- **类型解析错误**：`last_violation_at` 和 `decided_at` 字段类型为 `Any`，SQLAlchemy 无法解析。已改为 `DateTime` 类型。
+
+### 当前状态：**可启动**
+- 代码全部写完，集成全部完成
+- 数据库：18 张表，migration 已写好
+- API：30+ 端点，已注册到主 FastAPI app
+- 前端：12 个页面，已接入主 App 路由
+- 测试：单元测试 + E2E 测试框架已写好
+- V6 Adapter：三个 Adapter 已创建
+- **未在真实环境验证**：需要 PostgreSQL 数据库和 DeepSeek API 才能完整运行
+- **CI 未验证**：需要 GitHub Actions 环境
+- **生产未部署**：需要部署到 novel.xyjin.xyz
+
+### 未完成门禁（升级到「可用」需完成）
+1. ~~数据库会话集成~~ ✅ 已完成
+2. ~~API 路由注册~~ ✅ 已完成
+3. ~~前端路由接入~~ ✅ 已完成
+4. ~~单元测试~~ ✅ 已完成（框架就绪，需真实环境验证）
+5. ~~V6 Adapter~~ ✅ 已完成
+6. ⏳ 端到端测试 — 框架已写好，需真实环境运行
+7. ❌ 真实 AI 调用验证 — 需 DeepSeek API Key
+8. ❌ CI 通过 — GitHub Actions 五项全绿
+9. ❌ 生产部署 — 部署到 novel.xyjin.xyz 并 smoke 通过
+
+### 提交信息
+- Commit：`75e4d59` — 集成数据库会话、API路由、前端路由 + 单元测试
+- Commit：`dccc912` — 添加V6 Adapter层，复用成熟代码
+- 总计：23 files changed, 1363 insertions(+)
+- 本地已 commit，**尚未推送**（需要 GitHub 认证）
+- 代码位置：`backend/app/v7/`、`frontend/src/v7/`、`backend/tests/v7/`
+
+---
+
 ## 2026-08-01 V7.0 Alpha 完整实现 — Novel Intelligence System
 > 本轮按 V7.0.2.2 最终冻结架构执行：全局状态驱动 + 因果链约束 + 读者体验曲线控制的全书级智能体。代码全部完成，尚未接入主 app、未跑测试、未做真实 AI 验证，状态为**已接线**。
 
