@@ -402,7 +402,10 @@ def _chapter_tiptap_body(paragraphs: list[str], text: str) -> dict:
     return {
         "type": "doc",
         "content": [
-            {"type": "paragraph", "content": [{"type": "text", "text": p}]}
+            # paragraph carries BOTH a bare `text` (what the frontend's
+            # docToText()/Editor read) and a nested `content` (standard TipTap
+            # doc for the editor to load). Matches the original textToDoc shape.
+            {"type": "paragraph", "text": p, "content": [{"type": "text", "text": p}]}
             for p in paragraphs if p
         ],
         "paragraphs": paragraphs,
