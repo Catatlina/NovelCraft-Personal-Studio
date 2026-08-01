@@ -173,7 +173,7 @@ class VersionControl:
             "description": version.description,
             "branch_name": version.branch_name,
             "tag_name": version.tag_name,
-            "snapshot_id": snapshot["id"],
+            "created_by": version.created_by,
             "created_at": version.created_at.isoformat() if version.created_at else None,
         }
 
