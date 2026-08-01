@@ -3043,6 +3043,96 @@ def patrol_check() -> dict:
         "foreshadowing_count": len(overdue),
         "needs_rewrite_count": len(needs_rewrite),
     }
+
+# ── Stale bootstrap run recovery (deploy/crash resilience) ────────────────
+# Worker SIGKILL during deploy (docker compose up --force-recreate) can orphan
+# a run in status='running' with an in-flight node never finishing. This beat
+# task finds runs that have been 'running' longer than a stall threshold with
+# no active node progress, marks their stale in-flight nodes failed, and
+# re-dispatches the run — execute_bootstrap skips already-succeeded nodes and
+# resumes from the failed one (checkpoint-safe, idempotent).
+
+STALE_RUN_STALL_MINUTES = int(os.getenv("STALE_RUN_STALL_MINUTES", "10"))
+
+
+@celery_app.task(name="app.workers.tasks.resume_stale_bootstrap_runs")
+def resume_stale_bootstrap_runs() -> dict:
+    """Re-dispatch bootstrap runs stuck in 'running' past the stall threshold."""
+    db = connect()
+    stale = db.execute(
+        """SELECT id, current_node_key, updated_at
+           FROM workflow_runs
+           WHERE status = 'running'
+             AND updated_at < now() - make_interval(mins => %s)
+           ORDER BY updated_at""",
+        (STALE_RUN_STALL_MINUTES,),
+    ).fetchall()
+    db.close()
+
+    recovered, skipped, terminated = [], [], []
+    for run in stale:
+        run_id = run["id"]
+        node_key = run["current_node_key"] or "plan_idea"
+
+        # A live worker heartbeats the run while executing: if updated_at is
+        # stale AND no node is currently 'running' with a recent started_at,
+        # the original worker is gone. Flip stale in-flight nodes to failed so
+        # the claim guard (status IN pending/failed/...) accepts a re-dispatch.
+        db = connect()
+        active_node = db.execute(
+            """SELECT id FROM run_nodes
+               WHERE run_id = %s AND status = 'running'
+                 AND started_at > now() - make_interval(mins => %s)""",
+            (run_id, STALE_RUN_STALL_MINUTES),
+        ).fetchone()
+        if active_node:
+            db.close()
+            skipped.append({"run_id": run_id, "reason": "active_node"})
+            continue
+
+        # Zombie run: 'running' but has zero run_nodes (creation aborted before
+        # seeding). Nothing to resume — terminate it so the UI stops spinning.
+        node_count = db.execute(
+            "SELECT COUNT(*) AS n FROM run_nodes WHERE run_id = %s", (run_id,)
+        ).fetchone()["n"]
+        if node_count == 0:
+            db.execute(
+                """UPDATE workflow_runs SET status = 'failed', finished_at = now(),
+                           updated_at = now(),
+                           dispatch_error = 'zombie run: no nodes seeded; terminated by resume_stale_bootstrap_runs'
+                   WHERE id = %s""",
+                (run_id,),
+            )
+            db.commit()
+            db.close()
+            _record_bootstrap_event(
+                run_id, "run.terminated_zombie",
+                node_key=node_key,
+                payload={"reason": "no run_nodes seeded"},
+            )
+            terminated.append({"run_id": run_id, "reason": "no_nodes"})
+            continue
+
+        db.execute(
+            """UPDATE run_nodes SET status = 'failed', finished_at = now(),
+                       error = COALESCE(error, '') || ' [stale: worker lost; auto-resumed]'
+               WHERE run_id = %s AND status = 'running'""",
+            (run_id,),
+        )
+        db.commit()
+        db.close()
+
+        _record_bootstrap_event(
+            run_id, "run.resumed_after_stall",
+            node_key=node_key,
+            payload={"reason": "stale running beyond threshold"},
+        )
+        dispatch_bootstrap_run(run_id, node_key)
+        recovered.append({"run_id": run_id, "from_node": node_key})
+
+    return {"status": "ok", "recovered": recovered, "skipped": skipped, "terminated": terminated}
+
+
 @celery_app.task(bind=True, max_retries=2)
 def bootstrap_short_story_task(self, project_id: str, short_id: str) -> dict:
     """M3: Generate short story from idea."""

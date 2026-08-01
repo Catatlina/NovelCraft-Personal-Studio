@@ -44,8 +44,8 @@ type Run = {
 };
 
 const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
-const RETRYABLE_STATUSES = new Set(["failed", "pending_budget"]);
-const RESTARTABLE_RUN = new Set(["pending", "dispatch_failed", "failed"]);
+const RETRYABLE_STATUSES = new Set(["failed", "pending_budget", "pending_provider"]);
+const RESTARTABLE_RUN = new Set(["pending", "dispatch_failed", "failed", "pending_provider"]);
 const PLANNING_NODES = new Set([
   "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
   "plan_world_architecture", "plan_character_system", "plan_conflict_map",
@@ -60,6 +60,7 @@ const STATUS_LABELS: Record<string, string> = {
   succeeded: "已完成",
   failed: "失败",
   pending_budget: "预算阻塞",
+  pending_provider: "模型调用失败",
   skipped: "已跳过",
 };
 const RUN_LABELS: Record<string, string> = {
@@ -68,6 +69,7 @@ const RUN_LABELS: Record<string, string> = {
   waiting_human: "等待确认",
   succeeded: "已完成",
   failed: "需要处理",
+  pending_provider: "需要处理",
 };
 
 function formatTime(value?: string | null): string {
@@ -156,7 +158,7 @@ export function Progress({
   const succeededCount = nodes.filter(node => node.status === "succeeded").length;
   const percent = nodes.length ? Math.round((succeededCount / nodes.length) * 100) : 0;
   const activeNode = nodes.find(node => node.status === "running" || node.node_key === currentKey);
-  const failedCount = nodes.filter(node => node.status === "failed" || node.status === "pending_budget").length;
+  const failedCount = nodes.filter(node => node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider").length;
   const planningNodes = nodes.filter(node => PLANNING_NODES.has(node.node_key));
   const novelName = novel?.title || selectedTitle || titles[0] || "未命名小说";
 
@@ -344,7 +346,7 @@ export function Progress({
             return (
               <button type="button" key={node.node_key} className={`${active ? "active" : ""} ${node.status}`} onClick={() => setSelectedNodeKey(node.node_key)}>
                 <span className="node-order">
-                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" ? <AlertTriangle size={15} /> : <Circle size={13} />}
+                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" ? <AlertTriangle size={15} /> : <Circle size={13} />}
                 </span>
                 <span className="node-name"><strong>{node.title}</strong><small>{STATUS_LABELS[node.status] || node.status}</small></span>
                 <span className="node-index">{String(index + 1).padStart(2, "0")}</span>

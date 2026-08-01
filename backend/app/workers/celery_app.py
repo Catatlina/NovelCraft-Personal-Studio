@@ -62,5 +62,12 @@ celery_app.conf.update(
             "task": "app.core.billing.reset_monthly_usage",
             "schedule": crontab(day_of_month=1, hour=3, minute=15),
         },
+        "resume-stale-bootstrap-runs": {
+            # Deploy/crash resilience: re-dispatch bootstrap runs stuck in
+            # 'running' past the stall threshold (worker SIGKILLed during
+            # docker compose --force-recreate). Checkpoint-safe & idempotent.
+            "task": "app.workers.tasks.resume_stale_bootstrap_runs",
+            "schedule": 300.0,  # Every 5 minutes
+        },
     },
 )

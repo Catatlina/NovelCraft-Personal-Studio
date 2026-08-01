@@ -42,6 +42,7 @@ const RUN_LABELS: Record<string, string> = {
   waiting_human: "等待确认",
   succeeded: "创作完成",
   failed: "需要处理",
+  pending_provider: "需要处理",
 };
 
 export function Layout({

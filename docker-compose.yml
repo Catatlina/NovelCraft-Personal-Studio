@@ -79,6 +79,10 @@ services:
     restart: unless-stopped
     logging: *default-logging
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    # Graceful shutdown: let in-flight bootstrap nodes finish on SIGTERM
+    # (docker compose up --force-recreate) instead of SIGKILL mid-task,
+    # which previously orphaned runs in status='running' forever.
+    stop_grace_period: 10m
     environment:
       DATABASE_URL: postgresql://novelcraft:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres/novelcraft
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
