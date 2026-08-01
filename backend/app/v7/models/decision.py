@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime,  Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,5 +46,5 @@ class DecisionLog(BaseModel, NovelScopedMixin):
     alternatives: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     decided_by: Mapped[str] = mapped_column(String(50), nullable=False, default="ai")  # ai/human/system
     decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    decided_at: Mapped[Any | None] = mapped_column(nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     approval_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

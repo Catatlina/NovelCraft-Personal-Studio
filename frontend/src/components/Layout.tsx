@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   BookOpen,
+  Brain,
   CircleCheckBig,
   FilePenLine,
   Library,
@@ -31,6 +32,7 @@ const NAV_ITEMS: Array<{ id: AppTab; label: string; icon: React.ReactNode }> = [
   { id: "progress", label: "创作进度", icon: <CircleCheckBig size={19} /> },
   { id: "editor", label: "章节编辑器", icon: <FilePenLine size={19} /> },
   { id: "review", label: "审阅与一致性", icon: <BookOpen size={19} /> },
+  { id: "v7", label: "V7 智能体", icon: <Brain size={19} /> },
   { id: "settings", label: "小说设置", icon: <Settings size={19} /> },
 ];
 

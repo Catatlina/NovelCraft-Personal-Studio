@@ -29,7 +29,7 @@ class PromptVersion(BaseModel):
     is_default: Mapped[bool] = mapped_column(default=False)
     created_by: Mapped[str] = mapped_column(String(50), nullable=False, default="system")
     golden_cases: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 class PromptExecution(BaseModel):
@@ -60,4 +60,4 @@ class PromptExecution(BaseModel):
     novel_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     validation_passed: Mapped[bool | None] = mapped_column(nullable=True)
     validation_errors: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

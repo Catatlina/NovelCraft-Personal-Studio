@@ -42,7 +42,7 @@ class AgentRun(BaseModel, NovelScopedMixin):
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     chapter_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
@@ -86,4 +86,4 @@ class AgentTrace(BaseModel, NovelScopedMixin):
         ForeignKey("v7_agent_traces.id"),
         nullable=True,
     )
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

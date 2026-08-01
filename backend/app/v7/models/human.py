@@ -28,4 +28,4 @@ class HumanIntervention(BaseModel, NovelScopedMixin):
     run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     result: Mapped[str] = mapped_column(String(20), nullable=False, default="success")
     # success/failed/pending
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

@@ -53,4 +53,4 @@ class EventLog(BaseModel, NovelScopedMixin):
     # For grouping related events
     version: Mapped[int] = mapped_column(nullable=False, default=1)
     # Event schema version
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

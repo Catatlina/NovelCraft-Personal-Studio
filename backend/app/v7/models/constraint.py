@@ -1,9 +1,10 @@
 """Constraint system models."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Integer, String, Text, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,5 +27,5 @@ class Constraint(BaseModel, NovelScopedMixin):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     is_active: Mapped[bool] = mapped_column(default=True)
     violation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_violation_at: Mapped[Any | None] = mapped_column(nullable=True)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    last_violation_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

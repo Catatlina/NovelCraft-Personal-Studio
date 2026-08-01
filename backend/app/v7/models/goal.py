@@ -42,5 +42,5 @@ class StoryGoal(BaseModel, NovelScopedMixin):
     completed_chapter: Mapped[int | None] = mapped_column(Integer, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.8)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     is_active: Mapped[bool] = mapped_column(default=True)

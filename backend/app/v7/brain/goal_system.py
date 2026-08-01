@@ -88,7 +88,7 @@ class GoalSystem:
             "target_chapter": target_chapter,
             "priority": priority,
             "confidence": confidence,
-            "metadata": metadata or {},
+            "extra_metadata": metadata or {},
         })
 
         await self.event_repo.record_event(

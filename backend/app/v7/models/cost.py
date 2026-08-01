@@ -34,4 +34,4 @@ class CostBudget(BaseModel, NovelScopedMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     # { task_type: { max_tokens, max_cost, max_retries, model_preference } }
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

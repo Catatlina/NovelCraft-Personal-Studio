@@ -5,6 +5,7 @@ import { Progress } from "./components/Progress";
 import { Review } from "./components/Review";
 import { CommandPalette } from "./components/CommandPalette";
 import { Settings } from "./components/Settings";
+import { V7Dashboard } from "./v7/pages/V7Dashboard";
 import { LoginPage } from "./components/LoginPage";
 import { BookLibrary } from "./components/BookLibrary";
 import { ApiError, api as baseApi, apiRaw, apiStream } from "./lib/api";
@@ -32,7 +33,7 @@ type Tab = AppTab;
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
-const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings", "ranking"]);
+const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings", "ranking", "v7"]);
 const LEGACY_TAB_REDIRECTS: Record<string, Tab> = {
   home: "dashboard",
   overview: "dashboard",
@@ -830,6 +831,7 @@ export default function App() {
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
+      {tab === "v7" && novel && <V7Dashboard novelId={novel.id} />}
       </>}
       <CommandPalette commands={cmdActions} />
     </Layout>

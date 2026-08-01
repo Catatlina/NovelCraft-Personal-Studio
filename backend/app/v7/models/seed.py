@@ -22,4 +22,4 @@ class SeedData(BaseModel):
     is_builtin: Mapped[bool] = mapped_column(default=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     version: Mapped[int] = mapped_column(nullable=False, default=1)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

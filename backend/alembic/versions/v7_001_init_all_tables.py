@@ -144,7 +144,7 @@ def upgrade() -> None:
             completed_chapter INTEGER,
             priority INTEGER NOT NULL DEFAULT 50,
             confidence FLOAT NOT NULL DEFAULT 0.8,
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -170,7 +170,7 @@ def upgrade() -> None:
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             violation_count INTEGER NOT NULL DEFAULT 0,
             last_violation_at TIMESTAMPTZ,
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -245,7 +245,7 @@ def upgrade() -> None:
             user_id UUID,
             run_id UUID,
             result VARCHAR(20) NOT NULL DEFAULT 'success',
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -309,7 +309,7 @@ def upgrade() -> None:
             step_count INTEGER NOT NULL DEFAULT 0,
             error_message TEXT,
             error_type VARCHAR(100),
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             chapter_number INTEGER,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -347,7 +347,7 @@ def upgrade() -> None:
             decision_id UUID,
             error_message TEXT,
             parent_step_id UUID REFERENCES v7_agent_traces(id),
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -376,7 +376,7 @@ def upgrade() -> None:
             is_default BOOLEAN NOT NULL DEFAULT FALSE,
             created_by VARCHAR(50) NOT NULL DEFAULT 'system',
             golden_cases JSONB NOT NULL DEFAULT '[]',
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -409,7 +409,7 @@ def upgrade() -> None:
             novel_id UUID,
             validation_passed BOOLEAN,
             validation_errors JSONB NOT NULL DEFAULT '[]',
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -439,7 +439,7 @@ def upgrade() -> None:
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             description TEXT,
             cost_policy JSONB NOT NULL DEFAULT '{}',
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -467,7 +467,7 @@ def upgrade() -> None:
             description TEXT,
             correlation_id UUID,
             version INTEGER NOT NULL DEFAULT 1,
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -491,7 +491,7 @@ def upgrade() -> None:
             is_builtin BOOLEAN NOT NULL DEFAULT TRUE,
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             version INTEGER NOT NULL DEFAULT 1,
-            metadata JSONB NOT NULL DEFAULT '{}',
+            extra_metadata JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );

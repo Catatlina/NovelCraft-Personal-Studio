@@ -63,6 +63,7 @@ from .engine import router as engine_router
 from .api.v1.skills import router as skills_router
 from .api.v1.agents import router as agents_router
 from .apps.novel.router import router as novel_app_router
+from .v7.api.router import router as v7_router
 from .core.logging_config import setup_logging, get_logger
 from .core.rate_limit import install_rate_limiter, limiter
 
@@ -115,6 +116,7 @@ app.include_router(engine_router)
 app.include_router(skills_router)
 app.include_router(agents_router)
 app.include_router(novel_app_router)
+app.include_router(v7_router)
 init_metrics(app)
 install_rate_limiter(app)
 
