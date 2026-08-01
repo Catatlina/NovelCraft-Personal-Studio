@@ -298,11 +298,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
 
   // ── Topic Pool Actions ───────────────────────────────────
   async function toggleBookmark(topic: Topic) {
+    const currentlyBookmarked = !!(topic as any).meta?.bookmarked;
     setBusy(`bookmark:${topic.id}`); setMessage("");
     try {
-      await api(`/api/v1/ranking/topics/${topic.id}/bookmark`, { method: "POST", body: JSON.stringify({ bookmark: true }) });
-      await load();
-    } catch (error) { setMessage(`收藏失败：${errorText(error)}`); }
+      await api(`/api/v1/ranking/topics/${topic.id}/bookmark`, { method: "POST", body: JSON.stringify({ bookmark: !currentlyBookmarked }) });
+      if (topicTab === "bookmarked") await loadBookmarked();
+      else await load();
+      setMessage(currentlyBookmarked ? "已移出备选池" : "已加入备选池");
+    } catch (error) { setMessage(`操作失败：${errorText(error)}`); }
     finally { setBusy(""); }
   }
 

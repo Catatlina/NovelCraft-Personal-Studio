@@ -1042,7 +1042,7 @@ def toggle_topic_bookmark(topic_id: str, payload: TopicBookmarkRequest,
         raise HTTPException(404, "topic not found")
     require_member(db, topic["project_id"], user, write=True)
     db.execute(
-        "UPDATE topic_candidates SET meta = meta || %s, status = %s WHERE id = %s",
+        "UPDATE topic_candidates SET meta = meta || %s::jsonb, status = %s WHERE id = %s",
         (json.dumps({"bookmarked": payload.bookmark}),
          "bookmarked" if payload.bookmark else topic["status"],
          topic_id))
