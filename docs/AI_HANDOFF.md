@@ -2,6 +2,20 @@
 > 更新时间：2026-08-02
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-02 本轮融合开发状态（工作树，未提交/未部署）
+
+当前 Git 基线为 `94fc731`，本轮改动仍在工作树，尚未 commit、push 或部署。状态口径只使用“已接线 / 可用 / 已验收”：
+
+- 扫榜中心：**可用（代码级）**。现有榜单表增加全站/按类型扫榜契约，平台、性别、榜单、主/子分类、数量会写入快照证据；缺失可验证元数据时返回“数据稀疏”，不把混合样本伪装成精准榜单。
+- 选题分析：**可用（代码级）**。候选保留主/子类型、核心卖点、样本数、热度趋势说明、同质化、市场空位、黄金三章方向、证据来源和快照时间，并写入现有 `topic_candidates.meta`；重载快照或选题列表时仍能读回这些字段。
+- V7 质量链：**可用（代码级）**。V7 仍是唯一正文生成链；33 个内部审计项、跨章 transition contract、状态 delta、确定性去 AI 味指标和失败闭环已接入 V7 Director，并写回 V6 兼容承载层。
+- 规则学习：**已接线**。低风险规则按候选 → 25% 灰度 → 100% 激活推进；基于 before/after 指标和质量结果累计证据；人工回滚后保持 `rolled_back`，不会被后续章节自动重新激活。规则查询/回滚 API 已接线。
+- 真相域：**可用（代码级）**。`TruthStore` 将现有 `v7_story_states` 投影为 current_state、characters、world、timeline、foreshadowing、resources、style_bible 七域；数据库仍是唯一真相源，新增 `/api/v7/brain/{novel_id}/truth` 只读入口。
+
+本轮验证证据：`backend/.venv/bin/python -m pytest -q -k "not fanqie_ranking_returns_data_or_degraded and not qidian_ranking_returns_data_or_degraded and not zongheng_ranking_returns_data_or_degraded and not collect_all_returns_dict"` → **867 passed、138 skipped、4 deselected、1 xpassed**；新增/重点回归通过；前端 `npm run lint`、`npm test -- --run`（34 passed）和 `npm run build` 通过；`python3 scripts/verify_ai_truthfulness.py` 通过。质量门的既有提示扫描仍有已知良性告警，详见 `docs/KNOWN_ISSUES.md`。
+
+不能据此宣称：真实 Provider 20 章长跑、跨章人工质量达标、两位人工盲评、生产部署或最终产品验收。下一步是审阅本工作树 diff 后再决定提交/部署，并在具备 Provider 凭据和评审资源时做真实长跑。
+
 ## 当前最新决策：V7 作为唯一正文生成链（2026-08-02）
 
 根据隔离本地环境的真实 DeepSeek 20 章对比，V7 自动审核平均 92.0、最低 91.0，V6 平均 79.6、最低 72.0，因此产品不再保留两套正文生成链：

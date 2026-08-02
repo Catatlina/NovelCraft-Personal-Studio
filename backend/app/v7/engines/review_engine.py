@@ -1,6 +1,6 @@
 """Review Engine - Sprint 2.
 
-Real 7-dimensional AI review of generated chapters.
+Real 7-macro / 33-detail AI review of generated chapters.
 Dimensions: consistency / character_voice / pacing / plot_logic /
             writing_quality / emotional_impact / constraint_compliance
 """
@@ -17,6 +17,12 @@ from ...services.reader_experience import (
     normalize_reader_experience,
     summarize_reader_experience,
 )
+from ..quality.audit_dimensions import (
+    AUDIT_DIMENSIONS,
+    format_audit_dimensions,
+    normalize_audit_report,
+)
+from ..quality.deai_metrics import analyze_deai_patterns
 
 REVIEW_DIMENSIONS: tuple[str, ...] = (
     "consistency",
@@ -57,8 +63,8 @@ class ReviewEngine(BaseEngine):
         return EngineCapability(
             engine_name="review_engine",
             engine_type="review",
-            version="1.0.0",
-            description="7-dimensional AI review for quality, consistency and constraints",
+            version="1.1.0",
+            description="7 macro scores plus a 33-dimension evidence audit for quality and continuity",
             input_types=["chapter_text", "scene_text", "full_text"],
             output_types=["review_report", "issues", "score"],
         )
@@ -82,6 +88,7 @@ class ReviewEngine(BaseEngine):
             "chapter_number": input_data.get("chapter_number"),
             "word_count": chinese_word_count(chapter_text),
             "review_dimensions": list(REVIEW_DIMENSIONS),
+            "audit_dimensions": [item.key for item in AUDIT_DIMENSIONS],
             "constraints_to_check": [
                 {
                     "id": c.get("id"),
@@ -99,6 +106,9 @@ class ReviewEngine(BaseEngine):
             ],
             "previous_chapter_tail": input_data.get("previous_chapter_tail") or "",
             "previous_transition_contract": input_data.get("previous_transition_contract") or {},
+            "chapter_plan": input_data.get("chapter_plan") or {},
+            "scene_plan": input_data.get("scene_plan") or {},
+            "deai_metrics": input_data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
             "chapter_text": chapter_text,
         }
 
@@ -107,7 +117,7 @@ class ReviewEngine(BaseEngine):
             result=analysis,
             confidence=0.9,
             reason=(
-                f"Prepared 7-dimension review for {analysis['word_count']} chars, "
+                f"Prepared 7-macro/33-detail review for {analysis['word_count']} chars, "
                 f"{len(analysis['constraints_to_check'])} constraints"
             ),
         )
@@ -121,11 +131,14 @@ class ReviewEngine(BaseEngine):
         plan = {
             **data,
             "dimensions": list(REVIEW_DIMENSIONS),
+            "audit_dimensions": [item.key for item in AUDIT_DIMENSIONS],
             "score_threshold": QUALITY_PASS_SCORE,
             "checks_to_run": [
                 "ai_dimensional_review",
                 "constraint_compliance",
                 "length_check",
+                "continuity_contract_check",
+                "deai_metrics_check",
             ],
         }
         return EngineResult(
@@ -161,6 +174,7 @@ class ReviewEngine(BaseEngine):
         dimension_block = "\n".join(
             f"- {k}: {v}" for k, v in DIMENSION_LABELS.items()
         )
+        audit_block = format_audit_dimensions()
 
         # Keep both ends when a provider context limit requires a cap.  The
         # chapter opening contains the continuation point; the ending carries
@@ -179,13 +193,24 @@ class ReviewEngine(BaseEngine):
             },
             ensure_ascii=False,
         )
+        plan_block = json.dumps(
+            {
+                "chapter_plan": data.get("chapter_plan") or {},
+                "scene_plan": data.get("scene_plan") or {},
+                "deai_metrics": data.get("deai_metrics") or {},
+            },
+            ensure_ascii=False,
+        )
 
         prompt = (
-            "请对下面这章小说正文做专业审稿，从 7 个维度打分（0-100 整数）。\n\n"
+            "请对下面这章小说正文做专业审稿，先给 7 个宏观维度打分，"
+            "再完成 33 个内部审计项（均为 0-100 整数）。\n\n"
             f"【已确立设定】\n{setting_block}\n\n"
             f"【必须遵守的约束】\n{constraint_block}\n\n"
             f"【跨章连续性证据】\n{continuity_block}\n\n"
+            f"【本章计划与确定性表达指标】\n{plan_block}\n\n"
             f"【评分维度】\n{dimension_block}\n\n"
+            f"【33个内部审计项】\n{audit_block}\n\n"
             f"【正文】\n{review_text}\n\n"
             "只输出 JSON：\n"
             "{\n"
@@ -193,6 +218,7 @@ class ReviewEngine(BaseEngine):
             '"plot_logic":0,"writing_quality":0,"emotional_impact":0,'
             '"constraint_compliance":0},\n'
             '  "overall_score": 0,\n'
+            '  "audit_dimensions": {"chapter_goal":{"score":0,"evidence":"证据","repair":"修复动作"}},\n'
             '  "reader_experience": {"expectation":0,"conflict":0,"payoff":0,'
             '"emotion_shift":0,"worth_continuing":0},\n'
             '  "issues": [{"dimension":"pacing","severity":"low|medium|high",'
@@ -211,6 +237,8 @@ class ReviewEngine(BaseEngine):
             "如果存在逻辑问题，指出触发→依据→选择→阻碍→代价→结果哪一环断了；"
             "如果存在 AI 腔，指出具体套话、同构句、解释腔或过度工整段落，并给出替代表达方向。"
             "中高严重度的问题不得只写‘可加强’，必须写清位置和修复动作。"
+            "33个审计项必须全部出现；每项都要给 score、evidence、repair。"
+            "如果某项确实不适用，也要给出 score，并在 evidence 说明不适用的理由。"
             f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
             f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
             f"pacing/writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
@@ -220,10 +248,10 @@ class ReviewEngine(BaseEngine):
             ai = await self.ai_gateway.generate_json(
                 prompt,
                 system_prompt="你是严格的中文小说审稿编辑，只输出合法 JSON，不要客套。",
-                max_tokens=3000,
+                max_tokens=5000,
                 temperature=0.2,
-                prompt_name="v7.review.seven_dimension",
-                prompt_version="1.1.0",
+                prompt_name="v7.review.33_dimension",
+                prompt_version="1.0.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
@@ -277,17 +305,24 @@ class ReviewEngine(BaseEngine):
             overall = computed
 
         violations = raw.get("constraint_violations") or []
+        audit_report = normalize_audit_report(
+            raw.get("audit_dimensions"),
+            macro_scores=dimension_scores,
+            reader_experience=reader_experience,
+        )
         review_result = {
             "chapter_number": data.get("chapter_number"),
             "overall_score": float(overall),
             "computed_score": computed,
             "dimension_scores": dimension_scores,
+            "audit_report": audit_report,
             "reader_experience": reader_experience,
             "reader_experience_summary": summarize_reader_experience(reader_experience),
             "issues": raw.get("issues") or [],
             "constraint_violations": violations,
             "strengths": raw.get("strengths") or [],
             "constraints_checked": len(constraints),
+            "deai_metrics": data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
             "word_count": data.get("word_count", 0),
             "model": ai["usage"].get("model"),
             "reason": raw.get("reason", ""),
@@ -306,7 +341,10 @@ class ReviewEngine(BaseEngine):
             success=True,
             result=review_result,
             confidence=max(0.0, min(1.0, confidence)),
-            reason=f"AI review score {overall} across 7 dimensions",
+            reason=(
+                f"AI review score {overall} across 7 macro dimensions; "
+                f"33-dimension coverage {audit_report['coverage']:.0%}"
+            ),
             warnings=warnings,
         )
 
@@ -333,6 +371,12 @@ class ReviewEngine(BaseEngine):
             for v in result.get("constraint_violations", [])
             if str(v.get("severity", "")).lower() == "high"
         ]
+        audit_report = result.get("audit_report") or {}
+        audit_contract_valid = (
+            audit_report.get("schema_version") == "33d-v1"
+            and audit_report.get("count") == len(AUDIT_DIMENSIONS)
+            and len(audit_report.get("items") or {}) == len(AUDIT_DIMENSIONS)
+        )
 
         validation = {
             **result,
@@ -341,10 +385,13 @@ class ReviewEngine(BaseEngine):
                 and in_range
                 and overall_in_range
                 and reader_experience_complete
+                and audit_contract_valid
             ),
             "dimensions_count": len(scores),
             "score_in_range": in_range and overall_in_range,
             "reader_experience_complete": reader_experience_complete,
+            "audit_contract_valid": audit_contract_valid,
+            "audit_coverage": audit_report.get("coverage", 0.0),
             "reader_experience_summary": summarize_reader_experience(reader_experience),
             "blocking_violations": len(high_violations),
             "passed": result.get("overall_score", 0) >= QUALITY_PASS_SCORE and not high_violations,

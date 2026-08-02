@@ -130,6 +130,22 @@ def test_analysis_output_schema_is_strict_and_complete():
     assert normalized["pacing"] == {}
     assert normalized["originality_constraints"]
 
+    with_context = _validate_market_analysis_output(
+        _provider_output(),
+        analysis_context={
+            "sample_size": 30,
+            "scan_scope": {"mode": "typed", "main_category": "都市", "sub_category": "都市重生"},
+            "evidence_source": "番茄小说",
+            "source_snapshot_at": "2026-08-02T10:00:00+08:00",
+        },
+    )
+    candidate = with_context["topic_candidates"][0]
+    assert candidate["sample_size"] == 30
+    assert candidate["main_category"] == "都市"
+    assert candidate["evidence_source"] == "番茄小说"
+    assert candidate["golden_three_chapters"] == []
+    assert with_context["evidence_context"]["snapshot_at"] == "2026-08-02T10:00:00+08:00"
+
     duplicate = _provider_output()
     duplicate["topic_candidates"][0]["title"] = "末日经营指南"
     with pytest.raises(ValueError, match="duplicates"):

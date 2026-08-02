@@ -15,6 +15,7 @@ from ...services.reader_experience import (
     summarize_reader_experience,
 )
 from ...services.quality_risks import build_quality_repair_contract
+from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -32,15 +33,18 @@ CRITICAL_DIMENSION_MINIMUMS: dict[str, float] = {
     "constraint_compliance": 85.0,
 }
 
+AUDIT_HARD_MINIMUM = 85.0
+DEAI_HIGH_RISK_THRESHOLD = 70
+
 
 def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
     """Return the application-level decision for an AI review payload."""
-    score = float(review_data.get("overall_score") or 0.0)
+    overall_score = float(review_data.get("overall_score") or 0.0)
     blocking = int(review_data.get("blocking_violations") or 0)
     dimensions = review_data.get("dimension_scores") or review_data.get("dimensions") or {}
     failures: list[dict[str, Any]] = []
-    if score < QUALITY_PASS_SCORE:
-        failures.append({"dimension": "overall_score", "actual": score, "minimum": QUALITY_PASS_SCORE})
+    if overall_score < QUALITY_PASS_SCORE:
+        failures.append({"dimension": "overall_score", "actual": overall_score, "minimum": QUALITY_PASS_SCORE})
     for name, minimum in CRITICAL_DIMENSION_MINIMUMS.items():
         actual = float(dimensions.get(name) or 0.0)
         if actual < minimum:
@@ -59,14 +63,39 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
             "minimum": "resolved",
             "reason": risk.get("description") or risk.get("text"),
         })
+    audit_report = review_data.get("audit_report") or {}
+    audit_items = audit_report.get("items") or {}
+    for item in AUDIT_DIMENSIONS:
+        if not item.hard_gate:
+            continue
+        detail = audit_items.get(item.key) or {}
+        audit_score = detail.get("score")
+        if isinstance(audit_score, (int, float)) and audit_score < AUDIT_HARD_MINIMUM:
+            failures.append({
+                "dimension": item.key,
+                "actual": audit_score,
+                "minimum": AUDIT_HARD_MINIMUM,
+                "reason": detail.get("evidence") or item.label,
+            })
+    deai_metrics = review_data.get("deai_metrics") or {}
+    deai_risk = deai_metrics.get("risk_score")
+    if isinstance(deai_risk, (int, float)) and deai_risk >= DEAI_HIGH_RISK_THRESHOLD:
+        failures.append({
+            "dimension": "ai_pattern_risk",
+            "actual": deai_risk,
+            "minimum": f"< {DEAI_HIGH_RISK_THRESHOLD}",
+            "reason": "确定性表达指标显示 AI 腔风险过高，需要定向润色",
+        })
     reader_experience = summarize_reader_experience(review_data.get("reader_experience"))
     return {
         "passed": not failures,
-        "score": score,
+        "score": overall_score,
         "blocking_violations": blocking,
         "failures": failures,
         "threshold": QUALITY_PASS_SCORE,
         "critical_dimension_minimums": dict(CRITICAL_DIMENSION_MINIMUMS),
+        "audit_hard_minimum": AUDIT_HARD_MINIMUM,
+        "deai_high_risk_threshold": DEAI_HIGH_RISK_THRESHOLD,
         "quality_repair_contract": repair_contract,
         # Reader experience is advisory; it must not replace the continuity
         # and writing hard gates above.  It is nevertheless returned with the

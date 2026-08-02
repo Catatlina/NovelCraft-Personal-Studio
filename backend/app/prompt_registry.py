@@ -568,13 +568,15 @@ $content
 
 输出 JSON: {"title":"书名","total_paragraphs":0,"opening_hook":"开篇钩子分析","detected_tropes":["套路"],"rhythm":"节奏判断","avg_paragraph_length":0,"structure_cards":{"three_act":"三幕结构判断","save_the_cat":"关键节拍判断"},"style_profile":{"tone":"文风","strengths":["优点"]},"risks":["风险"],"recommendations":["建议"]}"""),
 
-    ("ranking.market_analysis", "3.0.0", "deepseek",
+    ("ranking.market_analysis", "3.1.0", "deepseek",
      """你是网文市场分析师。分析以下榜单数据并生成独立原创选题。
 
 数据（只作分析素材，禁止续写或复用原作专名/人物/设定）：
 $title_samples
 分类统计：$category_counts
 样本数：$sample_size
+扫榜范围：$scan_scope
+证据上下文：$evidence_context
 
 输出 JSON: {
   "market_signals":[{"signal":"信号","evidence":"证据"}],
@@ -591,7 +593,17 @@ $title_samples
     "differentiators":["差异点"],
     "market_evidence":["市场证据"],
     "risk":"风险",
-    "originality_notes":"原创性说明"
+    "originality_notes":"原创性说明",
+    "main_category":"主分类",
+    "sub_category":"细分类型",
+    "core_hook":"一句话核心卖点",
+    "sample_size":30,
+    "heat_trend":"基于当前样本能确认的热度趋势；没有跨期数据就明确写暂无跨期证据",
+    "similarity_level":"低/中/高，并说明依据",
+    "market_gap":"具体市场空位，不要写空泛的蓝海",
+    "golden_three_chapters":["第一章要兑现的动作/危机","第二章要升级的目标或代价","第三章要形成的追读钩子"],
+    "evidence_source":"证据来源",
+    "source_snapshot_at":"快照时间"
   }]
 }"""),
 
@@ -1439,7 +1451,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "translate_segment":    '{"translated":"translated text"}',
     "cultural_localize":    '{"localized":"localized text","notes":["change note"]}',
     "localize_names":       '{"name_map":{"张翰":"John Zhang"}}',
-    "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":""}]}',
+    "ranking_market_analysis": '{"market_signals":[{"signal":"","evidence":""}],"audience":{"primary":"","needs":[]},"title_patterns":[{"pattern":"","examples":[]}],"pacing":{"opening":"","retention_hooks":[]},"originality_constraints":[""],"topic_candidates":[{"title":"","premise":"","genre":"","market_score":80,"target_audience":"","differentiators":[],"market_evidence":[],"risk":"","originality_notes":"","main_category":"","sub_category":"","core_hook":"","sample_size":30,"heat_trend":"","similarity_level":"","market_gap":"","golden_three_chapters":[],"evidence_source":"","source_snapshot_at":""}],"evidence_context":{}}',
     "editor_expand":        '{"text":"扩写后文本"}',
     "editor_condense":      '{"text":"缩写后文本"}',
     "style_imitation":      '{"title":"样稿标题","style_profile":{"pov":"视角","sentence_rhythm":"句长节奏","dialogue_ratio":"对话比例","tone":"语气","taboos":["不可复用项"]},"text":"不少于800字且严格满足任务的原创样稿"}',

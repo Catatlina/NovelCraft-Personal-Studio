@@ -6,13 +6,19 @@ import { NovelAnalysisReport } from "./NovelAnalysisReport";
 
 type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string; capture_status?: string; user_action_required?: boolean; ocr_required?: boolean };
-type Snapshot = { id: string; source_key: string; display_name: string; status: string; capture_status?: string; collector?: string; confidence?: number; validation_summary?: Record<string, unknown>; item_count: number; error?: string; captured_at: string };
+type Snapshot = { id: string; source_key: string; display_name: string; status: string; capture_status?: string; collector?: string; confidence?: number; validation_summary?: Record<string, unknown>; evidence?: Record<string, unknown>; item_count: number; error?: string; captured_at: string };
 type Evidence = Record<string, unknown>;
 type UnifiedMetrics = { readers?: number; word_count?: number; completion_status?: string; engagement_index?: number };
 type RankingItem = { id: string; rank_no: number; title: string; author?: string; category?: string; source_url?: string; metadata_status?: string; collector?: string; confidence?: number; evidence?: Evidence; metrics?: { collector?: string; confidence?: number; evidence?: Evidence; validation?: Evidence; leaderboard?: string; leaderboards?: string[] }; unified_metrics?: UnifiedMetrics };
 type MarketAnalysis = { analysis_id: string; summary: string; status: string; analysis_mode: string; market_signals?: Array<{ signal?: string; evidence?: string }>; audience?: { primary?: string; needs?: string[] }; title_patterns?: Array<{ pattern?: string }>; pacing?: { opening?: string; retention_hooks?: string[] }; originality_constraints?: string[]; signals?: any; layers?: any; heatmap?: any; keywords?: any; candidates?: Topic[]; market_score_avg?: number | null; trend?: { direction?: string; delta?: number } };
 type SnapshotDetail = Snapshot & { items: RankingItem[]; latest_analysis?: MarketAnalysis | null };
-type Topic = { id: string; title: string; premise: string; genre: string; market_score: number; status: string; target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string; originality_notes?: string; novel_id?: string };
+type Topic = {
+  id: string; title: string; premise: string; genre: string; market_score: number; status: string;
+  target_audience?: string; differentiators?: string[]; market_evidence?: string[]; risk?: string;
+  originality_notes?: string; novel_id?: string; main_category?: string; sub_category?: string;
+  core_hook?: string; sample_size?: number; heat_trend?: string; similarity_level?: string;
+  market_gap?: string; golden_three_chapters?: string[]; evidence_source?: string; source_snapshot_at?: string;
+};
 type ImportItem = Record<string, unknown>;
 type CaptureArtifact = { source: string; status?: string; collector?: string; items?: ImportItem[]; source_label?: string };
 
@@ -51,6 +57,34 @@ function evidenceText(evidence?: Evidence): string {
   return Object.entries(evidence).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`).join("；");
 }
 
+function topicEvidence(topic: Topic): React.ReactNode {
+  const typeLabel = [topic.main_category, topic.sub_category].filter(Boolean).join(" / ") || topic.genre;
+  const hasEvidence = Boolean(
+    topic.core_hook || topic.market_gap || topic.heat_trend || topic.similarity_level
+    || topic.golden_three_chapters?.length || topic.evidence_source || topic.source_snapshot_at,
+  );
+  if (!hasEvidence) return null;
+  return (
+    <details style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }}>
+      <summary style={{ cursor: "pointer", color: "var(--primary-light)" }}>市场证据与黄金三章</summary>
+      <div style={{ display: "grid", gap: 3, marginTop: 6, lineHeight: 1.55 }}>
+        <div><b>类型：</b>{typeLabel}</div>
+        {topic.core_hook && <div><b>核心卖点：</b>{topic.core_hook}</div>}
+        {topic.heat_trend && <div><b>热度趋势：</b>{topic.heat_trend}</div>}
+        {topic.similarity_level && <div><b>同质化：</b>{topic.similarity_level}</div>}
+        {topic.market_gap && <div><b>市场空位：</b>{topic.market_gap}</div>}
+        {topic.sample_size != null && <div><b>样本：</b>{topic.sample_size} 本</div>}
+        {topic.golden_three_chapters?.length ? (
+          <div><b>黄金三章：</b>{topic.golden_three_chapters.join("；")}</div>
+        ) : <div><b>黄金三章：</b>模型未提供，需在立项前补齐</div>}
+        {(topic.evidence_source || topic.source_snapshot_at) && (
+          <div><b>证据：</b>{topic.evidence_source || "榜单快照"}{topic.source_snapshot_at ? ` · ${topic.source_snapshot_at}` : ""}</div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export function RankingCenter({ projectId, onBookCreated }: { projectId: string; onBookCreated: (novelId: string, runId?: string) => Promise<void> }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -70,6 +104,14 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [analysisMode, setAnalysisMode] = useState<"single" | "multi">("single");
   const [multiAnalysisResult, setMultiAnalysisResult] = useState<any>(null);
   const [multiAnalysisLoading, setMultiAnalysisLoading] = useState(false);
+  const [typedScan, setTypedScan] = useState({
+    platform: "fanqie",
+    gender: "all",
+    leaderboard: "all",
+    main_category: "",
+    sub_category: "",
+    limit: 30,
+  });
 
   async function load() {
     const [s, p, t] = await Promise.allSettled([
@@ -104,6 +146,30 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       await load();
     } catch (error) { setMessage(`一键采集失败：${errorText(error)}`); }
     finally { setBusy(""); }
+  }
+
+  async function scanByType() {
+    setBusy("scan-typed"); setMessage("");
+    try {
+      const result = await apiRaw<Wrapped<{ item_count: number; scan_scope?: Record<string, unknown> }>>(
+        `/api/v1/ranking/sources/${typedScan.platform}/scan?project_id=${projectId}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            gender: typedScan.gender,
+            leaderboard: typedScan.leaderboard,
+            main_category: typedScan.main_category,
+            sub_category: typedScan.sub_category,
+            limit: typedScan.limit,
+          }),
+        },
+      );
+      setMessage(`${typedScan.platform === "fanqie" ? "番茄" : "起点"}类型榜采集成功：${result.data.item_count} 本`);
+      await load();
+    } catch (error) {
+      setMessage(`类型榜采集失败：${errorText(error)}；样本不足时请放宽分类或增加榜单范围`);
+      await load();
+    } finally { setBusy(""); }
   }
 
   async function selectImportFile(file?: File) {
@@ -400,6 +466,60 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         {message}
       </div>
     )}
+
+    <details className="card" open>
+      <summary className="card-head" style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="card-title"><span>🧭</span> 扫榜方式</div>
+        <span className="card-sub">全站扫榜 / 按类型扫榜</span>
+      </summary>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "end", gap: 10, padding: "0 0 var(--space-3)" }}>
+        <button className="btn-primary" style={{ width: "auto", padding: "0 18px", height: 38 }} disabled={!!busy} onClick={() => void scanAll()}>
+          {busy === "scan-all" ? "采集中…" : "全站扫榜"}
+        </button>
+        <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          平台
+          <select className="form-input" aria-label="类型榜平台" value={typedScan.platform} onChange={event => setTypedScan(value => ({ ...value, platform: event.target.value }))}>
+            <option value="fanqie">番茄</option>
+            <option value="qidian">起点</option>
+          </select>
+        </label>
+        <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          性别
+          <select className="form-input" aria-label="类型榜性别" value={typedScan.gender} onChange={event => setTypedScan(value => ({ ...value, gender: event.target.value }))}>
+            <option value="all">全部</option>
+            <option value="male">男频</option>
+            <option value="female">女频</option>
+          </select>
+        </label>
+        <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          榜单
+          <select className="form-input" aria-label="类型榜单" value={typedScan.leaderboard} onChange={event => setTypedScan(value => ({ ...value, leaderboard: event.target.value }))}>
+            <option value="all">全榜</option>
+            <option value="newbook">新书榜</option>
+            <option value="reading">阅读榜</option>
+            <option value="hotsales">热销榜</option>
+            <option value="recommend">推荐榜</option>
+            <option value="monthly">月榜</option>
+          </select>
+        </label>
+        <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          主分类
+          <input className="form-input" aria-label="主分类" placeholder="例如 都市" value={typedScan.main_category} onChange={event => setTypedScan(value => ({ ...value, main_category: event.target.value }))} />
+        </label>
+        <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          子分类
+          <input className="form-input" aria-label="子分类" placeholder="例如 都市重生" value={typedScan.sub_category} onChange={event => setTypedScan(value => ({ ...value, sub_category: event.target.value }))} />
+        </label>
+        <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          数量
+          <input className="form-input" aria-label="采集数量" type="number" min={5} max={200} value={typedScan.limit} onChange={event => setTypedScan(value => ({ ...value, limit: Math.max(5, Math.min(200, Number(event.target.value) || 30)) }))} style={{ width: 90 }} />
+        </label>
+        <button className="btn-primary" style={{ width: "auto", padding: "0 18px", height: 38 }} disabled={!!busy} onClick={() => void scanByType()}>
+          {busy === "scan-typed" ? "采集中…" : "按类型扫榜"}
+        </button>
+      </div>
+      <small style={{ color: "var(--text-2)" }}>只使用榜单返回的可验证分类字段；没有足够样本时会明确提示“数据稀疏”。</small>
+    </details>
 
     {/* ── Source cards + import ── */}
     <details className="card" style={{ marginBottom: "var(--space-4)" }}>
@@ -750,6 +870,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                                           <strong style={{ fontSize: 14 }}>{topic.title}</strong>
                                           <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>{topic.genre}{topic.target_audience ? ` · ${topic.target_audience}` : ""}</div>
                                           {topic.premise && <p style={{ fontSize: 12, color: "var(--text-3)", margin: "6px 0 0", lineHeight: 1.6 }}>{topic.premise}</p>}
+                                          {topicEvidence(topic)}
                                         </div>
                                         <div style={{ textAlign: "right", flexShrink: 0 }}>
                                           <div style={{ fontSize: 18, color: "var(--primary-light)", fontWeight: 700 }}>{typeof topic.market_score === "number" ? topic.market_score.toFixed(1) : topic.market_score ?? "—"}</div>
@@ -824,6 +945,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
                       <strong style={{ fontSize: 14 }}>{topic.title}</strong>
                       <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>{topic.genre}{topic.target_audience ? ` · ${topic.target_audience}` : ""}</div>
                       {topic.premise && <p style={{ fontSize: 12, color: "var(--text-3)", margin: "6px 0 0", lineHeight: 1.6 }}>{topic.premise}</p>}
+                      {topicEvidence(topic)}
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 18, color: "var(--primary-light)", fontWeight: 700 }}>{typeof topic.market_score === "number" ? topic.market_score.toFixed(1) : topic.market_score ?? "—"}</div>
@@ -1073,6 +1195,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
               </small>
               <p style={{ fontSize: 13, color: "var(--text-1)", marginBottom: 8 }}>{topic.premise}</p>
               {topic.target_audience && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>目标受众：</b>{topic.target_audience}</small>}
+              {topicEvidence(topic)}
               {!!topic.differentiators?.length && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>差异化：</b>{topic.differentiators.join("；")}</small>}
               {!!topic.market_evidence?.length && <small style={{ color: "var(--text-2)", display: "block", marginBottom: 2 }}><b>市场依据：</b>{topic.market_evidence.join("；")}</small>}
               {topic.risk && <small style={{ color: "var(--red)", display: "block", marginBottom: 2 }}><b>风险：</b>{topic.risk}</small>}

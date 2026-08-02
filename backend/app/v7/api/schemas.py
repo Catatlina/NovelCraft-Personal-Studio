@@ -71,6 +71,12 @@ class StateListResponse(BaseModel):
     total: int
 
 
+# ── Quality rule learning ───────────────────────────────────────────────
+
+class RuleRollbackRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
 # ── Goals ────────────────────────────────────────────────────────────────
 
 class GoalResponse(BaseModel):

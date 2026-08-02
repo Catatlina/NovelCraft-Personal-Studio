@@ -12,6 +12,7 @@ from typing import Any
 
 from ...db import connect, encode, new_id, row_to_dict
 from .project_mapping import ensure_novel_project_link
+from ..quality.continuity import build_state_delta
 
 
 def generation_key(novel_id: str, chapter_number: int) -> str:
@@ -64,7 +65,7 @@ def build_transition_contract(
         and item.get("key")
     ]
     return {
-        "schema_version": "v1",
+        "schema_version": "v2",
         "chapter_number": chapter_number,
         "previous_chapter": chapter_number - 1 if chapter_number > 1 else None,
         "start_state": {
@@ -82,6 +83,7 @@ def build_transition_contract(
             for item in items
             if item.get("key") and item.get("summary")
         ],
+        "state_delta": build_state_delta(items),
         "open_threads": open_threads,
         "forbidden_changes": [
             {"name": c.get("name"), "description": c.get("description"), "severity": c.get("severity")}

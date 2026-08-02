@@ -1,5 +1,17 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-02 融合开发批次（工作树，基线 `94fc731`）
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 全站/按类型扫榜及范围证据 | 可用 | `backend/app/api/v1/ranking.py`、`RankingCenter.tsx`；离线榜单契约回归通过 | 真实平台刷新和平台字段覆盖 |
+| 选题候选市场字段与快照来源 | 可用 | `topic_candidates.meta` 复用现有迁移；市场分析回归通过 | 真实榜单样本和人工选题评审 |
+| 33 维内部审计 + 7 宏观分数 | 可用 | `backend/app/v7/quality/audit_dimensions.py`、`ReviewEngine`；V7 质量契约回归通过 | Provider 必须真实返回完整 33 项并做长篇质量复核 |
+| 跨章状态交接与七域真相投影 | 可用 | `continuity.py`、`truth_store.py`、V7 Director；transition contract 回归通过 | 真实多章运行和人工连贯性评估 |
+| 去 AI 味确定性指标与规则学习灰度/回滚 | 已接线 | `deai_metrics.py`、`rule_learning.py`；规则状态机回归通过 | 真实章节样本验证误伤率和读者体验 |
+
+本批工作树尚未提交或部署；“可用/已接线”只代表代码级闭环和离线回归，不代表生产质量验收。
+
 ## 2026-08-02 最新单链路决策
 
 质量对比已完成选型：V7 真实 20 章平均 92.0、最低 91.0，V6 平均 79.6、最低 72.0。故正文生成不再维护双轨，V7 为唯一 canonical chain；V6 只承担兼容事实、`contents`、编辑器和导出。

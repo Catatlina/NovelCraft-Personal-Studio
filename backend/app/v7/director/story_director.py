@@ -40,6 +40,7 @@ from ..integration.v6_bridge import (
     persist_accepted_v7_chapter,
     persist_rejected_v7_draft,
 )
+from ..quality.continuity import validate_transition_contract
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
     "perceive",
@@ -362,6 +363,7 @@ class StoryDirector:
                 "reader_experience": observation.get("reader_experience", {}),
                 "issues": observation.get("issues", []),
                 "quality_gate": observation.get("quality_gate", {}),
+                "audit_report": observation.get("audit_report", {}),
                 "passed_review": observation["passed_review"],
                 "rework_count": observation["rework_count"],
                 "memory": {
@@ -371,6 +373,8 @@ class StoryDirector:
                     "conflicts_found": update_result["conflicts_found"],
                 },
                 "transition_contract": update_result.get("transition_contract", {}),
+                "continuity": update_result.get("continuity", {}),
+                "rule_learning": update_result.get("rule_learning", []),
                 "v6_content": update_result.get("v6_content"),
                 "v6_content_id": (update_result.get("v6_content") or {}).get("content_id"),
                 "steps_executed": list(AGENT_LOOP_STEPS),
@@ -433,6 +437,7 @@ class StoryDirector:
                 s.get("key") for s in (pending_states or [])
             ][:20],
             "has_previous_chapter": bool(previous),
+            "truth_domains": await self.brain.truth.digest(),
         }
 
     # ── step 2 ──────────────────────────────────────────────────────────
@@ -640,6 +645,7 @@ class StoryDirector:
         plan: dict[str, Any],
     ) -> dict[str, Any]:
         def review_input(current: dict[str, Any]) -> dict[str, Any]:
+            metrics = (current.get("deai") or {}).get("metrics") or {}
             return {
                 "chapter_text": current["text"],
                 "chapter_number": chapter_number,
@@ -647,6 +653,9 @@ class StoryDirector:
                 "previous_transition_contract": current.get("context", {}).get(
                     "previous_transition_contract", {}
                 ),
+                "chapter_plan": plan.get("plot_brief") or {},
+                "scene_plan": current.get("scene_plan") or {},
+                "deai_metrics": metrics.get("after") or metrics,
             }
 
         review = await self.review_engine.run(review_input(generation))
@@ -755,6 +764,7 @@ class StoryDirector:
             "reader_experience": review_data.get("reader_experience", {}),
             "issues": review_data.get("issues", []),
             "constraint_violations": review_data.get("constraint_violations", []),
+            "audit_report": review_data.get("audit_report", {}),
             "blocking_violations": blocking,
             "passed_review": passed,
             "rework_count": rework_count,
@@ -794,6 +804,55 @@ class StoryDirector:
             memory_items=memory_data.get("extracted_items") or [],
             constraints=(generation.get("context") or {}).get("constraints") or [],
         )
+        continuity = validate_transition_contract(
+            transition_contract,
+            chapter_number=chapter_number,
+            previous_contract=(generation.get("context") or {}).get(
+                "previous_transition_contract", {}
+            ),
+        )
+        transition_contract["continuity"] = continuity
+        if not continuity["passed"]:
+            # This is an application hard gate.  A high model score cannot
+            # make a chapter publishable when its durable hand-off is broken.
+            observation["passed_review"] = False
+            quality_gate = observation.get("quality_gate") or {}
+            quality_gate["passed"] = False
+            quality_gate["continuity"] = continuity
+            quality_gate["failures"] = [
+                *(quality_gate.get("failures") or []),
+                *[
+                    {
+                        "dimension": "continuity",
+                        "actual": item["severity"],
+                        "minimum": "resolved",
+                        "reason": item["message"],
+                    }
+                    for item in continuity["issues"]
+                    if item["severity"] == "high"
+                ],
+            ]
+            observation["quality_gate"] = quality_gate
+            observation["issues"] = [
+                *(observation.get("issues") or []),
+                *[
+                    {
+                        "dimension": "continuity",
+                        "severity": item["severity"],
+                        "description": item["message"],
+                        "suggestion": "补齐上一章承接、状态变化和下一章入口后再提交",
+                    }
+                    for item in continuity["issues"]
+                ],
+            ]
+
+        rule_learning = await self.brain.rules.observe(
+            chapter_number=chapter_number,
+            accepted=bool(observation["passed_review"]),
+            deai_metrics=(generation.get("deai") or {}).get("metrics") or {},
+            issues=observation.get("issues") or [],
+            source_run_id=run_id,
+        )
 
         # Persist both outcomes at the product boundary.  A failed quality
         # gate stays fail-closed (`needs_rewrite`), but the author must still
@@ -815,7 +874,11 @@ class StoryDirector:
             "chapter_summary": summary,
             "deai": generation.get("deai") or {},
             "transition_contract": transition_contract,
-            "extra_meta": self.generation_metadata,
+            "extra_meta": {
+                **self.generation_metadata,
+                "audit_report": observation.get("audit_report") or {},
+                "continuity": continuity,
+            },
         }
         if not observation["passed_review"]:
             bridge_kwargs.update(
@@ -855,6 +918,8 @@ class StoryDirector:
             "chapter_persisted": bool(v6_result),
             "v6_content": v6_result,
             "transition_contract": transition_contract,
+            "continuity": continuity,
+            "rule_learning": rule_learning,
             "chapter_summary": summary,
             "states_applied": memory_data.get("states_applied", 0),
             "states_pending_review": memory_data.get("states_pending_review", 0),

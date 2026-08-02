@@ -231,7 +231,7 @@ _FANQIE_LABELS = {
 }
 
 
-def _parse_fanqie_item(item: dict, cat_name: str, rank: int) -> Optional[dict]:
+def _parse_fanqie_item(item: dict, cat_name: str, rank: int, gender: str = "") -> Optional[dict]:
     """Parse a single fanqie API item into a normalized dict. Returns None if invalid."""
     book_id = str(item.get("book_id", item.get("bookId", "")))
     if not book_id:
@@ -246,6 +246,7 @@ def _parse_fanqie_item(item: dict, cat_name: str, rank: int) -> Optional[dict]:
         "title": title,
         "author": author,
         "category": cat_name,
+        "gender": "male" if str(gender) == "1" else "female" if str(gender) == "0" else "",
         "source": "fanqie",
         "source_book_id": book_id,
         "url": f"https://fanqienovel.com/page/{book_id}",
@@ -278,7 +279,7 @@ def _fetch_fanqie_one_category(cat_id: str, cat_name: str, gender: str,
             if not book_id or book_id in seen:
                 continue
             seen.add(book_id)
-            parsed = _parse_fanqie_item(item, cat_name, len(results) + 1)
+            parsed = _parse_fanqie_item(item, cat_name, len(results) + 1, gender)
             if parsed:
                 results.append(parsed)
         if len(items) < limit:
@@ -372,6 +373,28 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
     Each item carries ``leaderboard`` (primary label) and ``leaderboards``
     (all labels the book appears on). No browser scraping, no mock data.
     """
+    requested = str(leaderboard or "all").casefold()
+    aliases = {
+        "main": "peak",
+        "巅峰榜": "peak",
+        "阅读榜": "recommend",
+        "reading": "recommend",
+        "热销榜": "hotsales",
+        "推荐榜": "recommend",
+        "新书榜": "newbook",
+        "完本榜": "completed",
+        "finished": "completed",
+        "monthly": "monthly",
+        "月榜": "monthly",
+    }
+    requested = aliases.get(requested, requested)
+    if requested == "monthly":
+        return [{"source": "fanqie", "degraded": True,
+                 "error": "番茄当前公开采集器没有可验证的月榜字段，请导入可见浏览器快照"}]
+    if requested not in {"all", "peak", "newbook", "recommend", "hotsales", "completed"}:
+        return [{"source": "fanqie", "degraded": True,
+                 "error": f"番茄不支持可验证的榜单类型: {leaderboard}"}]
+
     target = max_count or _RANKING_FANQIE_COUNT
     meta = _fanqie_meta()
     rv = meta.get("rank_version", "")
@@ -406,6 +429,18 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
     completed = _aggregate_board(
         [i for i in hot_pool if str(i.get("creation_status", "")) == "1"],
         "完本榜·聚合", per_board)
+
+    selected_boards = {
+        "peak": peak_items,
+        "newbook": newbook,
+        "recommend": recommend,
+        "hotsales": recommend,
+        "completed": completed,
+    }
+    if requested != "all":
+        selected = selected_boards[requested]
+        return selected[:target] if selected else [{"source": "fanqie", "degraded": True,
+                                                     "error": f"番茄榜单 {leaderboard} 当前没有可验证样本"}]
 
     # Merge boards in priority order; a book on multiple boards keeps its first
     # position and accumulates all labels in ``leaderboards``.
@@ -1072,6 +1107,10 @@ def normalize_ranking_items(source: str, items: list[dict],
             metrics["leaderboard"] = str(raw.get("leaderboard", ""))
         if raw.get("leaderboards"):
             metrics["leaderboards"] = [str(x) for x in raw.get("leaderboards", [])][:8]
+        if raw.get("gender"):
+            metrics["gender"] = str(raw.get("gender"))
+        if raw.get("_scan_scope"):
+            metrics["scan_scope"] = raw.get("_scan_scope")
         if any(key in raw for key in ("collector", "confidence", "evidence")):
             metrics.update({
                 "collector": str(raw.get("collector", "http")),
@@ -1140,17 +1179,25 @@ def normalize_item_metrics(raw_metrics: dict | None) -> dict:
     }
 
 
-def compute_market_trend(db, project_id: str, source_id: str, current_avg: float | None) -> dict:
+def compute_market_trend(
+    db,
+    project_id: str,
+    source_id: str,
+    current_avg: float | None,
+    exclude_analysis_id: str | None = None,
+) -> dict:
     """P1-T11: compare this snapshot's avg market_score with the previous succeeded
     analysis for the same project+source; return {prev_avg, delta, direction}."""
     if current_avg is None:
         return {"prev_avg": None, "delta": None, "direction": "unknown"}
+    exclude_clause = " AND ma.id != %s" if exclude_analysis_id else ""
+    params = (project_id, source_id, exclude_analysis_id) if exclude_analysis_id else (project_id, source_id)
     prev = db.execute(
         """SELECT AVG(tc.market_score) AS avg_score FROM market_analyses ma
            JOIN ranking_snapshots rs ON rs.id = ma.snapshot_id
            JOIN topic_candidates tc ON tc.analysis_id = ma.id
-           WHERE ma.status='succeeded' AND rs.project_id=%s AND rs.source_id=%s""",
-        (project_id, source_id),
+           WHERE ma.status='succeeded' AND rs.project_id=%s AND rs.source_id=%s""" + exclude_clause,
+        params,
     ).fetchone()
     prev_avg = float(prev["avg_score"]) if prev and prev["avg_score"] is not None else None
     if prev_avg is None:

@@ -29,6 +29,7 @@ from ...services.ai_runtime import (
     record_async_execution,
 )
 from ...services.unified_gateway import UnifiedAIGateway
+from ..quality.deai_metrics import analyze_deai_patterns
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,7 @@ class ContextAssembler:
         ]
         constraints = await self.brain.constraints.list_constraints(limit=50)
         style_card = await self.load_style_card()
+        active_rules = await self.brain.rules.active_instructions(chapter_number=chapter_number)
 
         previous = await self.load_previous_chapters(chapter_number, count=3)
         recap_parts: list[str] = []
@@ -190,6 +192,7 @@ class ContextAssembler:
             "previous_tail": last_tail,
             "previous_transition_contract": previous_transition_contract,
             "style_card": style_card,
+            "active_rules": active_rules,
         }
 
         rendered = self.render(layers)
@@ -267,6 +270,16 @@ class ContextAssembler:
                 + json.dumps(style_card, ensure_ascii=False, separators=(",", ":"))
             )
 
+        active_rules = layers.get("active_rules") or []
+        if active_rules:
+            blocks.append(
+                "【已验证的低风险写作规则（只处理表达，不改变剧情）】\n"
+                + "\n".join(
+                    f"- {item.get('instruction') or item.get('code')}"
+                    for item in active_rules[:12]
+                )
+            )
+
         recap = layers.get("recap", [])
         if recap:
             blocks.append("【前情提要】\n" + "\n".join(recap))
@@ -293,6 +306,7 @@ class ContextAssembler:
             "previous_transition_contract": layers.get("previous_transition_contract", {}),
             "previous_tail": layers.get("previous_tail", ""),
             "style_card": layers.get("style_card", {}),
+            "active_rules": layers.get("active_rules", []),
         }
         anchor = cls.render(anchor_layers)
         state_blob = cls.render(
@@ -513,6 +527,7 @@ class DeAIPipeline:
         silently returning the weaker heuristic result.
         """
         original = text
+        before_metrics = analyze_deai_patterns(text)
         layers: list[dict[str, Any]] = []
 
         text, n = self._layer_cliches(text)
@@ -545,7 +560,8 @@ class DeAIPipeline:
             "章末保留悬念而不是总结；句法层减少正式连接词、对称排比和过度完整的解释；"
             "词语层删除高频套话、翻译腔和空泛形容；人物层保留角色口吻与对白潜台词，"
             "用动作和细节承载情绪，不把情绪标签直接说满。原文自然的地方少改，"
-            "不得摘要、缩写、新增剧情或机械删成电报句。\n\n"
+            "不得摘要、缩写、新增剧情或机械删成电报句。标点不设禁用清单；"
+            "保留有语义必要的破折号、省略号和分号，只处理整章高密度、连续重复或模板化使用。\n\n"
             f"【不可变事实】\n{source_facts or '（无额外事实）'}\n\n"
             f"【禁止改动】\n{forbidden_changes or '情节、人物、时间线、设定与对白信息'}\n\n"
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
@@ -579,6 +595,7 @@ class DeAIPipeline:
                 f"final_humanize dropped too many paragraphs: {len(before_paragraphs)}->{len(after_paragraphs)}"
             )
         text = humanized
+        after_metrics = analyze_deai_patterns(text)
         layers.append(
             {
                 "layer": "semantic_final_humanize",
@@ -599,6 +616,11 @@ class DeAIPipeline:
             "semantic_humanize": True,
             "humanize_changes": payload.get("changes") or [],
             "ai_patterns_removed": payload.get("ai_patterns_removed") or [],
+            "metrics": {
+                "before": before_metrics,
+                "after": after_metrics,
+                "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
+            },
             "usage": ai.get("usage") or {},
         }
 
@@ -1374,7 +1396,11 @@ class GenerationEngine:
                     context_layers.get("constraints") or [], ensure_ascii=False
                 ),
                 style_profile=json.dumps(
-                    context_layers.get("style_card") or {}, ensure_ascii=False
+                    {
+                        **(context_layers.get("style_card") or {}),
+                        "active_rules": context_layers.get("active_rules") or [],
+                    },
+                    ensure_ascii=False,
                 ),
             )
             add_usage(step, deai_result.get("usage") or {})
@@ -1425,6 +1451,7 @@ class GenerationEngine:
                 "semantic_humanize": deai_result.get("semantic_humanize", False),
                 "humanize_changes": deai_result.get("humanize_changes", []),
                 "ai_patterns_removed": deai_result.get("ai_patterns_removed", []),
+                "metrics": deai_result.get("metrics", {}),
             },
             "usage": usage,
         }

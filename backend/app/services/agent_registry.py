@@ -26,7 +26,7 @@ AGENT_REGISTRY = {
     "reviewer": {
         "name": "Reviewer",
         "role": "七维审核",
-        "description": "OOC/一致性/节奏/文学性/逻辑/角色/对话审核",
+        "description": "7个宏观维度 + 33个内部项的 OOC/连续性/节奏/逻辑/角色/AI腔审核",
         "prompt_source": "bootstrap.review_7dim",
         "tools": ["ooc_check", "consistency_check", "rhythm_check"],
         "output_schema": {"score": "int", "issues": "list", "dimensions": "dict"},

@@ -21,6 +21,7 @@ from .schemas import (
     SuccessResponse,
     HumanInterventionListResponse, ReviewRequest,
     InstructionRequest, InstructionResponse,
+    RuleRollbackRequest,
 )
 from ...core.authz import require_novel_member_dep
 
@@ -87,11 +88,50 @@ async def get_overview(brain: NovelBrain = Depends(get_brain)):
     return await brain.get_overview()
 
 
+@router.get("/{novel_id}/truth", response_model=dict)
+async def get_truth_domains(
+    include_chapter_text: bool = Query(False, description="仅在编辑器明确请求时返回章节正文"),
+    brain: NovelBrain = Depends(get_brain),
+):
+    """Return the seven truth domains projected from the single story-state store."""
+    return await brain.truth.snapshot(include_chapter_text=include_chapter_text)
+
+
+# ── Quality rule learning ───────────────────────────────────────────────
+
+@router.get("/{novel_id}/quality/rules", response_model=list[dict])
+async def list_quality_rules(
+    status: str | None = Query(None, description="candidate/canary/active/rolled_back"),
+    brain: NovelBrain = Depends(get_brain),
+):
+    """List learned de-AI rules and their evidence/rollout state."""
+    return await brain.rules.list_rules(status=status)
+
+
+@router.post(
+    "/{novel_id}/quality/rules/{rule_key}/rollback",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
+async def rollback_quality_rule(
+    rule_key: str,
+    request: RuleRollbackRequest,
+    brain: NovelBrain = Depends(get_brain),
+):
+    """Disable a learned rule; rollback is a human veto and is not auto-reversed."""
+    try:
+        return await brain.rules.rollback(rule_key, reason=request.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 # ── Story States ─────────────────────────────────────────────────────────
 
 @router.get("/{novel_id}/states", response_model=StateListResponse)
 async def list_states(
-    state_type: str = Query(..., description="State type: global/character/world/plot/reader"),
+    state_type: str = Query(..., description="State type: global/character/world/plot/reader/chapter/learning_rule"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     brain: NovelBrain = Depends(get_brain),
