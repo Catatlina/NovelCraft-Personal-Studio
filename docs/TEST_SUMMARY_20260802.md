@@ -25,6 +25,7 @@
 | vitest 全量 | **32 passed**（9 个测试文件：Progress/Review/Settings/ThemeProvider/WorkspaceDashboard/editorPreview 回归等） |
 | TypeScript 类型检查 | tsc --noEmit 通过 |
 | 生产构建 | npm run build 通过（dist 产出正常） |
+| **Playwright E2E 全量** | **17 passed / 10 skipped / 0 failed**（27 用例，10 skip 均为 AI Key 未注入或条件性跳过，非失败；明细见 `docs/E2E_RESULT_20260802.md`） |
 
 ## 3. 生产验证
 
@@ -57,8 +58,8 @@
 
 ## 6. 待办（未完成）
 
-- 前端 Playwright e2e 全量（#164）—— agent 执行中，结果见 `docs/E2E_RESULT_20260802.md`（产出后补入本报告）
-- 生产 Web 功能走查（#162）—— **已完成**（见第 3 节）
+- ~~前端 Playwright e2e 全量（#164）~~ ✅ **已完成**（17 passed / 0 failed，见 `docs/E2E_RESULT_20260802.md`）
+- ~~生产 Web 功能走查（#162）~~ ✅ **已完成**（见第 3 节）
 - 覆盖率统计（#171）—— 未执行（整体≥70% / 核心≥80% 待跑）
 
 ---
