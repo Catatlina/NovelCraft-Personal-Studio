@@ -154,8 +154,10 @@ export async function apiStream(
       let payload: any;
       try { payload = JSON.parse(line.slice(5).trim()); } catch { continue; }
       if (payload.error) throw new ApiError(payload.code === "PENDING_BUDGET" ? 429 : 502, payload);
-      if (payload.delta) onDelta(payload.delta);
-      if (payload.done) finalText = payload.text ?? "";
+      if (payload.delta !== undefined && payload.delta !== null) onDelta(String(payload.delta));
+      if (payload.done) {
+        finalText = typeof payload.text === "string" ? payload.text : payload.text == null ? "" : String(payload.text);
+      }
     }
   }
   if (finalText === null) throw new ApiError(502, { error: "stream ended without done frame" });

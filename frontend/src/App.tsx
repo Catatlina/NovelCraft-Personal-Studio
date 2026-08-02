@@ -66,11 +66,29 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function docToText(doc: TipTapDoc): string {
-  return doc.content?.map(i => i.text ?? "").join("\n\n") ?? "";
+  return doc?.content?.map(i => typeof i?.text === "string" ? i.text : String(i?.text ?? "")).join("\n\n") ?? "";
 }
 
-function textToDoc(text: string): TipTapDoc {
-  return { type: "doc", content: text.split(/\n{2,}/).map(t => t.trim()).filter(Boolean).map(t => ({ type: "paragraph", text: t })) };
+function textValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const candidate = value as { text?: unknown; content?: unknown };
+    if (typeof candidate.text === "string") return candidate.text;
+    if (Array.isArray(candidate.content)) {
+      return candidate.content.map(item => {
+        if (item && typeof item === "object" && "text" in item) {
+          return String((item as { text?: unknown }).text ?? "");
+        }
+        return String(item ?? "");
+      }).join("\n\n");
+    }
+  }
+  return value == null ? "" : String(value);
+}
+
+function textToDoc(text: unknown): TipTapDoc {
+  const normalized = textValue(text);
+  return { type: "doc", content: normalized.split(/\n{2,}/).map(t => t.trim()).filter(Boolean).map(t => ({ type: "paragraph", text: t })) };
 }
 
 export default function App() {
@@ -559,7 +577,11 @@ export default function App() {
         const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
           delta => setStreamPreview(previous => previous + delta));
         setStreamPreview("");
-        const normalizedText = normalizeParagraphBreaks(text);
+        const normalizedText = normalizeParagraphBreaks(textValue(text));
+        if (!normalizedText.trim()) {
+          setError("AI 未返回可用正文，请重试");
+          return;
+        }
         const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
         setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
         if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
@@ -576,14 +598,18 @@ export default function App() {
     }
     try {
       const output = await api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) });
-      const normalizedText = normalizeParagraphBreaks(output.text);
+      const normalizedText = normalizeParagraphBreaks(textValue(output?.text));
+      if (!normalizedText.trim()) {
+        setError("AI 未返回可用正文，请重试");
+        return;
+      }
       const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
       setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
       setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
       if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
     } catch (caught) {
-      if (caught instanceof ApiError && !isOfflineApiError(caught)) {
-        setError(caught.message || "AI 操作失败");
+      if (!(caught instanceof ApiError) || !isOfflineApiError(caught)) {
+        setError(caught instanceof ApiError ? (caught.message || "AI 操作失败") : "AI 操作失败，请重试");
         return;
       }
       await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);

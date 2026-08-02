@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, apiEnvelope, ApiError } from "./api";
+import { api, apiEnvelope, apiStream, ApiError } from "./api";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -39,5 +39,17 @@ describe("API response contract", () => {
       status: 403,
       payload: { code: 403, message: "forbidden", data: null },
     });
+  });
+
+  it("normalizes non-string SSE text instead of breaking the editor preview", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      'data: {"delta":123}\n\ndata: {"done":true,"text":456}\n\n',
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    )));
+
+    const deltas: string[] = [];
+    await expect(apiStream("/api/v1/contents/chapter-1/ai/continue/stream", { method: "POST" }, delta => deltas.push(delta)))
+      .resolves.toEqual({ text: "456" });
+    expect(deltas).toEqual(["123"]);
   });
 });
