@@ -6,7 +6,7 @@
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
 |---|---|---|---|
-| 正文生成唯一链路 | 可用 | `continue`、批量、自动续写、人工重生成和 Bootstrap 首章均委托 V7 Director；V7 质量通过后幂等写回 V6 `contents` | 新路由生产 Provider smoke/长跑 |
+| 正文生成唯一链路 | 可用 | `08942f3` 已部署；`continue`、批量、自动续写、人工重生成和 Bootstrap 首章均委托 V7 Director；生产 smoke 15/15，V7 质量通过后幂等写回 V6 `contents` | 生产 20 章 Provider 长跑 |
 | V6 兼容承载 | 可用 | V6 仅作为事实/知识/章节存储、编辑器和导出层；V7 结果保留 `canonical_engine=v7`、run 和 transition provenance | 目标部署环境真实回放 |
 | 生成质量目标 | 可用 | V7 真实双轨自动证据优于 V6；本轮代码回归已通过 | 生产 20 章、两位人工盲评；不能标记已验收 |
 

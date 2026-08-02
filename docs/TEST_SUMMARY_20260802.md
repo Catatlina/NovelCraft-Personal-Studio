@@ -6,7 +6,7 @@
 - 兼容边界：V6 只承载事实/知识、`contents`、编辑器和导出；V7 通过质量门后幂等写回 V6。
 - 本轮后端全量：**849 passed、138 skipped、1 xpassed、2 warnings**；canonical V7 目标回归 **46 passed、2 warnings**。
 - `verify_ai_truthfulness.py`、`verify_delivery_claims.py`、Python 编译检查和 `git diff --check` 通过。
-- 本轮路由收口尚未提交、推送或部署；因此没有把代码回归写成生产质量验收。
+- 本轮路由收口已提交为 `08942f3` 并部署；生产 smoke 15/15，浏览器走查 4 个用例均有通过证据。部署验证不等于生产长篇质量验收。
 
 > 汇总本会话（2026-07-31 ～ 2026-08-02）执行的全部测试与验证结果；末尾追加本轮本地收口证据。
 > 覆盖：V7 引擎测试 / 编辑器回归 / 前端单测 / 构建 / 生产 smoke / 生产浏览器走查 / 50 章连续生成评估。

@@ -10,9 +10,10 @@
 - 公开 `/api/v1/agents/writer/execute` 也已统一调用 V7；缺少 `novel_id` 时返回参数错误，不会重新打开旧 V6 writer。
 - V6 仅作为兼容事实源和产品承载层：保存 `contents`、知识事实、项目映射，并继续服务编辑器和导出。通过质量门的 V7 结果幂等写回同一 V6 章节记录。
 - Bootstrap 的规划/蓝图节点仍负责结构化创作准备；这不是第二套正文生成链。正文生成和正文质量闭环只有 V7 一条。
-- 本轮路由收口代码当前未提交、未推送、未部署。代码级回归已通过，但新路由尚未在生产做 Provider 长跑。
+- 本轮路由收口已提交为 `08942f3`、推送并部署到 `https://novel.xyjin.xyz`；代码级回归和部署 smoke 已通过，但新路由尚未在生产做 20 章 Provider 长跑。
 - 质量状态仍为**可用**，不是**已验收**；人工盲评覆盖为 0/20 两位评审。
 - 本轮最终回归：后端 **849 passed、138 skipped、1 xpassed、2 warnings**；V7 单链路目标组合 **46 passed、2 warnings**；前端 **32 passed**，构建通过。
+- 部署证据：迁移 head `nc_v7_novel_project_mapping`；备份 `backups/pre-deploy-08942f3-20260802-171323.sql.gz`（24MB）；公网 healthz 200；`prod_smoke.py` 15/15；浏览器走查并发首跑 3 通过，剩余用例因注册限流 429 单 worker 重跑通过。
 
 ## 0. V7.0 Alpha 最新状态（2026-08-01 生产部署完成）
 
