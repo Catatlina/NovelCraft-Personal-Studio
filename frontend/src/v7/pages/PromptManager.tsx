@@ -3,11 +3,12 @@
  * 
  * Manage prompt versions and execution history.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   FileCode, Plus, Clock, CheckCircle, Copy, Eye,
   ChevronDown, ChevronUp, Zap, Tag,
 } from 'lucide-react';
+import brainApi from '../api/client';
 
 interface PromptManagerProps {
   novelId: string;
@@ -27,79 +28,42 @@ interface PromptVersion {
   created_at: string;
 }
 
-const MOCK_PROMPTS: PromptVersion[] = [
-  {
-    id: 'prompt-1',
-    prompt_name: 'chapter_generation',
-    version: 3,
-    version_label: 'v3.0',
-    model: 'deepseek-chat',
-    prompt_hash: 'a1b2c3d4e5f6g7h8',
-    description: 'Main chapter generation prompt',
-    change_notes: 'Improved character consistency instructions',
-    is_active: true,
-    is_default: true,
-    created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'prompt-2',
-    prompt_name: 'chapter_generation',
-    version: 2,
-    version_label: 'v2.0',
-    model: 'deepseek-chat',
-    prompt_hash: 'b2c3d4e5f6g7h8i9',
-    description: 'Main chapter generation prompt',
-    change_notes: 'Added pacing guidelines',
-    is_active: true,
-    is_default: false,
-    created_at: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'prompt-3',
-    prompt_name: 'chapter_generation',
-    version: 1,
-    version_label: 'v1.0',
-    model: 'deepseek-chat',
-    prompt_hash: 'c3d4e5f6g7h8i9j0',
-    description: 'Initial version',
-    change_notes: 'First version',
-    is_active: false,
-    is_default: false,
-    created_at: new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'prompt-4',
-    prompt_name: 'review_7dim',
-    version: 2,
-    version_label: 'v2.0',
-    model: 'deepseek-chat',
-    prompt_hash: 'd4e5f6g7h8i9j0k1',
-    description: '7-dimensional review prompt',
-    change_notes: 'Added consistency check dimension',
-    is_active: true,
-    is_default: true,
-    created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'prompt-5',
-    prompt_name: 'deai_style',
-    version: 1,
-    version_label: 'v1.0',
-    model: 'deepseek-chat',
-    prompt_hash: 'e5f6g7h8i9j0k1l2',
-    description: 'De-AI style transformation',
-    change_notes: 'Initial version',
-    is_active: true,
-    is_default: true,
-    created_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
-  },
-];
-
 export function PromptManager({ novelId }: PromptManagerProps) {
-  const [prompts, setPrompts] = useState<PromptVersion[]>(MOCK_PROMPTS);
+  const [prompts, setPrompts] = useState<PromptVersion[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [templateText, setTemplateText] = useState('');
+  const [createForm, setCreateForm] = useState({
+    prompt_name: '',
+    model: 'deepseek-chat',
+    change_notes: '',
+    template: '',
+  });
+
+  useEffect(() => {
+    loadPrompts();
+  }, [novelId]);
+
+  const loadPrompts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const resp = await brainApi.listPromptVersions(
+        { limit: 200 },
+        novelId,
+      );
+      setPrompts(resp?.versions || []);
+    } catch (err: any) {
+      console.error('Failed to load prompts:', err);
+      setError(err?.message || '加载失败');
+      setPrompts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Group by prompt name
   const groupedPrompts = prompts.reduce((acc, prompt) => {
@@ -110,20 +74,49 @@ export function PromptManager({ novelId }: PromptManagerProps) {
     return acc;
   }, {} as Record<string, PromptVersion[]>);
 
-  const handleSetDefault = (promptId: string) => {
-    const prompt = prompts.find(p => p.id === promptId);
-    if (!prompt) return;
-
-    setPrompts(prev => prev.map(p => {
-      if (p.prompt_name === prompt.prompt_name) {
-        return { ...p, is_default: p.id === promptId };
-      }
-      return p;
-    }));
+  const handleSetDefault = async (promptId: string) => {
+    try {
+      await brainApi.setDefaultPromptVersion(promptId, novelId);
+      await loadPrompts();
+    } catch (err: any) {
+      console.error('Failed to set default:', err);
+    }
   };
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
+  };
+
+  const handleShowTemplate = async (versionId: string) => {
+    try {
+      const v = await brainApi.getPromptVersion(versionId, novelId);
+      setTemplateText(v?.template || '（无模板内容）');
+      setExpandedId(prev => (prev === versionId ? null : versionId));
+    } catch (err: any) {
+      console.error('Failed to load template:', err);
+      setTemplateText('（模板加载失败）');
+    }
+  };
+
+  const handleCreateVersion = async () => {
+    if (!createForm.prompt_name.trim() || !createForm.template.trim()) return;
+    try {
+      await brainApi.registerPromptVersion(
+        {
+          prompt_name: createForm.prompt_name.trim(),
+          template: createForm.template,
+          model: createForm.model,
+          change_notes: createForm.change_notes || undefined,
+          make_default: false,
+        },
+        novelId,
+      );
+      setShowCreateModal(false);
+      setCreateForm({ prompt_name: '', model: 'deepseek-chat', change_notes: '', template: '' });
+      await loadPrompts();
+    } catch (err: any) {
+      console.error('Failed to create prompt version:', err);
+    }
   };
 
   return (
@@ -205,6 +198,29 @@ export function PromptManager({ novelId }: PromptManagerProps) {
       </div>
 
       {/* Prompt Groups */}
+      {loading ? (
+        <div className="flex items-center justify-center p-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600" />
+        </div>
+      ) : error ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500">{error}</p>
+          <button
+            onClick={loadPrompts}
+            className="mt-3 px-4 py-2 text-sm text-violet-600 border border-violet-200 rounded-lg hover:bg-violet-50"
+          >
+            重试
+          </button>
+        </div>
+      ) : Object.keys(groupedPrompts).length === 0 ? (
+        <div className="text-center py-12">
+          <FileCode className="mx-auto h-12 w-12 text-gray-300 mb-4" />
+          <p className="text-gray-500">暂无 prompt 版本记录</p>
+          <p className="text-sm text-gray-400 mt-1">
+            创建第一个版本以开始追踪 prompt 变更
+          </p>
+        </div>
+      ) : (
       <div className="space-y-6">
         {Object.entries(groupedPrompts).map(([name, versions]) => (
           <div key={name} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -233,7 +249,7 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                   <div key={version.id}>
                     <div
                       className="p-4 cursor-pointer hover:bg-gray-50"
-                      onClick={() => setExpandedId(isExpanded ? null : version.id)}
+                      onClick={() => handleShowTemplate(version.id)}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -299,7 +315,7 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleSetDefault(version.id);
+                                  void handleSetDefault(version.id);
                                 }}
                                 className="px-2 py-1 text-xs text-violet-600 border border-violet-200 rounded hover:bg-violet-50"
                                 disabled={version.is_default}
@@ -313,8 +329,8 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                               {version.description}
                             </p>
                           )}
-                          <div className="text-xs text-gray-400 italic">
-                            Prompt template content would be displayed here in full version
+                          <div className="text-xs text-gray-600 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
+                            {templateText || '（点击版本加载模板内容）'}
                           </div>
                         </div>
                       </div>
@@ -326,6 +342,7 @@ export function PromptManager({ novelId }: PromptManagerProps) {
           </div>
         ))}
       </div>
+      )}
 
       {/* Create Modal */}
       {showCreateModal && (
@@ -341,6 +358,8 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                 </label>
                 <input
                   type="text"
+                  value={createForm.prompt_name}
+                  onChange={(e) => setCreateForm({ ...createForm, prompt_name: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                   placeholder="e.g., chapter_generation"
                 />
@@ -349,10 +368,12 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Model
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500">
+                <select
+                  value={createForm.model}
+                  onChange={(e) => setCreateForm({ ...createForm, model: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                >
                   <option value="deepseek-chat">DeepSeek Chat</option>
-                  <option value="claude-3-sonnet">Claude 3 Sonnet</option>
-                  <option value="gpt-4o">GPT-4o</option>
                 </select>
               </div>
               <div>
@@ -361,6 +382,8 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                 </label>
                 <textarea
                   rows={3}
+                  value={createForm.change_notes}
+                  onChange={(e) => setCreateForm({ ...createForm, change_notes: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                   placeholder="What changed in this version?"
                 />
@@ -371,6 +394,8 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                 </label>
                 <textarea
                   rows={6}
+                  value={createForm.template}
+                  onChange={(e) => setCreateForm({ ...createForm, template: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-violet-500 font-mono text-sm"
                   placeholder="Enter prompt template..."
                 />
@@ -384,8 +409,9 @@ export function PromptManager({ novelId }: PromptManagerProps) {
                 Cancel
               </button>
               <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700"
+                onClick={handleCreateVersion}
+                disabled={!createForm.prompt_name.trim() || !createForm.template.trim()}
+                className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create
               </button>

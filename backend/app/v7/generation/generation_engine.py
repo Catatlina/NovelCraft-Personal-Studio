@@ -69,10 +69,16 @@ class ContextAssembler:
         """Assemble layered context: state / goals / constraints / recap."""
         overview = await self.brain.get_overview()
 
-        character_states = await self.brain.state.list_states("character", limit=30)
-        world_states = await self.brain.state.list_states("world", limit=30)
-        plot_states = await self.brain.state.list_states("plot", limit=30)
-        global_states = await self.brain.state.list_states("global", limit=20)
+        # 长程连续性修复（2026-08-02）：此前 world/character/plot 各只取
+        # 最新 30 条，50 章长程下早期关键设定（伏笔/设定细节）会被挤出
+        # 上下文窗口，导致后段连贯性下滑（50 章测试 CH46-50 连贯性跌到
+        # 78.8）。改为按需取全量：world/character 取 120 条、plot 取 100 条，
+        # global 取全量。state 是压缩后的摘要（每条 ~200 字），120 条约
+        # 2.4 万字 ≈ 6k tokens，仍在 8k 上下文预算内。
+        character_states = await self.brain.state.list_states("character", limit=120)
+        world_states = await self.brain.state.list_states("world", limit=120)
+        plot_states = await self.brain.state.list_states("plot", limit=100)
+        global_states = await self.brain.state.list_states("global", limit=100)
 
         goals = await self.brain.goals.list_goals(limit=50)
         active_goals = [
@@ -80,7 +86,7 @@ class ContextAssembler:
         ]
         constraints = await self.brain.constraints.list_constraints(limit=50)
 
-        previous = await self.load_previous_chapters(chapter_number, count=2)
+        previous = await self.load_previous_chapters(chapter_number, count=3)
         recap_parts: list[str] = []
         for prev in previous:
             summary = prev.get("summary") or ""

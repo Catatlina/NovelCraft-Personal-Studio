@@ -56,77 +56,44 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
   const loadBudgets = async () => {
     try {
       setLoading(true);
-      // Mock data for demo
-      setSummary({
-        total_budget_cny: 500,
-        total_spent_cny: 187.5,
-        total_remaining_cny: 312.5,
-        usage_percentage: 37.5,
-        total_tokens_limit: 5000000,
-        total_tokens_spent: 1875000,
-        active_budgets: 3,
-      });
-      
-      setBudgets([
-        {
-          id: 'budget-1',
-          budget_type: 'monthly',
-          budget_scope: 'novel',
-          limit_cny: 300,
-          spent_cny: 112.5,
-          remaining_cny: 187.5,
-          usage_percentage: 37.5,
-          limit_tokens: 3000000,
-          spent_tokens: 1125000,
-          remaining_tokens: 1875000,
-          token_usage_percentage: 37.5,
-          period_start: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString(),
-          period_end: new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString(),
-          action_on_exceed: 'notify',
-          is_active: true,
-          description: 'Monthly budget for this novel',
-        },
-        {
-          id: 'budget-2',
-          budget_type: 'chapter',
-          budget_scope: 'chapter',
-          limit_cny: 5,
-          spent_cny: 3.2,
-          remaining_cny: 1.8,
-          usage_percentage: 64,
-          limit_tokens: 50000,
-          spent_tokens: 32000,
-          remaining_tokens: 18000,
-          token_usage_percentage: 64,
-          period_start: new Date().toISOString(),
-          period_end: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-          action_on_exceed: 'warn',
-          is_active: true,
-          description: 'Per-chapter cost limit',
-        },
-        {
-          id: 'budget-3',
-          budget_type: 'generation',
-          budget_scope: 'generation',
-          limit_cny: 100,
-          spent_cny: 72,
-          remaining_cny: 28,
-          usage_percentage: 72,
-          limit_tokens: 1000000,
-          spent_tokens: 720000,
-          remaining_tokens: 280000,
-          token_usage_percentage: 72,
-          period_start: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
-          period_end: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-          action_on_exceed: 'notify',
-          is_active: true,
-          description: 'Generation API costs',
-        },
+      // 接真实 API：预算列表 + 汇总（后端 cost.py 已就绪）
+      const [budgetList, summaryData] = await Promise.all([
+        brainApi.listBudgets(novelId),
+        brainApi.getCostSummary(novelId),
       ]);
+      setBudgets(budgetList || []);
+      setSummary(summaryData || null);
     } catch (err: any) {
       console.error('Failed to load budgets:', err);
+      setBudgets([]);
+      setSummary(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateBudget = async () => {
+    try {
+      await brainApi.createBudget(novelId, {
+        budget_type: formData.budget_type,
+        budget_scope: formData.budget_scope,
+        limit_cny: formData.limit_cny,
+        limit_tokens: formData.limit_tokens,
+        action_on_exceed: formData.action_on_exceed,
+        description: formData.description,
+      });
+      setShowCreateModal(false);
+      setFormData({
+        budget_type: 'monthly',
+        budget_scope: 'novel',
+        limit_cny: 100,
+        limit_tokens: 1000000,
+        action_on_exceed: 'notify',
+        description: '',
+      });
+      await loadBudgets();
+    } catch (err: any) {
+      console.error('Failed to create budget:', err);
     }
   };
 
@@ -449,10 +416,7 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setShowCreateModal(false);
-                  loadBudgets();
-                }}
+                onClick={handleCreateBudget}
                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
               >
                 Create

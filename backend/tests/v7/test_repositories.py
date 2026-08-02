@@ -788,10 +788,10 @@ class TestConstraintRepository:
         assert (await repo.check_violation(constraint.id)).violation_count == 1
         assert (await repo.check_violation(constraint.id)).violation_count == 2
 
-        # BUG(prod): ConstraintRepository.check_violation never stamps
-        # ``last_violation_at`` — see report. Asserted here so the gap is
-        # visible and this test fails loudly once it is fixed.
-        assert (await repo.get(constraint.id)).last_violation_at is None
+        # FIXED(2026-08-02): check_violation 现在会同步写 last_violation_at
+        # （此前从不 stamp，恒为 None）。
+        after = await repo.get(constraint.id)
+        assert after.last_violation_at is not None
 
     async def test_check_violation_missing_raises(self, db_session: AsyncSession):
         repo = ConstraintRepository(db_session)
@@ -952,20 +952,20 @@ class TestVersionRepository:
         assert version.created_by == "test"
         assert version.snapshot_data == {}
 
-    async def test_sequential_versions_share_number_due_to_version_id_col(
+    async def test_sequential_versions_increment_number(
         self, db_session: AsyncSession, novel_id: uuid.UUID
     ):
-        """BUG(prod): ``StoryVersion.__mapper_args__["version_id_col"]`` makes
-        SQLAlchemy overwrite the computed ``version_number`` with its own
-        optimistic-locking counter (always 1 on INSERT), so versions are NOT
-        numbered 1, 2, 3. Asserted so the regression is explicit."""
+        """FIXED(2026-08-02): ``StoryVersion.__mapper_args__["version_id_col"]``
+        previously made SQLAlchemy overwrite the computed ``version_number``
+        with its own optimistic-locking counter (always 1 on INSERT). The
+        mapper config was removed; versions must now be numbered 1, 2, 3."""
         repo = VersionRepository(db_session)
 
         v1 = await repo.create_version(novel_id, description="v1")
         v2 = await repo.create_version(novel_id, description="v2")
         v3 = await repo.create_version(novel_id, description="v3")
 
-        assert [v1.version_number, v2.version_number, v3.version_number] == [1, 1, 1]
+        assert [v1.version_number, v2.version_number, v3.version_number] == [1, 2, 3]
         assert len({v1.id, v2.id, v3.id}) == 3
 
     async def test_get_next_version_number(

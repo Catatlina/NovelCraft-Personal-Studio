@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +49,9 @@ class ConstraintRepository(BaseRepository[Constraint]):
         """Record a constraint violation."""
         constraint = await self.get_or_404(constraint_id)
         constraint.violation_count += 1
+        # D2 修复（2026-08-02）：此前只累加计数从不写 last_violation_at，
+        # 导致该列恒为 NULL。现在同步记录最近一次违规时间（UTC）。
+        constraint.last_violation_at = datetime.now(timezone.utc)
         await self.db.flush()
         await self.db.refresh(constraint)
         return constraint

@@ -731,19 +731,20 @@ class TestVersionControl:
         types = [e.event_type for e in await vc.event_repo.list_by_novel(novel_id)]
         assert "version_created" in types
 
-    async def test_sequential_versions_share_number_due_to_version_id_col(
+    async def test_sequential_versions_increment_number(
         self, db_session: AsyncSession, novel_id: uuid.UUID
     ):
-        """BUG(prod): ``StoryVersion.__mapper_args__["version_id_col"]`` makes
-        SQLAlchemy overwrite the computed ``version_number`` with its own
-        optimistic-locking counter, so every INSERT lands on 1. Asserted so the
-        defect is explicit — see report."""
+        """FIXED(2026-08-02): ``StoryVersion.__mapper_args__["version_id_col"]``
+        previously made SQLAlchemy overwrite the computed ``version_number``
+        with its own optimistic-locking counter, so every INSERT landed on 1.
+        The mapper config was removed; now versions must increment 1, 2, ..."""
         vc = VersionControl(db_session, novel_id)
 
         v1 = await vc.create_version(description="v1")
         v2 = await vc.create_version(description="v2")
 
-        assert [v1["version_number"], v2["version_number"]] == [1, 1]
+        assert v1["version_number"] == 1
+        assert v2["version_number"] == 2
         assert v1["id"] != v2["id"]
 
     async def test_list_versions_and_branch_filter(

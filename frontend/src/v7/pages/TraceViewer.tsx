@@ -32,24 +32,11 @@ export function TraceViewer({ novelId }: TraceViewerProps) {
     try {
       setLoading(true);
       const data = await brainApi.listRuns(novelId, { limit: 50 });
-      setRuns(data);
+      setRuns(data || []);
     } catch (err: any) {
       console.error('Failed to load runs:', err);
-      // Mock data for demo
-      setRuns([
-        {
-          id: 'demo-run-1',
-          run_type: 'chapter_generation',
-          status: 'completed',
-          started_at: new Date().toISOString(),
-          completed_at: new Date().toISOString(),
-          duration_seconds: 45.5,
-          total_tokens: 8500,
-          total_cost: 0.025,
-          step_count: 7,
-          chapter_number: 1,
-        },
-      ]);
+      // 失败时显示空态，不伪造演示数据
+      setRuns([]);
     } finally {
       setLoading(false);
     }
@@ -58,17 +45,11 @@ export function TraceViewer({ novelId }: TraceViewerProps) {
   const loadSteps = async (runId: string) => {
     try {
       const data = await brainApi.listTraceSteps(novelId, runId);
-      setSteps(data);
+      setSteps(data || []);
     } catch (err: any) {
       console.error('Failed to load steps:', err);
-      // Mock steps
-      setSteps([
-        { id: 's1', step_name: 'director.planning', step_type: 'planning', step_order: 1, status: 'completed', duration_seconds: 2.3, tokens_input: 500, tokens_output: 100, cost: 0.001, confidence: 0.9 },
-        { id: 's2', step_name: 'generation.assemble_context', step_type: 'context', step_order: 2, status: 'completed', duration_seconds: 1.5, tokens_input: 0, tokens_output: 0, cost: 0, confidence: 1.0 },
-        { id: 's3', step_name: 'generation.ai_generate', step_type: 'generation', step_order: 3, status: 'completed', duration_seconds: 28.5, tokens_input: 3200, tokens_output: 2800, cost: 0.018, confidence: 0.85 },
-        { id: 's4', step_name: 'generation.deai_process', step_type: 'processing', step_order: 4, status: 'completed', duration_seconds: 5.2, tokens_input: 0, tokens_output: 0, cost: 0, confidence: 1.0 },
-        { id: 's5', step_name: 'director.review', step_type: 'review', step_order: 5, status: 'completed', duration_seconds: 8.0, tokens_input: 1500, tokens_output: 500, cost: 0.006, confidence: 0.8 },
-      ]);
+      // 失败时显示空态，不伪造演示数据
+      setSteps([]);
     }
   };
 

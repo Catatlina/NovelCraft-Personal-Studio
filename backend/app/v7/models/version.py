@@ -29,9 +29,10 @@ class StoryVersion(BaseModel, NovelScopedMixin):
     tag_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by: Mapped[str] = mapped_column(String(50), nullable=False, default="system")  # system/human/ai
 
-    __mapper_args__ = {
-        "version_id_col": version_number,
-    }
+    # D1 修复（2026-08-02）：此前用 `version_id_col = version_number` 把
+    # version_number 交给 SQLAlchemy 乐观锁计数器，导致每次 INSERT 都被
+    # 计数器覆盖成 1，版本号永远不递增。删除该配置后，repository 中
+    # get_next_version_number() 计算的值会真实入库。
 
 
 class BrainSnapshot(BaseModel, NovelScopedMixin):

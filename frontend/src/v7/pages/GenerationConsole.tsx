@@ -47,56 +47,32 @@ export function GenerationConsole({ novelId }: GenerationConsoleProps) {
     setIsGenerating(true);
     setError(null);
     setGenerationResult(null);
-    
-    // Reset steps
+
+    // Reset steps（点击生成后进入等待真实结果的状态，不再模拟）
     const resetSteps = PIPELINE_STEPS.map(s => ({ ...s, status: 'pending' as const }));
     setSteps(resetSteps);
 
     try {
-      // Simulate step-by-step progress
-      const stepOrder = ['planning', 'context', 'scene', 'generation', 'deai', 'review', 'memory'];
-      
-      for (let i = 0; i < stepOrder.length; i++) {
-        const stepId = stepOrder[i];
-        setCurrentStep(stepId);
-        
-        // Update step to running
-        setSteps(prev => prev.map(s => 
-          s.id === stepId ? { ...s, status: 'running' as const } : s
-        ));
-
-        // Simulate work
-        await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1000));
-
-        // Update step to completed
-        setSteps(prev => prev.map(s => 
-          s.id === stepId ? { ...s, status: 'completed' as const, duration: Math.random() * 2 + 0.5 } : s
-        ));
+      // 真实调用后端 director 生成接口；不做假进度条、不伪造结果
+      const result = await brainApi.generateChapter(novelId, {
+        chapter_number: chapterNumber,
+        prompt: prompt || undefined,
+      });
+      setGenerationResult(result || null);
+      // 有真实步骤信息时同步到管线展示
+      const stepNames = result?.step_names || [];
+      if (Array.isArray(stepNames) && stepNames.length) {
+        setSteps(prev => prev.map(s => ({
+          ...s,
+          status: stepNames.includes(s.id) ? ('completed' as const) : s.status,
+          duration: result?.run_duration_sec ? result.run_duration_sec : s.duration,
+        })));
       }
-
-      // Try real API call (will fail if backend not configured, that's ok)
-      try {
-        const result = await brainApi.generateChapter(novelId, {
-          chapter_number: chapterNumber,
-          prompt: prompt || undefined,
-        });
-        setGenerationResult(result);
-      } catch (apiError: any) {
-        // API not configured yet, use mock result
-        setGenerationResult({
-          chapter_number: chapterNumber,
-          status: 'completed',
-          review_score: 75,
-          word_count: 3200,
-          run_id: 'mock-run-id',
-        });
-      }
-
-      setCurrentStep(null);
     } catch (err: any) {
-      setError(err.message);
-      setCurrentStep(null);
+      // 失败如实报错，不伪造 mock 结果
+      setError(err?.message || '生成失败');
     } finally {
+      setCurrentStep(null);
       setIsGenerating(false);
     }
   };

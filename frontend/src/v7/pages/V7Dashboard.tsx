@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import {
   Brain, Database, Target, Shield, GitBranch, Activity,
-  Settings, ChevronLeft, ChevronRight, Sparkles,
+  ChevronLeft, ChevronRight, Sparkles,
   Wand2, Scale, Zap, DollarSign, FileCode,
 } from 'lucide-react';
 import BrainOverview from './BrainOverview';
@@ -36,8 +36,7 @@ type PageKey =
   | 'trace'
   | 'decisions'
   | 'cost'
-  | 'prompts'
-  | 'config';
+  | 'prompts';
 
 const NAV_ITEMS: { key: PageKey; label: string; icon: any; badge?: string; section?: string }[] = [
   // Brain section
@@ -54,7 +53,6 @@ const NAV_ITEMS: { key: PageKey; label: string; icon: any; badge?: string; secti
   // Engineering section
   { key: 'cost', label: 'Cost Monitor', icon: DollarSign, badge: 'New', section: 'Engineering' },
   { key: 'prompts', label: 'Prompts', icon: FileCode, badge: 'New' },
-  { key: 'config', label: 'Config', icon: Settings, badge: 'Soon' },
 ];
 
 export function V7Dashboard({ novelId }: V7DashboardProps) {
@@ -85,21 +83,6 @@ export function V7Dashboard({ novelId }: V7DashboardProps) {
         return <CostMonitor novelId={novelId} />;
       case 'prompts':
         return <PromptManager novelId={novelId} />;
-      case 'config':
-        return (
-          <div className="p-6">
-            <div className="text-center py-12">
-              <Settings className="mx-auto h-12 w-12 text-gray-300 mb-4" />
-              <h2 className="text-xl font-semibold text-gray-900">Configuration</h2>
-              <p className="text-gray-500 mt-2">
-                System configuration page coming soon
-              </p>
-              <p className="text-sm text-gray-400 mt-1">
-                Decision permissions, model routing, and more
-              </p>
-            </div>
-          </div>
-        );
       default:
         return null;
     }

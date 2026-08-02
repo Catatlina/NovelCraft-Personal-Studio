@@ -563,10 +563,22 @@ class StoryDirector:
         score = float(review_data.get("overall_score") or 0.0)
         rework_count = 0
 
+        # 长程质量修复（2026-08-02）：此前只有总分 < REWORK_SCORE(60) 才
+        # 重写，50 章测试里约束违例（如"归墟灯代价省略"、准确性 70 分）因
+        # 总分仍 ≥60 全部放行。现在加**维度级拦截**：准确性(constraint_
+        # compliance) < 80 视为约束违例，即使总分合格也重写一次，并把违例
+        # 详情注入重写 prompt。
+        dims = review_data.get("dimensions") or review_data.get("score_7dim") or {}
+        accuracy = float(
+            (dims.get("constraint_compliance") if isinstance(dims, dict) else 0) or 0
+        )
+        constraint_violated = accuracy < 80.0
+
         if (
             allow_rework
             and review.success
-            and score < REWORK_SCORE
+            and (score < REWORK_SCORE or constraint_violated)
+            and rework_count < 1
             and await self.permission_system.can_auto_decide("chapter_rework", 0.9)
         ):
             rework_count = 1
@@ -574,12 +586,15 @@ class StoryDirector:
             issue_text = "；".join(
                 f"{i.get('dimension')}: {i.get('description')}" for i in issues[:5]
             )
+            if constraint_violated and issues:
+                issue_text += f"；约束违例（准确性 {accuracy:.0f} 分）：必须严格遵守小说设定约束，补齐被省略的要素（如使用能力必须写明代价），不得省略或违背。"
             await self.brain.record_decision(
                 "chapter_rework",
                 "rework",
                 decision_reason=(
                     f"Chapter {chapter_number} rewritten (score {score} < "
-                    f"{REWORK_SCORE}): {issue_text or 'score below rework threshold'}"
+                    f"{REWORK_SCORE}, accuracy {accuracy:.0f}): "
+                    f"{issue_text or 'below rework threshold'}"
                 ),
                 confidence=0.85,
                 permission_level="notify",

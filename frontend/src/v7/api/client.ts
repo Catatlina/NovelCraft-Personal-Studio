@@ -294,6 +294,176 @@ class BrainApiClient {
   async getDirectorStatus(novelId: string): Promise<any> {
     return this.request(`/v7/director/${novelId}/status`);
   }
+
+  // ── Cost (Sprint 3 — 后端已就绪，前端接入) ───────────────────────────
+
+  async listBudgets(
+    novelId: string,
+    params?: { budget_type?: string; budget_scope?: string; is_active?: boolean }
+  ): Promise<any[]> {
+    const query = new URLSearchParams();
+    if (params?.budget_type) query.set('budget_type', params.budget_type);
+    if (params?.budget_scope) query.set('budget_scope', params.budget_scope);
+    if (params?.is_active !== undefined) query.set('is_active', String(params.is_active));
+    const qs = query.toString();
+    return this.request(`/v7/cost/${novelId}/budgets${qs ? `?${qs}` : ''}`);
+  }
+
+  async createBudget(
+    novelId: string,
+    data: {
+      budget_type: string;
+      budget_scope: string;
+      limit_cny: number;
+      limit_tokens?: number;
+      period_days?: number;
+      action_on_exceed?: string;
+      description?: string;
+    }
+  ): Promise<any> {
+    return this.request(`/v7/cost/${novelId}/budgets`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getBudget(novelId: string, budgetId: string): Promise<any> {
+    return this.request(`/v7/cost/${novelId}/budgets/${budgetId}`);
+  }
+
+  async updateBudget(novelId: string, budgetId: string, data: Record<string, unknown>): Promise<any> {
+    return this.request(`/v7/cost/${novelId}/budgets/${budgetId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteBudget(novelId: string, budgetId: string): Promise<any> {
+    return this.request(`/v7/cost/${novelId}/budgets/${budgetId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async resetBudget(novelId: string, budgetId: string): Promise<any> {
+    return this.request(`/v7/cost/${novelId}/budgets/${budgetId}/reset`, {
+      method: 'POST',
+    });
+  }
+
+  async getCostSummary(
+    novelId: string,
+    params?: { start_date?: string; end_date?: string }
+  ): Promise<any> {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    const qs = query.toString();
+    return this.request(`/v7/cost/${novelId}/summary${qs ? `?${qs}` : ''}`);
+  }
+
+  async getCostStatsByDate(
+    novelId: string,
+    params?: { start_date?: string; end_date?: string }
+  ): Promise<any> {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    const qs = query.toString();
+    return this.request(`/v7/cost/${novelId}/stats/daily${qs ? `?${qs}` : ''}`);
+  }
+
+  async getCostStatsByTaskType(
+    novelId: string,
+    params?: { start_date?: string; end_date?: string }
+  ): Promise<any> {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    const qs = query.toString();
+    return this.request(`/v7/cost/${novelId}/stats/task-type${qs ? `?${qs}` : ''}`);
+  }
+
+  // ── Prompt versions (Sprint 3 — 后端已就绪，前端接入) ────────────────
+
+  async listPromptNames(novelId?: string): Promise<{ total: number; prompt_names: string[] }> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/names${qs}`);
+  }
+
+  async listPromptVersions(
+    params?: { prompt_name?: string; is_active?: boolean; skip?: number; limit?: number },
+    novelId?: string
+  ): Promise<{ total: number; skip: number; limit: number; versions: any[] }> {
+    const query = new URLSearchParams();
+    if (params?.prompt_name) query.set('prompt_name', params.prompt_name);
+    if (params?.is_active !== undefined) query.set('is_active', String(params.is_active));
+    if (params?.skip) query.set('skip', String(params.skip));
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (novelId) query.set('novel_id', novelId);
+    return this.request(`/v7/prompt/versions?${query.toString()}`);
+  }
+
+  async registerPromptVersion(
+    data: {
+      prompt_name: string;
+      template: string;
+      model?: string;
+      description?: string;
+      change_notes?: string;
+      make_default?: boolean;
+      force_new?: boolean;
+      created_by?: string;
+    },
+    novelId?: string
+  ): Promise<any> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/versions${qs}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getActivePromptVersion(promptName: string, novelId?: string): Promise<any> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/versions/active/${encodeURIComponent(promptName)}${qs}`);
+  }
+
+  async getPromptVersion(versionId: string, novelId?: string): Promise<any> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/versions/${versionId}${qs}`);
+  }
+
+  async setDefaultPromptVersion(versionId: string, novelId?: string): Promise<any> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/versions/${versionId}/default${qs}`, {
+      method: 'POST',
+    });
+  }
+
+  async deactivatePromptVersion(versionId: string, novelId?: string): Promise<any> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/versions/${versionId}/deactivate${qs}`, {
+      method: 'POST',
+    });
+  }
+
+  async listPromptExecutions(
+    params?: { prompt_name?: string; status?: string; skip?: number; limit?: number },
+    novelId?: string
+  ): Promise<{ count: number; executions: any[] }> {
+    const query = new URLSearchParams();
+    if (params?.prompt_name) query.set('prompt_name', params.prompt_name);
+    if (params?.status) query.set('status', params.status);
+    if (params?.skip) query.set('skip', String(params.skip));
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (novelId) query.set('novel_id', novelId);
+    return this.request(`/v7/prompt/executions?${query.toString()}`);
+  }
+
+  async getPromptExecutionStats(promptName: string, novelId?: string): Promise<any> {
+    const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
+    return this.request(`/v7/prompt/executions/stats/${encodeURIComponent(promptName)}${qs}`);
+  }
 }
 
 const brainApi = new BrainApiClient();
