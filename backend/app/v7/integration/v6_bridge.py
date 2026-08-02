@@ -97,7 +97,7 @@ def build_transition_contract(
     }
 
 
-def persist_accepted_v7_chapter(
+def _persist_v7_chapter(
     *,
     novel_id: str,
     project_id: str | None,
@@ -110,15 +110,25 @@ def persist_accepted_v7_chapter(
     chapter_summary: str,
     deai: dict[str, Any],
     transition_contract: dict[str, Any],
+    status: str,
+    quality_status: str,
+    review_issues: list[dict[str, Any]] | None = None,
+    quality_gate: dict[str, Any] | None = None,
+    reader_experience: dict[str, Any] | None = None,
+    rework_count: int = 0,
     extra_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Upsert one accepted chapter into V6 and return its content id.
+    """Upsert one canonical V7 result into the V6 product boundary.
 
-    Only an accepted chapter may enter the library.  A failed gate is a
-    programmer error at this boundary rather than a draft that looks done.
+    ``reviewed`` is reserved for a passed quality gate.  A rejected result is
+    still persisted as ``needs_rewrite`` so the author can inspect the actual
+    draft, its score and its repair reasons; it never becomes a publishable
+    chapter merely because the provider returned text.
     """
     if not text.strip():
         raise ValueError("cannot persist an empty V7 chapter")
+    if status not in {"reviewed", "needs_rewrite"}:
+        raise ValueError(f"unsupported V7 content status: {status}")
     mapping = ensure_novel_project_link(novel_id, project_id)
     project_id = mapping["project_id"]
 
@@ -132,12 +142,21 @@ def persist_accepted_v7_chapter(
         "v7_run_id": str(run_id),
         "v7_state_key": f"chapter_{chapter_number:04d}",
         "generation_key": key,
-        "quality_status": "v7_quality_gate_passed",
+        "quality_status": quality_status,
         "review_score": review_score,
         "dimension_scores": dimension_scores,
         "chapter_summary": chapter_summary,
         "deai": deai,
         "transition_contract": transition_contract,
+        "reader_experience": reader_experience or {},
+        "review_issues": review_issues or [],
+        "quality_gate": quality_gate or {},
+        "rework_count": rework_count,
+        "quality_reason": (
+            "quality gate passed"
+            if status == "reviewed"
+            else "V7 quality gate did not pass; draft requires rewrite"
+        ),
         "project_mapping": mapping,
         "canonical_engine": "v7",
     }
@@ -170,23 +189,46 @@ def persist_accepted_v7_chapter(
                 (project_id, novel_id, chapter_number),
             ).fetchone()
 
+        if existing and status == "needs_rewrite":
+            # A rejected canonical draft may replace an older V6 draft or an
+            # accepted version during an explicit regeneration.  Preserve the
+            # previous body before the update so the editor can restore it.
+            conn.execute(
+                """
+                INSERT INTO versions
+                    (id, entity_type, entity_id, label, snapshot, reason, client_mutation_id)
+                SELECT %s,'content',id,'before_v7_rejected',
+                       jsonb_build_object('title',title,'body',body,'meta',meta),
+                       'v7 quality gate rejected the new draft',%s
+                FROM contents
+                WHERE id=%s
+                ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL
+                DO NOTHING
+                """,
+                (
+                    new_id("version"),
+                    f"{key}:before-rejected:{run_id}",
+                    existing["id"],
+                ),
+            )
+
         if existing:
             stored = conn.execute(
                 """
                 UPDATE contents
-                SET title=%s, body=%s, meta=%s, status='reviewed',
+                SET title=%s, body=%s, meta=%s, status=%s,
                     generation_key=%s, seq=%s, updated_at=now()
                 WHERE id=%s
                 RETURNING id
                 """,
-                (title, encode(body), encode(meta), key, chapter_number, existing["id"]),
+                (title, encode(body), encode(meta), status, key, chapter_number, existing["id"]),
             ).fetchone()
         else:
             stored = conn.execute(
                 """
                 INSERT INTO contents
                     (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq, created_at)
-                VALUES (%s,%s,%s,'chapter',%s,%s,%s,'reviewed',%s,%s,now())
+                VALUES (%s,%s,%s,'chapter',%s,%s,%s,%s,%s,%s,now())
                 ON CONFLICT (project_id, generation_key)
                     WHERE generation_key IS NOT NULL AND is_deleted=FALSE
                 DO UPDATE SET
@@ -194,7 +236,7 @@ def persist_accepted_v7_chapter(
                     title=EXCLUDED.title,
                     body=EXCLUDED.body,
                     meta=EXCLUDED.meta,
-                    status='reviewed',
+                    status=EXCLUDED.status,
                     seq=EXCLUDED.seq,
                     updated_at=now()
                 RETURNING id
@@ -206,6 +248,7 @@ def persist_accepted_v7_chapter(
                     title,
                     encode(body),
                     encode(meta),
+                    status,
                     key,
                     chapter_number,
                 ),
@@ -217,19 +260,22 @@ def persist_accepted_v7_chapter(
         # Keep the V6 editor/version history aligned with the content row.  The
         # stable mutation id makes retries safe even when the first request
         # succeeded but the caller lost its response.
+        version_key = f"{key}:version" if status == "reviewed" else f"{key}:draft:{run_id}"
         conn.execute(
             """
             INSERT INTO versions
                 (id, entity_type, entity_id, label, snapshot, reason, client_mutation_id)
-            VALUES (%s,'content',%s,'v7_generate',%s,'v7_bridge',%s)
+            VALUES (%s,'content',%s,%s,%s,%s,%s)
             ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL
             DO NOTHING
             """,
             (
                 new_id("version"),
                 content_id,
+                "v7_generate" if status == "reviewed" else "v7_generate_draft",
                 encode({"title": title, "body": body, "meta": meta}),
-                f"{key}:version",
+                "v7_bridge" if status == "reviewed" else "v7_quality_gate",
+                version_key,
             ),
         )
         conn.commit()
@@ -237,10 +283,87 @@ def persist_accepted_v7_chapter(
             "content_id": str(content_id),
             "generation_key": key,
             "project_id": str(project_id),
-            "status": "reviewed",
+            "status": status,
+            "quality_status": quality_status,
         }
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
+
+
+def persist_accepted_v7_chapter(
+    *,
+    novel_id: str,
+    project_id: str | None,
+    chapter_number: int,
+    title: str,
+    text: str,
+    review_score: float,
+    dimension_scores: dict[str, Any],
+    run_id: str,
+    chapter_summary: str,
+    deai: dict[str, Any],
+    transition_contract: dict[str, Any],
+    extra_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a V7 chapter that passed the strict quality gate."""
+    return _persist_v7_chapter(
+        novel_id=novel_id,
+        project_id=project_id,
+        chapter_number=chapter_number,
+        title=title,
+        text=text,
+        review_score=review_score,
+        dimension_scores=dimension_scores,
+        run_id=run_id,
+        chapter_summary=chapter_summary,
+        deai=deai,
+        transition_contract=transition_contract,
+        status="reviewed",
+        quality_status="v7_quality_gate_passed",
+        extra_meta=extra_meta,
+    )
+
+
+def persist_rejected_v7_draft(
+    *,
+    novel_id: str,
+    project_id: str | None,
+    chapter_number: int,
+    title: str,
+    text: str,
+    review_score: float,
+    dimension_scores: dict[str, Any],
+    run_id: str,
+    chapter_summary: str,
+    deai: dict[str, Any],
+    transition_contract: dict[str, Any],
+    review_issues: list[dict[str, Any]] | None = None,
+    quality_gate: dict[str, Any] | None = None,
+    reader_experience: dict[str, Any] | None = None,
+    rework_count: int = 0,
+    extra_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a real but rejected V7 draft for inspection and repair."""
+    return _persist_v7_chapter(
+        novel_id=novel_id,
+        project_id=project_id,
+        chapter_number=chapter_number,
+        title=title,
+        text=text,
+        review_score=review_score,
+        dimension_scores=dimension_scores,
+        run_id=run_id,
+        chapter_summary=chapter_summary,
+        deai=deai,
+        transition_contract=transition_contract,
+        status="needs_rewrite",
+        quality_status="v7_quality_gate_failed",
+        review_issues=review_issues,
+        quality_gate=quality_gate,
+        reader_experience=reader_experience,
+        rework_count=rework_count,
+        extra_meta=extra_meta,
+    )

@@ -38,6 +38,7 @@ from ..integration.quality import (
 from ..integration.v6_bridge import (
     build_transition_contract,
     persist_accepted_v7_chapter,
+    persist_rejected_v7_draft,
 )
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
@@ -224,7 +225,18 @@ class StoryDirector:
                 "director.assess", "assess",
                 input_summary="Assess plot situation",
             ) as step:
-                assessment = await self._assess(chapter_number, outline, perception)
+                # Bootstrap sometimes passes an empty JSON placeholder as the
+                # chapter outline while the actual creative context is in the
+                # prompt.  The pre-generation gate must assess the same story
+                # brief that the writer will receive; otherwise a valid first
+                # chapter is blocked as "low confidence" before any prose is
+                # generated.
+                assessment_outline = (outline or "").strip()
+                if assessment_outline in {"", "{}", "[]", "null"}:
+                    assessment_outline = (prompt or "").strip()
+                assessment = await self._assess(
+                    chapter_number, assessment_outline or None, perception
+                )
                 step.set_output(
                     assessment["summary"],
                     data={"plot_success": assessment["plot_success"]},
@@ -347,6 +359,9 @@ class StoryDirector:
                 "scene_plan": generation["scene_plan"],
                 "review_score": observation["review_score"],
                 "dimension_scores": observation["dimension_scores"],
+                "reader_experience": observation.get("reader_experience", {}),
+                "issues": observation.get("issues", []),
+                "quality_gate": observation.get("quality_gate", {}),
                 "passed_review": observation["passed_review"],
                 "rework_count": observation["rework_count"],
                 "memory": {
@@ -362,9 +377,9 @@ class StoryDirector:
                 "usage": generation["usage"],
             }
 
-            # The chapter body is already persisted as a story state; keep the
-            # run output_data lean so v7_agent_runs stays queryable.  V6 is
-            # only updated when the strict quality gate passed.
+            # The chapter body is persisted as a story state and rejected
+            # drafts remain visible in V6 as needs_rewrite; keep the run
+            # output_data lean so v7_agent_runs stays queryable.
             run_output = {k: v for k, v in result.items() if k not in ("content", "scene_plan")}
             run_stats = await self.tracer.complete_run(run_id, output_data=run_output)
             result["run_stats"] = run_stats
@@ -465,6 +480,12 @@ class StoryDirector:
             "chapter_title_hint": assessment_data.get("chapter_title_hint"),
             "gaps": gaps,
             "blockers": blockers,
+            # A bootstrap first chapter is allowed to start when the writer
+            # received a substantive creative brief.  The confidence number
+            # still remains auditable; this is a narrowly scoped policy for
+            # starting from a blank novel, while the independent quality gate
+            # below remains fail-closed.
+            "context_ready": len((outline or "").strip()) >= 200,
             "confidence": round(confidence, 3),
             "usage": plot_run.metadata.get("usage"),
             "summary": (
@@ -486,6 +507,28 @@ class StoryDirector:
         gate = await self.permission_system.evaluate(
             "chapter_plan", assessment["confidence"]
         )
+
+        # Do not strand a new novel before the first word is written merely
+        # because a model conservatively scores an otherwise complete brief
+        # below the generic confidence threshold.  This does not bypass an
+        # explicit human-only permission level or a structural blocker; it
+        # only lets a context-complete first chapter reach the independent
+        # prose quality gate.
+        if (
+            not gate["allowed"]
+            and gate["level"] in {"auto", "notify"}
+            and str(gate.get("blocked_reason") or "").startswith("confidence ")
+            and chapter_number == 1
+            and assessment.get("plot_success")
+            and assessment.get("context_ready")
+            and not (assessment.get("blockers") or [])
+        ):
+            gate = {
+                **gate,
+                "allowed": True,
+                "blocked_reason": None,
+                "policy_override": "first_chapter_context_complete",
+            }
 
         # `decision` is a short verb column (varchar 50) — the human-readable
         # explanation belongs in decision_reason / context.
@@ -514,16 +557,28 @@ class StoryDirector:
             "chapter_plan",
             "approve",
             decision_reason=(
-                f"Chapter {chapter_number} approved for auto-generation: "
-                f"confidence {assessment['confidence']:.2f} >= "
-                f"threshold {gate['threshold']:.2f}, permission={gate['level']}"
+                (
+                    f"Chapter {chapter_number} approved to reach the strict quality gate: "
+                    "first-chapter creative brief is complete; generic confidence "
+                    "override is recorded and does not waive post-generation review"
+                )
+                if gate.get("policy_override")
+                else (
+                    f"Chapter {chapter_number} approved for auto-generation: "
+                    f"confidence {assessment['confidence']:.2f} >= "
+                    f"threshold {gate['threshold']:.2f}, permission={gate['level']}"
+                )
             ),
             confidence=assessment["confidence"],
             permission_level=gate["level"],
             status="completed",
             run_id=run_id,
             decided_by="ai",
-            context={"chapter_number": chapter_number, "gaps": assessment["gaps"]},
+            context={
+                "chapter_number": chapter_number,
+                "gaps": assessment["gaps"],
+                "policy_override": gate.get("policy_override"),
+            },
         )
         return {**gate, "decision_id": decision["id"]}
 
@@ -619,7 +674,8 @@ class StoryDirector:
                 for item in gate["failures"][:8]
             )
             issue_text = "；".join(
-                f"{i.get('dimension')}: {i.get('description')}" for i in issues[:5]
+                f"{i.get('dimension')}: {i.get('description')}；建议：{i.get('suggestion') or '直接修复该问题'}"
+                for i in issues[:8]
             )
             feedback = f"质量门禁未通过：{failures}。{issue_text}".strip("；")
             await self.brain.record_decision(
@@ -637,7 +693,12 @@ class StoryDirector:
             generation = await self.generation_engine.generate_chapter(
                 chapter_number,
                 prompt=(plan.get("prompt") or "")
-                + f"\n\n上一稿未通过严格质量门禁（{score:.1f}分），必须修复：{feedback}",
+                + "\n\n【严格重写任务】\n"
+                + f"上一稿未通过严格质量门禁（{score:.1f}分），必须修复：{feedback}\n"
+                + "下面是上一稿正文。请保留已经成立的人物、地点、时间线和因果事实，"
+                + "不要只做同义词替换；要重排场景动作、对白和信息揭示，使冲突真正推进，"
+                + "并让章末钩子落到具体动作/发现/选择上。\n"
+                + f"【上一稿正文】\n{generation.get('text', '')[:16000]}",
                 outline=plan.get("outline"),
                 target_word_count=plan["target_word_count"],
             )
@@ -725,23 +786,38 @@ class StoryDirector:
             constraints=(generation.get("context") or {}).get("constraints") or [],
         )
 
-        v6_result: dict[str, Any] | None = None
-        if observation["passed_review"]:
-            v6_result = await asyncio.to_thread(
-                persist_accepted_v7_chapter,
-                novel_id=str(self.novel_id),
-                project_id=self.project_id,
-                chapter_number=chapter_number,
-                title=generation["title"],
-                text=generation["text"],
-                review_score=observation["review_score"],
-                dimension_scores=observation["dimension_scores"],
-                run_id=str(run_id),
-                chapter_summary=summary,
-                deai=generation.get("deai") or {},
-                transition_contract=transition_contract,
-                extra_meta=self.generation_metadata,
+        # Persist both outcomes at the product boundary.  A failed quality
+        # gate stays fail-closed (`needs_rewrite`), but the author must still
+        # be able to inspect the actual draft and repair evidence.
+        bridge = (
+            persist_accepted_v7_chapter
+            if observation["passed_review"]
+            else persist_rejected_v7_draft
+        )
+        bridge_kwargs: dict[str, Any] = {
+            "novel_id": str(self.novel_id),
+            "project_id": self.project_id,
+            "chapter_number": chapter_number,
+            "title": generation["title"],
+            "text": generation["text"],
+            "review_score": observation["review_score"],
+            "dimension_scores": observation["dimension_scores"],
+            "run_id": str(run_id),
+            "chapter_summary": summary,
+            "deai": generation.get("deai") or {},
+            "transition_contract": transition_contract,
+            "extra_meta": self.generation_metadata,
+        }
+        if not observation["passed_review"]:
+            bridge_kwargs.update(
+                {
+                    "review_issues": observation.get("issues") or [],
+                    "quality_gate": observation.get("quality_gate") or {},
+                    "reader_experience": observation.get("reader_experience") or {},
+                    "rework_count": observation.get("rework_count") or 0,
+                }
             )
+        v6_result = await asyncio.to_thread(bridge, **bridge_kwargs)
 
         await self.brain.state.update_state(
             CHAPTER_STATE_TYPE,

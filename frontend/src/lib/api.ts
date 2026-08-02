@@ -37,7 +37,7 @@ function getCookie(name: string): string {
   return item ? decodeURIComponent(item.slice(prefix.length)) : "";
 }
 
-async function tryRefreshToken(): Promise<boolean> {
+export async function tryRefreshToken(): Promise<boolean> {
   if (!refreshInFlight) {
     const csrf = getCookie("csrf_token");
     refreshInFlight = fetch(`${API_BASE}/v1/auth/refresh`, {
@@ -62,6 +62,10 @@ async function tryRefreshToken(): Promise<boolean> {
   return refreshInFlight;
 }
 
+// Keep the descriptive name used by newer callers while retaining the
+// historical helper name used by the streaming/auth contract.
+export const refreshAuthToken = tryRefreshToken;
+
 /** Low-level request for callers that explicitly need response metadata. */
 export async function apiEnvelope<T = unknown>(url: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
@@ -79,7 +83,7 @@ export async function apiEnvelope<T = unknown>(url: string, init?: RequestInit):
   const fullUrl = url.startsWith("/api") ? API_BASE + url.slice(4) : url;
   let r = await fetch(fullUrl, { ...init, headers, credentials: "include" });
   const isAuthRequest = /\/auth\/(login|register|refresh)$/.test(url);
-  if (r.status === 401 && token && !isAuthRequest && await tryRefreshToken()) {
+  if (r.status === 401 && token && !isAuthRequest && await refreshAuthToken()) {
     headers["Authorization"] = `Bearer ${sessionStorage.getItem("nc_token") || ""}`;
     r = await fetch(fullUrl, { ...init, headers, credentials: "include" });
   }

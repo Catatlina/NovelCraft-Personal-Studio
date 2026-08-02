@@ -44,7 +44,7 @@ type Run = {
 };
 
 const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
-const RETRYABLE_STATUSES = new Set(["failed", "pending_budget", "pending_provider"]);
+const RETRYABLE_STATUSES = new Set(["failed", "pending_budget", "pending_provider", "needs_review"]);
 const RESTARTABLE_RUN = new Set(["pending", "dispatch_failed", "failed", "pending_provider"]);
 const PLANNING_NODES = new Set([
   "plan_idea", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",
@@ -61,6 +61,8 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "失败",
   pending_budget: "预算阻塞",
   pending_provider: "模型调用失败",
+  pending_approval: "等待生成确认",
+  needs_review: "质量待重写",
   skipped: "已跳过",
 };
 const RUN_LABELS: Record<string, string> = {
@@ -70,6 +72,8 @@ const RUN_LABELS: Record<string, string> = {
   succeeded: "已完成",
   failed: "需要处理",
   pending_provider: "需要处理",
+  needs_review: "质量待处理",
+  pending_approval: "等待生成确认",
 };
 
 function formatTime(value?: string | null): string {
@@ -158,7 +162,13 @@ export function Progress({
   const succeededCount = nodes.filter(node => node.status === "succeeded").length;
   const percent = nodes.length ? Math.round((succeededCount / nodes.length) * 100) : 0;
   const activeNode = nodes.find(node => node.status === "running" || node.node_key === currentKey);
-  const failedCount = nodes.filter(node => node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider").length;
+  const failedCount = nodes.filter(node => node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" || node.status === "needs_review").length;
+  const pendingApproval = nodes.some(node => node.status === "pending_approval" || node.status === "waiting_human") || run?.status === "pending_approval";
+  const canonicalGeneration = (run?.context?.canonical_generation || {}) as Record<string, unknown>;
+  const canonicalStatus = String(canonicalGeneration.status || run?.context?.canonical_generation_status || "");
+  const canonicalReason = String(canonicalGeneration.blocked_reason || canonicalGeneration.reason || "");
+  const canonicalScore = canonicalGeneration.review_score;
+  const canonicalNeedsReview = canonicalStatus === "needs_review" || canonicalStatus === "needs_rewrite" || run?.status === "needs_review";
   const planningNodes = nodes.filter(node => PLANNING_NODES.has(node.node_key));
   const novelName = novel?.title || selectedTitle || titles[0] || "未命名小说";
 
@@ -270,7 +280,7 @@ export function Progress({
           <p className="eyebrow">CREATION PROGRESS</p>
           <h2>{novelName}</h2>
           <p>
-            {activeNode ? `正在执行：${activeNode.title}` : failedCount ? "流程遇到问题，请查看失败步骤。" : run.status === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
+            {activeNode ? `正在执行：${activeNode.title}` : pendingApproval ? "正文生成等待确认，尚未写入最终章节。" : canonicalNeedsReview ? "正文草稿已保存，但质量门未通过，等待重写。" : failedCount ? "流程遇到问题，请查看失败步骤。" : run.status === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -278,7 +288,7 @@ export function Progress({
           {failedCount > 0 && (
             <button className="btn-sm btn-primary" disabled={retrying !== ""} onClick={() => {
               nodes.filter(n => RETRYABLE_STATUSES.has(n.status)).forEach(n => retry(n));
-            }}><RefreshCw size={14} /> 重试失败 ({failedCount})</button>
+            }}><RefreshCw size={14} /> 重试待处理 ({failedCount})</button>
           )}
           {RESTARTABLE_RUN.has(run.status || "") && (
             <button className="btn-sm btn-ghost" disabled={restarting !== ""} onClick={() => void restartCurrentRun()}>
@@ -294,6 +304,19 @@ export function Progress({
       </section>
 
       {notice && <div className={`progress-notice ${notice.kind}`} role="status">{notice.kind === "error" ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}{notice.text}</div>}
+
+      {(pendingApproval || canonicalNeedsReview || canonicalReason) && (
+        <section className={`progress-notice ${canonicalNeedsReview ? "error" : "success"}`} role="status">
+          {canonicalNeedsReview ? <AlertTriangle size={17} /> : <Clock3 size={17} />}
+          <div>
+            <strong>{pendingApproval ? "生成尚未完成" : "生成结果需要处理"}</strong>
+            <span>
+              {canonicalReason || (canonicalNeedsReview ? "质量门未通过，草稿已保存为待重写。" : "系统正在等待生成确认。")}
+              {canonicalScore !== undefined && canonicalScore !== null ? ` 当前质量分：${String(canonicalScore)}。` : ""}
+            </span>
+          </div>
+        </section>
+      )}
 
       <section className="progress-overview starlume-card">
         <div className="progress-number">
@@ -346,7 +369,7 @@ export function Progress({
             return (
               <button type="button" key={node.node_key} className={`${active ? "active" : ""} ${node.status}`} onClick={() => setSelectedNodeKey(node.node_key)}>
                 <span className="node-order">
-                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" ? <AlertTriangle size={15} /> : <Circle size={13} />}
+                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" || node.status === "needs_review" ? <AlertTriangle size={15} /> : node.status === "pending_approval" || node.status === "waiting_human" ? <Clock3 size={15} /> : <Circle size={13} />}
                 </span>
                 <span className="node-name"><strong>{node.title}</strong><small>{STATUS_LABELS[node.status] || node.status}</small></span>
                 <span className="node-index">{String(index + 1).padStart(2, "0")}</span>

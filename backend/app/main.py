@@ -1129,7 +1129,16 @@ async def run_events(run_id: str, user: dict = Depends(get_current_user)):
                 "WHERE run_id = %s ORDER BY node_key", (run_id,),
             ).fetchall()
             conn.close()
-            if row and row["status"] in ("succeeded", "failed", "cancelled"):
+            if row and row["status"] in (
+                "succeeded",
+                "failed",
+                "needs_review",
+                "waiting_human",
+                "pending_budget",
+                "pending_provider",
+                "dispatch_failed",
+                "cancelled",
+            ):
                 for n in nodes:
                     seq += 1
                     event = dict(n)

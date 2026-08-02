@@ -136,7 +136,12 @@ class PlotEngine(BaseEngine):
             signals.append(
                 f"{perception['pending_review']} state(s) awaiting human review"
             )
-        if not open_goals:
+        # A freshly bootstrapped novel has not necessarily materialised goal
+        # rows yet.  Treating that normal first-chapter state as a risk signal
+        # lowered otherwise usable confidence and blocked the only prose
+        # chain before writing.  Later chapters still surface an exhausted
+        # goal tree for review.
+        if not open_goals and chapter_number > 1:
             signals.append("no open story goals — the arc may be exhausted")
         if existing_node and existing_node.status == "completed":
             signals.append(
@@ -261,7 +266,7 @@ class PlotEngine(BaseEngine):
         return f"""你正在为一部中文长篇小说规划第 {chapter_number} 章的结构。
 
 【本章大纲】
-{outline or "（作者未提供大纲，请根据目标与情节线自行推断本章应当承担什么）"}
+{(outline or "（作者未提供大纲，请根据目标与情节线自行推断本章应当承担什么）")[:12000]}
 
 【未完成的故事目标】
 {goal_lines}

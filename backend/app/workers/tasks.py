@@ -1005,9 +1005,32 @@ def _persist_canonical_bootstrap_result(
         "status": v7_status,
         "review_score": result.get("review_score"),
         "dimension_scores": result.get("dimension_scores") or {},
+        "reader_experience": result.get("reader_experience") or {},
+        "issues": result.get("issues") or [],
+        "quality_gate": result.get("quality_gate") or {},
+        "blocked_reason": result.get("blocked_reason") or "",
+        "passed_review": result.get("passed_review"),
         "transition_contract": result.get("transition_contract") or {},
         "v6_content_id": result.get("v6_content_id"),
     }
+    if v7_status == "completed":
+        delegated_statuses = ["succeeded"] * len(delegated_nodes)
+    elif v7_status == "pending_approval":
+        # Prose has not started yet.  Keep the first delegated node waiting and
+        # leave compatibility-only downstream nodes pending.
+        delegated_statuses = ["waiting_human"] + ["pending"] * (len(delegated_nodes) - 1)
+    elif v7_status in {"needs_review", "needs_rewrite"}:
+        # V7 generated/reviewed a draft, but the strict gate rejected it.  The
+        # first node carries the actionable result; downstream placeholders
+        # were not independently executed.
+        delegated_statuses = ["needs_review"] + ["skipped"] * (len(delegated_nodes) - 1)
+    else:
+        delegated_statuses = ["failed"] + ["skipped"] * (len(delegated_nodes) - 1)
+    canonical_reason = output["blocked_reason"] or (
+        "V7 质量门未通过，草稿已保存为待重写"
+        if v7_status in {"needs_review", "needs_rewrite"}
+        else "V7 canonical runtime did not complete"
+    )
     db = connect()
     try:
         run = db.execute("SELECT context FROM workflow_runs WHERE id=%s", (run_id,)).fetchone()
@@ -1020,22 +1043,43 @@ def _persist_canonical_bootstrap_result(
             "chapter_text": result.get("content") or context.get("chapter_text", ""),
             "chapter_title": result.get("title") or context.get("chapter_title", ""),
         })
-        for node_key in delegated_nodes:
+        for node_key, delegated_status in zip(delegated_nodes, delegated_statuses):
+            is_open = delegated_status in {"waiting_human", "pending", "running"}
             db.execute(
                 """
                 UPDATE run_nodes
-                SET status='succeeded', output=%s, finished_at=now(), error=NULL
+                SET status=%s, output=%s,
+                    finished_at=CASE WHEN %s THEN NULL ELSE now() END,
+                    error=%s
                 WHERE run_id=%s AND node_key=%s
                 """,
-                (encode({**output, "delegated_node": node_key}), run_id, node_key),
+                (
+                    delegated_status,
+                    encode({
+                        **output,
+                        "delegated_node": node_key,
+                        "delegated_status": delegated_status,
+                    }),
+                    is_open,
+                    canonical_reason if delegated_status not in {"succeeded", "pending"} else None,
+                    run_id,
+                    node_key,
+                ),
             )
+        workflow_status = {
+            "completed": "running",
+            "pending_approval": "waiting_human",
+            "needs_review": "needs_review",
+            "needs_rewrite": "needs_review",
+        }.get(v7_status, "failed")
+        current_node = "write_chapter_draft" if v7_status == "pending_approval" else None
         db.execute(
             """
             UPDATE workflow_runs
-            SET context=%s, current_node_key=NULL, status='running', updated_at=now()
+            SET context=%s, current_node_key=%s, status=%s, updated_at=now()
             WHERE id=%s
             """,
-            (encode(context), run_id),
+            (encode(context), current_node, workflow_status, run_id),
         )
         db.commit()
     except Exception:
@@ -1555,17 +1599,32 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
     chapter_id = completed_context.get("chapter_id")
     chapter = conn.execute("SELECT status FROM contents WHERE id=%s", (chapter_id,)).fetchone() if chapter_id else None
     canonical_status = completed_context.get("canonical_generation_status")
-    needs_review = bool(
-        (canonical_status and canonical_status != "completed")
-        or (chapter and chapter["status"] == "needs_rewrite")
-    )
-    final_status = "needs_review" if needs_review else "succeeded"
-    novel_status = "needs_review" if needs_review else "draft"
-    topic_status = "needs_review" if needs_review else "generated"
+    if canonical_status == "pending_approval":
+        final_status = "waiting_human"
+        current_node_key = "write_chapter_draft"
+        finished_at_sql = "NULL"
+    elif canonical_status in {"needs_review", "needs_rewrite"} or (
+        chapter and chapter["status"] == "needs_rewrite"
+    ):
+        final_status = "needs_review"
+        current_node_key = None
+        finished_at_sql = "now()"
+    elif canonical_status and canonical_status != "completed":
+        final_status = "failed"
+        current_node_key = "write_chapter_draft"
+        finished_at_sql = "now()"
+    else:
+        final_status = "succeeded"
+        current_node_key = None
+        finished_at_sql = "now()"
     conn.execute(
-        """UPDATE workflow_runs SET status=%s, current_node_key=NULL, finished_at=now(), updated_at=now()
-           WHERE id=%s""", (final_status, run_id),
+        f"""UPDATE workflow_runs
+            SET status=%s, current_node_key=%s, finished_at={finished_at_sql}, updated_at=now()
+            WHERE id=%s""",
+        (final_status, current_node_key, run_id),
     )
+    novel_status = "needs_review" if final_status != "succeeded" else "draft"
+    topic_status = "needs_review" if final_status != "succeeded" else "generated"
     if completed_run and completed_run.get("novel_id"):
         conn.execute("UPDATE contents SET status=%s,updated_at=now() WHERE id=%s",
                      (novel_status, completed_run["novel_id"]))
@@ -2362,7 +2421,15 @@ def _run_canonical_v7_task(
             batch_ordinal=batch_ordinal,
         )
         if batch_id:
-            if result.get("status") == "completed" and result.get("v6_content_id"):
+            # A rejected V7 draft is still a durable batch slot.  It is
+            # persisted as ``needs_rewrite`` and the batch finalizer will mark
+            # the batch ``needs_review``; treating this truthful quality result
+            # as a transport/task failure used to show a generic "batch
+            # failed" and strand the generated text outside the library.
+            if result.get("v6_content_id") and result.get("status") in {
+                "completed",
+                "needs_review",
+            }:
                 _reconcile_batch_progress(batch_id)
             else:
                 _mark_batch_failed(

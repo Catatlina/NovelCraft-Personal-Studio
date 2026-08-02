@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
@@ -13,7 +13,7 @@ from ..director.story_director import StoryDirector
 from ..brain.novel_brain import NovelBrain
 from ..trace.tracer import ExecutionTracer
 from ..events.event_bus import EventBus
-from ..runtime import seed_v6_context
+from ..runtime import generate_v7_chapter
 from .schemas import SuccessResponse
 from ..human.intervention_service import HumanInterventionService
 from .schemas import DecisionReviewResponse, ReviewRequest
@@ -69,19 +69,28 @@ def get_director(
 async def generate_chapter(
     novel_id: str,
     request: GenerateChapterRequest,
-    director: StoryDirector = Depends(get_director),
-    _editor: ProjectContext = Depends(require_novel_member_dep("editor")),
+    http_request: Request,
+    context: ProjectContext = Depends(require_novel_member_dep("editor")),
 ):
     """
-    Generate a chapter using the Story Director.
-    
-    This is the main entry point for chapter generation.
+    Generate a chapter through the canonical V7 runtime.
+
+    The V7 page used to construct a second, request-scoped StoryDirector here
+    while workers used ``app.v7.runtime``.  That split skipped the runtime's
+    provider override, context seeding and shared cleanup semantics.  All
+    product entrypoints now call the same runtime; V6 remains only the
+    compatibility storage/editor/export boundary.
     """
-    await seed_v6_context(director.brain, novel_id, request.chapter_number)
-    result = await director.generate_chapter(
-        request.chapter_number,
+    result = await generate_v7_chapter(
+        novel_id,
+        context.project_id,
+        chapter_number=request.chapter_number,
         prompt=request.prompt,
         outline=request.outline,
+        user_id=str(context.user.get("id") or ""),
+        api_key=http_request.headers.get("X-Api-Key", ""),
+        api_url=http_request.headers.get("X-Api-Base-Url", ""),
+        model=http_request.headers.get("X-Model", ""),
     )
     return result
 

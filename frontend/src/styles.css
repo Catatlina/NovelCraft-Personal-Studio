@@ -723,10 +723,14 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .progress-run-state.running { color: var(--brand-500); background: var(--brand-50); }
 .progress-run-state.waiting_human { color: var(--warning); background: var(--warning-soft); }
 .progress-run-state.failed { color: var(--danger); background: var(--danger-soft); }
+.progress-run-state.needs_review, .progress-run-state.pending_provider, .progress-run-state.dispatch_failed { color: var(--danger); background: var(--danger-soft); }
+.progress-run-state.pending_approval { color: var(--warning); background: var(--warning-soft); }
 .progress-run-state.succeeded { color: var(--success); background: var(--success-soft); }
 .progress-notice { padding: 13px 15px; display: flex; align-items: center; gap: 9px; border-radius: 12px; font-size: 13px; }
 .progress-notice.success { color: var(--success); background: var(--success-soft); }
 .progress-notice.error { color: var(--danger); background: var(--danger-soft); }
+.progress-notice > div { display: flex; flex-direction: column; gap: 3px; }
+.progress-notice > div span { color: inherit; opacity: .86; line-height: 1.5; }
 
 /* 全流程重执行确认弹窗（进度页） */
 .modal-backdrop {
@@ -792,7 +796,8 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .node-order { width: 28px; height: 28px; display: grid; place-items: center; color: var(--text-muted); background: var(--bg-hover); border-radius: 9px; }
 .node-list button.succeeded .node-order { color: var(--success); background: var(--success-soft); }
 .node-list button.running .node-order { color: var(--brand-500); background: var(--brand-50); }
-.node-list button.failed .node-order, .node-list button.pending_budget .node-order { color: var(--danger); background: var(--danger-soft); }
+.node-list button.failed .node-order, .node-list button.pending_budget .node-order, .node-list button.pending_provider .node-order, .node-list button.needs_review .node-order { color: var(--danger); background: var(--danger-soft); }
+.node-list button.pending_approval .node-order, .node-list button.waiting_human .node-order { color: var(--warning); background: var(--warning-soft); }
 .node-name { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .node-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
 .node-name small, .node-index { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -802,8 +807,9 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .node-status { padding: 5px 9px; color: var(--text-secondary); background: var(--bg-hover); border-radius: 999px; font-size: 11px; }
 .node-status.running { color: var(--brand-500); background: var(--brand-50); }
 .node-status.succeeded { color: var(--success); background: var(--success-soft); }
-.node-status.failed, .node-status.pending_budget { color: var(--danger); background: var(--danger-soft); }
+.node-status.failed, .node-status.pending_budget, .node-status.pending_provider, .node-status.needs_review { color: var(--danger); background: var(--danger-soft); }
 .node-status.waiting_human { color: var(--warning); background: var(--warning-soft); }
+.node-status.pending_approval { color: var(--warning); background: var(--warning-soft); }
 .node-meta { padding: 16px 0; display: flex; flex-wrap: wrap; gap: 10px 18px; color: var(--text-muted); font-size: 11px; }
 .node-meta span { display: flex; align-items: center; gap: 5px; }
 .node-error { padding: 14px; display: flex; gap: 10px; color: var(--danger); background: var(--danger-soft); border-radius: 11px; }

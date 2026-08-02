@@ -26,20 +26,61 @@ import type {
 
 const API_BASE = '/api';
 
+export class V7ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'V7ApiError';
+    this.status = status;
+  }
+}
+
 class BrainApiClient {
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      ...options,
-    });
+    const headers = new Headers(options?.headers);
+    headers.set('Content-Type', 'application/json');
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
+    const token = sessionStorage.getItem('nc_token');
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+
+    const apiKey = sessionStorage.getItem('nc_api_key');
+    const apiUrl = sessionStorage.getItem('nc_api_url');
+    const model = sessionStorage.getItem('nc_model');
+    if (apiKey) headers.set('X-Api-Key', apiKey);
+    if (apiUrl) headers.set('X-Api-Base-Url', apiUrl);
+    if (model) headers.set('X-Model', model);
+
+    const requestInit: RequestInit = {
+      ...options,
+      headers,
+      credentials: 'include',
+    };
+
+    let response = await fetch(`${API_BASE}${path}`, requestInit);
+
+    // Keep V7 requests on the same refresh path as the rest of the app. The
+    // previous client sent no JWT at all, so every protected V7 page rendered
+    // as HTTP 401 even when the user was already logged in.
+    if (response.status === 401 && token) {
+      const { refreshAuthToken } = await import('../../lib/api');
+      if (await refreshAuthToken()) {
+        const refreshedToken = sessionStorage.getItem('nc_token');
+        if (refreshedToken) headers.set('Authorization', `Bearer ${refreshedToken}`);
+        response = await fetch(`${API_BASE}${path}`, requestInit);
+      }
     }
 
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const message = error?.message || error?.detail ||
+        (response.status === 401 ? '登录状态已失效，请重新登录' :
+          response.status === 403 ? '没有访问该工程信息的权限' :
+            `V7 请求失败（HTTP ${response.status}）`);
+      throw new V7ApiError(response.status, message);
+    }
+
+    if (response.status === 204) return undefined as T;
     return response.json();
   }
 
@@ -381,6 +422,17 @@ class BrainApiClient {
     if (params?.end_date) query.set('end_date', params.end_date);
     const qs = query.toString();
     return this.request(`/v7/cost/${novelId}/stats/task-type${qs ? `?${qs}` : ''}`);
+  }
+
+  async getCrossVersionLedger(
+    novelId: string,
+    params?: { start_date?: string; end_date?: string }
+  ): Promise<any> {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    const qs = query.toString();
+    return this.request(`/v7/cost/${novelId}/ledger${qs ? `?${qs}` : ''}`);
   }
 
   // ── Prompt versions (Sprint 3 — 后端已就绪，前端接入) ────────────────
