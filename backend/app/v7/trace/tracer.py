@@ -358,6 +358,7 @@ class ExecutionTracer:
                 "duration_seconds": r.duration_seconds,
                 "total_tokens": r.total_tokens,
                 "total_cost": r.total_cost,
+                "step_count": r.step_count,
                 "chapter_number": r.chapter_number,
             }
             for r in runs
