@@ -112,6 +112,31 @@ def test_progress_is_recounted_from_unique_chapter_slot_metadata(monkeypatch):
     assert db.update is not None
 
 
+def test_v7_quality_gate_statuses_close_batch_slots():
+    from app.workers import tasks
+
+    rows = [
+        {"id": "passed", "meta": {"batch_id": "batch-1", "ordinal": 1, "quality_status": "v7_quality_gate_passed"}},
+        {"id": "failed", "meta": {"batch_id": "batch-1", "ordinal": 2, "quality_status": "v7_quality_gate_failed"}},
+    ]
+
+    class Db:
+        def execute(self, sql, params=()):
+            if sql.lstrip().startswith("SELECT"):
+                return _Cursor(many=rows)
+            return _Cursor()
+
+    progress = tasks._recount_batch_progress(Db(), "batch-1")
+
+    assert progress == {
+        "generated_count": 2,
+        "reviewed_count": 2,
+        "accepted_count": 1,
+        "needs_review_count": 1,
+        "completed_count": 2,
+    }
+
+
 def test_batch_progress_reconciliation_commits_terminal_state(monkeypatch):
     from app.workers import tasks
 
