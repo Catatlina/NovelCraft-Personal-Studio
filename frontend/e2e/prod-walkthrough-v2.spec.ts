@@ -86,14 +86,14 @@ test("生产走查：八页面可达 + V7 Cost/Prompt 真实渲染", async ({ pa
   // 5. 切到 V7 智能体页签（hash 路由）
   await page.goto(`${BASE}/#/v7`);
   await page.waitForTimeout(3000);
-  const v7Heading = page.getByRole("heading", { name: /Overview|Starlume AI/ }).first();
+  const v7Heading = page.getByRole("heading", { name: "质量与运行监控", exact: true }).first();
   console.log(`[走查] V7 页面标题可见: ${await v7Heading.isVisible({ timeout: 8000 }).catch(() => false)}`);
 
   // 6. Cost Monitor 渲染
-  const costNav = page.getByRole("button", { name: "Cost Monitor" }).first();
+  const costNav = page.getByRole("tab", { name: "成本账本" }).first();
   if (await costNav.isVisible({ timeout: 8000 }).catch(() => false)) {
     await costNav.click();
-    await expect(page.getByRole("heading", { name: "Cost Monitor", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "V6 / V7 Provider 成本对账", exact: true })).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1500);
     const body = await page.locator("body").innerText();
     expect(body.includes("187.5")).toBeFalsy(); // mock 假数据不应出现
@@ -103,11 +103,10 @@ test("生产走查：八页面可达 + V7 Cost/Prompt 真实渲染", async ({ pa
   }
 
   // 7. Prompts 渲染（V7 侧边栏按钮，文本定位兜底）
-  const promptNav = page.locator("nav").getByText("Prompts", { exact: true }).first()
-    .or(page.getByText("Prompts", { exact: true }).first());
+  const promptNav = page.getByRole("tab", { name: "Prompt provenance" }).first();
   if (await promptNav.isVisible({ timeout: 8000 }).catch(() => false)) {
     await promptNav.click();
-    await expect(page.getByRole("heading", { name: "Prompt Manager", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "最近注册的 Prompt 版本", exact: true })).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1500);
     const body = await page.locator("body").innerText();
     expect(body.includes("a1b2c3d4e5f6g7h8")).toBeFalsy(); // MOCK_PROMPTS hash 不应出现

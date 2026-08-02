@@ -28,6 +28,7 @@
 | Q-19 | 目录导入/导出 | 目录文件可读取并预览后确认导入；TXT/MD 导出使用稳定下载节点，失败明确提示 | 可用 | `BookLibrary.tsx` |
 | Q-20 | 审阅展示 | 结构化问题转换为可读中文，避免 `[object Object]`、原始 JSON 和空白审阅卡 | 可用 | `Review.tsx`、`Editor.tsx` |
 | Q-21 | 回归与门禁 | 前端构建、前端单测、后端质量回归、差异检查、AI 真实性门禁和交付验证全部留证 | 可用 | 本轮交付记录；全量后端 878 passed / 138 skipped / 1 xpassed；前端 34 passed；构建通过 |
+| Q-22 | V7 监控入口 | V7 无作品时也显示真实空态；有作品时显示总览、成本账本和 Prompt provenance；走查定位器与现行中文 UI 保持一致 | 可用 | `App.tsx`、`V7Dashboard.tsx`、生产走查脚本 |
 
 ## 质量门禁
 

@@ -922,7 +922,12 @@ export default function App() {
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
-      {tab === "v7" && novel && <V7Dashboard novelId={novel.id} />}
+      {tab === "v7" && <V7Dashboard
+        novelId={novel?.id ?? null}
+        onOpenProgress={() => setTab("progress")}
+        onOpenReview={() => setTab("review")}
+        onOpenLibrary={() => setTab("library")}
+      />}
       </>}
       <CommandPalette commands={cmdActions} />
     </Layout>
