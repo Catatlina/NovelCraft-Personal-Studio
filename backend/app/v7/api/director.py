@@ -16,8 +16,13 @@ from ..events.event_bus import EventBus
 from .schemas import SuccessResponse
 from ..human.intervention_service import HumanInterventionService
 from .schemas import DecisionReviewResponse, ReviewRequest
+from ...core.authz import ProjectContext, require_novel_member_dep
 
-router = APIRouter(prefix="", tags=["v7-director"])
+router = APIRouter(
+    prefix="",
+    tags=["v7-director"],
+    dependencies=[Depends(require_novel_member_dep())],
+)
 
 
 # ── Request Models ───────────────────────────────────────────────────────
@@ -31,7 +36,11 @@ class GenerateChapterRequest(BaseModel):
 # ── Dependency ───────────────────────────────────────────────────────────
 
 
-def get_director(novel_id: str, db: AsyncSession = Depends(get_db)) -> StoryDirector:
+def get_director(
+    novel_id: str,
+    context: ProjectContext = Depends(require_novel_member_dep()),
+    db: AsyncSession = Depends(get_db),
+) -> StoryDirector:
     """Get StoryDirector instance."""
     try:
         novel_uuid = uuid.UUID(novel_id)
@@ -42,7 +51,15 @@ def get_director(novel_id: str, db: AsyncSession = Depends(get_db)) -> StoryDire
     tracer = ExecutionTracer(db, novel_uuid)
     event_bus = EventBus(db, novel_uuid)
     
-    return StoryDirector(db, novel_uuid, brain, tracer, event_bus)
+    return StoryDirector(
+        db,
+        novel_uuid,
+        brain,
+        tracer,
+        event_bus,
+        project_id=context.project_id,
+        user_id=str(context.user.get("id") or ""),
+    )
 
 
 # ── Generation ───────────────────────────────────────────────────────────
@@ -52,6 +69,7 @@ async def generate_chapter(
     novel_id: str,
     request: GenerateChapterRequest,
     director: StoryDirector = Depends(get_director),
+    _editor: ProjectContext = Depends(require_novel_member_dep("editor")),
 ):
     """
     Generate a chapter using the Story Director.
@@ -87,6 +105,7 @@ async def approve_decision(
     decision_id: str,
     request: ReviewRequest | None = None,
     db: AsyncSession = Depends(get_db),
+    _editor: ProjectContext = Depends(require_novel_member_dep("editor")),
 ):
     """Approve a pending decision.
 
@@ -105,6 +124,7 @@ async def reject_decision(
     decision_id: str,
     request: ReviewRequest | None = None,
     db: AsyncSession = Depends(get_db),
+    _editor: ProjectContext = Depends(require_novel_member_dep("editor")),
 ):
     """Reject a pending decision.
 

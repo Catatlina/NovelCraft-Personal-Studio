@@ -15,8 +15,13 @@ from .schemas import (
     CostRecordRequest,
     SuccessResponse,
 )
+from ...core.authz import ProjectContext, require_novel_member_dep
 
-router = APIRouter(prefix="", tags=["v7-cost"])
+router = APIRouter(
+    prefix="",
+    tags=["v7-cost"],
+    dependencies=[Depends(require_novel_member_dep())],
+)
 
 
 # ── Dependency ───────────────────────────────────────────────────────────
@@ -24,6 +29,7 @@ router = APIRouter(prefix="", tags=["v7-cost"])
 
 def get_cost_manager(
     novel_id: str,
+    context: ProjectContext = Depends(require_novel_member_dep()),
     db: AsyncSession = Depends(get_db),
 ) -> CostBudgetManager:
     """Get CostBudgetManager instance for a novel."""
@@ -31,7 +37,7 @@ def get_cost_manager(
         novel_uuid = uuid.UUID(novel_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid novel_id")
-    return CostBudgetManager(db, novel_uuid)
+    return CostBudgetManager(db, novel_uuid, project_id=context.project_id)
 
 
 def _parse_budget_id(budget_id: str) -> uuid.UUID:
@@ -62,7 +68,11 @@ async def list_budgets(
     )
 
 
-@router.post("/{novel_id}/budgets", response_model=dict)
+@router.post(
+    "/{novel_id}/budgets",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def create_budget(
     request: BudgetCreateRequest,
     manager: CostBudgetManager = Depends(get_cost_manager),
@@ -95,7 +105,11 @@ async def get_budget(
     return budget
 
 
-@router.put("/{novel_id}/budgets/{budget_id}", response_model=dict)
+@router.put(
+    "/{novel_id}/budgets/{budget_id}",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def update_budget(
     budget_id: str,
     request: BudgetUpdateRequest,
@@ -115,7 +129,11 @@ async def update_budget(
     return budget
 
 
-@router.delete("/{novel_id}/budgets/{budget_id}", response_model=SuccessResponse)
+@router.delete(
+    "/{novel_id}/budgets/{budget_id}",
+    response_model=SuccessResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def delete_budget(
     budget_id: str,
     manager: CostBudgetManager = Depends(get_cost_manager),
@@ -127,7 +145,11 @@ async def delete_budget(
     return SuccessResponse(message="Budget deactivated")
 
 
-@router.post("/{novel_id}/budgets/{budget_id}/reset", response_model=dict)
+@router.post(
+    "/{novel_id}/budgets/{budget_id}/reset",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def reset_budget(
     budget_id: str,
     manager: CostBudgetManager = Depends(get_cost_manager),
@@ -164,7 +186,11 @@ async def check_budget(
     )
 
 
-@router.post("/{novel_id}/record", response_model=dict)
+@router.post(
+    "/{novel_id}/record",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def record_cost(
     request: CostRecordRequest,
     manager: CostBudgetManager = Depends(get_cost_manager),
@@ -200,6 +226,28 @@ async def get_summary(
 ):
     """Budget state plus actual recorded spend."""
     return await manager.get_summary(start_date=start_date, end_date=end_date)
+
+
+@router.get("/{novel_id}/ledger", response_model=dict)
+async def get_cross_version_ledger(
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    manager: CostBudgetManager = Depends(get_cost_manager),
+):
+    """Unified V6/V7 provider cost and prompt provenance ledger."""
+    try:
+        return await manager.get_cross_version_ledger(
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "SHARED_LEDGER_UNAVAILABLE",
+                "error_type": type(exc).__name__,
+            },
+        ) from exc
 
 
 @router.get("/{novel_id}/stats/daily", response_model=dict)

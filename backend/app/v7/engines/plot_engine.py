@@ -46,7 +46,12 @@ class PlotEngine(BaseEngine):
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        self.ai_gateway = AIGateway(self.tracer)
+        self.ai_gateway = AIGateway(
+            self.tracer,
+            db=self.db,
+            novel_id=self.novel_id,
+            project_id=self.project_id,
+        )
         self.plot_repo = PlotNodeRepository(self.db)
 
     @property
@@ -154,7 +159,7 @@ class PlotEngine(BaseEngine):
                 max_tokens=2500,
                 temperature=0.3,
                 prompt_name="v7.plot.assess",
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
             )
             ai_payload = ai["data"] or {}
             self.record_usage(ai["usage"])
@@ -190,6 +195,9 @@ class PlotEngine(BaseEngine):
             "must_accomplish": ai_payload.get("must_accomplish") or [],
             "tension_target": ai_payload.get("tension_target"),
             "pacing_advice": ai_payload.get("pacing_advice"),
+            "reader_promise": ai_payload.get("reader_promise"),
+            "emotional_target": ai_payload.get("emotional_target"),
+            "opening_anchor": ai_payload.get("opening_anchor"),
             "risks": ai_payload.get("risks") or [],
             "suggested_beats": ai_payload.get("suggested_beats") or [],
             "chapter_title_hint": ai_payload.get("chapter_title"),
@@ -280,6 +288,9 @@ class PlotEngine(BaseEngine):
   "must_accomplish": ["本章必须完成的事 1", "本章必须完成的事 2"],
   "tension_target": "本章张力目标的一句话描述",
   "pacing_advice": "节奏建议的一句话描述",
+  "reader_promise": "本章给读者的情绪/信息承诺，以及读者为什么要继续追读",
+  "emotional_target": "情绪曲线：开场情绪 -> 中段转折 -> 章末情绪",
+  "opening_anchor": "本章开头必须承接上一章尾部的具体动作、地点或未决问题",
   "risks": ["风险 1", "风险 2"],
   "suggested_beats": [
     {{"name": "节拍名", "content": "这一节拍发生什么", "target_words": 600,

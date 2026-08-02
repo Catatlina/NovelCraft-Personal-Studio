@@ -14,10 +14,10 @@ V6's gateway interface:
 """
 from __future__ import annotations
 
-import json
+import hashlib
 from typing import Any, Optional
 
-from ...gateway import generate_text, generate_structured
+from ...gateway import complete
 
 
 class V6GenerationAdapter:
@@ -48,42 +48,31 @@ class V6GenerationAdapter:
         Returns:
             Dict with: content, usage, model, finish_reason, raw_response
         """
-        if response_format:
-            # Structured output
-            result = generate_structured(
-                prompt=prompt,
-                system_prompt=system_prompt or "",
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format=response_format,
-                project_id=self.project_id,
-            )
-            return {
-                "content": result.get("parsed", result.get("text", "")),
-                "raw_content": result.get("text", ""),
-                "usage": result.get("usage", {}),
-                "model": result.get("model", model),
-                "finish_reason": result.get("finish_reason", "stop"),
-                "raw_response": result,
-            }
-        else:
-            # Plain text generation
-            result = generate_text(
-                prompt=prompt,
-                system_prompt=system_prompt or "",
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                project_id=self.project_id,
-            )
-            return {
-                "content": result.get("text", ""),
-                "usage": result.get("usage", {}),
-                "model": result.get("model", model),
-                "finish_reason": result.get("finish_reason", "stop"),
-                "raw_response": result,
-            }
+        if not self.project_id:
+            raise ValueError("V6 generation adapter requires project_id")
+        # V6 owns prompt registration, model routing, budget checks and the
+        # ai_calls ledger.  This adapter deliberately maps to a registered
+        # editor task instead of inventing a second provider call surface.
+        result = complete(
+            run_id=None,
+            node_key="v7_v6_generation_adapter",
+            project_id=self.project_id,
+            task_type="editor_polish",
+            prompt_name="editor.polish",
+            variables={"selection": prompt, "instruction": prompt, "text": prompt},
+            client_mutation_id="v7-v6-adapter:" + hashlib.sha256(prompt.encode()).hexdigest(),
+        )
+        content = result.get("text", "") if isinstance(result, dict) else ""
+        if response_format and isinstance(result, dict):
+            content = result
+        return {
+            "content": content,
+            "raw_content": result.get("text", "") if isinstance(result, dict) else "",
+            "usage": result.get("usage", {}) if isinstance(result, dict) else {},
+            "model": model,
+            "finish_reason": "stop",
+            "raw_response": result,
+        }
 
     def generate_with_retry(
         self,

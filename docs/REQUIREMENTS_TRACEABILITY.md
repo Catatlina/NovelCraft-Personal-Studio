@@ -37,3 +37,45 @@
 - 状态提升必须在“当前证据”中写入命令、测试、run、提交或生产验证。
 - 只存在代码、路由、按钮或类型定义时，最高为“已接线”。
 - 失败或跳过的测试不能写成通过。
+
+## 2026-08-02 V6/V7 质量合并追踪补充
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| V7 章节交接契约与 V6 contents 桥 | 可用 | `backend/app/v7/integration/v6_bridge.py`；新增质量回归通过；仅质量通过章节写入 V6 | 真实数据库写回、书库/编辑器/导出端到端 |
+| V7 85 分跨章质量门 | 可用 | `backend/app/v7/integration/quality.py`、StoryDirector 二次复核与最多两次重写 | 真实 Provider 多章长跑、人工盲评 |
+| V6 主链最终人文化 | 已接线 | `chapter_loop.py` 在修复/重规划后调用真实 `bootstrap.final_humanize` 并做最终 review | 真实 Provider/数据库环境复测 |
+| V6 事实冲突局部修复 | 已接线 | `write_fact_reconcile` 返回精确修复项；主链应用、二次审查、失败转 `needs_review` | 真实冲突样本与回滚/写回证据 |
+| V6/V7 成本与 Prompt provenance 统一 | 可用 | `UnifiedAIGateway` 收敛 Provider transport；V6/V7 写 `ai_execution_ledger`；V7 `ensure_runtime_version` + `record_runtime_execution` 写 Prompt provenance；67 项目标回归通过 | Alembic migration、真实播种/回放、V6/V7 账本对账和生产长跑 |
+
+## 2026-08-02 本地收口证据更新
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 统一 Provider transport（V6/V7 sync/async/stream） | 可用 | `unified_gateway.py`；统一 Gateway 回归、流式 SSE 回归通过；E2E 真实后端运行 | 真实 Provider 多章回放 |
+| Prompt provenance 与 runtime seed | 可用 | `alembic current` = `nc_v6_v7_runtime_ledger (head)`；seed 8 个 runtime Prompt，重复执行幂等 | 真实 Provider 执行记录与生产审计 |
+| 跨版本成本账本 | 已接线 | `ai_execution_ledger` migration、V6/V7 写入、项目范围 `/ledger` 和日期/任务统计回归 | 真实 V6/V7 回放对账、生产成本核对 |
+| V7 → V6 章节质量桥 | 可用 | 85 分质量门、`transition_contract`、幂等 contents bridge、V6 二次复核回归 | 真实生成后书库/编辑器/导出链路 |
+| 生成质量验收 | 已接线 | 全量后端 843 passed；E2E 18 passed/9 skipped；20 章脚本 dry-run 可执行 | 真实 20 章双轨、跨章指标、去 AI 味差分、两名编辑盲评 |
+| 强制 AI development gate | 已接线 | AST 真值、交付声明、空白检查通过；强制脚本 exit 3 的宽泛告警已在 KI-005/015 解释 | 规则清零或完成 CI 级告警收敛 |
+
+## 2026-08-02 继续整改追踪补充
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| ai-workbench 参考落地 | 可用 | `docs/AI_WORKBENCH参考评估_20260802.md`；情绪目标、钩子、分层去 AI、读者体验已接入 V7/V6 提示与契约 | 真实长篇与人工盲评 |
+| V7 读者体验证据 | 已接线 | V7 Review 强制五项字段并持久化到 transition contract；目标与全量回归通过 | 真实 Provider 样本的人感相关性 |
+| V7 novel→V6 project 映射 | 可用 | `nc_v7_novel_project_mapping`；本地回填 6994 条；跨 project pair 拒绝测试通过 | 生产迁移与真实书库/编辑器/导出回写 |
+| Prompt 管理权限 | 可用 | V7 Prompt router 使用 admin read/write guard；权限结构测试通过 | 双用户生产接口回归 |
+| 当前质量回归 | 可用 | 后端 843 passed/138 skipped/1 xpassed；前端 32 passed；E2E 最新复跑 17 passed/10 skipped | Provider 20 章双轨、人工盲评 |
+
+## 2026-08-02 真实 Provider 20 章双轨更新
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| V6/V7 真实双轨自动回放 | 可用 | 真实 DeepSeek、本地 PostgreSQL/Redis/Celery；两轨各 20/20；V6 平均 79.6、V7 平均 92.0 | 两位独立人工盲评 |
+| 跨版本成本账本 | 可用 | `ai_execution_ledger` 369/369 成功、0 失败、3.190506 元；V6/V7 分项可对账 | 目标部署环境成本核对 |
+| Prompt provenance | 可用 | V6 7 个、V7 6 个 Prompt identity，版本、usage、task type 均可追溯 | 生产审计回放 |
+| V7→V6 书库/编辑器/导出 | 可用 | 20 章 `contents`、mapping、编辑器、完成度、TXT/Markdown/EPUB 真实接口证据 | 目标部署环境回放 |
+| 人工盲评 | 已接线 | 20 个匿名 case 和评分模板已生成 | 0/20 case 达到两位评审 |
+| 生成质量目标 | 已接线 | 自动连续性、审稿、去味和重复风险指标已生成 | 人工评分及人感差异报告 |

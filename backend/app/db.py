@@ -157,6 +157,11 @@ def init_db() -> None:
     from .config import settings
 
     db = connect()
+    # Development databases are often created from an older Alembic snapshot.
+    # Keep the shared V6/V7 execution ledger available before seed calls run;
+    # production still receives the same object through Alembic.
+    from .services.ai_runtime import ensure_shared_ledger_schema
+    ensure_shared_ledger_schema(db)
     existing = db.execute("SELECT id FROM projects LIMIT 1").fetchone()
     if existing is None and settings.environment.lower() == "development":
         # Development convenience only. Production must never get a known password.

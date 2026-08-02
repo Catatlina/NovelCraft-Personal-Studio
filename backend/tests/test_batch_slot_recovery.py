@@ -112,6 +112,52 @@ def test_progress_is_recounted_from_unique_chapter_slot_metadata(monkeypatch):
     assert db.update is not None
 
 
+def test_batch_progress_reconciliation_commits_terminal_state(monkeypatch):
+    from app.workers import tasks
+
+    events = []
+
+    class Db:
+        def commit(self):
+            events.append("commit")
+
+        def close(self):
+            events.append("close")
+
+    monkeypatch.setattr(tasks, "connect", lambda: Db())
+    monkeypatch.setattr(tasks, "_recount_batch_progress",
+                        lambda _db, _batch_id: events.append("recount") or {"completed_count": 1})
+    monkeypatch.setattr(tasks, "_maybe_finalize_batch",
+                        lambda _db, _batch_id: events.append("finalize"))
+
+    assert tasks._reconcile_batch_progress("batch-1") == {"completed_count": 1}
+    assert events == ["recount", "finalize", "commit", "close"]
+
+
+def test_child_slot_failure_marks_batch_failed_and_commits(monkeypatch):
+    from app.workers import tasks
+
+    events = []
+
+    class Db:
+        def execute(self, sql, params=()):
+            events.append(("execute", " ".join(sql.split()), params))
+
+        def commit(self):
+            events.append(("commit",))
+
+        def close(self):
+            events.append(("close",))
+
+    monkeypatch.setattr(tasks, "connect", lambda: Db())
+    tasks._mark_batch_failed("batch-1", ValueError("provider schema mismatch"))
+
+    update = next(event for event in events if event[0] == "execute")
+    assert "status='failed'" in update[1]
+    assert "provider schema mismatch" in update[2][0]
+    assert ("commit",) in events
+
+
 def test_batch_runner_is_slot_based_not_completed_counter_based():
     from app.workers import tasks
 

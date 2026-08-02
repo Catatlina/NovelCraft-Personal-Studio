@@ -34,6 +34,11 @@ GATEWAY_CALLS = {
     "_claude_complete",
     "_openai_complete",
     "_gemini_complete",
+    # V7's async gateway exposes the provider boundary as object methods.
+    # Treating these as unknown was a false negative in the gate: the AST saw
+    # ``self.ai_gateway.generate_json`` but only knew the V6 free functions.
+    "generate",
+    "generate_json",
 }
 
 AI_WRAPPER_CALLS = {
@@ -48,6 +53,7 @@ AI_WRAPPER_CALLS = {
     "_review_via_gateway",
     "execute_bootstrap",
     "batch_generate_chapters_task",
+    "generate_chapter",
 }
 
 # Explicit non-AI/deterministic exceptions. These functions must not return
@@ -92,6 +98,34 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/services/ten_layer_analysis.py:_generate_keyword_cloud": "deterministic keyword frequency aggregation",
     "backend/app/services/ten_layer_analysis.py:_generate_trend_report": "deterministic report assembly over layer results",
     "backend/app/services/assembler.py:_scene_plan": "data formatter: reads scene records from DB and formats as text, no AI generation",
+    "backend/app/repositories/loop_repos.py:save_review": "persists an already-reviewed result; no generated prose",
+    "backend/app/services/chapter_loop.py:_avg_score": "deterministic arithmetic over model-provided review dimensions",
+    "backend/app/v7/director/story_director.py:_plan": "director orchestration; actual AI work is delegated to gateway-backed engines",
+    "backend/app/v7/director/story_director.py:review_input": "deterministic review payload assembly",
+    "backend/app/v7/integration/quality.py:evaluate_review": "deterministic application quality gate over model-provided scores",
+    "backend/app/v7/repositories/state.py:list_pending_review": "database query for pending states",
+    "backend/app/v7/api/brain.py:list_pending_review": "read-only API dispatch for pending state records",
+    "backend/app/v7/api/director.py:_review_decision": "human approval endpoint; state transition is performed by the repository",
+    "backend/app/v7/brain/state_manager.py:get_pending_review": "database query for pending states",
+    "backend/app/v7/events/subscribers.py:on_review_completed": "event projection handler; does not generate text",
+    "backend/app/v7/human/intervention_service.py:record_state_review": "auditable human review persistence",
+    "backend/app/v7/human/intervention_service.py:record_decision_review": "auditable human decision persistence",
+    "backend/app/v7/human/intervention_service.py:review_decision": "human decision state transition",
+    "backend/app/v7/generation/generation_engine.py:plan_scene": "scene planning delegates to self.gateway.generate_json",
+    "backend/app/v7/generation/generation_engine.py:generate": "the V7 gateway's direct real-provider HTTP boundary",
+    "backend/app/v7/generation/generation_engine.py:generate_chapter": "generation orchestration delegates to gateway-backed scene, writing and humanize stages",
+    "backend/app/v7/engines/base.py:analyze": "abstract engine lifecycle method; concrete execute stage owns AI call",
+    "backend/app/v7/engines/base.py:plan": "abstract engine lifecycle method; concrete execute stage owns AI call",
+    "backend/app/v7/engines/plot_engine.py:analyze": "deterministic input preparation; execute stage calls the real gateway",
+    "backend/app/v7/engines/plot_engine.py:_analyze_written_chapter": "deterministic input preparation; execute stage calls the real gateway",
+    "backend/app/v7/engines/plot_engine.py:plan": "deterministic plan preparation; execute stage calls the real gateway",
+    "backend/app/v7/engines/memory_engine.py:analyze": "deterministic input preparation; execute stage calls the real gateway",
+    "backend/app/v7/engines/memory_engine.py:plan": "deterministic plan preparation; execute stage calls the real gateway",
+    "backend/app/v7/engines/review_engine.py:analyze": "deterministic input preparation; execute stage calls the real gateway",
+    "backend/app/v7/engines/review_engine.py:plan": "deterministic plan preparation; execute stage calls the real gateway",
+    "backend/app/v7/adapters/generation_adapter.py:generate": "V6 complete-backed compatibility adapter; prompt/model routing remains owned by V6",
+    "backend/app/v7/adapters/generation_adapter.py:generate_with_retry": "compatibility retry wrapper over the V6 complete-backed adapter",
+    "backend/app/v7/adapters/context_adapter.py:assemble_for_review": "V6 ContextAssembler compatibility wrapper; no generated output",
 }
 
 

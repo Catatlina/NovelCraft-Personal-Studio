@@ -1,5 +1,5 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-01
+> 更新时间：2026-08-02
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
 ## 0. V7.0 Alpha 最新状态（2026-08-01 生产部署完成）
@@ -449,3 +449,50 @@ bash scripts/ai_development_gate.sh
 ```
 
 没有同一版本的浏览器、接口、持久化或真实 Provider 证据时，不得使用“已验收”。
+
+## 2026-08-02 继续整改交接状态（历史快照）
+
+- 代码基线：`0a3261d`；当前工作树有未提交的 V6/V7 合并与生成质量整改改动，未提交、未推送、未部署。
+- 本轮新增/修改重点：V6 主章节链接入真实 `bootstrap.final_humanize` 与二次结构化复核；`write_fact_reconcile` 支持精确 anchor/replacement 局部修复并记录 repair version；V6/V7 去 AI 味接收 style card/事实约束；新增 V6 质量契约测试。
+- 目标回归：`PYTHONPATH=/tmp/novelcraft-latest-deps:. backend/.venv/bin/python -m pytest ...` 目标组合为 **63 passed、2 warnings**；`py_compile`、`git diff --check` 已通过。
+- 普通 `backend/.venv` 运行主应用测试时因缺少 `asyncpg` 在导入阶段失败；补充依赖路径后目标组合通过。注册接口 503 的真实 Provider/数据库长链仍未形成验收证据。
+- `scripts/verify_ai_truthfulness.py` 的 AST 真值检查已通过；完整 `bash scripts/ai_development_gate.sh` 仍受仓库既有宽泛 suspicion 告警影响，不能标记为全门禁通过。
+- V7 `AIGateway` 已补调用前预算阻断与调用后 provider usage 记账，并有超预算/成功记账测试；当时 V6 Gateway 与 V7 成本账本尚未统一。
+- 该快照后的共享运行时、Prompt provenance 和双轨验收资产已在下一节落地；真实 Provider/数据库回放与人工盲评仍是当前外部验收项。
+
+## 2026-08-02 继续整改（共享运行时与质量验收资产）
+
+- 共享 Provider transport 已落地：`backend/app/services/unified_gateway.py`；V6 `app.gateway` 和 V7 `AIGateway` 仍分别提供 sync/async 适配，但请求形状、超时和 usage 解析共用。
+- 共享执行账本已落地：`backend/app/services/ai_runtime.py` + migration `nc_v6_v7_runtime_ledger`；V6 成功/失败/流式收口和 V7 成功/失败收口都写 `ai_execution_ledger`。V7 成功响应若 Prompt provenance/账本写入失败不重试 Provider。
+- Prompt provenance 已进入真实 V7 生成调用：`PromptVersionManager.ensure_runtime_version` 幂等播种 runtime identity，`record_runtime_execution` 保存 exact rendered prompt、hash、usage、run/step；播种命令是 `PYTHONPATH=backend backend/.venv/bin/python backend/scripts/seed_v7_prompts.py`。
+- 新增 `scripts/v6v7_20_chapter_quality.py`：真实旧链/新链 20 章、自动连续性指标、匿名盲评包、私有映射、两名评审评分模板和明确通过条件；默认 dry-run，不会伪造结果。
+- 新增共享账本/Provenance/双轨 harness 回归；当前目标组合为 **67 passed、2 warnings**。`git diff --check`、目标 `py_compile` 已通过。
+- 当前仍不能宣称：真实数据库 migration/播种/Provider 回放已完成；20 章真实双轨与人工盲评已验收；强制 `bash scripts/ai_development_gate.sh` 已清零既有宽泛告警。
+
+## 2026-08-02 本轮最终收口证据
+
+- 本地 Alembic 已到 `nc_v6_v7_runtime_ledger (head)`；Prompt seed 已实际运行两次，8 个 runtime Prompt 身份保持幂等。
+- `backend/.venv/bin/python -m pytest backend/tests -q`：**843 passed、138 skipped、1 xpassed、2 warnings**；`npm test -- --run`：**9 个文件、32 个测试通过**；`npm run build` 通过。
+- `npm run test:e2e`：**18 passed、9 skipped、0 failed**。E2E 后端仅注入 `NOVELCRAFT_REGISTER_RATE_LIMIT=120/minute` 解决并发测试限流；生产默认仍是 5/minute。无 Provider Key 的 AI 正向用例保持 skip。
+- `verify_ai_truthfulness.py`、`verify_delivery_claims.py`、`git diff --check` 和 Python 编译检查通过。强制 `bash scripts/ai_development_gate.sh` 返回 **exit 3**，仅可按 KI-005/015 解释告警后用 `GATE_ALLOW_WARNINGS=1` 复验。
+- 20 章脚本已验证 dry-run 和真实执行前置条件；真实 Provider、双轨数据库回放、V6 书库/编辑器/导出验收和两名编辑盲评仍是外部验收项。
+
+## 2026-08-02 本轮继续整改最终状态
+
+- 已读取并评估 `/Users/genius/Workbuddy/2026-07-03-12-42-23/ai-workbench`；结论与落地项见 `docs/AI_WORKBENCH参考评估_20260802.md`。
+- 已实现：V7 reader experience 五项强制证据、情绪/钩子/开场锚点 Prompt、四层 final_humanize Prompt、V7 novel→V6 project 映射表与桥接校验、V7 Prompt API admin guard。
+- 本地数据库：Alembic `nc_v7_novel_project_mapping`；mapping 回填 6994 条；新 runtime Prompt active 版本已播种，旧版本保留。
+- 当前回归：后端 843 passed/138 skipped/1 xpassed/2 warnings；前端 32 passed；build 通过；E2E 最新复跑 17 passed/10 skipped/0 failed；dry-run、truthfulness、delivery claims、compile、diff check 通过。
+- 强制 `bash scripts/ai_development_gate.sh` exit 3 的既有宽泛扫描告警仍保留并记录在 KI-005/KI-015，不能宣称全绿。
+- 工作树仍有未提交、未推送、未部署改动；不要在无用户明确指令时提交、推送或部署。
+- 仍未验收：真实 Provider 20 章双轨、跨版本成本对账、V6 书库/编辑器/导出写回和人工盲评。
+
+## 2026-08-02 真实 Provider 20 章双轨最终交接
+
+- 隔离本地 PostgreSQL/Redis/Celery 环境已完成真实 DeepSeek `deepseek-chat` 的 V6/V7 各 20 章双轨长跑。
+- 自动证据：V6 20/20、平均 79.6、最低 72.0；V7 20/20、平均 92.0、最低 91.0；V7 20/20 持久化 `transition_contract`；相邻 5-gram 最大 Jaccard 为 V6 0.0377、V7 0.0255。
+- 产品链证据：V7 章节写入 V6 `contents` 后，编辑器首章、完成度、TXT、Markdown、EPUB 均真实返回成功；证据在 `artifacts/v6v7-20-chapter-20260802-isolated-3/product-chain-evidence.json`。
+- 成本/Provenance：`ai_execution_ledger` 369/369 成功、0 失败、3.190506 元；V6 232 条/1.393293 元，V7 137 条/1.797213 元；V6 7 个、V7 6 个 Prompt identity 有版本和 usage 记录。
+- 运行时修复：补齐批次进度提交、子任务失败落批次 `failed`、EPUB 依赖；一次真实 schema 错误通过失败语义和恢复运行处理，未伪造为成功。
+- 人工盲评：`blind-review-packet.json` 已生成 20 个匿名 case，`blind-scores.template.csv` 已准备，但 0/20 case 达到两位评审，脚本仍是 `pending_manual_or_failed`。
+- 当前口径：真实本地双轨和产品链**可用**；人工盲评**已接线**；生成质量目标和生产 V6/V7 合并验收不能宣称完成。

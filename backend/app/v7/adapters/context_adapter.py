@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ...services.assembler import assemble_context
+from ...services.assembler import ContextAssembler
 
 
 class V6ContextAdapter:
@@ -47,19 +47,15 @@ class V6ContextAdapter:
         """
         budget = token_budget or self.default_token_budget
 
-        result = assemble_context(
-            novel_id=novel_id,
-            chapter_id=chapter_id,
-            purpose=purpose,
-            token_budget=budget,
-        )
+        assembler = ContextAssembler(novel_id, chapter_id=chapter_id)
+        context = assembler.build()
 
         return {
-            "context": result.get("context", ""),
-            "token_count": result.get("token_count", 0),
+            "context": context,
+            "token_count": max(0, len(context) // 2),
             "token_budget": budget,
-            "layers_used": result.get("layers", []),
-            "raw_result": result,
+            "layers_used": [name for name, value in assembler.layers_built.items() if value],
+            "raw_result": {"context": context, "discarded": assembler.discarded},
         }
 
     def assemble_for_chapter(

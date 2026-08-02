@@ -133,3 +133,11 @@ def init_v7_db() -> None:
     )
 
     Base.metadata.create_all(bind=engine)
+    # Keep local development databases aligned with the Alembic migration even
+    # when the caller uses the convenience initializer instead of ``alembic``.
+    from ..services.ai_runtime import SHARED_LEDGER_DDL
+    with engine.begin() as connection:
+        # The shared DDL contains several PostgreSQL statements; execute it as
+        # driver SQL so SQLAlchemy does not treat the semicolons as one text
+        # clause with ambiguous bind parsing.
+        connection.exec_driver_sql(SHARED_LEDGER_DDL)

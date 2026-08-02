@@ -1,6 +1,6 @@
 # Starlume AI 全量测试汇总报告（2026-08-02）
 
-> 汇总本会话（2026-07-31 ～ 2026-08-02）执行的全部测试与验证结果。
+> 汇总本会话（2026-07-31 ～ 2026-08-02）执行的全部测试与验证结果；末尾追加本轮本地收口证据。
 > 覆盖：V7 引擎测试 / 编辑器回归 / 前端单测 / 构建 / 生产 smoke / 生产浏览器走查 / 50 章连续生成评估。
 
 ---
@@ -25,7 +25,7 @@
 | vitest 全量 | **32 passed**（9 个测试文件：Progress/Review/Settings/ThemeProvider/WorkspaceDashboard/editorPreview 回归等） |
 | TypeScript 类型检查 | tsc --noEmit 通过 |
 | 生产构建 | npm run build 通过（dist 产出正常） |
-| **Playwright E2E 全量** | **17 passed / 10 skipped / 0 failed**（27 用例，10 skip 均为 AI Key 未注入或条件性跳过，非失败；明细见 `docs/E2E_RESULT_20260802.md`） |
+| **Playwright E2E 最终复跑** | **17 passed / 10 skipped / 0 failed**（27 用例；Provider/条件性 skip 不计入通过；明细见 `docs/E2E_RESULT_20260802.md`） |
 
 ## 3. 生产验证
 
@@ -58,10 +58,43 @@
 
 ## 6. 待办（未完成）
 
-- ~~前端 Playwright e2e 全量（#164）~~ ✅ **已完成**（17 passed / 0 failed，见 `docs/E2E_RESULT_20260802.md`）
+- ~~前端 Playwright e2e 全量（#164）~~ ✅ **已验证**（最终复跑 17 passed / 10 skipped / 0 failed；无 Provider Key 的正向 AI 用例仍不计入质量验收，见 `docs/E2E_RESULT_20260802.md`）
 - ~~生产 Web 功能走查（#162）~~ ✅ **已完成**（见第 3 节）
 - 覆盖率统计（#171）—— 未执行（整体≥70% / 核心≥80% 待跑）
 
 ---
 
-*报告生成：2026-08-02 · 本地与生产版本一致：720f40b*
+*历史报告生成：2026-08-02；本轮工作树含未提交的 V6/V7 合并与生成质量整改，尚未推送或部署生产。*
+
+## 7. 本轮收口追加证据（2026-08-02）
+
+- 后端全量：`backend/.venv/bin/python -m pytest backend/tests -q` → **843 passed, 138 skipped, 1 xpassed, 2 warnings**。
+- 前端：`npm test -- --run` → **9 个文件、32 个测试通过**；`npm run build` 通过。
+- 端到端历史回归：`npm run test:e2e` → **18 passed, 9 skipped, 0 failed**；为避免并发测试互相消耗生产注册限流，E2E 后端仅通过 `NOVELCRAFT_REGISTER_RATE_LIMIT=120/minute` 覆盖测试环境，生产默认仍为 `5/minute`。本轮最终复跑为 **17 passed, 10 skipped, 0 failed**。
+- 数据库：Alembic 当前为 `nc_v6_v7_runtime_ledger (head)`；Prompt 播种脚本重复执行仍返回同一组 8 个 runtime Prompt 身份。
+- 静态门禁：`verify_ai_truthfulness.py`、`verify_delivery_claims.py`、`git diff --check`、Python 编译检查通过；强制 `bash scripts/ai_development_gate.sh` 仍以 **exit 3** 结束，原因是既有宽泛 suspicion scan，详见 `docs/KNOWN_ISSUES.md` KI-005。
+
+## 8. 继续整改后的最新证据（2026-08-02）
+
+- 后端全量最新：`843 passed、138 skipped、1 xpassed、2 warnings`；新增 V7 读者体验、Prompt 权限、project mapping、生成质量提示测试均通过。
+- 前端：`npm test -- --run` 为 **9 个文件、32 tests passed**；`npm run build` 通过。
+- E2E 最新复跑：`npm run test:e2e` 为 **17 passed、10 skipped、0 failed**；多出的 1 个 skip 是重执行控件在本次未观测到可操作异步 run 时按设计跳过，无 Provider key 的 AI 用例继续保持真实 skip/失败语义。
+- 数据库最新：`alembic current` 为 `nc_v7_novel_project_mapping`；Prompt seed 8 个运行时身份的新默认版本已落库；`v7_novel_project_links` 回填 6994 条。
+- ai-workbench 参考资产已形成评估文档并接入代码，不能把参考项目本身的弱自动评级当作生成质量证据。
+- 强制 `bash scripts/ai_development_gate.sh` 仍为 exit 3；这是已解释的宽泛扫描告警，不等于 AI 真值检查失败，但也不能写成门禁全绿。
+
+## 9. 真实 Provider 双轨与产品链复验（2026-08-02）
+
+| 检查项 | 结果 | 证据 |
+|---|---|---|
+| V6 真实双轨 | 20/20 章节、平均 79.6、最低 72.0 | `dual-track-evidence.json` |
+| V7 真实双轨 | 20/20 章节、平均 92.0、最低 91.0 | `dual-track-evidence.json` |
+| V7 跨章交接契约 | 20/20 | `dual-track-evidence.json`、V6 `contents.meta` |
+| 跨版本账本 | 369 成功、0 失败、3.190506 元 | `ai_execution_ledger` 对账 |
+| Prompt provenance | V6 7 个、V7 6 个 Prompt identity | `ai_execution_ledger` 对账 |
+| V6 书库/编辑器/完成度 | 真实 HTTP 200；20/20 reviewed | `product-chain-evidence.json` |
+| TXT/Markdown/EPUB | 全部 HTTP 200；EPUB 有效 ZIP | `product-chain-evidence.json` |
+
+自动回放和产品链当前为**可用**。盲评包虽已生成 20 个 case，但 0/20 case 有两位评审，故生成质量目标仍不能标记为**已验收**。
+
+浏览器 E2E 最终复跑：**17 passed、10 skipped、0 failed**；10 个 skip 均为 Provider/异步状态/截图 opt-in 条件，不计入生成质量验收。

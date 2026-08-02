@@ -2230,21 +2230,21 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
         return {"status": "skipped", "reason": "another generation in progress"}
     try:
         result = _generate_next_chapter_unlocked(novel_id, project_id, batch_id, batch_ordinal)
+        # Batch progress + finalization are driven from here so fan-out slots
+        # advance the batch independently of the non-blocking orchestrator.
+        if batch_id:
+            _reconcile_batch_progress(batch_id)
+        return result
+    except Exception as exc:
+        # A provider/schema/continuity failure must not strand the batch in
+        # ``running`` forever. The API resume endpoint can retry this stable
+        # slot without creating a duplicate chapter.
+        if batch_id:
+            _mark_batch_failed(batch_id, exc)
+        raise
     finally:
         release_lock(lock_key)
         release_ai_slot()
-
-    # Batch progress + finalization are driven from here so fan-out slots advance
-    # the batch independently of the (now non-blocking) orchestrator, preserving
-    # idempotency and resume semantics (P2-T5 / Q11).
-    if batch_id:
-        db = connect()
-        try:
-            _recount_batch_progress(db, batch_id)
-            _maybe_finalize_batch(db, batch_id)
-        finally:
-            db.close()
-    return result
 def _batch_generation_key(batch_id: str, ordinal: int) -> str:
     return f"batch:{batch_id}:slot:{ordinal}:v1"
 def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
@@ -2704,6 +2704,39 @@ def _maybe_finalize_batch(db, batch_id: str) -> None:
     )
 
 
+def _reconcile_batch_progress(batch_id: str) -> dict | None:
+    """Recount and persist a batch's terminal progress in one transaction."""
+    db = connect()
+    try:
+        progress = _recount_batch_progress(db, batch_id)
+        _maybe_finalize_batch(db, batch_id)
+        # The chapter task commits its content before reaching this point, but
+        # progress/final-state updates above are a separate transaction. Without
+        # this commit the API can poll a permanently ``running`` batch even when
+        # its chapter and review rows are already durable.
+        db.commit()
+        return progress
+    finally:
+        db.close()
+
+
+def _mark_batch_failed(batch_id: str, error: Exception) -> None:
+    """Make a child-slot exception observable and resumable by the API."""
+    db = connect()
+    try:
+        detail = f"{type(error).__name__}: {str(error)[:1800]}"
+        db.execute(
+            """UPDATE generation_batches
+               SET status='failed', quality_status='failed', current_ordinal=NULL,
+                   error=%s, updated_at=now()
+               WHERE id=%s AND status NOT IN ('succeeded','needs_review','cancelled')""",
+            (detail, batch_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 @celery_app.task(bind=True, max_retries=1)
 def batch_generate_chapters_task(
     self,
@@ -2780,12 +2813,7 @@ def batch_generate_chapters_task(
     # If nothing new was dispatched (everything already done), make sure the
     # final state is consistent.
     if dispatched == 0:
-        db = connect()
-        try:
-            _recount_batch_progress(db, batch_id)
-            _maybe_finalize_batch(db, batch_id)
-        finally:
-            db.close()
+        _reconcile_batch_progress(batch_id)
     return {"status": "running", "batch_id": batch_id, "dispatched": dispatched}
 @celery_app.task
 def expand_outline_task(novel_id: str, project_id: str) -> dict:

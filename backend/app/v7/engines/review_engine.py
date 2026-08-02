@@ -11,6 +11,12 @@ from typing import Any
 
 from .base import BaseEngine, EngineCapability, EngineResult
 from ..generation.generation_engine import AIGateway, AIGatewayError, chinese_word_count
+from ..integration.quality import QUALITY_PASS_SCORE
+from ...services.reader_experience import (
+    READER_EXPERIENCE_KEYS,
+    normalize_reader_experience,
+    summarize_reader_experience,
+)
 
 REVIEW_DIMENSIONS: tuple[str, ...] = (
     "consistency",
@@ -38,7 +44,12 @@ class ReviewEngine(BaseEngine):
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        self.ai_gateway = AIGateway(self.tracer)
+        self.ai_gateway = AIGateway(
+            self.tracer,
+            db=self.db,
+            novel_id=self.novel_id,
+            project_id=self.project_id,
+        )
 
     @property
     def capability(self) -> EngineCapability:
@@ -85,6 +96,8 @@ class ReviewEngine(BaseEngine):
             "known_plot": [
                 {"key": s["key"], "value": s["value"]} for s in plot_states
             ],
+            "previous_chapter_tail": input_data.get("previous_chapter_tail") or "",
+            "previous_transition_contract": input_data.get("previous_transition_contract") or {},
             "chapter_text": chapter_text,
         }
 
@@ -107,7 +120,7 @@ class ReviewEngine(BaseEngine):
         plan = {
             **data,
             "dimensions": list(REVIEW_DIMENSIONS),
-            "score_threshold": 70,
+            "score_threshold": QUALITY_PASS_SCORE,
             "checks_to_run": [
                 "ai_dimensional_review",
                 "constraint_compliance",
@@ -148,13 +161,29 @@ class ReviewEngine(BaseEngine):
             f"- {k}: {v}" for k, v in DIMENSION_LABELS.items()
         )
 
-        # Cap the reviewed text so a single review stays inside the context window.
-        review_text = chapter_text[:12000]
+        # Keep both ends when a provider context limit requires a cap.  The
+        # chapter opening contains the continuation point; the ending carries
+        # the new hook and state for the next chapter.
+        review_text = chapter_text
+        if len(review_text) > 20000:
+            review_text = (
+                review_text[:10000]
+                + "\n【正文中段省略，仅因模型上下文限制；不得据此推断中段不存在】\n"
+                + review_text[-10000:]
+            )
+        continuity_block = json.dumps(
+            {
+                "previous_chapter_tail": data.get("previous_chapter_tail", ""),
+                "previous_transition_contract": data.get("previous_transition_contract") or {},
+            },
+            ensure_ascii=False,
+        )
 
         prompt = (
             "请对下面这章小说正文做专业审稿，从 7 个维度打分（0-100 整数）。\n\n"
             f"【已确立设定】\n{setting_block}\n\n"
             f"【必须遵守的约束】\n{constraint_block}\n\n"
+            f"【跨章连续性证据】\n{continuity_block}\n\n"
             f"【评分维度】\n{dimension_block}\n\n"
             f"【正文】\n{review_text}\n\n"
             "只输出 JSON：\n"
@@ -163,6 +192,8 @@ class ReviewEngine(BaseEngine):
             '"plot_logic":0,"writing_quality":0,"emotional_impact":0,'
             '"constraint_compliance":0},\n'
             '  "overall_score": 0,\n'
+            '  "reader_experience": {"expectation":0,"conflict":0,"payoff":0,'
+            '"emotion_shift":0,"worth_continuing":0},\n'
             '  "issues": [{"dimension":"pacing","severity":"low|medium|high",'
             '"description":"问题","suggestion":"改法","excerpt":"原文片段"}],\n'
             '  "constraint_violations": [{"name":"约束名","description":"如何违反的",'
@@ -171,7 +202,13 @@ class ReviewEngine(BaseEngine):
             '  "confidence": 0.85,\n'
             '  "reason": "总体评价一句话"\n'
             "}\n"
-            "overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
+            "读者体验五项必须全部给出 0-100 分：expectation（期待感）、"
+            "conflict（冲突感）、payoff（爽点/情绪释放）、emotion_shift（情绪变化）、"
+            "worth_continuing（追读意愿）。低于 60 分必须在 issues 中指出具体段落或"
+            "具体缺口；读者体验分不计入 7 维 overall_score。\n"
+            f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
+            f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
+            f"writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
         )
 
         try:
@@ -181,7 +218,7 @@ class ReviewEngine(BaseEngine):
                 max_tokens=3000,
                 temperature=0.2,
                 prompt_name="v7.review.seven_dimension",
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
@@ -212,6 +249,22 @@ class ReviewEngine(BaseEngine):
                 result={"raw": raw},
             )
 
+        reader_experience = normalize_reader_experience(raw.get("reader_experience"))
+        missing_reader_experience = [
+            key for key in READER_EXPERIENCE_KEYS
+            if reader_experience is None or key not in reader_experience
+        ]
+        if missing_reader_experience:
+            return EngineResult(
+                success=False,
+                reason=(
+                    "AI review missing reader-experience evidence: "
+                    + ", ".join(missing_reader_experience)
+                ),
+                confidence=0.0,
+                result={"raw": raw},
+            )
+
         overall = raw.get("overall_score")
         computed = round(sum(dimension_scores.values()) / len(dimension_scores), 1)
         if not isinstance(overall, (int, float)) or abs(overall - computed) > 15:
@@ -224,6 +277,8 @@ class ReviewEngine(BaseEngine):
             "overall_score": float(overall),
             "computed_score": computed,
             "dimension_scores": dimension_scores,
+            "reader_experience": reader_experience,
+            "reader_experience_summary": summarize_reader_experience(reader_experience),
             "issues": raw.get("issues") or [],
             "constraint_violations": violations,
             "strengths": raw.get("strengths") or [],
@@ -261,6 +316,13 @@ class ReviewEngine(BaseEngine):
         all_dimensions_present = all(d in scores for d in REVIEW_DIMENSIONS)
         in_range = all(0 <= v <= 100 for v in scores.values())
         overall_in_range = 0 <= result.get("overall_score", -1) <= 100
+        reader_experience = result.get("reader_experience") or {}
+        reader_experience_complete = all(
+            key in reader_experience
+            and isinstance(reader_experience.get(key), (int, float))
+            and 0 <= reader_experience[key] <= 100
+            for key in READER_EXPERIENCE_KEYS
+        )
         high_violations = [
             v
             for v in result.get("constraint_violations", [])
@@ -269,11 +331,18 @@ class ReviewEngine(BaseEngine):
 
         validation = {
             **result,
-            "review_valid": all_dimensions_present and in_range and overall_in_range,
+            "review_valid": (
+                all_dimensions_present
+                and in_range
+                and overall_in_range
+                and reader_experience_complete
+            ),
             "dimensions_count": len(scores),
             "score_in_range": in_range and overall_in_range,
+            "reader_experience_complete": reader_experience_complete,
+            "reader_experience_summary": summarize_reader_experience(reader_experience),
             "blocking_violations": len(high_violations),
-            "passed": result.get("overall_score", 0) >= 70 and not high_violations,
+            "passed": result.get("overall_score", 0) >= QUALITY_PASS_SCORE and not high_violations,
         }
 
         if not validation["review_valid"]:
@@ -289,7 +358,7 @@ class ReviewEngine(BaseEngine):
             result=validation,
             confidence=output.confidence,
             reason=(
-                f"Validated 7/7 dimensions, "
+                f"Validated 7/7 dimensions plus reader experience, "
                 f"{validation['blocking_violations']} blocking violation(s)"
             ),
             warnings=output.warnings,
@@ -310,6 +379,7 @@ class ReviewEngine(BaseEngine):
                 "chapter_number": chapter_number,
                 "overall_score": data.get("overall_score", 0),
                 "dimension_scores": data.get("dimension_scores", {}),
+                "reader_experience": data.get("reader_experience", {}),
                 "issues_count": len(data.get("issues", [])),
                 "blocking_violations": data.get("blocking_violations", 0),
             },
@@ -347,7 +417,10 @@ class ReviewEngine(BaseEngine):
             permission_level="auto",
             status="completed",
             decided_by="ai",
-            context={"dimension_scores": data.get("dimension_scores", {})},
+            context={
+                "dimension_scores": data.get("dimension_scores", {}),
+                "reader_experience": data.get("reader_experience", {}),
+            },
         )
 
         return EngineResult(

@@ -25,13 +25,13 @@
 
 ### 门禁证据
 - **端到端 API 测试通过**：10/10 测试项全部通过
-  - ✅ State 创建 + 列表查询
-  - ✅ Goal 创建 + 列表查询
-  - ✅ Constraint 创建 + 列表查询
-  - ✅ Version 创建 + 列表查询
-  - ✅ Overview 统计正确
-  - ✅ Event Log 记录完整
-  - ✅ Decision Log 正常
+  - ✅ State 创建 + 列表查询（历史证据：V7 API 测试）
+  - ✅ Goal 创建 + 列表查询（历史证据：V7 API 测试）
+  - ✅ Constraint 创建 + 列表查询（历史证据：V7 API 测试）
+  - ✅ Version 创建 + 列表查询（历史证据：V7 API 测试）
+  - ✅ Overview 统计正确（历史证据：V7 API 测试）
+  - ✅ Event Log 记录完整（历史证据：V7 API 测试）
+  - ✅ Decision Log 正常（历史证据：V7 API 测试）
 
 ### 当前状态
 - **V7 API 完整可用**：所有 Brain API 端点都已验证通过
@@ -52,7 +52,7 @@
 
 ### 已完成
 
-#### 生产部署 ✅
+#### 生产部署 ✅（历史证据：实测记录）
 - 服务器：43.156.17.78（新加坡）
 - 部署方式：Docker Compose（生产配置）
 - 代码版本：`302bd23`（main 分支最新）
@@ -70,12 +70,12 @@
 - 迁移执行成功，18 张 V7 表已创建
 
 #### Smoke Test 通过 ✅
-- **Brain Overview** — `GET /api/v7/brain/{novel_id}/overview` ✅
+- **Brain Overview** — `GET /api/v7/brain/{novel_id}/overview` ✅（历史证据：API 测试）
   - 返回正确的 JSON 结构
   - states/goals/constraints/versions/events 全部正常
-- **Goals List** — `GET /api/v7/brain/{novel_id}/goals` ✅
+- **Goals List** — `GET /api/v7/brain/{novel_id}/goals` ✅（历史证据：API 测试）
   - 返回空数组（无数据时正常）
-- **Versions List** — `GET /api/v7/brain/{novel_id}/versions` ✅
+- **Versions List** — `GET /api/v7/brain/{novel_id}/versions` ✅（历史证据：API 测试）
   - 返回空数组（无数据时正常）
 
 #### 修复的问题
@@ -103,23 +103,23 @@
    - requirements.txt: 添加 asyncpg 依赖
 
 ### 当前状态：**生产可用**
-- ✅ 代码全部写完
-- ✅ 集成全部完成
-- ✅ 真实 AI 调用已验证
-- ✅ 生产部署成功
-- ✅ API 端点 smoke test 通过
+- ✅ 代码全部写完（历史证据：测试）
+- ✅ 集成全部完成（历史证据：测试）
+- ✅ 真实 AI 调用已验证（历史证据：实测）
+- ✅ 生产部署成功（历史证据：实测）
+- ✅ API 端点 smoke test 通过（历史证据：API 测试）
 - ⏳ 端到端测试 — 待完整流程测试
 - ⏳ CI 通过 — 待 GitHub Actions 运行
 
 ### 剩余门禁
-1. ~~数据库会话集成~~ ✅
-2. ~~API 路由注册~~ ✅
-3. ~~前端路由接入~~ ✅
+1. ~~数据库会话集成~~ ✅（历史证据：迁移）
+2. ~~API 路由注册~~ ✅（历史证据：API 测试）
+3. ~~前端路由接入~~ ✅（历史证据：浏览器）
 4. ~~单元测试~~ ✅
-5. ~~V6 Adapter~~ ✅
-6. ~~真实 AI 调用~~ ✅
-7. ~~生产部署~~ ✅
-8. ~~Smoke Test~~ ✅
+5. ~~V6 Adapter~~ ✅（历史证据：测试）
+6. ~~真实 AI 调用~~ ✅（历史证据：实测）
+7. ~~生产部署~~ ✅（历史证据：实测）
+8. ~~Smoke Test~~ ✅（历史证据：API 测试）
 9. ⏳ 端到端测试 — 需完整章节生成流程测试
 10. ❌ CI 通过 — 需 GitHub Actions 运行
 
@@ -136,7 +136,7 @@
 
 ### 已完成
 
-#### 真实 AI 调用 ✅
+#### 真实 AI 调用 ✅（历史证据：实测）
 - AIGateway 从 mock 实现升级为真实 DeepSeek API 调用
 - 支持参数：
   - system_prompt — 系统提示词
@@ -167,12 +167,12 @@
 - **未部署到生产**：需要服务器 SSH 权限
 
 ### 剩余门禁
-1. ~~数据库会话集成~~ ✅
-2. ~~API 路由注册~~ ✅
-3. ~~前端路由接入~~ ✅
+1. ~~数据库会话集成~~ ✅（历史证据：迁移）
+2. ~~API 路由注册~~ ✅（历史证据：API 测试）
+3. ~~前端路由接入~~ ✅（历史证据：浏览器）
 4. ~~单元测试~~ ✅
-5. ~~V6 Adapter~~ ✅
-6. ~~真实 AI 调用~~ ✅
+5. ~~V6 Adapter~~ ✅（历史证据：测试）
+6. ~~真实 AI 调用~~ ✅（历史证据：实测）
 7. ⏳ 端到端测试 — 需生产环境运行
 8. ❌ 生产部署 — 需服务器 SSH 权限
 9. ❌ CI 通过 — 需 GitHub Actions 运行
@@ -189,14 +189,14 @@
 
 ### 已完成门禁项
 
-#### 1. 数据库会话集成 ✅
+#### 1. 数据库会话集成 ✅（历史证据：迁移）
 - 创建 `backend/app/v7/db.py`
 - SQLAlchemy 会话管理，复用 V6 的 `DATABASE_URL` 环境变量
 - 提供 `get_db()` FastAPI 依赖和 `session_scope()` 上下文管理器
 - 提供 `init_v7_db()` 初始化函数（开发用）
 - V6 psycopg2 与 V7 SQLAlchemy 完全隔离，互不影响
 
-#### 2. API 路由注册 ✅
+#### 2. API 路由注册 ✅（历史证据：API 测试）
 - 创建 `backend/app/v7/api/router.py` 统一路由入口
 - 在 `backend/app/main.py` 中注册 V7 路由
 - 路由前缀：`/api/v7`
@@ -205,7 +205,7 @@
   - `/api/v7/trace` — Trace API（Run 管理/步骤追踪）
   - `/api/v7/director` — Director API（章节生成/决策审批）
 
-#### 3. 前端路由接入 ✅
+#### 3. 前端路由接入 ✅（历史证据：浏览器）
 - 在 `frontend/src/App.tsx` 中添加 V7 Dashboard
 - 在 `PUBLIC_TABS` 中添加 `v7` tab
 - 在 `frontend/src/components/Layout.tsx` 中添加导航项「V7 智能体」
@@ -235,7 +235,7 @@
   - 状态一致性测试
   - Trace 完整性测试
 
-#### 5. V6 Adapter ✅
+#### 5. V6 Adapter ✅（历史证据：测试）
 - 创建 `backend/app/v7/adapters/` 目录
 - **V6GenerationAdapter** — 包装 V6 的 `gateway.py` AI 网关
   - 支持普通文本生成和结构化输出
@@ -266,11 +266,11 @@
 - **生产未部署**：需要部署到 novel.xyjin.xyz
 
 ### 未完成门禁（升级到「可用」需完成）
-1. ~~数据库会话集成~~ ✅ 已完成
-2. ~~API 路由注册~~ ✅ 已完成
-3. ~~前端路由接入~~ ✅ 已完成
+1. ~~数据库会话集成~~ ✅ 已完成（历史证据：迁移）
+2. ~~API 路由注册~~ ✅ 已完成（历史证据：API 测试）
+3. ~~前端路由接入~~ ✅ 已完成（历史证据：浏览器）
 4. ~~单元测试~~ ✅ 已完成（框架就绪，需真实环境验证）
-5. ~~V6 Adapter~~ ✅ 已完成
+5. ~~V6 Adapter~~ ✅ 已完成（历史证据：测试）
 6. ⏳ 端到端测试 — 框架已写好，需真实环境运行
 7. ❌ 真实 AI 调用验证 — 需 DeepSeek API Key
 8. ❌ CI 通过 — GitHub Actions 五项全绿
@@ -718,3 +718,19 @@
 - 全链 T2（历史）：曾使用 mock provider 验证真实 Postgres 编排/落库/校验链。当前规则已移除业务 mock provider，该证据仅保留为历史参考，不再作为完成证据。
 - QA 遗留：QA-002 微博嵌套解析（回归测试）/QA-003 admin 读接口按 NOVELCRAFT_ADMIN_EMAILS 收紧（配置即生效，个人实例不锁死）/QA-004 DELETE novels/contents 软删级联/QA-008 注册防枚举/healthz 增加 worker 存活+队列深度检查，均有 `tests/test_qa_remediation_20260713.py` 回归。
 - **真实 Provider V2 全链**：`tests/test_real_provider_v2_bootstrap.py` 已用 2026-07-14 本地开发 key 跑通；该 key 不得提交，项目截止后回收。
+
+## 2026-08-02 继续整改收口
+
+- 已评估本地 `ai-workbench`，有效的情绪/钩子/分层去 AI/读者体验思路已落入 V7 生成与审稿链；评估文档为 `docs/AI_WORKBENCH参考评估_20260802.md`。
+- 已补 V7 reader experience 五项证据、生成/续写情绪与跨章钩子约束、V7 novel→V6 project 映射迁移与权限校验。
+- 本地数据库 Alembic 头为 `nc_v7_novel_project_mapping`，映射回填 6994 条；Prompt 新默认版本已播种。
+- 最新回归：后端 843 passed/138 skipped/1 xpassed/2 warnings；前端 32 passed；E2E 最新复跑 17 passed/10 skipped/0 failed；构建、truthfulness、delivery claims、compile、diff check 通过。
+- 仍未验收：真实 Provider 20 章双轨、跨版本账本真实对账、V6 书库/编辑器/导出回写和人工盲评；强制 gate exit 3 的宽泛告警保持记录。
+
+## 2026-08-02 真实 Provider 双轨与产品链最终收口
+
+- 真实本地 Provider 长跑已完成：V6/V7 各 20 章，V6 自动审核平均 79.6、最低 72.0；V7 平均 92.0、最低 91.0；V7 20/20 章有 `transition_contract`。
+- V7→V6 真实链已核验：章节来源、运行 ID、状态、项目归属、版本记录均可追溯；编辑器首章、完成度、TXT、Markdown、EPUB 均成功，EPUB 为有效 ZIP。
+- 统一账本已完成本地真实对账：369/369 成功、0 失败、3.190506 元；V6 232 条、V7 137 条；Prompt provenance 可按版本和执行记录追溯。
+- 长跑中发现并修复批次提交、Provider schema 失败收口和 EPUB 依赖问题；修复后恢复运行完成，失败经历已保留在交接记录。
+- 人工盲评包已生成 20 个匿名 case，但 0/20 case 有两位独立评审；因此自动双轨与产品链标记为**可用**，人工盲评为**已接线**，生成质量达标与生产 V6/V7 合并验收不能宣称完成。

@@ -142,6 +142,7 @@ class PromptVersionManager:
         model: str = "deepseek-chat",
         parameters: dict[str, Any] | None = None,
         output_schema: dict[str, Any] | None = None,
+        version_label: str | None = None,
         description: str | None = None,
         change_notes: str | None = None,
         created_by: str = "system",
@@ -184,6 +185,7 @@ class PromptVersionManager:
             model=model,
             parameters=parameters,
             output_schema=output_schema,
+            version_label=version_label,
             description=description,
             change_notes=change_notes,
             is_default=make_default,
@@ -197,6 +199,40 @@ class PromptVersionManager:
             "previous_hash": previous.prompt_hash if previous else None,
             "version": self._version_to_dict(version, include_template=True),
         }
+
+    async def ensure_runtime_version(
+        self,
+        prompt_name: str,
+        version_label: str | int | None,
+        *,
+        model: str = "deepseek-chat",
+    ) -> dict[str, Any]:
+        """Seed the concrete runtime label before its first execution.
+
+        V7 prompt builders render context inline, so the full rendered prompt
+        is recorded on ``PromptExecution`` rather than pretending that every
+        context change is a new template version.  The registered template is
+        a stable runtime identity; the execution carries the exact rendered
+        hash and text used by the provider.
+        """
+        label = str(version_label or "runtime-1").strip() or "runtime-1"
+        template = f"runtime-managed:{prompt_name}:{label}"
+        parameters = {
+            "runtime_managed": True,
+            "runtime_version_label": label,
+        }
+        result = await self.register_version(
+            prompt_name,
+            template,
+            model=model,
+            parameters=parameters,
+            version_label=label,
+            description="Runtime-seeded provenance identity; exact rendered prompt is stored per execution.",
+            change_notes="Created or reconciled by the shared V6/V7 execution gateway.",
+            created_by="runtime",
+            make_default=True,
+        )
+        return result["version"]
 
     async def set_default(self, version_id: uuid.UUID) -> dict[str, Any] | None:
         """Make a version the default for its prompt name."""
@@ -278,6 +314,57 @@ class PromptVersionManager:
             extra_metadata=extra_metadata,
         )
         return self._execution_to_dict(execution)
+
+    async def record_runtime_execution(
+        self,
+        prompt_name: str,
+        *,
+        version_label: str | int | None,
+        rendered_prompt: str,
+        model: str,
+        input_variables: dict[str, Any] | None = None,
+        output_raw: str | None = None,
+        output: dict[str, Any] | None = None,
+        tokens_input: int = 0,
+        tokens_output: int = 0,
+        cost: float = 0.0,
+        duration_seconds: float | None = None,
+        status: str = "success",
+        error_message: str | None = None,
+        run_id: uuid.UUID | None = None,
+        step_id: uuid.UUID | None = None,
+        novel_id: uuid.UUID | None = None,
+        validation_passed: bool | None = None,
+        validation_errors: list[str] | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Register a runtime prompt identity and record its exact execution."""
+        version = await self.ensure_runtime_version(
+            prompt_name,
+            version_label,
+            model=model,
+        )
+        return await self.record_execution(
+            prompt_name,
+            prompt_version_id=uuid.UUID(version["id"]),
+            input_variables=input_variables,
+            rendered_prompt=rendered_prompt,
+            output=output,
+            output_raw=output_raw,
+            model=model,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            cost=cost,
+            duration_seconds=duration_seconds,
+            status=status,
+            error_message=error_message,
+            run_id=run_id,
+            step_id=step_id,
+            novel_id=novel_id,
+            validation_passed=validation_passed,
+            validation_errors=validation_errors,
+            extra_metadata=extra_metadata,
+        )
 
     async def get_execution_history(
         self,
@@ -374,6 +461,7 @@ class PromptVersionManager:
             "is_active": version.is_active,
             "is_default": version.is_default,
             "created_by": version.created_by,
+            "extra_metadata": version.extra_metadata,
             "created_at": version.created_at.isoformat() if version.created_at else None,
         }
         if include_template:
@@ -392,6 +480,8 @@ class PromptVersionManager:
             "status": execution.status,
             "input_variables": execution.input_variables,
             "output": execution.output,
+            "output_raw": execution.output_raw,
+            "rendered_prompt": execution.rendered_prompt,
             "tokens_input": execution.tokens_input,
             "tokens_output": execution.tokens_output,
             "cost": execution.cost,
@@ -402,5 +492,6 @@ class PromptVersionManager:
             "novel_id": str(execution.novel_id) if execution.novel_id else None,
             "validation_passed": execution.validation_passed,
             "validation_errors": execution.validation_errors,
+            "extra_metadata": execution.extra_metadata,
             "created_at": execution.created_at.isoformat() if execution.created_at else None,
         }

@@ -1,7 +1,7 @@
 """回归测试：编辑器 deai 字数门禁 + AI 建议应用冲突修复（2026-08-01 1306484）。
 
 覆盖：
-1. deai.rewrite prompt 1.1.0 含篇幅硬要求（≥原文 / ≥2000 / 禁压缩）
+1. deai.rewrite prompt 1.1.1 含篇幅硬要求（≥原文 / ≥2000 / 禁压缩）
 2. main.py deai 分支的字数门禁逻辑（不足 2000 带反馈重跑一次）
 3. _ensure_editor_paragraphs 段落分隔不丢内容
 4. buildAiEditPreview（前端）在整章替换时的正确性（与 editorPreview.ts 同逻辑的 Python 复刻校验）
@@ -31,7 +31,7 @@ def test_deai_rewrite_version_bumped():
     import app.prompt_registry as pr
     for name, version, _provider, _text in pr.PROMPT_SEEDS:
         if name == "deai.rewrite":
-            assert version == "1.1.0", f"deai.rewrite 应升到 1.1.0，当前 {version}"
+            assert version == "1.1.1", f"deai.rewrite 应升到 1.1.1，当前 {version}"
             return
     raise AssertionError("deai.rewrite missing")
 

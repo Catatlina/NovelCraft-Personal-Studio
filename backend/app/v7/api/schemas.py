@@ -371,6 +371,7 @@ class PromptVersionCreateRequest(BaseModel):
     model: str = Field("deepseek-chat", max_length=100)
     parameters: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
+    version_label: str | None = Field(None, max_length=100)
     description: str | None = None
     change_notes: str | None = None
     created_by: str = "human"

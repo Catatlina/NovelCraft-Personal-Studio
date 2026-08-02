@@ -33,6 +33,16 @@ interface Budget {
   description: string;
 }
 
+function money(value: unknown): string {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+}
+
+function percentage(value: unknown): number {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 export function CostMonitor({ novelId }: CostMonitorProps) {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [summary, setSummary] = useState<any>(null);
@@ -166,7 +176,7 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
               <div>
                 <p className="text-sm text-gray-500">Total Budget</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
-                  ¥{summary.total_budget_cny.toFixed(2)}
+                  ¥{money(summary.total_limit_cny)}
                 </p>
               </div>
               <div className="p-3 bg-emerald-50 rounded-lg">
@@ -180,7 +190,7 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
               <div>
                 <p className="text-sm text-gray-500">Spent</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
-                  ¥{summary.total_spent_cny.toFixed(2)}
+                  ¥{money(summary.total_spent_cny)}
                 </p>
               </div>
               <div className="p-3 bg-blue-50 rounded-lg">
@@ -194,7 +204,7 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
               <div>
                 <p className="text-sm text-gray-500">Remaining</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
-                  ¥{summary.total_remaining_cny.toFixed(2)}
+                  ¥{money(summary.total_remaining_cny)}
                 </p>
               </div>
               <div className="p-3 bg-green-50 rounded-lg">
@@ -207,8 +217,8 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500">Usage</p>
-                <p className={`text-2xl font-bold mt-1 ${getUsageColor(summary.usage_percentage)}`}>
-                  {summary.usage_percentage.toFixed(1)}%
+                <p className={`text-2xl font-bold mt-1 ${getUsageColor(percentage(summary.usage_percentage))}`}>
+                  {percentage(summary.usage_percentage).toFixed(1)}%
                 </p>
               </div>
               <div className="p-3 bg-purple-50 rounded-lg">
@@ -224,17 +234,17 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
         <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-gray-900">Overall Budget Usage</h2>
-            {getStatusBadge(summary.usage_percentage)}
+            {getStatusBadge(percentage(summary.usage_percentage))}
           </div>
           <div className="w-full bg-gray-200 rounded-full h-4">
             <div
               className={`h-4 rounded-full transition-all ${getProgressColor(summary.usage_percentage)}`}
-              style={{ width: `${Math.min(summary.usage_percentage, 100)}%` }}
+              style={{ width: `${Math.min(percentage(summary.usage_percentage), 100)}%` }}
             />
           </div>
           <div className="flex justify-between mt-2 text-sm text-gray-500">
-            <span>¥{summary.total_spent_cny.toFixed(2)} spent</span>
-            <span>¥{summary.total_remaining_cny.toFixed(2)} remaining</span>
+            <span>¥{money(summary.total_spent_cny)} spent</span>
+            <span>¥{money(summary.total_remaining_cny)} remaining</span>
           </div>
         </div>
       )}
@@ -283,7 +293,7 @@ export function CostMonitor({ novelId }: CostMonitorProps) {
                       <div className="flex justify-between text-sm mb-1">
                         <span className="text-gray-600">Cost</span>
                         <span className="font-medium">
-                          ¥{budget.spent_cny.toFixed(2)} / ¥{budget.limit_cny.toFixed(2)}
+                          ¥{money(budget.spent_cny)} / ¥{money(budget.limit_cny)}
                         </span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">

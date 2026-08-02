@@ -1,5 +1,7 @@
 """Auth endpoints: register, login, refresh, logout."""
 
+import os
+
 import secrets
 
 from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Response
@@ -66,7 +68,7 @@ def _clear_session_cookies(response: Response) -> None:
 
 
 @router.post("/register")
-@limiter.limit("5/minute")
+@limiter.limit(os.getenv("NOVELCRAFT_REGISTER_RATE_LIMIT", "5/minute"))
 def register(request: Request, response: Response, payload: RegisterRequest = Body(...)):
     db = connect()
     existing = db.execute("SELECT id FROM users WHERE email = %s", (payload.email,)).fetchone()

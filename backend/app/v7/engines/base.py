@@ -66,12 +66,14 @@ class BaseEngine(ABC):
         brain: NovelBrain,
         tracer: ExecutionTracer,
         event_bus: EventBus,
+        project_id: str | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
         self.brain = brain
         self.tracer = tracer
         self.event_bus = event_bus
+        self.project_id = project_id
         # Set by run() so phase implementations can report token usage / cost
         # onto the trace step that is currently open.
         self._step_ctx: Any = None

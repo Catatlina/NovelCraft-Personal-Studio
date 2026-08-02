@@ -18,8 +18,13 @@ from .schemas import (
     PromptExecutionCreateRequest,
     PromptVersionCreateRequest,
 )
+from ...api.v1.config import require_admin, require_admin_reads
 
-router = APIRouter(prefix="", tags=["v7-prompt"])
+router = APIRouter(
+    prefix="",
+    tags=["v7-prompt"],
+    dependencies=[Depends(require_admin_reads)],
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -84,6 +89,7 @@ async def list_versions(
 async def register_version(
     request: PromptVersionCreateRequest,
     manager: PromptVersionManager = Depends(get_prompt_manager),
+    _admin: dict = Depends(require_admin),
 ):
     """Register a prompt version — a new row is created only on content change."""
     try:
@@ -93,6 +99,7 @@ async def register_version(
             model=request.model,
             parameters=request.parameters,
             output_schema=request.output_schema,
+            version_label=getattr(request, "version_label", None),
             description=request.description,
             change_notes=request.change_notes,
             created_by=request.created_by,
@@ -162,6 +169,7 @@ async def get_version(
 async def set_default_version(
     version_id: str,
     manager: PromptVersionManager = Depends(get_prompt_manager),
+    _admin: dict = Depends(require_admin),
 ):
     """Make a version the default for its prompt name."""
     version = await manager.set_default(_parse_uuid(version_id, "version_id"))
@@ -174,6 +182,7 @@ async def set_default_version(
 async def deactivate_version(
     version_id: str,
     manager: PromptVersionManager = Depends(get_prompt_manager),
+    _admin: dict = Depends(require_admin),
 ):
     """Deactivate a version without deleting it."""
     version = await manager.deactivate_version(_parse_uuid(version_id, "version_id"))
@@ -188,6 +197,7 @@ async def deactivate_version(
 async def record_execution(
     request: PromptExecutionCreateRequest,
     manager: PromptVersionManager = Depends(get_prompt_manager),
+    _admin: dict = Depends(require_admin),
 ):
     """Record one prompt execution bound to a concrete prompt version."""
     try:

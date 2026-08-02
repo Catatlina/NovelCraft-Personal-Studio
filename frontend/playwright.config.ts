@@ -28,6 +28,9 @@ export default defineConfig({
         ...process.env,
         E2E_BACKEND_PORT: String(BACKEND_PORT),
         NOVELCRAFT_JWT_SECRET: "starlume-e2e-only-secret-key-32-bytes-minimum",
+        // E2E specs create isolated users in parallel. Keep production's
+        // 5/minute registration limit, but avoid cross-spec test starvation.
+        NOVELCRAFT_REGISTER_RATE_LIMIT: "120/minute",
       },
     },
     {

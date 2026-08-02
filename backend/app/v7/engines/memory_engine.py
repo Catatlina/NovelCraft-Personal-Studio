@@ -30,7 +30,12 @@ class MemoryEngine(BaseEngine):
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        self.ai_gateway = AIGateway(self.tracer)
+        self.ai_gateway = AIGateway(
+            self.tracer,
+            db=self.db,
+            novel_id=self.novel_id,
+            project_id=self.project_id,
+        )
 
     @property
     def capability(self) -> EngineCapability:

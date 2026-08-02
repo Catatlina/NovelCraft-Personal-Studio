@@ -60,12 +60,23 @@ export function GenerationConsole({ novelId }: GenerationConsoleProps) {
       });
       setGenerationResult(result || null);
       // 有真实步骤信息时同步到管线展示
-      const stepNames = result?.step_names || [];
+      const stepNames = result?.steps_executed || [];
+      const visibleAliases: Record<string, string[]> = {
+        planning: ['plan'],
+        context: ['perceive'],
+        scene: ['plan'],
+        generation: ['execute'],
+        deai: ['execute'],
+        review: ['observe'],
+        memory: ['update'],
+      };
       if (Array.isArray(stepNames) && stepNames.length) {
         setSteps(prev => prev.map(s => ({
           ...s,
-          status: stepNames.includes(s.id) ? ('completed' as const) : s.status,
-          duration: result?.run_duration_sec ? result.run_duration_sec : s.duration,
+          // Backend reports logical agent-loop steps; map them to the visible
+          // console without inventing intermediate progress.
+          status: (visibleAliases[s.id] || []).some(name => stepNames.includes(name))
+            ? ('completed' as const) : s.status,
         })));
       }
     } catch (err: any) {

@@ -22,8 +22,13 @@ from .schemas import (
     HumanInterventionListResponse, ReviewRequest,
     InstructionRequest, InstructionResponse,
 )
+from ...core.authz import require_novel_member_dep
 
-router = APIRouter(prefix="", tags=["v7-brain"])
+router = APIRouter(
+    prefix="",
+    tags=["v7-brain"],
+    dependencies=[Depends(require_novel_member_dep())],
+)
 
 
 # ── Dependency ───────────────────────────────────────────────────────────
@@ -99,7 +104,11 @@ async def list_states(
     }
 
 
-@router.post("/{novel_id}/states", response_model=StateUpdateResponse)
+@router.post(
+    "/{novel_id}/states",
+    response_model=StateUpdateResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def create_state(
     request: StateCreateRequest,
     brain: NovelBrain = Depends(get_brain),
@@ -135,7 +144,11 @@ async def create_state(
     return result
 
 
-@router.put("/{novel_id}/states/{state_id}", response_model=StateUpdateResponse)
+@router.put(
+    "/{novel_id}/states/{state_id}",
+    response_model=StateUpdateResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def update_state(
     state_id: str,
     request: StateUpdateRequest,
@@ -185,7 +198,11 @@ async def update_state(
     return result
 
 
-@router.post("/{novel_id}/states/{state_id}/approve", response_model=dict)
+@router.post(
+    "/{novel_id}/states/{state_id}/approve",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def approve_state(
     state_id: str,
     request: ReviewRequest | None = None,
@@ -227,7 +244,11 @@ async def approve_state(
     return result
 
 
-@router.post("/{novel_id}/states/{state_id}/reject", response_model=dict)
+@router.post(
+    "/{novel_id}/states/{state_id}/reject",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def reject_state(
     state_id: str,
     request: ReviewRequest | None = None,
@@ -318,7 +339,11 @@ async def get_goal_tree(
     return {"tree": tree}
 
 
-@router.post("/{novel_id}/goals", response_model=GoalResponse)
+@router.post(
+    "/{novel_id}/goals",
+    response_model=GoalResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def create_goal(
     request: GoalCreateRequest,
     brain: NovelBrain = Depends(get_brain),
@@ -338,7 +363,11 @@ async def create_goal(
     )
 
 
-@router.put("/{novel_id}/goals/{goal_id}", response_model=GoalResponse)
+@router.put(
+    "/{novel_id}/goals/{goal_id}",
+    response_model=GoalResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def update_goal(
     goal_id: str,
     request: GoalUpdateRequest,
@@ -354,7 +383,11 @@ async def update_goal(
     return await brain.goals.update_goal(goal_uuid, data)
 
 
-@router.delete("/{novel_id}/goals/{goal_id}", response_model=SuccessResponse)
+@router.delete(
+    "/{novel_id}/goals/{goal_id}",
+    response_model=SuccessResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def delete_goal(
     goal_id: str,
     brain: NovelBrain = Depends(get_brain),
@@ -385,7 +418,11 @@ async def list_constraints(
     )
 
 
-@router.post("/{novel_id}/constraints", response_model=ConstraintResponse)
+@router.post(
+    "/{novel_id}/constraints",
+    response_model=ConstraintResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def create_constraint(
     request: ConstraintCreateRequest,
     brain: NovelBrain = Depends(get_brain),
@@ -402,7 +439,11 @@ async def create_constraint(
     )
 
 
-@router.put("/{novel_id}/constraints/{constraint_id}", response_model=ConstraintResponse)
+@router.put(
+    "/{novel_id}/constraints/{constraint_id}",
+    response_model=ConstraintResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def update_constraint(
     constraint_id: str,
     request: ConstraintUpdateRequest,
@@ -418,7 +459,11 @@ async def update_constraint(
     return await brain.constraints.update_constraint(constraint_uuid, data)
 
 
-@router.delete("/{novel_id}/constraints/{constraint_id}", response_model=SuccessResponse)
+@router.delete(
+    "/{novel_id}/constraints/{constraint_id}",
+    response_model=SuccessResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def delete_constraint(
     constraint_id: str,
     brain: NovelBrain = Depends(get_brain),
@@ -448,7 +493,11 @@ async def list_versions(
     )
 
 
-@router.post("/{novel_id}/versions", response_model=VersionResponse)
+@router.post(
+    "/{novel_id}/versions",
+    response_model=VersionResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def create_version(
     request: VersionCreateRequest,
     brain: NovelBrain = Depends(get_brain),
@@ -473,7 +522,11 @@ async def list_snapshots(
     return await brain.versions.list_snapshots(skip=skip, limit=limit)
 
 
-@router.post("/{novel_id}/snapshots", response_model=SnapshotResponse)
+@router.post(
+    "/{novel_id}/snapshots",
+    response_model=SnapshotResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def create_snapshot(
     brain: NovelBrain = Depends(get_brain),
 ):
@@ -501,7 +554,11 @@ async def get_snapshot(
     return snapshot
 
 
-@router.post("/{novel_id}/snapshots/compare", response_model=SnapshotCompareResponse)
+@router.post(
+    "/{novel_id}/snapshots/compare",
+    response_model=SnapshotCompareResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def compare_snapshots(
     request: SnapshotCompareRequest,
     brain: NovelBrain = Depends(get_brain),
@@ -519,7 +576,11 @@ async def compare_snapshots(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router.post("/{novel_id}/rollback", response_model=RollbackResponse)
+@router.post(
+    "/{novel_id}/rollback",
+    response_model=RollbackResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def rollback_to_snapshot(
     request: RollbackRequest,
     brain: NovelBrain = Depends(get_brain),
@@ -625,7 +686,11 @@ async def list_interventions(
     return {"items": items, "total": total, "stats": stats}
 
 
-@router.post("/{novel_id}/instructions", response_model=InstructionResponse)
+@router.post(
+    "/{novel_id}/instructions",
+    response_model=InstructionResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def inject_instruction(
     request: InstructionRequest,
     human: HumanInterventionService = Depends(get_human),

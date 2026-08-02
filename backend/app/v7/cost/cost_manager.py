@@ -4,9 +4,10 @@ Closed loop over ``v7_cost_budgets``:
 budget CRUD -> live remaining budget -> spend recording -> threshold alerts
 (80% warning / 95% critical / 100% stop) -> generation blocking.
 
-Actual spend statistics (per novel / date / task type) are aggregated from
-``v7_agent_runs`` / ``v7_agent_traces`` / ``v7_prompt_executions``, which are the
-tables that carry real token and cost numbers.
+Actual spend statistics use the shared ``ai_execution_ledger`` when its
+migration is available.  The V7 run/trace/prompt tables remain visible as
+reconciliation references during rollout and are never added to the shared
+total a second time.
 """
 from __future__ import annotations
 
@@ -19,6 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.cost import CostBudget
 from ..repositories.cost import CostBudgetRepository
 from ..repositories.event import EventLogRepository
+from ...services.ai_runtime import (
+    async_ledger_by_date,
+    async_ledger_by_task_type,
+    async_ledger_summary,
+)
 
 WARNING_THRESHOLD = 0.80
 CRITICAL_THRESHOLD = 0.95
@@ -42,9 +48,15 @@ class BudgetExceededError(RuntimeError):
 class CostBudgetManager:
     """Cost budget manager for one novel."""
 
-    def __init__(self, db: AsyncSession, novel_id: uuid.UUID):
+    def __init__(
+        self,
+        db: AsyncSession,
+        novel_id: uuid.UUID,
+        project_id: str | None = None,
+    ):
         self.db = db
         self.novel_id = novel_id
+        self.project_id = project_id
         self.budget_repo = CostBudgetRepository(db)
         self.event_repo = EventLogRepository(db)
 
@@ -420,6 +432,24 @@ class CostBudgetManager:
             self.novel_id, start_date=start_date, end_date=end_date
         )
 
+        try:
+            shared = await async_ledger_summary(
+                self.db,
+                novel_id=self.novel_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            shared_available = True
+        except Exception as exc:
+            # Keep the legacy counters visible for migration diagnostics, but
+            # never label them as the unified source if its table is absent.
+            shared = {
+                "source": "ai_execution_ledger",
+                "status": "unavailable",
+                "error_type": type(exc).__name__,
+            }
+            shared_available = False
+
         return {
             **remaining,
             "period": {
@@ -429,12 +459,45 @@ class CostBudgetManager:
             "actual_spend": {
                 "agent_runs": runs,
                 "prompt_executions": prompts,
+                # Once the shared ledger is available it is the only total
+                # used for billing display; trace/prompt tables remain as a
+                # reconciliation reference and are not added again.
+                "shared_ledger": shared,
                 "total_cost_cny": round(
-                    runs["cost_cny"] + prompts["cost_cny"], 6
+                    shared["cost_cny"] if shared_available
+                    else runs["cost_cny"] + prompts["cost_cny"],
+                    6,
                 ),
-                "total_tokens": runs["tokens"] + prompts["tokens"],
+                "total_tokens": (
+                    shared["tokens"] if shared_available
+                    else runs["tokens"] + prompts["tokens"]
+                ),
+                "total_source": (
+                    "ai_execution_ledger" if shared_available else "legacy_reconciliation"
+                ),
             },
         }
+
+    async def get_cross_version_ledger(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict[str, Any]:
+        """Expose the unified V6/V7 spend source for reconciliation and QA."""
+        # V6 rows are project-scoped while V7 rows are both novel- and
+        # project-scoped.  Use the authenticated project for the cross-version
+        # endpoint so one report contains both gateways; fall back to the novel
+        # scope only for legacy callers that cannot resolve a project.
+        scope = {"project_id": self.project_id} if self.project_id else {"novel_id": self.novel_id}
+        result = await async_ledger_summary(
+            self.db, start_date=start_date, end_date=end_date, **scope
+        )
+        result["scope"] = {
+            "project_id": self.project_id,
+            "novel_id_fallback": None if self.project_id else str(self.novel_id),
+        }
+        return result
 
     async def get_stats_by_date(
         self,
@@ -442,7 +505,40 @@ class CostBudgetManager:
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> dict[str, Any]:
-        """Actual spend grouped by calendar date (agent runs + prompt executions)."""
+        """Actual spend grouped by calendar date from the shared ledger."""
+        try:
+            shared_rows = await async_ledger_by_date(
+                self.db,
+                novel_id=self.novel_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            items = [
+                {
+                    "date": row["date"],
+                    "cost_cny": row["cost_cny"],
+                    "tokens": row["tokens"],
+                    "run_count": 0,
+                    "execution_count": row["calls"],
+                    "call_count": row["calls"],
+                }
+                for row in shared_rows
+            ]
+            return {
+                "novel_id": str(self.novel_id),
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+                "days": len(items),
+                "total_cost_cny": round(sum(r["cost_cny"] for r in items), 8),
+                "total_tokens": sum(r["tokens"] for r in items),
+                "items": items,
+                "source": "ai_execution_ledger",
+            }
+        except Exception:
+            # The fallback is intentionally labelled; it is a migration
+            # diagnostic and must not be presented as the unified total.
+            pass
+
         run_rows = await self.budget_repo.sum_cost_by_date(
             self.novel_id, start_date=start_date, end_date=end_date
         )
@@ -483,6 +579,7 @@ class CostBudgetManager:
             "total_cost_cny": round(sum(r["cost_cny"] for r in items), 6),
             "total_tokens": sum(r["tokens"] for r in items),
             "items": items,
+            "source": "legacy_reconciliation",
         }
 
     async def get_stats_by_task_type(
@@ -491,7 +588,29 @@ class CostBudgetManager:
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> dict[str, Any]:
-        """Actual spend grouped by task type (run type / step type / prompt name)."""
+        """Actual spend grouped by task type from the shared ledger."""
+        try:
+            shared_rows = await async_ledger_by_task_type(
+                self.db,
+                novel_id=self.novel_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            return {
+                "novel_id": str(self.novel_id),
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+                "total_cost_cny": round(sum(r["cost_cny"] for r in shared_rows), 8),
+                "total_tokens": sum(r["tokens"] for r in shared_rows),
+                "by_task_type": shared_rows,
+                "by_run_type": [],
+                "by_step_type": [],
+                "by_prompt_name": [],
+                "source": "ai_execution_ledger",
+            }
+        except Exception:
+            pass
+
         by_run = await self.budget_repo.sum_cost_by_run_type(
             self.novel_id, start_date=start_date, end_date=end_date
         )
@@ -517,6 +636,7 @@ class CostBudgetManager:
             "by_run_type": by_run,
             "by_step_type": by_step,
             "by_prompt_name": by_prompt,
+            "source": "legacy_reconciliation",
         }
 
     # ── Internals ────────────────────────────────────────────────────────

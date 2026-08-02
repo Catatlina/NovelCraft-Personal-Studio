@@ -515,6 +515,19 @@ def _save_chapter_content(project_id: str, novel_id: str, chapter_seq: int,
     return cid
 
 
+def _mark_chapter_quality_status(content_id: str, status: str, reason: str) -> None:
+    """Persist an explicit quality state instead of silently publishing a risk."""
+    conn = connect()
+    try:
+        conn.execute(
+            "UPDATE contents SET status=%s, meta=COALESCE(meta,'{}'::jsonb) || %s, updated_at=now() WHERE id=%s",
+            (status, encode({"quality_status": status, "quality_reason": reason[:1000]}), content_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _apply_replacements(text: str, replacements: list[dict]) -> str:
     out = text
     applied = 0
@@ -539,7 +552,8 @@ def _semantic_coherence_check(run_id: str, project_id: str, user_id: str | None,
     / bridge_broken / factual_error. Only `high` severity (or the structural
     types name_drift / bridge_broken / plot_contradiction) forces a rewrite.
 
-    Never raises: on any failure we return clean so generation is not blocked.
+    Provider failure is itself an unverified result. It blocks automatic
+    delivery rather than being converted into a clean/low-severity result.
     """
     try:
         out = gateway.complete(
@@ -552,9 +566,11 @@ def _semantic_coherence_check(run_id: str, project_id: str, user_id: str | None,
                 "chapter_text": text,
             },
         )
-    except Exception as exc:  # pragma: no cover - judge must never block generation
-        return [], [{"type": "_error", "severity": "low",
-                     "detail": f"coherence judge failed: {type(exc).__name__}"}]
+    except Exception as exc:  # pragma: no cover - provider failure is a gate failure
+        detail = f"coherence judge failed: {type(exc).__name__}"
+        return [f"[coherence_unverified] {detail}"], [{
+            "type": "coherence_unverified", "severity": "high", "detail": detail,
+        }]
     vs = out.get("violations") or []
     high: list[str] = []
     for v in vs:
@@ -584,6 +600,8 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "run_id": run_id, "project_id": project_id, "novel_id": novel_id,
         "chapter_seq": chapter_seq, "steps": [],
     }
+    quality_blocked = False
+    quality_block_reasons: list[str] = []
 
     # 0. context
     ctx = gather_novel_context(project_id, novel_id)
@@ -597,6 +615,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     _bcfg = repo.get_book_config(project_id, novel_id)
     _bai = decode(_bcfg.get("author_intent"), {}) or {} if _bcfg else {}
     prev_facts_var = str(_bai.get("continuity_facts") or "") if isinstance(_bai, dict) else ""
+    continuity_facts = prev_facts_var
     archive_var = _build_archive_text(_bai) or "（本书未配置永久档案，按既有设定与上下文续写）"
     context_text, context_hash, included, layers = _build_context_pkg(
         project_id, novel_id, chapter_seq, style, bible
@@ -741,11 +760,14 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         banned = repo.get_continuity_banned_tokens(project_id, novel_id) or []
         rules = repo.get_continuity_rules(project_id, novel_id) or []
         facts = repo.get_continuity_facts(project_id, novel_id) or ""
+        continuity_facts = facts or continuity_facts
         chars = repo.get_continuity_characters(project_id, novel_id) or []
         cards_raw = repo.get_character_cards(project_id, novel_id) or []
         must_names = [c["name"] for c in cards_raw
                       if isinstance(c, dict) and c.get("must_use_canonical") and c.get("name")]
-        if banned or rules or facts:
+        # Semantic cross-chapter verification is mandatory for every
+        # continuation; optional author rules only add deterministic checks.
+        if banned or rules or facts or chapter_seq > 1:
             import re as _re
             _death_toks = ["尸体", "丧命", "遇难", "砸死", "压死", "断气",
                            "没了呼吸", "死了", "死掉", "死在", "死人", "死了一"]
@@ -856,6 +878,9 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                     "remaining_lexical": _violations(text)[:5] if (not applied and v0) else [],
                     "remaining_semantic": semantic_high[:5] if (not applied and not v0) else [],
                 })
+                if not applied:
+                    quality_blocked = True
+                    quality_block_reasons.extend(v0[:3] or semantic_high[:3])
 
     # 2. review (structured)
     rev = gateway.complete(
@@ -965,13 +990,90 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             fact_text = "\n".join(
                 f"[{i.get('type')}/{i.get('severity')}] {i.get('description','')}" for i in fact_issues
             )
-            gateway.complete(
+            reconcile = gateway.complete(
                 run_id=run_id, node_key="fact_reconcile", project_id=project_id,
                 task_type="write_fact_reconcile", prompt_name="bootstrap.write_fact_reconcile",
                 user_id=user_id,
-                variables={"chapter_text": text, "repair_issues": fact_text},
+                variables={"chapter_text": text, "repair_issues": fact_text,
+                           "_context_window": context_text, "_worldview_text": ctx.get("worldview", "")},
             )
-            report["steps"].append({"step": "fact_reconcile", "candidates": len(fact_issues)})
+            reconciliation = reconcile.get("reconciliation") or {}
+            conflicts_found = int(reconciliation.get("conflicts_found") or 0)
+            passed_reconcile = reconciliation.get("passed") is True and conflicts_found == 0
+            reconcile_repairs = reconciliation.get("repairs") or reconciliation.get("replacements") or []
+            repaired_text, replacements_applied = _apply_replacements(text, reconcile_repairs)
+            repair_review_score = None
+            repair_review_issues: list[dict] = []
+            repair_accepted = False
+            if not passed_reconcile and replacements_applied:
+                # Fact reconciliation is allowed to repair only exact anchors
+                # returned by the provider.  The repaired text must then pass a
+                # second structured review before it can clear the blocker.
+                rev_fact = gateway.complete(
+                    run_id=run_id, node_key="fact_reconcile_review", project_id=project_id,
+                    task_type="review_7dim_structured", prompt_name="bootstrap.review_7dim_structured",
+                    user_id=user_id,
+                    variables={"chapter_text": repaired_text,
+                               "characters": ctx.get("characters", ""),
+                               "worldview": ctx.get("worldview", "")},
+                )
+                s7_fact = (decode(rev_fact.get("score_7dim"), {})
+                           if isinstance(rev_fact.get("score_7dim"), str)
+                           else rev_fact.get("score_7dim", {}))
+                repair_review_score = _avg_score(s7_fact)
+                repair_review_issues = rev_fact.get("issues", []) or []
+                high_fact_issues = [
+                    i for i in repair_review_issues
+                    if isinstance(i, dict)
+                    and i.get("severity") == "high"
+                    and i.get("type") in _FACT_TYPES
+                ]
+                repair_accepted = (
+                    not high_fact_issues
+                    and repair_review_score >= overall
+                )
+                report["steps"].append({
+                    "step": "fact_reconcile_repair_review",
+                    "replacements_applied": replacements_applied,
+                    "score": repair_review_score,
+                    "high_fact_issues": len(high_fact_issues),
+                    "accepted": repair_accepted,
+                })
+                if repair_accepted:
+                    before_fact_repair = text
+                    text = repaired_text
+                    overall = repair_review_score
+                    issues = repair_review_issues
+                    _save_chapter_content(
+                        project_id, novel_id, chapter_seq, title,
+                        [p for p in re.split(r"\n{2,}|\n", text) if p.strip()],
+                    )
+                    rid = repo.save_repair_version(
+                        project_id, content_id, chapter_seq=chapter_seq,
+                        repair_type="fact_reconcile", repair_scope="local",
+                        before_text=before_fact_repair, after_text=text,
+                        reason=f"fact conflicts: {conflicts_found}", model="deepseek-chat",
+                    )
+                    repo.update_repair_status(
+                        rid, "applied", second_review_score=repair_review_score,
+                        rolled_back=False,
+                        reason=f"fact repair accepted; replacements={replacements_applied}",
+                    )
+                    repairs_done += 1
+            report["steps"].append({
+                "step": "fact_reconcile",
+                "candidates": len(fact_issues),
+                "conflicts_found": conflicts_found,
+                "passed": passed_reconcile,
+                "replacements_proposed": len(reconcile_repairs),
+                "replacements_applied": replacements_applied,
+                "repair_accepted": repair_accepted,
+            })
+            if not passed_reconcile and not repair_accepted:
+                quality_blocked = True
+                quality_block_reasons.append(
+                    f"fact_reconcile not passed (conflicts_found={conflicts_found})"
+                )
 
         # Step 5: C-class major structural issue -> replan + rewrite.
         # Triggered by repair_scope=="chapter" (or high-severity plot/logic). Only
@@ -1048,6 +1150,137 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                 repairs_done += 1
             report["steps"].append({"step": "replan_rewrite", "candidates": len(major_issues),
                                      "second_score": score2, "rolled_back": rolled_back})
+
+    # 3b. final semantic humanization.  This is deliberately after local/fact
+    # repair and replan so the last prose pass cannot be mistaken for the source
+    # of a quality fix.  A final review follows it because even a style-only
+    # rewrite must prove that continuity and facts survived.
+    humanize_feedback = "\n".join(
+        f"[{i.get('type')}/{i.get('severity')}] {i.get('description', '')}"
+        for i in issues if isinstance(i, dict)
+    )
+    style_profile = style if isinstance(style, str) else json.dumps(style, ensure_ascii=False)
+    forbidden_changes = "\n".join(
+        item for item in (archive_var, continuity_facts, prev_facts_var) if item
+    )
+    try:
+        from .deai_pipeline import DeaiPipeline
+
+        humanized = DeaiPipeline(project_id, content_id, title).final_humanize(
+            text,
+            source_facts=continuity_facts,
+            forbidden_changes=forbidden_changes,
+            quality_retry_feedback=humanize_feedback,
+            style_profile=style_profile,
+            run_id=run_id,
+            user_id=user_id,
+        )
+        humanized_text = humanized["final_text"]
+        humanized_paragraphs = [
+            p for p in re.split(r"\n{2,}|\n", humanized_text) if p.strip()
+        ]
+        text = humanized_text
+        paragraphs = humanized_paragraphs
+        _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
+        report["steps"].append({
+            "step": "final_humanize",
+            "applied": True,
+            "changes": len(humanized.get("changes") or []),
+            "ai_patterns_removed": len(humanized.get("ai_patterns_removed") or []),
+            "chars": len(text),
+        })
+
+        final_semantic_high: list[str] = []
+        if chapter_seq > 1:
+            final_prev_tail = repo.get_previous_chapter_tail(
+                novel_id, chapter_seq, tail_chars=800
+            )
+            final_semantic_high, _ = _semantic_coherence_check(
+                run_id, project_id, user_id, text, final_prev_tail,
+                archive_var, continuity_facts,
+            )
+        final_review = gateway.complete(
+            run_id=run_id, node_key="final_humanize_review", project_id=project_id,
+            task_type="review_7dim_structured", prompt_name="bootstrap.review_7dim_structured",
+            user_id=user_id,
+            variables={
+                "chapter_text": text,
+                "characters": ctx.get("characters", ""),
+                "worldview": ctx.get("worldview", ""),
+            },
+        )
+        final_score_7dim = (
+            decode(final_review.get("score_7dim"), {})
+            if isinstance(final_review.get("score_7dim"), str)
+            else final_review.get("score_7dim", {})
+        )
+        final_issues = final_review.get("issues", []) or []
+        final_overall = _avg_score(final_score_7dim)
+        repo.save_review(
+            content_id, final_score_7dim, final_issues, _hash(text),
+            model="deepseek-chat", overall=final_overall, run_id=run_id,
+            review_type="final_humanize_review",
+        )
+        high_final_issues = [
+            i for i in final_issues
+            if isinstance(i, dict)
+            and i.get("severity") == "high"
+            and i.get("type") in {"continuity", "plot", "logic", "character"}
+        ]
+        report["steps"].append({
+            "step": "final_humanize_review",
+            "overall_score": final_overall,
+            "issues": len(final_issues),
+            "semantic_violations": len(final_semantic_high),
+            "high_structural_issues": len(high_final_issues),
+        })
+        if final_semantic_high:
+            quality_blocked = True
+            quality_block_reasons.extend(final_semantic_high[:3])
+        if final_overall < REVIEW_SCORE_THRESHOLD or high_final_issues:
+            quality_blocked = True
+            quality_block_reasons.append(
+                f"final_humanize_review below gate (score={final_overall}, "
+                f"high_structural_issues={len(high_final_issues)})"
+            )
+        overall = final_overall
+        score_7dim = final_score_7dim
+        issues = final_issues
+    except Exception as exc:
+        # The chapter remains persisted for human review, but this is never
+        # converted into a successful delivery or a heuristic fallback.
+        quality_blocked = True
+        quality_block_reasons.append(f"final_humanize_unverified: {type(exc).__name__}")
+        report["steps"].append({
+            "step": "final_humanize",
+            "applied": False,
+            "quality_blocked": True,
+            "error": f"{type(exc).__name__}: {str(exc)[:120]}",
+        })
+
+    # Do not let an unverified chapter poison the long-term Story Bible.  The
+    # raw chapter and quality evidence remain available for a human repair, but
+    # entity/fact/archive writeback waits until the chapter passes the gate.
+    if quality_blocked:
+        repo.save_context_package(project_id, content_id, chapter_seq, context_hash, included,
+                                  token_budget=8000, actual_tokens=None, layers=layers)
+        cost = _replicate_cost(project_id, run_id, content_id, chapter_seq)
+        reason = "; ".join(quality_block_reasons) or "continuity or fact verification was not proven"
+        _mark_chapter_quality_status(content_id, "needs_review", reason)
+        repo.finish_workflow_run(run_id, "needs_review")
+        report.update({
+            "final_score": overall,
+            "chars": len(text),
+            "repairs_done": repairs_done,
+            "content_id": content_id,
+            "cost": cost,
+            "ok": False,
+            "status": "needs_review",
+            "quality_blocked": True,
+            "quality_block_reasons": quality_block_reasons[:10],
+            "memory_write_suppressed": True,
+        })
+        return report
 
     # 4. persist Story Bible (entity extraction + confidence gating)
     ent = gateway.complete(
@@ -1380,6 +1613,23 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     repo.save_context_package(project_id, content_id, chapter_seq, context_hash, included,
                               token_budget=8000, actual_tokens=None, layers=layers)
     cost = _replicate_cost(project_id, run_id, content_id, chapter_seq)
+    if quality_blocked:
+        reason = "; ".join(quality_block_reasons) or (
+            "continuity or fact verification was not proven"
+        )
+        _mark_chapter_quality_status(content_id, "needs_review", reason)
+        repo.finish_workflow_run(run_id, "needs_review")
+        report["final_score"] = overall
+        report["chars"] = len(text)
+        report["repairs_done"] = repairs_done
+        report["content_id"] = content_id
+        report["cost"] = cost
+        report["ok"] = False
+        report["status"] = "needs_review"
+        report["quality_blocked"] = True
+        report["quality_block_reasons"] = quality_block_reasons[:10]
+        return report
+
     repo.record_book_status(
         project_id, novel_id, "serializing",
         reason=f"chapter loop started at ch{chapter_seq}",
@@ -1391,6 +1641,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     report["content_id"] = content_id
     report["cost"] = cost
     report["ok"] = True
+    report["status"] = "succeeded"
     return report
 
 
@@ -1403,6 +1654,7 @@ def _replicate_cost(project_id: str, run_id: str, content_id: str,
         "review_7dim_structured": ("review", "chapter_review"),
         "repair_local": ("repair", "repair_local"),
         "write_fact_reconcile": ("repair", "fact_reconcile"),
+        "final_humanize": ("repair", "final_humanize"),
         "replan_chapter": ("plan", "replan_chapter"),
         "extract_entities": ("other", "entity_extract"),
         "extract_story_facts": ("other", "fact_extract"),

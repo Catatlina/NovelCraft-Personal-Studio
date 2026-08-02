@@ -10,8 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_async_db as get_db
 from ..trace.tracer import ExecutionTracer
 from .schemas import RunResponse, TraceStepResponse, SuccessResponse
+from ...core.authz import require_novel_member_dep
 
-router = APIRouter(prefix="", tags=["v7-trace"])
+router = APIRouter(
+    prefix="",
+    tags=["v7-trace"],
+    dependencies=[Depends(require_novel_member_dep())],
+)
 
 
 # ── Dependency ───────────────────────────────────────────────────────────
@@ -64,7 +69,11 @@ async def get_run(
     return run
 
 
-@router.post("/{novel_id}/runs", response_model=dict)
+@router.post(
+    "/{novel_id}/runs",
+    response_model=dict,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def start_run(
     novel_id: str,
     run_type: str = Query(..., description="Run type: chapter_generation/review/analysis"),
@@ -81,7 +90,11 @@ async def start_run(
     return {"run_id": str(run_id), "status": "started"}
 
 
-@router.post("/{novel_id}/runs/{run_id}/complete", response_model=RunResponse)
+@router.post(
+    "/{novel_id}/runs/{run_id}/complete",
+    response_model=RunResponse,
+    dependencies=[Depends(require_novel_member_dep("editor"))],
+)
 async def complete_run(
     novel_id: str,
     run_id: str,

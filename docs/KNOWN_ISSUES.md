@@ -1,6 +1,6 @@
 # Starlume AI 当前已知问题
 
-> 更新时间：2026-07-29。按阻断程度排序；解决后必须保留验证证据并从本表移除或标注历史。
+> 更新时间：2026-08-02。按阻断程度排序；解决后必须保留验证证据并从本表移除或标注历史。
 
 ## 阻断生产验收
 
@@ -132,6 +132,49 @@
 
 ### KI-011 多书选择回弹、内容不刷新与跨账号缓存污染
 
+### KI-012 V6/V7 生成质量整改尚未完成真实验收
+
+- 状态：可用（代码与目标回归），不是已验收。
+- 已落地：V6 主章节链真实 `final_humanize`、事实 anchor 局部修复+二次复核、连续性失败闭环；V7 交接契约、85 分质量门和 V6 章节桥。
+- 证据：目标回归 60 passed、2 warnings；`verify_ai_truthfulness.py` AST 检查通过。
+- 当前状态：本地 `.venv` 已补齐项目 requirements 中声明的 `asyncpg`，真实 PostgreSQL/Redis 下全量后端回归已形成证据；注册 503 已通过本地服务依赖与测试 Redis 默认地址修复得到解决。
+- 仍然阻断：尚无真实 Provider 的 V6/V7 多章复测和人工盲评。
+- 不得宣称：跨章连贯性已达标、去 AI 味已完成人工验收、V6/V7 全应用运行时已统一；当前只能宣称 Provider transport/执行账本边界已接线。
+
+### KI-013 V6/V7 Gateway、成本与 Prompt provenance 统一边界已接线，真实验收未完成
+
+- 状态：可用（代码级），不是已验收。
+- 现状：V6/V7 已通过 `backend/app/services/unified_gateway.py` 共用同步、异步和流式 Provider transport；`backend/app/services/ai_runtime.py` + `nc_v6_v7_runtime_ledger` 提供共享执行账本。V7 每次真实调用会幂等播种 `PromptVersionManager` 并写 `v7_prompt_executions`；V6 成功/失败/流式调用写同一账本，Cost API 的项目范围 ledger 可同时汇总两版本，V7 预算门和成功 usage 记账保持 fail-closed。
+- 证据：`test_v7_budget_gateway.py`、`test_v7_runtime_provenance.py`、`test_v6v7_quality_harness.py`；目标组合 67 passed、2 warnings；Alembic 已到 `nc_v6_v7_runtime_ledger (head)`，`backend/scripts/seed_v7_prompts.py` 已实际执行并重复执行验证幂等。
+- 仍然阻断：尚未完成真实 Provider 回放、V6/V7 跨版本账本对账、V6 书库/编辑器/导出回写和人工盲评。
+- 下一步：提供真实 Provider key、同题材双项目/双轨数据库和两名盲评编辑，执行 `scripts/v6v7_20_chapter_quality.py --execute --confirm I_UNDERSTAND_REAL_API_COST_AND_DUAL_WRITE`，再核验共享账本与 V6 facts。
+
+### KI-014 E2E 注册限流与端到端最终结果 -- 已修复（本地验证）
+
+- 现象：多 worker E2E 共享本机 IP 时，注册接口的生产限流 `5/minute` 会造成榜单折叠用例在 UI 断言前等待并超时。
+- 修复：注册限流改为读取 `NOVELCRAFT_REGISTER_RATE_LIMIT`，Playwright webServer 仅注入 `120/minute`；生产默认仍为 `5/minute`。这是测试环境隔离配置，不是放宽生产安全策略。
+- 证据：`ranking-fold.spec.ts` 单测 **1 passed**；历史完整 `npm run test:e2e` 为 **18 passed、9 skipped、0 failed**，本轮最终复跑为 **17 passed、10 skipped、0 failed**；多出的 skip 是未观测到可操作异步 run 的条件性跳过。
+
+### KI-015 强制 AI development gate 仍有已知宽泛告警 -- 可用（不能视为全绿）
+
+- `bash scripts/ai_development_gate.sh` 当前返回 **exit 3**；`verify_ai_truthfulness.py`、Git whitespace 检查通过。
+- 剩余命中包括测试 monkeypatch、HTML input placeholder、合法空集合/服务降级分支、历史非小说榜单 fallback、移除硬编码预算的注释，以及真实订阅写库的 `status='active'`。这些逐条解释见本文件 KI-005，不是生成结果伪造证据。
+- `GATE_ALLOW_WARNINGS=1 bash scripts/ai_development_gate.sh` 只能作为已解释告警的复验，不能将其改写成“强制门禁全绿”。
+
+### KI-016 V7 读者体验与情绪钩子证据已接线，真实人感未验收
+
+- 状态：可用（代码与确定性回归），不是已验收。
+- 已落地：V7 审稿强制五项 reader experience 字段；场景计划/正文/续写提示加入读者承诺、情绪曲线、开场锚点、局部转折和章末钩子；交接契约持久化读者体验与下一章桥接证据。
+- 证据：`test_v7_generation_quality_prompts.py`、`test_v7_merge_quality.py`、全量后端 843 passed；参考差异见 `docs/AI_WORKBENCH参考评估_20260802.md`。
+- 仍然阻断：没有真实 Provider 的 20 章双轨样本与人工盲评，不能证明相邻章节人感连贯或去 AI 味优于旧链。
+
+### KI-017 V7 novel→V6 project 映射已落表
+
+- 状态：可用（本地迁移与回填），生产证据未验收。
+- 已落地：`nc_v7_novel_project_mapping` migration、`v7/integration/project_mapping.py`；桥接写回前校验 V6 novel 所属 project 并持久化映射。
+- 证据：本地 Alembic 头为 `nc_v7_novel_project_mapping`，回填 6994 条；跨 project pair 的拒绝测试通过。
+- 仍然阻断：尚无生产数据库迁移/真实 V7 章节写回后在 V6 书库、编辑器和导出可见的完整证据。
+
 - 状态：**可用**。
 - 根因：`projects` / `currentNovel` 使用全局离线缓存键；run 恢复异步响应可覆盖人工选择；人工选择后章节加载 effect 被永久禁用；快速切换没有请求代次校验；Layout 的本地选择值未随真实 `currentNovelId` 同步。
 - 修复：缓存按登录账号隔离；登录/退出清理工作区；选择 epoch 使旧详情/run/章节响应失效；选书后重新加载章节；Layout 同步受控值。
@@ -145,3 +188,15 @@
 - 真实内容平台发布回执尚未验收。
 - 外部热点源七天连续稳定性尚未验收。
 - 这些模块目前从小说 UI 隐藏,不得因"看不见"就删除历史数据或把它们写成已完成。
+
+### KI-018 真实 Provider 20 章双轨已完成自动回放，人工盲评仍阻断 -- 已接线
+
+- 本地隔离环境已用真实 DeepSeek 完成 V6/V7 各 20 章；自动门通过，V6 平均 79.6、V7 平均 92.0，V7 20 章均有跨章交接契约。
+- 盲评包已生成 20 个匿名 case，但两位独立评审覆盖为 0/20；不能把模型自审分数写成用户质量验收。
+- 解除条件：两位独立评审分别填写 `blind-scores.template.csv`，随后使用评分文件重新运行 20 章 harness，检查一致性、差异和最低分门禁。
+
+### KI-019 真实长跑期间发现的状态/导出问题已修复 -- 可用
+
+- 批次进度此前缺少事务提交，可能持久化为 `running`；Provider 输出 schema 失败此前可能让子任务退出但批次仍停在 `running`。现已分别补齐进度提交和批次失败收口，并有批次恢复回归。
+- EPUB 导出此前因运行环境缺少 `EbookLib` 返回 503；已补运行依赖并在真实产品链中验证 200、`application/epub+zip` 和有效 ZIP 文件头。
+- 本地长跑账本留下了 369 条真实执行记录、0 条最终失败记录；仍需目标部署环境重复回归，不能将本地修复写成生产验收。

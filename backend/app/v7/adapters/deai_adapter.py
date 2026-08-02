@@ -14,16 +14,27 @@ V6's deai_pipeline interface:
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
-from ...services.deai_pipeline import deai_pipeline
+from ...services.deai_pipeline import DeaiPipeline
 
 
 class V6DeAIAdapter:
     """Adapter that wraps V6's deai_pipeline for V7 compatibility."""
 
-    def __init__(self, style_profile: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        style_profile: Optional[dict[str, Any]] = None,
+        *,
+        project_id: str | None = None,
+        content_id: str | None = None,
+        chapter_title: str = "",
+    ):
         self.style_profile = style_profile or {}
+        self.project_id = project_id or ""
+        self.content_id = content_id or ""
+        self.chapter_title = chapter_title
 
     def process(
         self,
@@ -41,20 +52,21 @@ class V6DeAIAdapter:
         Returns:
             Dict with: text, steps_applied, quality_score, raw_result
         """
-        profile = style_profile or self.style_profile
-
-        result = deai_pipeline(
-            text=text,
-            style_profile=profile,
-            intensity=intensity,
-        )
+        if not self.project_id or not self.content_id:
+            raise ValueError("V6 de-AI adapter requires project_id and content_id")
+        # DeaiPipeline is provider-backed and raises on provider failure; this
+        # adapter must not turn an unavailable rewrite into a heuristic success.
+        effective_style = style_profile or self.style_profile
+        result = DeaiPipeline(
+            self.project_id, self.content_id, self.chapter_title
+        ).run(text, style_profile=json.dumps(effective_style, ensure_ascii=False))
 
         return {
-            "text": result.get("text", text),
-            "steps_applied": result.get("steps_applied", []),
-            "quality_score": result.get("quality_score", 0),
+            "text": result.get("final_text", ""),
+            "steps_applied": result.get("layers", []),
+            "quality_score": result.get("final_score"),
             "original_length": len(text),
-            "final_length": len(result.get("text", text)),
+            "final_length": len(result.get("final_text", text)),
             "raw_result": result,
         }
 

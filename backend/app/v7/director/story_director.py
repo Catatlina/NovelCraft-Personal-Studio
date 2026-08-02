@@ -10,6 +10,7 @@ confidence gate are enforced in `decide` and cannot be bypassed.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -29,6 +30,15 @@ from ..generation.generation_engine import (
     chinese_word_count,
 )
 from ..repositories.decision import DecisionPermissionRepository
+from ..integration.quality import (
+    MAX_REWORKS,
+    QUALITY_REWORK_SCORE,
+    evaluate_review,
+)
+from ..integration.v6_bridge import (
+    build_transition_contract,
+    persist_accepted_v7_chapter,
+)
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
     "perceive",
@@ -39,11 +49,6 @@ AGENT_LOOP_STEPS: tuple[str, ...] = (
     "observe",
     "update",
 )
-
-# Chapters scoring below this are flagged; below REWORK_SCORE they are retried.
-PASS_SCORE = 70.0
-REWORK_SCORE = 60.0
-
 
 class DecisionPermissionSystem:
     """
@@ -135,20 +140,30 @@ class StoryDirector:
         brain: NovelBrain,
         tracer: ExecutionTracer,
         event_bus: EventBus,
+        project_id: str | None = None,
+        user_id: str | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
         self.brain = brain
         self.tracer = tracer
         self.event_bus = event_bus
+        self.project_id = project_id
+        self.user_id = user_id
         self.permission_system = DecisionPermissionSystem(db, novel_id)
 
         # Engines
-        self.plot_engine = PlotEngine(db, novel_id, brain, tracer, event_bus)
-        self.memory_engine = MemoryEngine(db, novel_id, brain, tracer, event_bus)
-        self.review_engine = ReviewEngine(db, novel_id, brain, tracer, event_bus)
+        self.plot_engine = PlotEngine(
+            db, novel_id, brain, tracer, event_bus, project_id=project_id
+        )
+        self.memory_engine = MemoryEngine(
+            db, novel_id, brain, tracer, event_bus, project_id=project_id
+        )
+        self.review_engine = ReviewEngine(
+            db, novel_id, brain, tracer, event_bus, project_id=project_id
+        )
         self.generation_engine = GenerationEngine(
-            db, novel_id, brain, tracer, event_bus
+            db, novel_id, brain, tracer, event_bus, project_id=project_id
         )
 
         # Event-driven state projection
@@ -311,7 +326,7 @@ class StoryDirector:
             result = {
                 "run_id": str(run_id),
                 "chapter_number": chapter_number,
-                "status": "completed",
+                "status": "completed" if observation["passed_review"] else "needs_review",
                 "title": generation["title"],
                 "content": generation["text"],
                 "word_count": generation["word_count"],
@@ -328,12 +343,16 @@ class StoryDirector:
                     "states_discarded": update_result["states_discarded"],
                     "conflicts_found": update_result["conflicts_found"],
                 },
+                "transition_contract": update_result.get("transition_contract", {}),
+                "v6_content": update_result.get("v6_content"),
+                "v6_content_id": (update_result.get("v6_content") or {}).get("content_id"),
                 "steps_executed": list(AGENT_LOOP_STEPS),
                 "usage": generation["usage"],
             }
 
             # The chapter body is already persisted as a story state; keep the
-            # run output_data lean so v7_agent_runs stays queryable.
+            # run output_data lean so v7_agent_runs stays queryable.  V6 is
+            # only updated when the strict quality gate passed.
             run_output = {k: v for k, v in result.items() if k not in ("content", "scene_plan")}
             run_stats = await self.tracer.complete_run(run_id, output_data=run_output)
             result["run_stats"] = run_stats
@@ -553,48 +572,50 @@ class StoryDirector:
         allow_rework: bool,
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        review = await self.review_engine.run(
-            {
-                "chapter_text": generation["text"],
+        def review_input(current: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "chapter_text": current["text"],
                 "chapter_number": chapter_number,
+                "previous_chapter_tail": current.get("context", {}).get("previous_tail", ""),
+                "previous_transition_contract": current.get("context", {}).get(
+                    "previous_transition_contract", {}
+                ),
             }
-        )
+
+        review = await self.review_engine.run(review_input(generation))
         review_data = review.result or {}
         score = float(review_data.get("overall_score") or 0.0)
         rework_count = 0
 
-        # 长程质量修复（2026-08-02）：此前只有总分 < REWORK_SCORE(60) 才
-        # 重写，50 章测试里约束违例（如"归墟灯代价省略"、准确性 70 分）因
-        # 总分仍 ≥60 全部放行。现在加**维度级拦截**：准确性(constraint_
-        # compliance) < 80 视为约束违例，即使总分合格也重写一次，并把违例
-        # 详情注入重写 prompt。
-        dims = review_data.get("dimensions") or review_data.get("score_7dim") or {}
-        accuracy = float(
-            (dims.get("constraint_compliance") if isinstance(dims, dict) else 0) or 0
-        )
-        constraint_violated = accuracy < 80.0
+        if not review.success:
+            raise RuntimeError(f"Review failed: {review.reason}")
 
-        if (
+        # Rework is bounded, but the gate is not fail-open: after the retry
+        # budget is exhausted the chapter remains needs_review and never enters
+        # the V6 library as a reviewed chapter.
+        while (
             allow_rework
-            and review.success
-            and (score < REWORK_SCORE or constraint_violated)
-            and rework_count < 1
+            and not evaluate_review(review_data)["passed"]
+            and rework_count < MAX_REWORKS
             and await self.permission_system.can_auto_decide("chapter_rework", 0.9)
         ):
-            rework_count = 1
+            gate = evaluate_review(review_data)
+            rework_count += 1
             issues = review_data.get("issues") or []
+            failures = "；".join(
+                f"{item['dimension']} {item['actual']:.0f}/{item['minimum']:.0f}"
+                for item in gate["failures"][:8]
+            )
             issue_text = "；".join(
                 f"{i.get('dimension')}: {i.get('description')}" for i in issues[:5]
             )
-            if constraint_violated and issues:
-                issue_text += f"；约束违例（准确性 {accuracy:.0f} 分）：必须严格遵守小说设定约束，补齐被省略的要素（如使用能力必须写明代价），不得省略或违背。"
+            feedback = f"质量门禁未通过：{failures}。{issue_text}".strip("；")
             await self.brain.record_decision(
                 "chapter_rework",
                 "rework",
                 decision_reason=(
-                    f"Chapter {chapter_number} rewritten (score {score} < "
-                    f"{REWORK_SCORE}, accuracy {accuracy:.0f}): "
-                    f"{issue_text or 'below rework threshold'}"
+                    f"Chapter {chapter_number} rewrite {rework_count}/{MAX_REWORKS}; "
+                    f"score {score:.1f}, rework threshold {QUALITY_REWORK_SCORE:.0f}: {feedback}"
                 ),
                 confidence=0.85,
                 permission_level="notify",
@@ -604,24 +625,19 @@ class StoryDirector:
             generation = await self.generation_engine.generate_chapter(
                 chapter_number,
                 prompt=(plan.get("prompt") or "")
-                + f"\n\n上一稿被审稿判为不合格（{score}分），需要改进：{issue_text}",
+                + f"\n\n上一稿未通过严格质量门禁（{score:.1f}分），必须修复：{feedback}",
                 outline=plan.get("outline"),
                 target_word_count=plan["target_word_count"],
             )
-            review = await self.review_engine.run(
-                {
-                    "chapter_text": generation["text"],
-                    "chapter_number": chapter_number,
-                }
-            )
+            review = await self.review_engine.run(review_input(generation))
+            if not review.success:
+                raise RuntimeError(f"Review failed after rework: {review.reason}")
             review_data = review.result or {}
             score = float(review_data.get("overall_score") or 0.0)
 
-        if not review.success:
-            raise RuntimeError(f"Review failed: {review.reason}")
-
-        blocking = int(review_data.get("blocking_violations") or 0)
-        passed = score >= PASS_SCORE and blocking == 0
+        gate = evaluate_review(review_data)
+        blocking = gate["blocking_violations"]
+        passed = gate["passed"]
 
         await self.event_bus.publish(
             "review_completed",
@@ -632,6 +648,7 @@ class StoryDirector:
                 "chapter_number": chapter_number,
                 "overall_score": score,
                 "dimension_scores": review_data.get("dimension_scores", {}),
+                "reader_experience": review_data.get("reader_experience", {}),
                 "blocking_violations": blocking,
             },
         )
@@ -641,8 +658,7 @@ class StoryDirector:
                 "chapter_quality",
                 "needs_human_attention",
                 decision_reason=(
-                    f"score {score} < {PASS_SCORE}" if score < PASS_SCORE
-                    else f"{blocking} blocking constraint violation(s)"
+                    f"quality gate failures: {gate['failures']}"
                 ),
                 confidence=review.confidence,
                 permission_level="notify",
@@ -654,12 +670,14 @@ class StoryDirector:
             "generation": generation,
             "review_score": score,
             "dimension_scores": review_data.get("dimension_scores", {}),
+            "reader_experience": review_data.get("reader_experience", {}),
             "issues": review_data.get("issues", []),
             "constraint_violations": review_data.get("constraint_violations", []),
             "blocking_violations": blocking,
             "passed_review": passed,
             "rework_count": rework_count,
             "review_confidence": review.confidence,
+            "quality_gate": gate,
         }
 
     # ── step 7 ──────────────────────────────────────────────────────────
@@ -681,6 +699,37 @@ class StoryDirector:
         memory_data = memory.result or {}
         summary = memory_data.get("chapter_summary") or ""
 
+        transition_contract = build_transition_contract(
+            chapter_number=chapter_number,
+            title=generation["title"],
+            text=generation["text"],
+            summary=summary,
+            word_count=generation["word_count"],
+            review_score=observation["review_score"],
+            dimension_scores=observation["dimension_scores"],
+            reader_experience=observation.get("reader_experience"),
+            previous_context=generation.get("context"),
+            memory_items=memory_data.get("extracted_items") or [],
+            constraints=(generation.get("context") or {}).get("constraints") or [],
+        )
+
+        v6_result: dict[str, Any] | None = None
+        if observation["passed_review"]:
+            v6_result = await asyncio.to_thread(
+                persist_accepted_v7_chapter,
+                novel_id=str(self.novel_id),
+                project_id=self.project_id,
+                chapter_number=chapter_number,
+                title=generation["title"],
+                text=generation["text"],
+                review_score=observation["review_score"],
+                dimension_scores=observation["dimension_scores"],
+                run_id=str(run_id),
+                chapter_summary=summary,
+                deai=generation.get("deai") or {},
+                transition_contract=transition_contract,
+            )
+
         await self.brain.state.update_state(
             CHAPTER_STATE_TYPE,
             chapter_state_key(chapter_number),
@@ -691,9 +740,12 @@ class StoryDirector:
                 "summary": summary,
                 "word_count": generation["word_count"],
                 "review_score": observation["review_score"],
+                "reader_experience": observation.get("reader_experience", {}),
                 "passed_review": observation["passed_review"],
                 "rework_count": observation["rework_count"],
                 "run_id": str(run_id),
+                "transition_contract": transition_contract,
+                "v6_content_id": (v6_result or {}).get("content_id"),
             },
             0.95,
             source="generation_engine",
@@ -702,7 +754,9 @@ class StoryDirector:
         )
 
         return {
-            "chapter_persisted": True,
+            "chapter_persisted": bool(v6_result),
+            "v6_content": v6_result,
+            "transition_contract": transition_contract,
             "chapter_summary": summary,
             "states_applied": memory_data.get("states_applied", 0),
             "states_pending_review": memory_data.get("states_pending_review", 0),

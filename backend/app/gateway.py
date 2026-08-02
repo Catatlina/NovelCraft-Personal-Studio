@@ -5,8 +5,6 @@ import logging
 import os
 import re
 import time
-import urllib.error
-import urllib.request
 from contextvars import ContextVar
 from typing import Any
 
@@ -24,6 +22,13 @@ from .core.alerts import alert_budget, alert_provider_error
 from .db import connect, decode, encode, new_id, row_to_dict
 from .core.billing import get_active_subscription, monthly_window
 from .prompt_registry import OUTPUT_CONTRACTS, render_prompt
+from .services.ai_runtime import (
+    SHARED_LEDGER_TABLE,
+    execution_key as build_execution_key,
+    ensure_shared_ledger_schema,
+    record_sync_execution,
+)
+from .services.unified_gateway import UnifiedAIGateway, UnifiedGatewayError
 
 logger = logging.getLogger(__name__)
 
@@ -782,6 +787,7 @@ def _complete_impl(
             return decode(existing["output"], {})
     start = time.perf_counter()
     prompt_text, provider, model, params = _load_prompt_and_route(prompt_name, task_type, variables)
+    prompt_version = _active_prompt_version(prompt_name)
     estimated_cost = _estimate_cost(variables, {"prompt": prompt_text})
     _assert_budget(user_id, project_id, "bootstrap", estimated_cost)
 
@@ -833,9 +839,14 @@ def _complete_impl(
 
     conn = connect()
     try:
+        # Old development databases may predate the Alembic head.  Provision
+        # the additive shared table in the same transaction before writing the
+        # V6 row; production still runs the named migration explicitly.
+        ensure_shared_ledger_schema(conn)
         # ON CONFLICT lets a successful retry overwrite the failed-attempt ledger
         # row that shares this mutation id, instead of colliding on the unique
         # index and permanently breaking failed-state retry recovery.
+        call_id = new_id("call")
         conn.execute(
             """
             INSERT INTO ai_calls (
@@ -852,7 +863,7 @@ def _complete_impl(
                 status = 'succeeded', error = NULL
             """,
             (
-                new_id("call"),
+                call_id,
                 run_id,
                 node_key,
                 provider_name,
@@ -870,6 +881,40 @@ def _complete_impl(
                 project_id,
                 user_id,
             ),
+        )
+        # V6 and V7 close the same shared execution contract.  This write is
+        # in the same transaction as ai_calls: a successful provider result
+        # cannot be reported as complete if the unified cost/provenance ledger
+        # is unavailable.
+        record_sync_execution(
+            conn,
+            execution_key=build_execution_key(
+                "v6",
+                scope=project_id,
+                client_mutation_id=client_mutation_id or call_id,
+            ),
+            gateway_version="v6",
+            project_id=project_id,
+            novel_id=None,
+            run_id=run_id,
+            step_id=None,
+            task_type=task_type,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+            rendered_prompt=prompt_text,
+            provider=provider_name,
+            model=model_name,
+            status="succeeded",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_cny=cost_cny,
+            latency_ms=latency_ms,
+            client_mutation_id=client_mutation_id,
+            metadata={
+                "source": "v6_gateway",
+                "variables_hash_input": True,
+                "provider_attempts": schema_attempt + 1,
+            },
         )
         conn.commit()
     finally:
@@ -926,10 +971,21 @@ def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id:
         route = _load_route(task_type) or {}
         provider = str(route.get("provider") or settings.ai_provider or "unknown")
         model = str(route.get("model") or settings.deepseek_model or "unknown")
+        try:
+            failed_prompt, _prompt_provider, _prompt_model, _prompt_params = _load_prompt_and_route(
+                prompt_name, task_type, variables
+            )
+        except Exception:
+            # If prompt loading itself failed there is no exact provider input;
+            # preserve the variables as an explicit diagnostic payload rather
+            # than inventing a successful-looking prompt version.
+            failed_prompt = encode({"variables": variables})
         conn = connect()
+        ensure_shared_ledger_schema(conn)
         # DO NOTHING keeps the first attempt's row and never clobbers a prior
         # succeeded row; a later successful retry upgrades the row via complete()'s
         # own ON CONFLICT DO UPDATE.
+        call_id = new_id("call")
         conn.execute(
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
@@ -938,11 +994,41 @@ def _record_failed_call(*, run_id: str | None, node_key: str | None, project_id:
                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,0,0,%s,'failed',%s,%s,%s,%s)
                ON CONFLICT (project_id, client_mutation_id) WHERE client_mutation_id IS NOT NULL
                DO NOTHING""",
-            (new_id("call"), run_id, node_key, provider, model, prompt_name, task_type,
+            (call_id, run_id, node_key, provider, model, prompt_name, task_type,
              encode({"variables": variables}), encode({}),
              int((time.perf_counter() - started) * 1000), str(error)[:2000],
              client_mutation_id, project_id, user_id),
         )
+        # A failed provider attempt is still provenance.  Keep this best
+        # effort so the original provider error is never masked by an outage
+        # in the audit table; successful calls use the fail-closed path above.
+        try:
+            record_sync_execution(
+                conn,
+                execution_key=build_execution_key(
+                    "v6",
+                    scope=project_id,
+                    client_mutation_id=client_mutation_id or call_id,
+                ),
+                gateway_version="v6",
+                project_id=project_id,
+                novel_id=None,
+                run_id=run_id,
+                step_id=node_key,
+                task_type=task_type,
+                prompt_name=prompt_name,
+                prompt_version=_active_prompt_version(prompt_name),
+                rendered_prompt=failed_prompt,
+                provider=provider,
+                model=model,
+                status="failed",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                client_mutation_id=client_mutation_id,
+                error=str(error)[:2000],
+                metadata={"source": "v6_gateway", "failure": True},
+            )
+        except Exception:
+            logger.warning("shared AI execution ledger unavailable for failed V6 call", exc_info=True)
         conn.commit()
     except Exception:
         pass  # Preserve the original provider/budget error if the ledger is unavailable.
@@ -1026,14 +1112,48 @@ def _load_prompt_and_route(
     return prompt_text, provider, model, params
 
 
+def _active_prompt_version(prompt_name: str) -> str:
+    """Resolve the exact V6 prompt version used by the active DB row."""
+    try:
+        conn = connect()
+        try:
+            row = row_to_dict(
+                conn.execute(
+                    """
+                    SELECT version FROM prompts
+                    WHERE name = %s AND is_active = TRUE
+                    ORDER BY string_to_array(version, '.')::int[] DESC, created_at DESC
+                    LIMIT 1
+                    """,
+                    (prompt_name,),
+                ).fetchone()
+            )
+        finally:
+            conn.close()
+        if row and row.get("version"):
+            return str(row["version"])
+    except Exception:
+        # Prompt loading already performed the authoritative DB check.  This
+        # fallback keeps test doubles and old read-only workers observable while
+        # still exposing a concrete version label in the shared ledger.
+        logger.warning("could not resolve active V6 prompt version", exc_info=True)
+    from .prompt_registry import PROMPT_SEEDS
+
+    for name, version, _provider, _template in PROMPT_SEEDS:
+        if name == prompt_name:
+            return str(version)
+    return "runtime-1"
+
+
 def _assert_budget(user_id: str | None, project_id: str, scope: str, estimated_cost: float) -> None:
     """Enforce the user's plan-derived monthly cost budget.
 
     The limit is sourced from the user's active plan (plans.monthly_budget_cny)
     instead of the previously hardcoded 2.0 CNY per-project 'bootstrap' budget.
     When no user context is available (e.g. background workers), fall back to the
-    configured default and aggregate spend by project_id. Spend is the sum of
-    ai_calls.cost_cny for the current natural month.
+    configured default and aggregate spend by project_id. Spend is read from
+    the shared V6/V7 execution ledger when migrated, with the legacy ``ai_calls``
+    table as an explicitly labelled compatibility fallback.
     """
     limit = float(settings.default_monthly_budget_cny)
     if user_id:
@@ -1045,15 +1165,29 @@ def _assert_budget(user_id: str | None, project_id: str, scope: str, estimated_c
     start, end = monthly_window()
     conn = connect()
     try:
-        agg = row_to_dict(conn.execute(
-            """
-            SELECT COALESCE(SUM(cost_cny), 0)::float AS spent
-            FROM ai_calls
-            WHERE created_at >= %s AND created_at < %s
-              AND (user_id = %s OR (user_id IS NULL AND project_id = %s))
-            """,
-            (start, end, user_id, project_id),
-        ).fetchone())
+        try:
+            agg = row_to_dict(conn.execute(
+                f"""
+                SELECT COALESCE(SUM(cost_cny), 0)::float AS spent
+                FROM {SHARED_LEDGER_TABLE}
+                WHERE created_at >= %s AND created_at < %s
+                  AND status = 'succeeded' AND project_id = %s
+                """,
+                (start, end, project_id),
+            ).fetchone())
+        except Exception:
+            rollback = getattr(conn, "rollback", None)
+            if rollback:
+                rollback()
+            agg = row_to_dict(conn.execute(
+                """
+                SELECT COALESCE(SUM(cost_cny), 0)::float AS spent
+                FROM ai_calls
+                WHERE created_at >= %s AND created_at < %s
+                  AND (user_id = %s OR (user_id IS NULL AND project_id = %s))
+                """,
+                (start, end, user_id, project_id),
+            ).fetchone())
     finally:
         conn.close()
     spent = float(agg.get("spent") or 0)
@@ -1102,50 +1236,43 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
         # characters inside a JSON payload. Relying on provider defaults makes
         # the prompt say "write long" while the API may still truncate output.
         max_tokens = 8192
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "你是 NovelCraft 的职业网文创作 Agent。只输出合法 JSON；正文必须是可直接连载发布的小说叙事，不写说明文、计划书或创作建议。"},
-            {"role": "user", "content": prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": params.get("temperature", 0.7),
-    }
     if max_tokens is not None:
         try:
-            body["max_tokens"] = max(1024, min(int(max_tokens), 8192))
+            max_tokens = max(1024, min(int(max_tokens), 8192))
         except (TypeError, ValueError):
-            body["max_tokens"] = 8192
+            max_tokens = 8192
+    else:
+        max_tokens = 8192
     from .core.url_security import validate_ai_base_url
     base_url = validate_ai_base_url(_request_api_base_url.get() or settings.deepseek_base_url)
-    request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-    )
     try:
-        with urllib.request.urlopen(request, timeout=settings.request_timeout_seconds) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        # HTTP 429 -> dedicated rate-limit error so the rate-limit backoff applies.
-        if exc.code == 429:
-            raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            retry_after = int(raw_retry_after) if (raw_retry_after and str(raw_retry_after).isdigit()) else None
+        response = UnifiedAIGateway(
+            provider="deepseek",
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=settings.request_timeout_seconds,
+        ).complete_sync(
+            prompt,
+            system_prompt=(
+                "你是 NovelCraft 的职业网文创作 Agent。只输出合法 JSON；"
+                "正文必须是可直接连载发布的小说叙事，不写说明文、计划书或创作建议。"
+            ),
+            temperature=params.get("temperature", 0.7),
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
+        content = response.content
+    except UnifiedGatewayError as exc:
+        if exc.status_code == 429:
             raise ProviderRateLimitError(
-                f"deepseek rate limited (429): {exc}", retry_after=retry_after
+                f"deepseek rate limited (429): {exc}"
             ) from exc
-        alert_provider_error(task_type, f"deepseek http {exc.code}")
-        raise ProviderError(f"deepseek http error {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        alert_provider_error(task_type, str(exc))
-        raise ProviderError(f"deepseek request failed: {exc}") from exc
-    msg = payload["choices"][0]["message"]
-    content = msg.get("content") or msg.get("reasoning_content", "")
-    usage = payload.get("usage", {})
+        if exc.status_code:
+            alert_provider_error(task_type, f"deepseek http {exc.status_code}")
+        else:
+            alert_provider_error(task_type, str(exc))
+        raise ProviderError(str(exc)) from exc
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
@@ -1167,7 +1294,7 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
                     raise OutputValidationError(f"deepseek returned non-json for {task_type}") from exc
             else:
                 raise OutputValidationError(f"deepseek returned non-json for {task_type}")
-    return parsed, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+    return parsed, response.prompt_tokens, response.completion_tokens
 
 
 # ===== Streaming (pure-text tasks only) =====
@@ -1185,46 +1312,31 @@ def _deepseek_stream(prompt: str, model: str, params: dict[str, Any], usage_out:
     api_key = _request_api_key.get() or settings.deepseek_api_key
     if not api_key:
         raise ProviderError("DEEPSEEK_API_KEY is not configured")
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "你是 NovelCraft 的创作助手。直接输出正文文本，不要任何解释、标题或格式包裹。"},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": params.get("temperature", 0.7),
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
     from .core.url_security import validate_ai_base_url
     base_url = validate_ai_base_url(_request_api_base_url.get() or settings.deepseek_base_url)
-    request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
-                 "Accept": "text/event-stream"},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=settings.request_timeout_seconds) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    payload = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                if payload.get("usage"):
-                    usage_out.update(payload["usage"])
-                choices = payload.get("choices") or []
-                if choices:
-                    delta = (choices[0].get("delta") or {}).get("content")
-                    if delta:
-                        yield delta
-    except (urllib.error.URLError, TimeoutError) as exc:
+        max_tokens = params.get("max_tokens", 8192)
+        try:
+            max_tokens = max(1024, min(int(max_tokens), 8192))
+        except (TypeError, ValueError):
+            max_tokens = 8192
+        for delta in UnifiedAIGateway(
+            provider="deepseek",
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=settings.request_timeout_seconds,
+        ).stream_sync(
+            prompt,
+            system_prompt="你是 NovelCraft 的创作助手。直接输出正文文本，不要任何解释、标题或格式包裹。",
+            temperature=params.get("temperature", 0.7),
+            max_tokens=max_tokens,
+            usage_out=usage_out,
+        ):
+            yield delta
+    except UnifiedGatewayError as exc:
+        if exc.status_code == 429:
+            raise ProviderRateLimitError(f"deepseek rate limited (429): {exc}") from exc
         raise ProviderError(f"deepseek stream failed: {exc}") from exc
 
 
@@ -1293,8 +1405,10 @@ def _complete_stream_impl(
     latency_ms = int((time.perf_counter() - start) * 1000)
     conn = connect()
     try:
+        ensure_shared_ledger_schema(conn)
         # Same replay-safety as complete(): a successful stream upgrades any prior
         # failed-attempt row sharing this mutation id instead of colliding.
+        call_id = new_id("call")
         conn.execute(
             """INSERT INTO ai_calls (
                    id, run_id, node_key, provider, model, prompt_name, task_type,
@@ -1308,12 +1422,38 @@ def _complete_stream_impl(
                    prompt_tokens = EXCLUDED.prompt_tokens, completion_tokens = EXCLUDED.completion_tokens,
                    cost_cny = EXCLUDED.cost_cny, latency_ms = EXCLUDED.latency_ms,
                    status = 'succeeded', error = NULL""",
-            (new_id("call"), None, None, provider_name, model_name, prompt_name, task_type,
+            (call_id, None, None, provider_name, model_name, prompt_name, task_type,
              encode({"variables": variables, "prompt": prompt_text, "stream": True}),
              encode({"text": full_text}),
              prompt_tokens, completion_tokens,
              _calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens), latency_ms,
              "succeeded", client_mutation_id, project_id, user_id),
+        )
+        record_sync_execution(
+            conn,
+            execution_key=build_execution_key(
+                "v6",
+                scope=project_id,
+                client_mutation_id=client_mutation_id or call_id,
+            ),
+            gateway_version="v6",
+            project_id=project_id,
+            novel_id=None,
+            run_id=None,
+            step_id=None,
+            task_type=task_type,
+            prompt_name=prompt_name,
+            prompt_version=_active_prompt_version(prompt_name),
+            rendered_prompt=prompt_text,
+            provider=provider_name,
+            model=model_name,
+            status="succeeded",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_cny=_calculate_cost(provider_name, model_name, prompt_tokens, completion_tokens),
+            latency_ms=latency_ms,
+            client_mutation_id=client_mutation_id,
+            metadata={"source": "v6_gateway", "stream": True},
         )
         conn.commit()
     finally:

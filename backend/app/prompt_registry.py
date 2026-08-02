@@ -1190,8 +1190,9 @@ body 至少 8 段，每段为完整叙事段落，总字数不得低于 2000 字
 2. 时间线：本章耗时与前文衔接是否矛盾
 3. 世界观规则：有没有违反已立规则的行为
 4. 每条 issue 含：type、detail（矛盾双方原文位置）、severity（high/medium/low）
+5. 若存在不改变剧情事实的局部修复，必须同时给出 repairs 数组；每个修复必须是当前正文中的精确 anchor 与替换文本，禁止整章改写。无法安全修复时 repairs 为空。
 
-输出 JSON: {"reconciliation":{"conflicts_found":0,"issues":[],"passed":true}}"""),
+输出 JSON: {"reconciliation":{"conflicts_found":0,"issues":[],"repairs":[],"passed":true}}"""),
 
     ("bootstrap.relearn_style", "1.0.0", "deepseek",
      """你是文风分析师。请基于作者最近若干章的正文，提炼/更新其作者文风卡（Author Style Card）。
@@ -1245,12 +1246,13 @@ emotion_shift（情绪变化）、worth_continuing（追读意愿）。
 
 输出 JSON: {"continuity":{"status":"continuous","gaps":[],"narrative_flow":"评价（50字内）"}}"""),
 
-    ("bootstrap.final_humanize", "1.0.2", "deepseek",
+    ("bootstrap.final_humanize", "1.0.4", "deepseek",
      """你是去 AI 味专家（story-deslop）。请对本章执行最终人文化处理，输出完整全文。
 
 章节内容：$_chapter_body
 不可变事实：$source_facts
 禁止改动：$forbidden_changes
+作者文风卡：$style_profile
 上次质量门禁反馈：$quality_retry_feedback
 
 处理规则：
@@ -1263,6 +1265,8 @@ emotion_shift（情绪变化）、worth_continuing（追读意愿）。
 7. “口语自然”不等于删成电报句；不得为了去 AI 味机械删除必要的主语、助词和连接词，不得把“胳膊像灌了铅一样沉重”改成“胳膊灌铅”这类病句
 8. 原文已经自然的句子保持不动，宁可少改，不得为了列出 changes 而强行改坏
 9. 必须保留自然分段，humanized_text 中使用 \n\n 分隔段落；允许合并相邻短段，但段落数不得少于原文的 60%
+10. 分四层复核：结构层打散“提出观点-解释-总结”的重复段式，场景转换用动作/对白承接，章末保留悬念；句法层减少正式连接词、对称排比和过度完整的解释；词语层删除翻译腔与空泛形容；人物层保留角色口吻和对白潜台词，用动作/细节承载情绪
+11. 原文自然的地方少改；不得为了列出 changes 强行重写，更不能把短句机械切碎或把必要连接词全部删除
 
 输出 JSON: {"humanized_text":"处理后完整正文","changes":["改动说明1","改动说明2"],"ai_patterns_removed":["消除的AI痕迹1"]}"""),
 
@@ -1349,11 +1353,14 @@ emotion_shift（情绪变化）、worth_continuing（追读意愿）。
 输出JSON: {"score":50,"reasons":["理由"]}"""),
 
     # ═══ V3 去 AI 味重写（关键——网文风格） ═══
-    ("deai.rewrite", "1.1.0", "deepseek",
+    ("deai.rewrite", "1.1.1", "deepseek",
      """你是网文改稿专家（不是 AI，是一个真人编辑）。你的任务是把下面这段 AI 生成的文字改写成真正的网络小说风格。改完之后要让读者觉得"这肯定是个老作者写的，不可能是 AI"。
 
 【原文】
 $text
+
+【作者文风卡】
+$style_profile
 
 【改稿铁律——逐条执行，不得跳过】
 
@@ -1442,7 +1449,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "write_self_review":      '{"overall":"总体评价","strengths":["优点1","优点2"],"weaknesses":["缺点1"],"suggestions":["建议1"],"self_score":80}',
     "write_polish":           '{"polished":{"title":"章名","body":["段落一","段落二","段落三","段落四","段落五","段落六"]},"changes_summary":"修改摘要"}（body 段落数与原文相当，至少 4 段）',
     "write_length_check":     '{"actual_chars":3500,"is_acceptable":true,"advice":"无需调整"}',
-    "write_fact_reconcile":   '{"reconciliation":{"conflicts_found":0,"issues":[],"passed":true}}',
+    "write_fact_reconcile":   '{"reconciliation":{"conflicts_found":0,"issues":[],"repairs":[],"passed":true}}',
     "final_consistency_check": '{"checks":{"source_fidelity":{"status":"pass","issues":[]},"characters":{"status":"pass","issues":[]},"locations":{"status":"pass","issues":[]},"timeline":{"status":"pass","issues":[]},"objects":{"status":"pass","issues":[]},"settings":{"status":"pass","issues":[]},"foreshadowing":{"status":"pass","issues":[]}},"overall_status":"pass","warning_count":0,"reader_experience":{"expectation":82,"conflict":78,"payoff":76,"emotion_shift":80,"worth_continuing":84}}',
     "final_continuity_audit": '{"continuity":{"status":"continuous","gaps":[],"narrative_flow":"流畅"}}',
     "final_humanize":         '{"humanized_text":"处理后完整正文","changes":["改动说明"],"ai_patterns_removed":["消除的AI痕迹"]}',

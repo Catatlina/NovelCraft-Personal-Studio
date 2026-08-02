@@ -34,6 +34,7 @@ export function DecisionLog({ novelId }: DecisionLogProps) {
   const [decisions, setDecisions] = useState<DecisionLogItem[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export function DecisionLog({ novelId }: DecisionLogProps) {
   const loadDecisions = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await brainApi.listDecisions(novelId, {
         status: statusFilter || undefined,
         limit: 100,
@@ -50,55 +52,8 @@ export function DecisionLog({ novelId }: DecisionLogProps) {
       setDecisions(data);
     } catch (err: any) {
       console.error('Failed to load decisions:', err);
-      // Mock data for demo
-      setDecisions([
-        {
-          id: 'dec-1',
-          decision_type: 'chapter_plan',
-          decision: 'Chapter 5 plan approved',
-          decision_reason: 'Plot aligns with current goals',
-          confidence: 0.85,
-          permission_level: 'auto',
-          status: 'completed',
-          decided_by: 'ai',
-          decided_at: new Date(Date.now() - 3600000).toISOString(),
-          context: { chapter_number: 5, goals_advanced: 2 },
-        },
-        {
-          id: 'dec-2',
-          decision_type: 'character_change',
-          decision: 'Protagonist personality shift',
-          decision_reason: 'Character development milestone',
-          confidence: 0.72,
-          permission_level: 'approve',
-          status: 'pending',
-          decided_by: 'ai',
-          context: { character: 'protagonist', change_type: 'personality' },
-        },
-        {
-          id: 'dec-3',
-          decision_type: 'plot_twist',
-          decision: 'Add plot twist in chapter 8',
-          decision_reason: 'Reader engagement forecast low',
-          confidence: 0.65,
-          permission_level: 'approve',
-          status: 'pending',
-          decided_by: 'ai',
-          context: { chapter: 8, twist_type: 'reveal' },
-        },
-        {
-          id: 'dec-4',
-          decision_type: 'pacing_adjustment',
-          decision: 'Slow down pacing',
-          decision_reason: 'Recent chapters too fast',
-          confidence: 0.9,
-          permission_level: 'notify',
-          status: 'completed',
-          decided_by: 'ai',
-          decided_at: new Date(Date.now() - 7200000).toISOString(),
-          context: { adjustment: 'slow', factor: 0.8 },
-        },
-      ]);
+      setDecisions([]);
+      setError(err?.message || '无法加载真实决策记录');
     } finally {
       setLoading(false);
     }
@@ -107,26 +62,20 @@ export function DecisionLog({ novelId }: DecisionLogProps) {
   const handleApprove = async (decisionId: string) => {
     try {
       await brainApi.approveDecision(novelId, decisionId);
-      loadDecisions();
+      await loadDecisions();
     } catch (err: any) {
       console.error('Failed to approve:', err);
-      // Update locally for demo
-      setDecisions(prev => prev.map(d => 
-        d.id === decisionId ? { ...d, status: 'approved', decided_by: 'human' } : d
-      ));
+      setError(err?.message || '审批失败，服务端状态未改变');
     }
   };
 
   const handleReject = async (decisionId: string) => {
     try {
       await brainApi.rejectDecision(novelId, decisionId);
-      loadDecisions();
+      await loadDecisions();
     } catch (err: any) {
       console.error('Failed to reject:', err);
-      // Update locally for demo
-      setDecisions(prev => prev.map(d => 
-        d.id === decisionId ? { ...d, status: 'rejected', decided_by: 'human' } : d
-      ));
+      setError(err?.message || '拒绝失败，服务端状态未改变');
     }
   };
 
@@ -172,6 +121,13 @@ export function DecisionLog({ novelId }: DecisionLogProps) {
           </div>
         )}
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700" role="alert">
+          {error}
+          <button className="ml-3 underline" onClick={() => void loadDecisions()}>重试</button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-4">

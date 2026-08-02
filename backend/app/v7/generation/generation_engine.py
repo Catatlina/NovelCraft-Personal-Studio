@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
+import time
 import uuid
 from typing import Any
 
@@ -20,6 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..brain.novel_brain import NovelBrain
 from ..trace.tracer import ExecutionTracer
 from ..events.event_bus import EventBus
+from ...services.ai_runtime import (
+    execution_key as build_execution_key,
+    normalise_prompt_version,
+    prompt_hash,
+    record_async_execution,
+)
+from ...services.unified_gateway import UnifiedAIGateway
+
+logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
 
@@ -39,11 +50,42 @@ class AIGatewayError(RuntimeError):
     """Raised when the LLM call cannot be completed."""
 
 
+class BudgetAccountingError(AIGatewayError):
+    """Raised when a successful provider call cannot be durably accounted for."""
+
+
 class ContextAssembler:
     """Assembles real generation context out of the Novel Brain."""
 
-    def __init__(self, brain: NovelBrain):
+    def __init__(self, brain: NovelBrain, project_id: str | None = None):
         self.brain = brain
+        self.project_id = project_id
+
+    async def load_style_card(self) -> dict[str, Any]:
+        """Load the V6 author/genre card used by the shared project scope."""
+        if not self.project_id:
+            return {}
+
+        def _read() -> dict[str, Any]:
+            from ...db import connect, decode
+
+            conn = connect()
+            try:
+                row = conn.execute(
+                    "SELECT author_card, genre_card FROM style_cards "
+                    "WHERE project_id=%s ORDER BY updated_at DESC LIMIT 1",
+                    (self.project_id,),
+                ).fetchone()
+                if not row:
+                    return {}
+                return {
+                    "author_card": decode(row.get("author_card"), {}) or {},
+                    "genre_card": decode(row.get("genre_card"), {}) or {},
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_read)
 
     async def load_previous_chapters(
         self, chapter_number: int, *, count: int = 2
@@ -85,6 +127,7 @@ class ContextAssembler:
             g for g in goals if g.get("status") in ("in_progress", "pending")
         ]
         constraints = await self.brain.constraints.list_constraints(limit=50)
+        style_card = await self.load_style_card()
 
         previous = await self.load_previous_chapters(chapter_number, count=3)
         recap_parts: list[str] = []
@@ -95,9 +138,14 @@ class ContextAssembler:
                     f"第{prev.get('chapter_number')}章梗概：{summary}"
                 )
         last_tail = ""
+        previous_transition_contract: dict[str, Any] = {}
         if previous:
             last_text = previous[-1].get("text") or ""
-            last_tail = last_text[-400:] if last_text else ""
+            # The old 400-character tail was too short to carry a scene's
+            # actor/location/object state into the next chapter.  Keep a
+            # durable transition contract as well as the literal tail.
+            last_tail = last_text[-1200:] if last_text else ""
+            previous_transition_contract = previous[-1].get("transition_contract") or {}
 
         layers = {
             "story_state": {
@@ -140,6 +188,8 @@ class ContextAssembler:
             ],
             "recap": recap_parts,
             "previous_tail": last_tail,
+            "previous_transition_contract": previous_transition_contract,
+            "style_card": style_card,
         }
 
         rendered = self.render(layers)
@@ -147,7 +197,7 @@ class ContextAssembler:
         max_chars = int(token_budget * 1.6)
         truncated = False
         if len(rendered) > max_chars:
-            rendered = rendered[:max_chars]
+            rendered = self._fit_context(layers, max_chars)
             truncated = True
 
         return {
@@ -203,6 +253,20 @@ class ContextAssembler:
             ]
             blocks.append("【必须遵守的约束】\n" + "\n".join(lines))
 
+        transition = layers.get("previous_transition_contract")
+        if transition:
+            blocks.append(
+                "【上一章交接契约（必须优先遵守）】\n"
+                + json.dumps(transition, ensure_ascii=False, separators=(",", ":"))
+            )
+
+        style_card = layers.get("style_card")
+        if style_card:
+            blocks.append(
+                "【V6作者风格卡（只约束表达，不改变剧情事实）】\n"
+                + json.dumps(style_card, ensure_ascii=False, separators=(",", ":"))
+            )
+
         recap = layers.get("recap", [])
         if recap:
             blocks.append("【前情提要】\n" + "\n".join(recap))
@@ -212,6 +276,49 @@ class ContextAssembler:
             blocks.append("【上一章结尾原文（用于承接）】\n" + tail)
 
         return "\n\n".join(blocks) if blocks else "（暂无历史上下文，这是故事的开端）"
+
+    @classmethod
+    def _fit_context(cls, layers: dict[str, Any], max_chars: int) -> str:
+        """Fit context without dropping the cross-chapter anchors.
+
+        State inventories are compressible; the previous tail, hand-off
+        contract, constraints and recap are not.  The previous implementation
+        sliced the fully-rendered prompt from character zero, which commonly
+        removed exactly those anchors.
+        """
+        anchor_layers = {
+            "active_goals": layers.get("active_goals", []),
+            "constraints": layers.get("constraints", []),
+            "recap": layers.get("recap", []),
+            "previous_transition_contract": layers.get("previous_transition_contract", {}),
+            "previous_tail": layers.get("previous_tail", ""),
+            "style_card": layers.get("style_card", {}),
+        }
+        anchor = cls.render(anchor_layers)
+        state_blob = cls.render(
+            {
+                "characters": layers.get("characters", [])[:40],
+                "world": layers.get("world", [])[:40],
+                "plot": layers.get("plot", [])[:40],
+            }
+        )
+        if len(anchor) >= max_chars:
+            # Keep the literal tail and contract even if a pathological story
+            # has an enormous constraint list.
+            tail = str(layers.get("previous_tail") or "")[-1200:]
+            contract = json.dumps(
+                layers.get("previous_transition_contract") or {},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            required = "【上一章交接契约】\n" + contract + "\n\n【上一章结尾原文】\n" + tail
+            return required[-max_chars:]
+        available = max_chars - len(anchor) - 2
+        if available <= 0:
+            return anchor
+        if len(state_blob) > available:
+            state_blob = state_blob[:available] + "\n【设定状态其余条目见 Novel Brain，禁止据此改写已确认事实】"
+        return state_blob + "\n\n" + anchor
 
 
 class SceneDirector:
@@ -268,6 +375,9 @@ class SceneDirector:
             "pacing": plot_brief.get("pacing_advice"),
             "conflict": plot_brief.get("tension_target"),
             "hook": plot_brief.get("hook"),
+            "reader_promise": plot_brief.get("reader_promise"),
+            "emotional_target": plot_brief.get("emotional_target"),
+            "opening_anchor": plot_brief.get("opening_anchor"),
             "risks": plot_brief.get("risks") or [],
             "must_accomplish": objectives,
             "target_word_count": target_word_count,
@@ -321,6 +431,9 @@ class SceneDirector:
             '  "pacing": "slow|medium|fast",\n'
             '  "conflict": "本章核心冲突",\n'
             '  "hook": "章末钩子",\n'
+            '  "reader_promise": "读者在本章应获得的情绪/信息承诺",\n'
+            '  "emotional_target": "开场情绪 -> 中段转折 -> 章末情绪",\n'
+            '  "opening_anchor": "与上一章尾部衔接的具体动作/地点/未决问题",\n'
             '  "confidence": 0.85\n'
             "}\n"
             "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数。"
@@ -330,6 +443,8 @@ class SceneDirector:
             system_prompt="你是资深小说结构编辑，只输出严格合法的 JSON。",
             max_tokens=2000,
             temperature=0.6,
+            prompt_name="v7.generation.scene_plan",
+            prompt_version="1.1.0",
         )
         plan = result["data"]
         plan.setdefault("chapter_title", f"第{chapter_number}章")
@@ -341,7 +456,14 @@ class SceneDirector:
 
 
 class DeAIPipeline:
-    """Rule-based de-AI pipeline. Every layer reports how many edits it made."""
+    """Rule pre-clean plus a real semantic final-humanize pass.
+
+    Regexes can remove a few visible clichés, but they cannot fix cadence,
+    voice or the over-explained feeling the quality report identified.  The
+    final pass therefore goes through the same real V7 provider gateway as the
+    rest of generation.  Provider failure is explicit; the rule pass is not a
+    fake success fallback.
+    """
 
     # Layer 1: AI 腔套话
     CLICHE_PATTERNS: list[tuple[str, str]] = [
@@ -372,8 +494,24 @@ class DeAIPipeline:
         "!": "！",
     }
 
-    async def process(self, text: str) -> dict[str, Any]:
-        """Run all 7 layers. Returns processed text + per-layer edit counts."""
+    def __init__(self, gateway: "AIGateway | None" = None):
+        self.gateway = gateway
+
+    async def process(
+        self,
+        text: str,
+        *,
+        source_facts: str = "",
+        forbidden_changes: str = "",
+        quality_retry_feedback: str = "",
+        style_profile: str = "",
+    ) -> dict[str, Any]:
+        """Run rule pre-clean and semantic humanization.
+
+        The semantic output must retain nearly all source material and
+        paragraph structure.  If it does not, fail the generation instead of
+        silently returning the weaker heuristic result.
+        """
         original = text
         layers: list[dict[str, Any]] = []
 
@@ -398,6 +536,58 @@ class DeAIPipeline:
         text, n = self._layer_trailing_moral(text)
         layers.append({"layer": "trailing_moral_removal", "changes": n})
 
+        if self.gateway is None:
+            raise AIGatewayError("semantic final_humanize gateway is not configured")
+        humanize_prompt = (
+            "请对下面这章小说执行最终人文化定稿。只改表达，不改事件、人物、"
+            "因果、物品状态或对话信息；保留具体细节和自然分段。按四层检查："
+            "结构层打散‘提出观点-解释-总结’的重复段式，场景转换用动作/对白承接，"
+            "章末保留悬念而不是总结；句法层减少正式连接词、对称排比和过度完整的解释；"
+            "词语层删除高频套话、翻译腔和空泛形容；人物层保留角色口吻与对白潜台词，"
+            "用动作和细节承载情绪，不把情绪标签直接说满。原文自然的地方少改，"
+            "不得摘要、缩写、新增剧情或机械删成电报句。\n\n"
+            f"【不可变事实】\n{source_facts or '（无额外事实）'}\n\n"
+            f"【禁止改动】\n{forbidden_changes or '情节、人物、时间线、设定与对白信息'}\n\n"
+            f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
+            f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
+            f"【原文】\n{text}\n\n"
+            "输出 JSON：{\"humanized_text\":\"完整正文\","
+            "\"changes\":[\"改动说明\"],\"ai_patterns_removed\":[\"消除的痕迹\"]}"
+        )
+        ai = await self.gateway.generate_json(
+            humanize_prompt,
+            system_prompt="你是严格的真人网文责任编辑，只输出合法 JSON。",
+            max_tokens=max(3500, int(chinese_word_count(text) * 1.4)),
+            temperature=0.45,
+            prompt_name="bootstrap.final_humanize",
+            prompt_version="1.0.4",
+        )
+        payload = ai.get("data") or {}
+        humanized = str(payload.get("humanized_text") or "").strip()
+        if not humanized:
+            raise AIGatewayError("final_humanize returned empty text")
+        before_chars = chinese_word_count(text)
+        after_chars = chinese_word_count(humanized)
+        if before_chars < 1 or after_chars < int(before_chars * 0.8) or after_chars > int(before_chars * 1.2):
+            raise AIGatewayError(
+                f"final_humanize changed chapter length outside safe range: {before_chars}->{after_chars}"
+            )
+        before_paragraphs = [p for p in text.split("\n") if p.strip()]
+        after_paragraphs = [p for p in humanized.split("\n") if p.strip()]
+        if len(after_paragraphs) < max(1, int(len(before_paragraphs) * 0.6)):
+            raise AIGatewayError(
+                f"final_humanize dropped too many paragraphs: {len(before_paragraphs)}->{len(after_paragraphs)}"
+            )
+        text = humanized
+        layers.append(
+            {
+                "layer": "semantic_final_humanize",
+                "changes": len(payload.get("changes") or []),
+                "patterns_removed": payload.get("ai_patterns_removed") or [],
+                "usage": ai.get("usage") or {},
+            }
+        )
+
         total = sum(item["changes"] for item in layers)
         return {
             "original_text": original,
@@ -406,6 +596,10 @@ class DeAIPipeline:
             "total_changes": total,
             "original_chars": chinese_word_count(original),
             "processed_chars": chinese_word_count(text),
+            "semantic_humanize": True,
+            "humanize_changes": payload.get("changes") or [],
+            "ai_patterns_removed": payload.get("ai_patterns_removed") or [],
+            "usage": ai.get("usage") or {},
         }
 
     def _layer_cliches(self, text: str) -> tuple[str, int]:
@@ -549,13 +743,258 @@ class AIGateway:
     INPUT_PRICE_PER_M = 1.0   # CNY / 1M tokens
     OUTPUT_PRICE_PER_M = 2.0  # CNY / 1M tokens
 
-    def __init__(self, tracer: ExecutionTracer | None = None):
+    def __init__(
+        self,
+        tracer: ExecutionTracer | None = None,
+        *,
+        db: AsyncSession | None = None,
+        novel_id: uuid.UUID | None = None,
+        project_id: str | None = None,
+    ):
         self.tracer = tracer
+        self.db = db
+        self.novel_id = novel_id
+        self.project_id = project_id
         self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
         self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         self.default_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         self.timeout = float(os.getenv("V7_AI_TIMEOUT", "180"))
         self.max_retries = int(os.getenv("V7_AI_MAX_RETRIES", "3"))
+
+    async def _assert_budget(self, prompt: str, max_tokens: int) -> None:
+        """Block before the provider call when a hard V7 budget is exceeded."""
+        if self.db is None or self.novel_id is None:
+            return
+        from ..cost.cost_manager import BudgetExceededError, CostBudgetManager
+
+        estimated_input = max(1, len(prompt) // 4)
+        estimated_tokens = estimated_input + max(1, max_tokens)
+        estimated_cost = (
+            estimated_input / 1_000_000 * self.INPUT_PRICE_PER_M
+            + max(1, max_tokens) / 1_000_000 * self.OUTPUT_PRICE_PER_M
+        )
+        try:
+            await CostBudgetManager(self.db, self.novel_id).assert_within_budget(
+                estimated_cost_cny=estimated_cost,
+                estimated_tokens=estimated_tokens,
+            )
+        except BudgetExceededError as exc:
+            raise AIGatewayError(str(exc)) from exc
+
+    async def _record_budget_spend(self, usage: dict[str, Any], prompt_name: str | None) -> None:
+        """Record provider-reported spend exactly once after a successful call."""
+        if self.db is None or self.novel_id is None:
+            return
+        from ..cost.cost_manager import CostBudgetManager
+
+        run_id = getattr(self.tracer, "_current_run", None) if self.tracer else None
+        try:
+            await CostBudgetManager(self.db, self.novel_id).record_cost(
+                cost_cny=float(usage.get("cost") or 0.0),
+                tokens=int(usage.get("tokens_input") or 0) + int(usage.get("tokens_output") or 0),
+                run_id=run_id,
+                source="v7_ai_gateway",
+                description=f"V7 provider call: {prompt_name or 'unattributed'}",
+            )
+        except Exception as exc:
+            # Do not retry the provider after a successful response if the
+            # ledger write failed: that would create a second billable call.
+            raise BudgetAccountingError(
+                f"provider succeeded but V7 cost accounting failed: {type(exc).__name__}"
+            ) from exc
+
+    @staticmethod
+    def _as_uuid(value: Any) -> uuid.UUID | None:
+        if value is None:
+            return None
+        if isinstance(value, uuid.UUID):
+            return value
+        try:
+            return uuid.UUID(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    async def _record_shared_provenance(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str,
+        history: list[dict[str, str]] | None,
+        result: dict[str, Any],
+        prompt_name: str | None,
+        prompt_version: str | None,
+        json_mode: bool,
+        attempt: int,
+        logical_mutation_id: str,
+        started: float,
+    ) -> None:
+        """Close PromptVersionManager + shared ledger in one V7 transaction."""
+        if self.db is None or self.novel_id is None:
+            return
+        # Unit doubles used for provider/budget tests intentionally do not
+        # pretend to be an AsyncSession.  Production sessions expose execute,
+        # add and flush; only those sessions may claim durable provenance.
+        if not all(hasattr(self.db, attr) for attr in ("execute", "flush")):
+            return
+
+        effective_name = (prompt_name or "v7.unattributed").strip() or "v7.unattributed"
+        effective_version = normalise_prompt_version(prompt_version)
+        run_id = getattr(self.tracer, "_current_run", None) if self.tracer else None
+        step_stack = getattr(self.tracer, "_step_stack", []) if self.tracer else []
+        step_id = step_stack[-1] if step_stack else None
+        exact_hash = prompt_hash(
+            prompt,
+            system_prompt=system_prompt,
+            history=history,
+        )
+        metadata = {
+            "gateway_version": "v7",
+            "runtime_managed_prompt": True,
+            "rendered_prompt_hash": exact_hash,
+            "json_mode": json_mode,
+            "attempt": attempt,
+            "logical_mutation_id": logical_mutation_id,
+        }
+
+        from ..prompt.prompt_manager import PromptVersionManager
+
+        manager = PromptVersionManager(self.db, self.novel_id)
+        await manager.record_runtime_execution(
+            effective_name,
+            version_label=effective_version,
+            rendered_prompt=prompt,
+            model=str(result.get("model") or self.default_model),
+            input_variables={
+                "system_prompt": system_prompt,
+                "history": history or [],
+                "rendered_prompt_hash": exact_hash,
+                "json_mode": json_mode,
+            },
+            output_raw=result.get("text"),
+            tokens_input=int(result.get("tokens_input") or 0),
+            tokens_output=int(result.get("tokens_output") or 0),
+            cost=float(result.get("cost") or 0.0),
+            duration_seconds=max(0.0, time.perf_counter() - started),
+            status="success",
+            run_id=self._as_uuid(run_id),
+            step_id=self._as_uuid(step_id),
+            novel_id=self.novel_id,
+            validation_passed=True,
+            extra_metadata=metadata,
+        )
+        await record_async_execution(
+            self.db,
+            execution_key=build_execution_key(
+                "v7",
+                scope=str(self.novel_id),
+                client_mutation_id=logical_mutation_id,
+                attempt=attempt,
+            ),
+            gateway_version="v7",
+            project_id=self.project_id,
+            novel_id=str(self.novel_id),
+            run_id=str(run_id) if run_id else None,
+            step_id=str(step_id) if step_id else None,
+            task_type=effective_name,
+            prompt_name=effective_name,
+            prompt_version=effective_version,
+            rendered_prompt=prompt,
+            prompt_hash_value=exact_hash,
+            provider="deepseek",
+            model=str(result.get("model") or self.default_model),
+            status="succeeded",
+            prompt_tokens=int(result.get("tokens_input") or 0),
+            completion_tokens=int(result.get("tokens_output") or 0),
+            cost_cny=float(result.get("cost") or 0.0),
+            latency_ms=int(max(0.0, time.perf_counter() - started) * 1000),
+            client_mutation_id=logical_mutation_id,
+            metadata=metadata,
+        )
+
+    async def _record_failed_provenance(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str,
+        history: list[dict[str, str]] | None,
+        prompt_name: str | None,
+        prompt_version: str | None,
+        json_mode: bool,
+        attempt: int,
+        logical_mutation_id: str,
+        model_name: str,
+        error: Exception,
+    ) -> None:
+        """Best-effort record of a non-billable failed provider attempt."""
+        if self.db is None or self.novel_id is None:
+            return
+        if not all(hasattr(self.db, attr) for attr in ("execute", "flush")):
+            return
+        effective_name = (prompt_name or "v7.unattributed").strip() or "v7.unattributed"
+        effective_version = normalise_prompt_version(prompt_version)
+        run_id = getattr(self.tracer, "_current_run", None) if self.tracer else None
+        step_stack = getattr(self.tracer, "_step_stack", []) if self.tracer else []
+        step_id = step_stack[-1] if step_stack else None
+        exact_hash = prompt_hash(prompt, system_prompt=system_prompt, history=history)
+        metadata = {
+            "gateway_version": "v7",
+            "runtime_managed_prompt": True,
+            "rendered_prompt_hash": exact_hash,
+            "json_mode": json_mode,
+            "attempt": attempt,
+            "failure": True,
+        }
+
+        from ..prompt.prompt_manager import PromptVersionManager
+
+        manager = PromptVersionManager(self.db, self.novel_id)
+        await manager.record_runtime_execution(
+            effective_name,
+            version_label=effective_version,
+            rendered_prompt=prompt,
+            model=model_name,
+            input_variables={
+                "system_prompt": system_prompt,
+                "history": history or [],
+                "rendered_prompt_hash": exact_hash,
+                "json_mode": json_mode,
+            },
+            output_raw=None,
+            tokens_input=0,
+            tokens_output=0,
+            cost=0.0,
+            status="failed",
+            error_message=str(error)[:2000],
+            run_id=self._as_uuid(run_id),
+            step_id=self._as_uuid(step_id),
+            novel_id=self.novel_id,
+            extra_metadata=metadata,
+        )
+        await record_async_execution(
+            self.db,
+            execution_key=build_execution_key(
+                "v7",
+                scope=str(self.novel_id),
+                client_mutation_id=logical_mutation_id,
+                attempt=attempt,
+            ),
+            gateway_version="v7",
+            project_id=self.project_id,
+            novel_id=str(self.novel_id),
+            run_id=str(run_id) if run_id else None,
+            step_id=str(step_id) if step_id else None,
+            task_type=effective_name,
+            prompt_name=effective_name,
+            prompt_version=effective_version,
+            rendered_prompt=prompt,
+            prompt_hash_value=exact_hash,
+            provider="deepseek",
+            model=model_name,
+            status="failed",
+            error=str(error)[:2000],
+            client_mutation_id=logical_mutation_id,
+            metadata=metadata,
+        )
 
     @property
     def configured(self) -> bool:
@@ -573,6 +1012,7 @@ class AIGateway:
         history: list[dict[str, str]] | None = None,
         prompt_name: str | None = None,
         prompt_version: str | None = None,
+        client_mutation_id: str | None = None,
     ) -> dict[str, Any]:
         """Call the LLM. Raises AIGatewayError after all retries fail."""
         if not self.api_key:
@@ -580,29 +1020,14 @@ class AIGateway:
                 "DEEPSEEK_API_KEY is not configured; refusing to fabricate output"
             )
 
+        await self._assert_budget(prompt, max_tokens)
+
         model = model or self.default_model
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
-
-        payload: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
-
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
         last_error: Exception | None = None
+        logical_mutation_id = client_mutation_id or uuid.uuid4().hex
         for attempt in range(1, self.max_retries + 1):
+            started = time.perf_counter()
             try:
                 # Total-duration hard cap: httpx's ``timeout`` only guards the
                 # idle gap between two socket reads, so a slow-but-chatty LLM
@@ -611,21 +1036,35 @@ class AIGateway:
                 # firing). wrap the whole request in asyncio.wait_for so the
                 # call can never exceed ``self.timeout`` wall-clock seconds.
                 async def _one_request() -> dict[str, Any]:
-                    async with httpx.AsyncClient(timeout=httpx.Timeout(
-                        connect=self.timeout, read=self.timeout,
-                        write=self.timeout, pool=self.timeout,
-                    )) as client:
-                        response = await client.post(url, headers=headers, json=payload)
-                        response.raise_for_status()
-                        return response.json()
+                    response = await UnifiedAIGateway(
+                        provider="deepseek",
+                        api_key=self.api_key,
+                        base_url=self.base_url,
+                        model=model,
+                        timeout=self.timeout,
+                    ).complete_async(
+                        prompt,
+                        system_prompt=system_prompt,
+                        history=history,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        json_mode=json_mode,
+                        # Keep the existing test seam while the transport is
+                        # now owned by the shared V6/V7 gateway.
+                        client_factory=httpx.AsyncClient,
+                    )
+                    return {
+                        "content": response.content,
+                        "prompt_tokens": response.prompt_tokens,
+                        "completion_tokens": response.completion_tokens,
+                        "finish_reason": response.finish_reason,
+                    }
 
                 result = await asyncio.wait_for(_one_request(), timeout=self.timeout)
 
-                choice = result["choices"][0]
-                content = choice["message"]["content"]
-                usage = result.get("usage", {}) or {}
-                tokens_input = int(usage.get("prompt_tokens", 0))
-                tokens_output = int(usage.get("completion_tokens", 0))
+                content = result["content"]
+                tokens_input = int(result.get("prompt_tokens", 0))
+                tokens_output = int(result.get("completion_tokens", 0))
                 cost = (
                     tokens_input / 1_000_000 * self.INPUT_PRICE_PER_M
                     + tokens_output / 1_000_000 * self.OUTPUT_PRICE_PER_M
@@ -633,19 +1072,61 @@ class AIGateway:
                 if not content or not content.strip():
                     raise AIGatewayError("LLM returned empty content")
 
-                return {
+                result_payload = {
                     "text": content,
                     "model": model,
                     "tokens_input": tokens_input,
                     "tokens_output": tokens_output,
                     "cost": cost,
-                    "finish_reason": choice.get("finish_reason", "stop"),
+                    "finish_reason": result.get("finish_reason", "stop"),
                     "attempts": attempt,
                     "prompt_name": prompt_name,
                     "prompt_version": prompt_version,
                 }
+                await self._record_budget_spend(result_payload, prompt_name)
+                try:
+                    await self._record_shared_provenance(
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                        history=history,
+                        result=result_payload,
+                        prompt_name=prompt_name,
+                        prompt_version=prompt_version,
+                        json_mode=json_mode,
+                        attempt=attempt,
+                        logical_mutation_id=logical_mutation_id,
+                        started=started,
+                    )
+                except Exception as exc:
+                    # Never retry a billable provider response after either
+                    # provenance or the shared ledger failed to close.
+                    raise BudgetAccountingError(
+                        f"provider succeeded but V7 provenance accounting failed: {type(exc).__name__}"
+                    ) from exc
+                return result_payload
             except Exception as exc:  # noqa: BLE001 - retried and re-raised below
                 last_error = exc
+                if isinstance(exc, BudgetAccountingError):
+                    break
+                if attempt == self.max_retries:
+                    try:
+                        await self._record_failed_provenance(
+                            prompt=prompt,
+                            system_prompt=system_prompt,
+                            history=history,
+                            prompt_name=prompt_name,
+                            prompt_version=prompt_version,
+                            json_mode=json_mode,
+                            attempt=attempt,
+                            logical_mutation_id=logical_mutation_id,
+                            model_name=model,
+                            error=exc,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "V7 failed provider provenance could not be persisted",
+                            exc_info=True,
+                        )
                 if attempt < self.max_retries:
                     await asyncio.sleep(min(2 ** attempt, 8))
 
@@ -663,6 +1144,7 @@ class AIGateway:
         max_tokens: int = 2000,
         prompt_name: str | None = None,
         prompt_version: str | None = None,
+        client_mutation_id: str | None = None,
     ) -> dict[str, Any]:
         """Generate and parse a JSON object. Returns {"data":..., "usage":...}."""
         usage_total = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
@@ -680,6 +1162,7 @@ class AIGateway:
                 json_mode=True,
                 prompt_name=prompt_name,
                 prompt_version=prompt_version,
+                client_mutation_id=client_mutation_id,
             )
             usage_total["tokens_input"] += result["tokens_input"]
             usage_total["tokens_output"] += result["tokens_output"]
@@ -726,17 +1209,24 @@ class GenerationEngine:
         brain: NovelBrain,
         tracer: ExecutionTracer,
         event_bus: EventBus,
+        project_id: str | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
         self.brain = brain
         self.tracer = tracer
         self.event_bus = event_bus
+        self.project_id = project_id
 
-        self.ai_gateway = AIGateway(tracer)
-        self.context_assembler = ContextAssembler(brain)
+        self.ai_gateway = AIGateway(
+            tracer,
+            db=db,
+            novel_id=novel_id,
+            project_id=project_id,
+        )
+        self.context_assembler = ContextAssembler(brain, project_id)
         self.scene_director = SceneDirector(brain, self.ai_gateway)
-        self.deai_pipeline = DeAIPipeline()
+        self.deai_pipeline = DeAIPipeline(self.ai_gateway)
 
     async def generate_chapter(
         self,
@@ -821,7 +1311,7 @@ class GenerationEngine:
                 max_tokens=4000,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
             )
             add_usage(step, first)
             text = first["text"].strip()
@@ -842,7 +1332,7 @@ class GenerationEngine:
                     max_tokens=3000,
                     temperature=0.85,
                     prompt_name="v7.generation.continuation",
-                    prompt_version="1.0.0",
+                    prompt_version="1.1.0",
                 )
                 add_usage(step, cont)
                 text = text.rstrip() + "\n" + cont["text"].strip()
@@ -859,7 +1349,26 @@ class GenerationEngine:
             "deai_processing",
             input_summary="Run 7-layer de-AI pipeline",
         ) as step:
-            deai_result = await self.deai_pipeline.process(text)
+            context_layers = context.get("context_layers") or {}
+            deai_result = await self.deai_pipeline.process(
+                text,
+                source_facts=json.dumps(
+                    {
+                        "previous_transition_contract": context_layers.get(
+                            "previous_transition_contract"
+                        ),
+                        "previous_tail": context_layers.get("previous_tail"),
+                    },
+                    ensure_ascii=False,
+                ),
+                forbidden_changes=json.dumps(
+                    context_layers.get("constraints") or [], ensure_ascii=False
+                ),
+                style_profile=json.dumps(
+                    context_layers.get("style_card") or {}, ensure_ascii=False
+                ),
+            )
+            add_usage(step, deai_result.get("usage") or {})
             step.set_output(
                 f"{deai_result['total_changes']} edits across "
                 f"{len(deai_result['layers_applied'])} layers",
@@ -893,11 +1402,20 @@ class GenerationEngine:
             "context": {
                 "rendered_chars": context["rendered_chars"],
                 "previous_chapters": context["previous_chapters"],
+                "previous_tail": context["context_layers"].get("previous_tail", ""),
+                "previous_transition_contract": context["context_layers"].get(
+                    "previous_transition_contract", {}
+                ),
+                "constraints": context["context_layers"].get("constraints", []),
+                "style_card": context["context_layers"].get("style_card", {}),
             },
             "scene_plan": scene_plan,
             "deai": {
                 "layers_applied": deai_result["layers_applied"],
                 "total_changes": deai_result["total_changes"],
+                "semantic_humanize": deai_result.get("semantic_humanize", False),
+                "humanize_changes": deai_result.get("humanize_changes", []),
+                "ai_patterns_removed": deai_result.get("ai_patterns_removed", []),
             },
             "usage": usage,
         }
@@ -924,11 +1442,20 @@ class GenerationEngine:
             f"本章目的：{scene_plan.get('scene_goal', '')}\n"
             f"核心冲突：{scene_plan.get('conflict', '')}\n"
             f"节奏：{scene_plan.get('pacing', 'medium')}\n"
+            f"读者承诺：{scene_plan.get('reader_promise', '')}\n"
+            f"情绪曲线：{scene_plan.get('emotional_target', '')}\n"
+            f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
+            "【连续性硬门禁】上一章结尾、交接契约和本章第一场必须处于同一"
+            "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"
             f"节拍安排：\n{beat_lines}\n\n"
             f"额外要求：{outline or '无'}\n\n"
             f"请写出不少于 {target_word_count} 个汉字的完整章节正文。"
             f"必须与前情提要和已有设定保持一致，不得与【必须遵守的约束】冲突。"
+            "正文质量要求：开头两段直接承接上一章的动作、地点或未决问题，不要重新讲背景；"
+            "在篇幅允许时每约 800-1200 字推进一次局部变化、信息揭示或情绪转折，但不要机械插入；"
+            "章末必须把钩子落实为动作、发现或新的选择，不得用总结/说教代替；"
+            "情绪要有起伏，避免每段都用同一种‘提出问题-解释-总结’结构。"
         )
 
     @staticmethod
@@ -942,5 +1469,6 @@ class GenerationEngine:
             f"以下是本章已写好的结尾部分：\n\n{tail}\n\n"
             f"请无缝接着往下写，至少再写 {missing} 个汉字，"
             f"完成剩余节拍（{remaining}）并以钩子收束："
-            f"{scene_plan.get('hook', '')}。不要重复上文，不要写任何说明。"
+            f"{scene_plan.get('hook', '')}。保持上一段的时间线、地点、人物状态和情绪，"
+            "不要重新开场、不要重复上文，不要写任何说明。"
         )

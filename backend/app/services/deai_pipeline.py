@@ -11,6 +11,7 @@ Design guarantees (per system design §3.3 / Bug②):
 from __future__ import annotations
 
 import logging
+import hashlib
 import re
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,77 @@ class DeaiPipeline:
         self.content_id = content_id or ""
         self.chapter_title = chapter_title or ""
 
-    def run(self, text: str) -> dict:
+    def final_humanize(
+        self,
+        text: str,
+        *,
+        source_facts: str = "",
+        forbidden_changes: str = "",
+        quality_retry_feedback: str = "",
+        style_profile: str = "",
+        run_id: str | None = None,
+        user_id: str | None = None,
+    ) -> dict:
+        """Run the V6 final semantic humanization gate.
+
+        The rule-only pass in :meth:`run` is useful for cheap pre-cleaning, but
+        it cannot repair cadence, voice, or over-explanation.  The chapter loop
+        therefore calls this provider-backed pass after content repairs.  A
+        malformed, destructive, or empty response raises instead of silently
+        publishing the pre-humanized text as if the quality gate had passed.
+        """
+        from app.gateway import OutputValidationError, complete
+
+        if not text or not text.strip():
+            return {
+                "final_text": text or "",
+                "changes": [],
+                "ai_patterns_removed": [],
+            }
+
+        source_chars = len(re.sub(r"\s+", "", text))
+        source_paragraphs = [p for p in re.split(r"\n{2,}|\n", text) if p.strip()]
+        mutation_seed = hashlib.sha256(text.encode("utf-8")).hexdigest()[:20]
+        out = complete(
+            run_id=run_id,
+            node_key="final_humanize",
+            project_id=self.project_id,
+            user_id=user_id,
+            task_type="final_humanize",
+            prompt_name="bootstrap.final_humanize",
+            variables={
+                "_chapter_body": text,
+                "source_facts": source_facts or "（无额外不可变事实）",
+                "forbidden_changes": forbidden_changes or "情节、人物、时间线、设定与对白信息",
+                "quality_retry_feedback": quality_retry_feedback or "（首次最终定稿）",
+                "style_profile": style_profile or "（暂无作者文风卡）",
+            },
+            client_mutation_id=f"final-humanize:{self.content_id}:{mutation_seed}:v1",
+        )
+        final_text = str(out.get("humanized_text") or "").strip() if isinstance(out, dict) else ""
+        if len(final_text) < 50:
+            raise OutputValidationError("final_humanize returned empty or too-short text")
+
+        final_chars = len(re.sub(r"\s+", "", final_text))
+        if final_chars < int(source_chars * 0.8) or final_chars > int(source_chars * 1.2):
+            raise OutputValidationError(
+                f"final_humanize changed chapter length outside safe range: "
+                f"{source_chars}->{final_chars}"
+            )
+        final_paragraphs = [p for p in re.split(r"\n{2,}|\n", final_text) if p.strip()]
+        if len(final_paragraphs) < max(1, int(len(source_paragraphs) * 0.6)):
+            raise OutputValidationError(
+                "final_humanize dropped too many paragraphs: "
+                f"{len(source_paragraphs)}->{len(final_paragraphs)}"
+            )
+
+        return {
+            "final_text": final_text,
+            "changes": out.get("changes", []) if isinstance(out, dict) else [],
+            "ai_patterns_removed": out.get("ai_patterns_removed", []) if isinstance(out, dict) else [],
+        }
+
+    def run(self, text: str, *, style_profile: str = "") -> dict:
         """Run the pipeline.
 
         Returns keys: original_score, final_score, layers, final_text.
@@ -124,22 +195,30 @@ class DeaiPipeline:
 
         # Layer 2: real AI rewrite with web-novel style prompt
         from app.gateway import OutputValidationError, complete
-        try:
-            out = complete(
-                        run_id=None,
-                        node_key=None,
-                        project_id=self.project_id,
-                        task_type="deai_rewrite",
-                        prompt_name="deai.rewrite",
-                        variables={"text": text[:6000], "title": self.chapter_title},
-                        client_mutation_id=f"deai:{self.content_id}:{abs(hash(text)) % 10 ** 8}",
+        out = complete(
+            run_id=None,
+            node_key=None,
+            project_id=self.project_id,
+            task_type="deai_rewrite",
+            prompt_name="deai.rewrite",
+            # Do not silently throw away the second half of a chapter.  The
+            # prompt and gateway own context sizing; this layer must preserve
+            # the complete source for a fact-safe rewrite.
+            variables={"text": text, "title": self.chapter_title,
+                       "style_profile": style_profile or "（暂无作者文风卡）"},
+            client_mutation_id=f"deai:{self.content_id}:{abs(hash(text)) % 10 ** 8}",
+        )
+        rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
+        if len(rewritten.strip()) < 20:
+            raise OutputValidationError("deai.rewrite returned empty or too-short text")
+        source_chars = len(re.sub(r"\s+", "", text))
+        rewritten_chars = len(re.sub(r"\s+", "", rewritten))
+        if rewritten_chars < int(source_chars * 0.8) or rewritten_chars > int(source_chars * 1.2):
+            raise OutputValidationError(
+                f"deai.rewrite changed length outside safe range: {source_chars}->{rewritten_chars}"
             )
-            rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
-            if len(rewritten.strip()) >= 20:
-                polished = rewritten
-                layers.append({"name": "AI 网文风格重写", "note": "deai.rewrite", "applied": True})
-        except Exception:
-            layers.append({"name": "AI 网文风格重写", "note": "provider unavailable, fallback to heuristic", "applied": False})
+        polished = rewritten
+        layers.append({"name": "AI 网文风格重写", "note": "deai.rewrite", "applied": True})
 
         # Layer 3: post-processing — enforce short paragraphs
         polished = _enforce_short_paragraphs(polished)
