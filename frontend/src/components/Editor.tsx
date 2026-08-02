@@ -307,6 +307,14 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                     </button>
                   </span>
                 </div>
+                {editorAiReview.review.quality_gate && !editorAiReview.review.quality_gate.passed ? (
+                  <div style={{ marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: "var(--warning-dim, #fff7e6)", color: "var(--warning, #a15c00)", fontSize: 12 }}>
+                    当前文本仍需定向修复：{(editorAiReview.review.quality_gate.quality_repair_contract?.required_repairs || [])
+                      .map((item: any) => item.label)
+                      .filter(Boolean)
+                      .join("、") || "存在未解决的质量问题"}。修复后请重新审计，不能只靠平均分通过。
+                  </div>
+                ) : null}
                 {editorAiReview.review.issues?.length ? (
                   <>
                     <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>

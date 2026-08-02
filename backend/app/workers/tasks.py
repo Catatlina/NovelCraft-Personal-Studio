@@ -2719,6 +2719,28 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             reader_experience_issues, summarize_reader_experience)
         rx_summary = summarize_reader_experience(review.get("reader_experience"))
         issues.extend(reader_experience_issues(rx_summary))
+        from app.services.quality_risks import build_quality_repair_contract, repair_feedback
+        quality_contract = build_quality_repair_contract(
+            {
+                "overall_score": score,
+                "dimensions": review.get("dimensions") or {},
+                "issues": issues,
+            },
+            dimension_minimums={
+                "continuity": max(85.0, threshold),
+                "plot_logic": max(85.0, threshold),
+                "pacing": max(85.0, threshold),
+                "writing_quality": max(85.0, threshold),
+            },
+            continuity=continuity,
+        )
+        # Keep blocking evidence visible to editors and the audit trail.  The
+        # label is not a fake pass/fail replacement; it is the exact reason a
+        # targeted rewrite is required before the chapter can be reviewed.
+        for risk in quality_contract["blocking_risks"]:
+            evidence = f"质量整改：{risk['label']}：{risk.get('description') or risk.get('text')}"
+            if evidence not in issues:
+                issues.append(evidence)
         review_key = f"{generation_key}:review-record:{attempt}:v1"
         db = connect()
         db.execute(
@@ -2728,12 +2750,14 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                DO UPDATE SET score=EXCLUDED.score,dimensions=EXCLUDED.dimensions,issues=EXCLUDED.issues""",
             (new_id(), chapter_id, score, encode(review["dimensions"]), encode(issues), review_key),
         )
-        passed = (score >= threshold) and length_ok
+        passed = (score >= threshold) and length_ok and quality_contract["passed"]
         if passed:
             db.execute("""UPDATE contents SET status='reviewed',meta=meta || %s,updated_at=now() WHERE id=%s""",
                        (encode({"review_score": score, "review_issues": issues,
                                 "review_attempts": attempt + 1,
                                 "reader_experience": rx_summary,
+                                "quality_repair_contract": quality_contract,
+                                "quality_risks": quality_contract["risks"],
                                 "quality_status": "ai_review_passed",
                                 "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}"}), chapter_id))
             db.commit(); db.close()
@@ -2744,11 +2768,15 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             reason = f"score={score:.0f}/{threshold:.0f}"
             if not length_ok:
                 reason += f", chars={last_chars}/{MIN_CHAPTER_CHARS}"
+            if quality_contract["blocking_categories"]:
+                reason += ", blocking=" + ",".join(quality_contract["blocking_categories"])
             db.execute("""UPDATE contents SET status='needs_rewrite',meta=meta || %s,updated_at=now()
                           WHERE id=%s""",
                        (encode({"review_score": score, "review_issues": issues,
                                 "review_attempts": attempt + 1,
                                 "reader_experience": rx_summary,
+                                "quality_repair_contract": quality_contract,
+                                "quality_risks": quality_contract["risks"],
                                 "quality_status": "needs_rewrite",
                                 "quality_reason": reason}), chapter_id))
             db.commit(); db.close()
@@ -2760,7 +2788,9 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             run_id=None, node_key=None, project_id=project_id,
             task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
             variables={"rewrite": True, "chapter_seq": chapter_seq, "current_title": current_title,
-                       "current_body": current_text, "review_feedback": issues, "continuity": continuity},
+                       "current_body": current_text,
+                       "review_feedback": repair_feedback(quality_contract, issues),
+                       "continuity": continuity},
             client_mutation_id=f"{generation_key}:rewrite:{attempt + 1}:v1",
         )["chapter"]
         current_title = rewritten["title"]

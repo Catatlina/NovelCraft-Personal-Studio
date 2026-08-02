@@ -1418,7 +1418,10 @@ def ai_edit(
     # V3 deai → use the new DeaiPipeline (web novel style rewrite)
     IMPROVE_OPS = {"polish", "rewrite", "rewrite_chapter"}
     EDITOR_MIN_CHARS = int(os.getenv("MIN_CHAPTER_CHARS", "2000"))
-    EDITOR_REVIEW_PASS = 80
+    # An editor candidate is only quality-safe after the same product bar as
+    # the canonical V7 writer.  The preview remains user-confirmed, but a
+    # score in the low 80s or a material risk must trigger targeted rework.
+    EDITOR_REVIEW_PASS = 85
     MAX_EDITOR_RETRIES = 3
 
     if str(op) == "deai":
@@ -1469,16 +1472,30 @@ def ai_edit(
                 )
                 score = float(review.get("score") or 0)
                 chars = count_content_chars(candidate_text)
-                length_ok = chars >= EDITOR_MIN_CHARS
+                from app.services.quality_risks import (
+                    evaluate_editor_review_gate,
+                    repair_feedback,
+                )
+                quality_gate = evaluate_editor_review_gate(
+                    review,
+                    chars=chars,
+                    minimum_chars=EDITOR_MIN_CHARS,
+                    minimum_score=EDITOR_REVIEW_PASS,
+                )
+                review["quality_gate"] = quality_gate
+                review["quality_repair_contract"] = quality_gate["quality_repair_contract"]
                 if score > best_score:
                     best_score = score
                     best = {"text": candidate_text, "review_7dim": review}
-                if score >= EDITOR_REVIEW_PASS and length_ok:
+                if quality_gate["passed"]:
                     best = {"text": candidate_text, "review_7dim": review}
                     break
                 # 评分/字数不达标 → 用审查建议 + 去 AI 味要求重跑（最多 3 次）
-                issues = list(review.get("issues", []))
-                if not length_ok:
+                issues = repair_feedback(
+                    quality_gate["quality_repair_contract"],
+                    list(review.get("issues", [])),
+                )
+                if chars < EDITOR_MIN_CHARS:
                     issues.append(f"字数不足：当前 {chars} 字，必须扩写到 {EDITOR_MIN_CHARS} 字以上，不得压缩或总结情节")
                 issues.append(
                     "必须去除 AI 味：严格执行【去 AI 味改稿铁律】全部 5 条——段落炸碎（每段 1-3 句）、"
@@ -1507,6 +1524,17 @@ def ai_edit(
                 variables=review_context,
                 client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
             )
+        from app.services.quality_risks import evaluate_editor_review_gate
+        from app.services.text_metrics import count_content_chars
+        final_chars = count_content_chars(output.get("text") or payload.selection)
+        final_gate = evaluate_editor_review_gate(
+            output["review_7dim"],
+            chars=final_chars,
+            minimum_chars=EDITOR_MIN_CHARS,
+            minimum_score=EDITOR_REVIEW_PASS,
+        )
+        output["review_7dim"]["quality_gate"] = final_gate
+        output["review_7dim"]["quality_repair_contract"] = final_gate["quality_repair_contract"]
         output["next_chapter_plan"] = complete(
             run_id=None, node_key=None, project_id=content["project_id"],
             task_type="plan_next_chapter", prompt_name="narrative.plan_next_chapter",

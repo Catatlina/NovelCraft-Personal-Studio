@@ -87,6 +87,7 @@ def test_reader_experience_is_visible_but_not_a_substitute_for_hard_gate():
                 "consistency": 90,
                 "character_voice": 90,
                 "plot_logic": 90,
+                "pacing": 90,
                 "writing_quality": 90,
                 "constraint_compliance": 90,
             },

@@ -14,6 +14,7 @@ from ...services.reader_experience import (
     reader_experience_issues,
     summarize_reader_experience,
 )
+from ...services.quality_risks import build_quality_repair_contract
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -26,6 +27,7 @@ CRITICAL_DIMENSION_MINIMUMS: dict[str, float] = {
     "consistency": 85.0,
     "character_voice": 85.0,
     "plot_logic": 85.0,
+    "pacing": 85.0,
     "writing_quality": 85.0,
     "constraint_compliance": 85.0,
 }
@@ -45,6 +47,18 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
             failures.append({"dimension": name, "actual": actual, "minimum": minimum})
     if blocking:
         failures.append({"dimension": "blocking_violations", "actual": blocking, "minimum": 0})
+    repair_contract = build_quality_repair_contract(
+        review_data,
+        dimension_minimums=CRITICAL_DIMENSION_MINIMUMS,
+        continuity=review_data.get("continuity"),
+    )
+    for risk in repair_contract["blocking_risks"]:
+        failures.append({
+            "dimension": risk["category"],
+            "actual": risk.get("severity"),
+            "minimum": "resolved",
+            "reason": risk.get("description") or risk.get("text"),
+        })
     reader_experience = summarize_reader_experience(review_data.get("reader_experience"))
     return {
         "passed": not failures,
@@ -53,6 +67,7 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         "failures": failures,
         "threshold": QUALITY_PASS_SCORE,
         "critical_dimension_minimums": dict(CRITICAL_DIMENSION_MINIMUMS),
+        "quality_repair_contract": repair_contract,
         # Reader experience is advisory; it must not replace the continuity
         # and writing hard gates above.  It is nevertheless returned with the
         # decision so weak expectation/payoff is visible to rework and UI.

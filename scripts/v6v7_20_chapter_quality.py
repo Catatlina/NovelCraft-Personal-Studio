@@ -40,6 +40,12 @@ from app.services.t5_long_run import (  # noqa: E402
 
 CONFIRMATION = "I_UNDERSTAND_REAL_API_COST_AND_DUAL_WRITE"
 KEY_DIMENSIONS = ("continuity", "voice", "ai_feel", "fact_safety", "overall")
+BLIND_MINIMUMS = {
+    "continuity": 85.0,
+    "voice": 80.0,
+    "fact_safety": 85.0,
+    "overall": 85.0,
+}
 
 
 def _text(value: Any) -> str:
@@ -138,10 +144,10 @@ def _blind_packet(old: list[dict[str, Any]], new: list[dict[str, Any]], seed: in
     return packet, private_map
 
 
-def _read_scores(path: Path) -> dict[str, list[dict[str, dict[str, float]]]]:
+def _read_scores(path: Path) -> dict[str, list[dict[str, Any]]]:
     if not path.exists():
         return {}
-    result: dict[str, list[dict[str, dict[str, float]]]] = {}
+    result: dict[str, list[dict[str, Any]]] = {}
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             case_id = str(row.get("case_id") or "").strip()
@@ -160,7 +166,7 @@ def _read_scores(path: Path) -> dict[str, list[dict[str, dict[str, float]]]]:
                     break
                 sample_values[sample] = values
             if len(sample_values) == 2:
-                result.setdefault(case_id, []).append(sample_values)
+                result.setdefault(case_id, []).append({"reviewer_id": reviewer, "scores": sample_values})
     return result
 
 
@@ -170,14 +176,23 @@ def _manual_summary(
     private_map: dict[str, str],
 ) -> dict[str, Any]:
     scores = _read_scores(score_file) if score_file else {}
-    complete_cases = [case_id for case_id, rows in scores.items() if len(rows) >= 2]
+    complete_cases = [
+        case_id for case_id, rows in scores.items()
+        if len({str(row.get("reviewer_id") or "") for row in rows}) >= 2
+    ]
+    reviewer_ids = sorted({
+        str(row.get("reviewer_id") or "")
+        for case_id in complete_cases
+        for row in scores[case_id]
+        if row.get("reviewer_id")
+    })
     averages: dict[str, dict[str, float]] = {}
     if complete_cases:
         for sample in ("sample_a", "sample_b"):
             averages[sample] = {}
             for dimension in KEY_DIMENSIONS:
                 values = [
-                    row[sample][dimension]
+                    row["scores"][sample][dimension]
                     for case_id in complete_cases
                     for row in scores[case_id]
                 ]
@@ -190,8 +205,8 @@ def _manual_summary(
             for case_id in complete_cases:
                 sample_a_is_new = private_map.get(case_id) == "sample_a=new"
                 for row in scores[case_id]:
-                    new_values.append(row["sample_a" if sample_a_is_new else "sample_b"][dimension])
-                    old_values.append(row["sample_b" if sample_a_is_new else "sample_a"][dimension])
+                    new_values.append(row["scores"]["sample_a" if sample_a_is_new else "sample_b"][dimension])
+                    old_values.append(row["scores"]["sample_b" if sample_a_is_new else "sample_a"][dimension])
             comparison[dimension] = {
                 "old": round(sum(old_values) / len(old_values), 3),
                 "new": round(sum(new_values) / len(new_values), 3),
@@ -200,6 +215,8 @@ def _manual_summary(
         "status": "complete" if len(complete_cases) == len(packet) and packet else "pending",
         "cases": len(packet),
         "cases_with_two_reviewers": len(complete_cases),
+        "reviewer_ids": reviewer_ids,
+        "distinct_reviewer_count": len(reviewer_ids),
         "averages": averages,
         "minimum_reviewers_per_case": 2,
         "comparison_old_vs_new": comparison,
@@ -218,6 +235,15 @@ def _write_outputs(output_dir: Path, evidence: dict[str, Any], packet: list[dict
     # genuinely blind during review.
     (output_dir / "blind-review-private-map.json").write_text(
         json.dumps(private_map, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output_dir / "blind-review-instructions.md").write_text(
+        "# 双轨人工盲评填写说明\n\n"
+        "1. 将 `blind-review-packet.json` 和评分表分别交给两位独立评审；评审者不得接触 `blind-review-private-map.json`。\n"
+        "2. 两位评审必须使用不同的 `reviewer_id`，每个 case 都要各填一行，不能由同一人补齐第二行。\n"
+        "3. 每个 sample 按 0-100 分填写：continuity、voice、fact_safety、overall 越高越好；ai_feel 按 AI 腔风险强度评分，越低越好。\n"
+        "4. notes 写具体证据：哪一段断裂、哪一个转折缺铺垫、哪一句有 AI 腔。不要只写“可加强”。\n"
+        "5. 填完后再运行带 `--score-file` 的脚本；脚本只有在 20 个 case 都有两位不同评审、且达到目标线时才会给出 accepted。\n",
+        encoding="utf-8",
     )
     with (output_dir / "blind-scores.template.csv").open("w", newline="", encoding="utf-8") as handle:
         fields = ["case_id", "reviewer_id"] + [
@@ -239,7 +265,7 @@ def _write_outputs(output_dir: Path, evidence: dict[str, Any], packet: list[dict
         f"人工盲评：`{json.dumps(evidence['manual_review'], ensure_ascii=False)}`",
         f"验收状态：**{evidence['acceptance_status']}**",
         "",
-        "> 只有真实 Provider/数据库结果和至少两名评审的完整评分才会把状态推进为 accepted。",
+        "> 只有真实 Provider/数据库结果、20 个 case 均有两位不同评审、并达到目标分数，才会把状态推进为 accepted。",
     ]
     (output_dir / "dual-track-report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -317,6 +343,11 @@ def main() -> int:
     comparison = manual.get("comparison_old_vs_new") or {}
     manual_ok = (
         manual["status"] == "complete"
+        and manual.get("distinct_reviewer_count", 0) >= 2
+        and comparison.get("overall", {}).get("new", 0) >= BLIND_MINIMUMS["overall"]
+        and comparison.get("continuity", {}).get("new", 0) >= BLIND_MINIMUMS["continuity"]
+        and comparison.get("voice", {}).get("new", 0) >= BLIND_MINIMUMS["voice"]
+        and comparison.get("fact_safety", {}).get("new", 0) >= BLIND_MINIMUMS["fact_safety"]
         and comparison.get("overall", {}).get("new", 0)
         >= comparison.get("overall", {}).get("old", 0)
         and comparison.get("ai_feel", {}).get("new", 99)

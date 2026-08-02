@@ -81,7 +81,7 @@ def test_low_score_rewrite_until_passing_then_accepted(monkeypatch):
     monkeypatch.setattr(tasks, "connect", lambda: db)
     monkeypatch.setattr(tasks, "complete", lambda **kwargs: calls.append(kwargs) or next(outputs))
     result = tasks._review_and_finalize_chapter(
-        "chapter-1", "novel-1", "project-1", 2, "chapter-key", "第二章", _long_body(), {"status": "flagged"}
+        "chapter-1", "novel-1", "project-1", 2, "chapter-key", "第二章", _long_body(), {"status": "clean"}
     )
     assert result["accepted"] is True
     assert result["review_status"] == "reviewed"

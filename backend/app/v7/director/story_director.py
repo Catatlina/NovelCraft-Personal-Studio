@@ -672,12 +672,21 @@ class StoryDirector:
             failures = "；".join(
                 f"{item['dimension']} {item['actual']:.0f}/{item['minimum']:.0f}"
                 for item in gate["failures"][:8]
+                if isinstance(item.get("actual"), (int, float))
             )
             issue_text = "；".join(
-                f"{i.get('dimension')}: {i.get('description')}；建议：{i.get('suggestion') or '直接修复该问题'}"
+                (
+                    f"{i.get('dimension') or i.get('type') or '问题'}: {i.get('description')}; "
+                    f"建议：{i.get('suggestion') or '直接修复该问题'}"
+                    if isinstance(i, dict)
+                    else str(i)
+                )
                 for i in issues[:8]
             )
-            feedback = f"质量门禁未通过：{failures}。{issue_text}".strip("；")
+            repair_feedback = "；".join(
+                str(item) for item in (gate.get("quality_repair_contract") or {}).get("required_repair_feedback") or []
+            )
+            feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}".strip("；。")
             await self.brain.record_decision(
                 "chapter_rework",
                 "rework",

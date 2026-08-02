@@ -207,9 +207,13 @@ class ReviewEngine(BaseEngine):
             "conflict（冲突感）、payoff（爽点/情绪释放）、emotion_shift（情绪变化）、"
             "worth_continuing（追读意愿）。低于 60 分必须在 issues 中指出具体段落或"
             "具体缺口；读者体验分不计入 7 维 overall_score。\n"
+            "问题必须具体落到可改的证据：如果存在节奏/铺垫问题，指出转折前缺少的动作、线索或高潮后的余波；"
+            "如果存在逻辑问题，指出触发→依据→选择→阻碍→代价→结果哪一环断了；"
+            "如果存在 AI 腔，指出具体套话、同构句、解释腔或过度工整段落，并给出替代表达方向。"
+            "中高严重度的问题不得只写‘可加强’，必须写清位置和修复动作。"
             f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
             f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
-            f"writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
+            f"pacing/writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
         )
 
         try:

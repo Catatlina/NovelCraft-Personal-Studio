@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import csv
 from pathlib import Path
 
 
@@ -45,3 +46,29 @@ def test_dual_track_automated_metrics_and_blind_packet_are_deterministic():
     assert packet_a == packet_b
     assert mapping_a == mapping_b
     assert all("old" not in json.dumps(case, ensure_ascii=False) for case in packet_a)
+
+
+def test_blind_summary_requires_two_distinct_reviewer_ids(tmp_path):
+    harness = _load_harness()
+    packet = [{"case_id": "case-1", "chapter_number": 1}]
+    private_map = {"case-1": "sample_a=new"}
+    score_path = tmp_path / "scores.csv"
+    fields = ["case_id", "reviewer_id"] + [
+        f"{sample}_{dimension}"
+        for sample in ("sample_a", "sample_b")
+        for dimension in harness.KEY_DIMENSIONS
+    ]
+    with score_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for reviewer in ("reviewer-a", "reviewer-a"):
+            row = {"case_id": "case-1", "reviewer_id": reviewer}
+            for sample in ("sample_a", "sample_b"):
+                for dimension in harness.KEY_DIMENSIONS:
+                    row[f"{sample}_{dimension}"] = 90
+            writer.writerow(row)
+
+    summary = harness._manual_summary(packet, score_path, private_map)
+    assert summary["status"] == "pending"
+    assert summary["cases_with_two_reviewers"] == 0
+    assert summary["distinct_reviewer_count"] == 0
