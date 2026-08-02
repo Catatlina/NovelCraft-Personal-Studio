@@ -964,6 +964,87 @@ def _attach_user_context(novel_id: str) -> None:
             _request_user_id.set(owner["owner_id"])
     except Exception:
         pass
+
+
+def _canonical_bootstrap_prompt(context: dict[str, Any]) -> str:
+    """Turn V6 planning artifacts into the input for the canonical V7 writer."""
+    blocks = [
+        f"用户创意：{str(context.get('idea') or '')[:4000]}",
+        f"创意扩展：{str(context.get('idea_expanded') or '')[:5000]}",
+        f"创作圣经：{str(context.get('creative_bible') or '')[:9000]}",
+        f"世界观：{str(context.get('_worldview_text') or context.get('worldview') or '')[:5000]}",
+        f"人物系统：{str(context.get('_characters_text') or '')[:6000]}",
+        f"冲突图谱：{json.dumps(context.get('conflict_map') or {}, ensure_ascii=False)[:5000]}",
+        f"场景节拍：{json.dumps(context.get('scene_beat_sheet') or {}, ensure_ascii=False)[:5000]}",
+        "这是唯一正文生成链路：请直接输出第一章小说正文，不要输出提纲、解释、审稿意见或 Markdown。必须让人物、世界规则、冲突代价和章末动作钩子落到具体场景中。",
+    ]
+    return "\n\n".join(block for block in blocks if block.split("：", 1)[-1].strip())
+
+
+def _persist_canonical_bootstrap_result(
+    run_id: str,
+    result: dict[str, Any],
+) -> None:
+    """Close the legacy bootstrap progress UI around the canonical V7 result."""
+    delegated_nodes = [
+        "write_chapter_draft",
+        "write_self_review",
+        "write_polish",
+        "write_length_check",
+        "write_fact_reconcile",
+        "final_humanize",
+        "final_consistency_check",
+        "final_continuity_audit",
+    ]
+    v7_status = str(result.get("status") or "needs_review")
+    output = {
+        "canonical_engine": "v7",
+        "delegated": True,
+        "v7_run_id": result.get("run_id"),
+        "chapter_number": result.get("chapter_number"),
+        "status": v7_status,
+        "review_score": result.get("review_score"),
+        "dimension_scores": result.get("dimension_scores") or {},
+        "transition_contract": result.get("transition_contract") or {},
+        "v6_content_id": result.get("v6_content_id"),
+    }
+    db = connect()
+    try:
+        run = db.execute("SELECT context FROM workflow_runs WHERE id=%s", (run_id,)).fetchone()
+        context = (run or {}).get("context") if isinstance((run or {}).get("context"), dict) else {}
+        context.update({
+            "canonical_engine": "v7",
+            "canonical_generation_status": v7_status,
+            "canonical_generation": output,
+            "chapter_id": result.get("v6_content_id") or context.get("chapter_id", ""),
+            "chapter_text": result.get("content") or context.get("chapter_text", ""),
+            "chapter_title": result.get("title") or context.get("chapter_title", ""),
+        })
+        for node_key in delegated_nodes:
+            db.execute(
+                """
+                UPDATE run_nodes
+                SET status='succeeded', output=%s, finished_at=now(), error=NULL
+                WHERE run_id=%s AND node_key=%s
+                """,
+                (encode({**output, "delegated_node": node_key}), run_id, node_key),
+            )
+        db.execute(
+            """
+            UPDATE workflow_runs
+            SET context=%s, current_node_key=NULL, status='running', updated_at=now()
+            WHERE id=%s
+            """,
+            (encode(context), run_id),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Core bootstrap execution
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1170,6 +1251,60 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                 payload={"stage": stage, "agent": agent})
 
         time.sleep(0.3)
+
+        # The old bootstrap workflow remains as the progress/blueprint
+        # contract, but its prose-writing and finalization nodes are now one
+        # delegated V7 Director run.  This prevents a first chapter from being
+        # written once by V6 and then rewritten by V7 as a second chain.
+        if stage == "writing" and node_key == "write_chapter_draft":
+            run_context = run["context"] if isinstance(run["context"], dict) else {}
+            project_id = run["project_id"]
+            novel_id = run["novel_id"]
+            try:
+                result = _run_canonical_v7_task(
+                    self,
+                    novel_id,
+                    project_id,
+                    api_key=api_key,
+                    api_url=api_url,
+                    model=model,
+                    chapter_number=chapter_seq,
+                    prompt=_canonical_bootstrap_prompt(run_context),
+                    outline=json.dumps(
+                        run_context.get("_chapter_outline") or {}, ensure_ascii=False
+                    ),
+                    api_key_ref=api_key_ref,
+                )
+                _persist_canonical_bootstrap_result(run_id, result)
+                _record_bootstrap_event(
+                    run_id,
+                    "canonical_v7.completed",
+                    node_key=node_key,
+                    payload={
+                        "status": result.get("status"),
+                        "v7_run_id": result.get("run_id"),
+                        "v6_content_id": result.get("v6_content_id"),
+                    },
+                )
+                break
+            except OutputValidationError as exc:
+                _mark_node(run_id, node_key, "failed", str(exc)[:500])
+                _record_bootstrap_event(
+                    run_id,
+                    "canonical_v7.invalid_output",
+                    node_key=node_key,
+                    payload={"error": str(exc)[:300]},
+                )
+                return {"status": "invalid_output", "node_key": node_key}
+            except Exception as exc:
+                _mark_node(run_id, node_key, "failed", str(exc)[:500])
+                _record_bootstrap_event(
+                    run_id,
+                    "canonical_v7.failed",
+                    node_key=node_key,
+                    payload={"error": str(exc)[:300]},
+                )
+                raise self.retry(exc=exc, countdown=5)
 
         # ── Build node execution context ───────────────────────────────
         run_context = run["context"] if isinstance(run["context"], dict) else {}
@@ -1419,7 +1554,11 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
     completed_context = completed_run["context"] if completed_run and isinstance(completed_run["context"], dict) else {}
     chapter_id = completed_context.get("chapter_id")
     chapter = conn.execute("SELECT status FROM contents WHERE id=%s", (chapter_id,)).fetchone() if chapter_id else None
-    needs_review = bool(chapter and chapter["status"] == "needs_rewrite")
+    canonical_status = completed_context.get("canonical_generation_status")
+    needs_review = bool(
+        (canonical_status and canonical_status != "completed")
+        or (chapter and chapter["status"] == "needs_rewrite")
+    )
     final_status = "needs_review" if needs_review else "succeeded"
     novel_status = "needs_review" if needs_review else "draft"
     topic_status = "needs_review" if needs_review else "generated"
@@ -2174,12 +2313,80 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 # Chapter generation (M2 — unchanged from original)
 # ══════════════════════════════════════════════════════════════════════════
 
+def _run_canonical_v7_task(
+    task: Any,
+    novel_id: str,
+    project_id: str,
+    *,
+    api_key: str = "",
+    api_url: str = "",
+    model: str = "",
+    batch_id: str = "",
+    batch_ordinal: int = 0,
+    chapter_number: int | None = None,
+    api_key_ref: str = "",
+    prompt: str | None = None,
+    outline: str | None = None,
+) -> dict[str, Any]:
+    """Run the single canonical V7 prose path from a Celery worker."""
+    from app.v7.runtime import generate_v7_chapter_sync
+    from .lock import acquire_lock, release_lock
+
+    api_key = resolve_byok_key(api_key_ref, api_key)
+    acquired = False
+    for _ in range(6):
+        if acquire_ai_slot(timeout=5):
+            acquired = True
+            break
+        time.sleep(1)
+    if not acquired:
+        raise task.retry(exc=RuntimeError("global AI concurrency limit reached"), countdown=3)
+
+    lock_key = f"lock:novel:{novel_id}:canonical_v7_chapter"
+    if not acquire_lock(lock_key):
+        release_ai_slot()
+        raise task.retry(exc=RuntimeError("canonical V7 chapter is already running"), countdown=3)
+
+    try:
+        result = generate_v7_chapter_sync(
+            novel_id,
+            project_id,
+            chapter_number=chapter_number,
+            user_id=None,
+            api_key=api_key,
+            api_url=api_url,
+            model=model,
+            prompt=prompt,
+            outline=outline,
+            batch_id=batch_id,
+            batch_ordinal=batch_ordinal,
+        )
+        if batch_id:
+            if result.get("status") == "completed" and result.get("v6_content_id"):
+                _reconcile_batch_progress(batch_id)
+            else:
+                _mark_batch_failed(
+                    batch_id,
+                    RuntimeError(
+                        "canonical V7 quality gate did not accept the chapter"
+                    ),
+                )
+        return result
+    except Exception as exc:
+        if batch_id:
+            _mark_batch_failed(batch_id, exc)
+        raise
+    finally:
+        release_lock(lock_key)
+        release_ai_slot()
+
 @celery_app.task(bind=True, max_retries=4)
 @_isolated_request_context
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
                            api_key: str = "", api_url: str = "", model: str = "",
                            batch_id: str = "", batch_ordinal: int = 0,
-                           api_key_ref: str = "") -> dict:
+                           api_key_ref: str = "", canonical: bool = False,
+                           chapter_number: int | None = None) -> dict:
     """M2: Generate the next chapter using context assembler (with distributed lock).
 
     P2 hardening:
@@ -2191,6 +2398,20 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
         generating), a *batch* slot is re-queued (P2-T4 / Q10) instead of
         crashing the whole batch.
     """
+    if canonical:
+        return _run_canonical_v7_task(
+            self,
+            novel_id,
+            project_id,
+            api_key=api_key,
+            api_url=api_url,
+            model=model,
+            batch_id=batch_id,
+            batch_ordinal=batch_ordinal,
+            chapter_number=chapter_number,
+            api_key_ref=api_key_ref,
+        )
+
     from app.gateway import _request_api_key, _request_api_base_url, _request_model
     from .lock import acquire_lock, release_lock
 
@@ -2506,7 +2727,7 @@ def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
 @_isolated_request_context
 def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
                             api_key: str = "", api_url: str = "", model: str = "",
-                            api_key_ref: str = "") -> dict:
+                            api_key_ref: str = "", canonical: bool = False) -> dict:
     """Regenerate one rejected chapter in place.
 
     This is the manual-review path: rejecting a chapter must not create the next
@@ -2539,6 +2760,93 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
     project_id = chapter["project_id"]
     novel_id = chapter["parent_id"]
     db.close()
+
+    if canonical:
+        # Preserve the rejected draft before the V7 canonical engine replaces
+        # the same V6 contents row.  A passed V7 result is then left pending
+        # human approval, matching the manual-review contract.
+        snapshot_db = connect()
+        snapshot_db.execute(
+            """
+            INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason)
+            VALUES (%s,'content',%s,'before_manual_regenerate_v7',%s,%s)
+            """,
+            (new_id("ver"), chapter_id,
+             encode({"title": chapter["title"], "body": chapter["body"], "meta": chapter_meta}),
+             reason[:500]),
+        )
+        snapshot_db.commit()
+        snapshot_db.close()
+        try:
+            result = _run_canonical_v7_task(
+                self,
+                novel_id,
+                project_id,
+                api_key=api_key,
+                api_url=api_url,
+                model=model,
+                chapter_number=seq,
+                api_key_ref=api_key_ref,
+            )
+        except Exception as exc:
+            failed_db = connect()
+            failed_db.execute(
+                "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+                (encode({"manual_review": {"status": "regenerate_failed", "reason": str(exc)[:500]}}), chapter_id),
+            )
+            failed_db.commit()
+            failed_db.close()
+            raise
+
+        if result.get("status") == "completed" and result.get("v6_content_id"):
+            updated_db = connect()
+            updated_db.execute(
+                """
+                UPDATE contents
+                SET status='pending_review',
+                    meta=meta || %s,
+                    updated_at=now()
+                WHERE id=%s
+                """,
+                (encode({
+                    "quality_status": "draft_pending_review",
+                    "canonical_engine": "v7",
+                    "manual_review": {
+                        "status": "regenerated",
+                        "reason": reason,
+                        "regenerated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }), chapter_id),
+            )
+            updated_db.commit()
+            updated_db.close()
+            return {
+                "status": "pending_review",
+                "chapter_id": chapter_id,
+                "title": result.get("title") or chapter["title"],
+                "seq": seq,
+                "canonical_engine": "v7",
+            }
+
+        failed_db = connect()
+        failed_db.execute(
+            "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+            (encode({
+                "manual_review": {
+                    "status": "regenerate_failed",
+                    "reason": "V7 quality gate did not accept the regenerated chapter",
+                },
+                "canonical_engine": "v7",
+            }), chapter_id),
+        )
+        failed_db.commit()
+        failed_db.close()
+        return {
+            "status": "needs_rewrite",
+            "chapter_id": chapter_id,
+            "seq": seq,
+            "canonical_engine": "v7",
+        }
 
     output = complete(
         run_id=None,
@@ -2642,6 +2950,7 @@ def _run_batch_slot(batch: dict, ordinal: int, api_key: str = "", api_url: str =
     return gen_next_chapter_task.run(
         batch["novel_id"], batch["project_id"], api_key, api_url, model,
         batch["id"], ordinal,
+        canonical=True,
     )
 def _recount_batch_progress(db, batch_id: str) -> dict | None:
     """Rebuild counters from distinct persisted slots; never blindly trust increments."""
@@ -2764,6 +3073,7 @@ def batch_generate_chapters_task(
     requested = int(batch.get("requested_count", 0) or 0)
     project_id = batch["project_id"]
     novel_id = batch["novel_id"]
+    start_seq = int(batch.get("start_seq", 1) or 1)
     dispatched = 0
     try:
         for ordinal in range(start_ordinal, requested + 1):
@@ -2774,10 +3084,11 @@ def batch_generate_chapters_task(
                 db.commit(); db.close()
                 return {"status": "cancelled", "batch_id": batch_id}
             # Idempotency: skip ordinals already generated (resume / re-dispatch).
+            canonical_key = f"v7:{novel_id}:chapter:{start_seq + ordinal - 1}:v1"
             existing = db.execute(
                 """SELECT 1 FROM contents WHERE project_id=%s AND parent_id=%s
-                   AND generation_key=%s AND type='chapter' AND is_deleted=FALSE""",
-                (project_id, novel_id, _batch_generation_key(batch_id, ordinal)),
+                   AND generation_key IN (%s,%s) AND type='chapter' AND is_deleted=FALSE""",
+                (project_id, novel_id, _batch_generation_key(batch_id, ordinal), canonical_key),
             ).fetchone()
             if existing:
                 continue
@@ -2785,6 +3096,7 @@ def batch_generate_chapters_task(
             gen_next_chapter_task.delay(
                 novel_id, project_id, "", api_url, model,
                 batch_id, ordinal, api_key_ref=api_key_ref,
+                canonical=True,
             )
             dispatched += 1
     except BudgetExceeded as exc:
@@ -2879,7 +3191,9 @@ def auto_serial_check() -> dict:
             if int(digest, 16) % shards != tick % shards:
                 continue
         try:
-            gen_next_chapter_task.delay(novel["id"], novel["project_id"])
+            gen_next_chapter_task.delay(
+                novel["id"], novel["project_id"], canonical=True
+            )
             results.append({"novel_id": novel["id"], "status": "dispatched"})
             dispatched += 1
         except Exception as e:

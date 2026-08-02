@@ -137,12 +137,68 @@ def _provider_output(task_type: str) -> dict:
     return outputs[task_type]
 
 
+def _stub_canonical_v7(monkeypatch):
+    """Keep this workflow test offline while exercising the V7 handoff contract."""
+    from app.workers import tasks
+
+    def fake_canonical(_task, novel_id, project_id, **_kwargs):
+        chapter_id = new_id()
+        body = {
+            "type": "doc",
+            "content": [{"type": "paragraph", "text": "V7 canonical chapter " * 40}],
+        }
+        meta = {
+            "seq": 1,
+            "word_count": 760,
+            "canonical_engine": "v7",
+            "source": "v7",
+            "reader_experience": {
+                "status": "pass",
+                "scores": {"worth_continuing": 84.0},
+            },
+        }
+        db = connect()
+        db.execute(
+            """
+            INSERT INTO contents
+                (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq)
+            VALUES (%s,%s,%s,'chapter',%s,%s,%s,'reviewed',%s,1)
+            """,
+            (
+                chapter_id,
+                project_id,
+                novel_id,
+                "第一章 V7",
+                encode(body),
+                encode(meta),
+                f"v7:{novel_id}:chapter:1:v1",
+            ),
+        )
+        db.commit()
+        db.close()
+        return {
+            "status": "completed",
+            "canonical_engine": "v7",
+            "run_id": "v7-run-test",
+            "chapter_number": 1,
+            "title": "第一章 V7",
+            "content": "V7 canonical chapter " * 40,
+            "v6_content_id": chapter_id,
+            "review_score": 92,
+            "dimension_scores": {"consistency": 92, "writing_quality": 92},
+            "transition_contract": {"schema_version": "v1"},
+        }
+
+    monkeypatch.setattr(tasks, "_run_canonical_v7_task", fake_canonical)
+
+
 def test_journey_a_full_v2_flow_provider_boundary(seeded_novel, monkeypatch):
     from app.workers import tasks
 
     project_id, novel_id = seeded_novel
     monkeypatch.setattr(tasks, "complete", lambda **kwargs: _provider_output(kwargs["task_type"]))
     monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
+    _stub_canonical_v7(monkeypatch)
 
     # celery eager-ish: call the underlying function synchronously
     run_id = None
@@ -216,6 +272,7 @@ def test_bootstrap_auto_confirms_title_for_unattended_basic_chain(seeded_novel, 
     project_id, novel_id = seeded_novel
     monkeypatch.setattr(tasks, "complete", lambda **kwargs: _provider_output(kwargs["task_type"]))
     monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
+    _stub_canonical_v7(monkeypatch)
 
     def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
         tasks.execute_bootstrap.run(
@@ -257,7 +314,7 @@ def test_bootstrap_auto_confirms_title_for_unattended_basic_chain(seeded_novel, 
     assert any((event["details"].get("payload") or {}).get("action") == "auto_confirmed" for event in human_events)
 
 
-def test_bootstrap_rejects_non_narrative_polish_before_overwriting_chapter(seeded_novel, monkeypatch):
+def test_bootstrap_uses_canonical_v7_instead_of_legacy_polish(seeded_novel, monkeypatch):
     from app.services.novel_export import extract_body_text
     from app.workers import tasks
 
@@ -280,6 +337,7 @@ def test_bootstrap_rejects_non_narrative_polish_before_overwriting_chapter(seede
 
     monkeypatch.setattr(tasks, "complete", lambda **kwargs: provider_output(kwargs["task_type"]))
     monkeypatch.setattr(tasks, "_summarize_and_store", lambda *_args, **_kwargs: None)
+    _stub_canonical_v7(monkeypatch)
 
     def sync_dispatch(rid, start_key, api_key="", api_url="", model="", api_key_ref=""):
         tasks.execute_bootstrap.run(
@@ -294,23 +352,18 @@ def test_bootstrap_rejects_non_narrative_polish_before_overwriting_chapter(seede
         tasks.execute_bootstrap.delay = original_delay  # type: ignore[assignment]
 
     run, node_status = _run_state(run_id)
-    assert run["status"] == "failed"
-    assert node_status["write_polish"] == "failed"
+    assert run["status"] == "succeeded"
+    assert node_status["write_polish"] == "succeeded"
 
     db = connect()
     chapter = db.execute(
         "SELECT body FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
         (novel_id,),
     ).fetchone()
-    failed_node = db.execute(
-        "SELECT error FROM run_nodes WHERE run_id=%s AND node_key='write_polish'",
-        (run_id,),
-    ).fetchone()
     db.close()
 
-    assert "non-narrative" in failed_node["error"]
     body_text = extract_body_text(chapter["body"])
-    assert "停电来得突然" in body_text
+    assert "V7 canonical chapter" in body_text
     assert "本章将深入探讨" not in body_text
 
 

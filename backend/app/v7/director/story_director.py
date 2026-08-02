@@ -142,6 +142,8 @@ class StoryDirector:
         event_bus: EventBus,
         project_id: str | None = None,
         user_id: str | None = None,
+        provider_config: dict[str, str] | None = None,
+        generation_metadata: dict[str, Any] | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -150,20 +152,30 @@ class StoryDirector:
         self.event_bus = event_bus
         self.project_id = project_id
         self.user_id = user_id
+        self.provider_config = provider_config or {}
+        self.generation_metadata = generation_metadata or {}
         self.permission_system = DecisionPermissionSystem(db, novel_id)
 
         # Engines
         self.plot_engine = PlotEngine(
-            db, novel_id, brain, tracer, event_bus, project_id=project_id
+            db, novel_id, brain, tracer, event_bus,
+            project_id=project_id,
+            provider_config=self.provider_config,
         )
         self.memory_engine = MemoryEngine(
-            db, novel_id, brain, tracer, event_bus, project_id=project_id
+            db, novel_id, brain, tracer, event_bus,
+            project_id=project_id,
+            provider_config=self.provider_config,
         )
         self.review_engine = ReviewEngine(
-            db, novel_id, brain, tracer, event_bus, project_id=project_id
+            db, novel_id, brain, tracer, event_bus,
+            project_id=project_id,
+            provider_config=self.provider_config,
         )
         self.generation_engine = GenerationEngine(
-            db, novel_id, brain, tracer, event_bus, project_id=project_id
+            db, novel_id, brain, tracer, event_bus,
+            project_id=project_id,
+            provider_config=self.provider_config,
         )
 
         # Event-driven state projection
@@ -728,6 +740,7 @@ class StoryDirector:
                 chapter_summary=summary,
                 deai=generation.get("deai") or {},
                 transition_contract=transition_contract,
+                extra_meta=self.generation_metadata,
             )
 
         await self.brain.state.update_state(

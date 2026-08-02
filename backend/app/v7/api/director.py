@@ -13,6 +13,7 @@ from ..director.story_director import StoryDirector
 from ..brain.novel_brain import NovelBrain
 from ..trace.tracer import ExecutionTracer
 from ..events.event_bus import EventBus
+from ..runtime import seed_v6_context
 from .schemas import SuccessResponse
 from ..human.intervention_service import HumanInterventionService
 from .schemas import DecisionReviewResponse, ReviewRequest
@@ -76,6 +77,7 @@ async def generate_chapter(
     
     This is the main entry point for chapter generation.
     """
+    await seed_v6_context(director.brain, novel_id, request.chapter_number)
     result = await director.generate_chapter(
         request.chapter_number,
         prompt=request.prompt,

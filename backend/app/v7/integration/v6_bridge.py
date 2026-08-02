@@ -110,6 +110,7 @@ def persist_accepted_v7_chapter(
     chapter_summary: str,
     deai: dict[str, Any],
     transition_contract: dict[str, Any],
+    extra_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Upsert one accepted chapter into V6 and return its content id.
 
@@ -138,38 +139,77 @@ def persist_accepted_v7_chapter(
         "deai": deai,
         "transition_contract": transition_contract,
         "project_mapping": mapping,
+        "canonical_engine": "v7",
     }
+    if extra_meta:
+        meta.update(extra_meta)
 
     conn = connect()
     try:
-        stored = conn.execute(
+        # Reuse an old V6 row with the same chapter number when the canonical
+        # engine takes over an existing book.  This prevents a V6 draft and a
+        # V7 chapter from becoming two visible versions of the same chapter.
+        existing = conn.execute(
             """
-            INSERT INTO contents
-                (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq, created_at)
-            VALUES (%s,%s,%s,'chapter',%s,%s,%s,'reviewed',%s,%s,now())
-            ON CONFLICT (project_id, generation_key)
-                WHERE generation_key IS NOT NULL AND is_deleted=FALSE
-            DO UPDATE SET
-                parent_id=EXCLUDED.parent_id,
-                title=EXCLUDED.title,
-                body=EXCLUDED.body,
-                meta=EXCLUDED.meta,
-                status='reviewed',
-                seq=EXCLUDED.seq,
-                updated_at=now()
-            RETURNING id
+            SELECT id FROM contents
+            WHERE project_id=%s AND parent_id=%s AND type='chapter'
+              AND generation_key=%s AND is_deleted=FALSE
+            LIMIT 1
             """,
-            (
-                new_id("content"),
-                project_id,
-                novel_id,
-                title,
-                encode(body),
-                encode(meta),
-                key,
-                chapter_number,
-            ),
+            (project_id, novel_id, key),
         ).fetchone()
+        if not existing:
+            existing = conn.execute(
+                """
+                SELECT id FROM contents
+                WHERE project_id=%s AND parent_id=%s AND type='chapter'
+                  AND seq=%s AND is_deleted=FALSE
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (project_id, novel_id, chapter_number),
+            ).fetchone()
+
+        if existing:
+            stored = conn.execute(
+                """
+                UPDATE contents
+                SET title=%s, body=%s, meta=%s, status='reviewed',
+                    generation_key=%s, seq=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING id
+                """,
+                (title, encode(body), encode(meta), key, chapter_number, existing["id"]),
+            ).fetchone()
+        else:
+            stored = conn.execute(
+                """
+                INSERT INTO contents
+                    (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq, created_at)
+                VALUES (%s,%s,%s,'chapter',%s,%s,%s,'reviewed',%s,%s,now())
+                ON CONFLICT (project_id, generation_key)
+                    WHERE generation_key IS NOT NULL AND is_deleted=FALSE
+                DO UPDATE SET
+                    parent_id=EXCLUDED.parent_id,
+                    title=EXCLUDED.title,
+                    body=EXCLUDED.body,
+                    meta=EXCLUDED.meta,
+                    status='reviewed',
+                    seq=EXCLUDED.seq,
+                    updated_at=now()
+                RETURNING id
+                """,
+                (
+                    new_id("content"),
+                    project_id,
+                    novel_id,
+                    title,
+                    encode(body),
+                    encode(meta),
+                    key,
+                    chapter_number,
+                ),
+            ).fetchone()
         conn.commit()
         content_id = stored["id"] if stored else None
         if not content_id:

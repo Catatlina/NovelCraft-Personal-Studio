@@ -67,6 +67,7 @@ class BaseEngine(ABC):
         tracer: ExecutionTracer,
         event_bus: EventBus,
         project_id: str | None = None,
+        provider_config: dict[str, str] | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -74,6 +75,10 @@ class BaseEngine(ABC):
         self.tracer = tracer
         self.event_bus = event_bus
         self.project_id = project_id
+        # The canonical V7 runtime may receive a short-lived BYOK override
+        # from a V6-compatible HTTP entrypoint.  Empty values intentionally
+        # fall back to the worker environment in AIGateway.
+        self.provider_config = provider_config or {}
         # Set by run() so phase implementations can report token usage / cost
         # onto the trace step that is currently open.
         self._step_ctx: Any = None

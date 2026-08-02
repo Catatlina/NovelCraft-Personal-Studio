@@ -35,6 +35,7 @@ class MemoryEngine(BaseEngine):
             db=self.db,
             novel_id=self.novel_id,
             project_id=self.project_id,
+            provider_config=self.provider_config,
         )
 
     @property

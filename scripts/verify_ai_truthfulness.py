@@ -54,6 +54,9 @@ AI_WRAPPER_CALLS = {
     "execute_bootstrap",
     "batch_generate_chapters_task",
     "generate_chapter",
+    "generate_v7_chapter",
+    "generate_v7_chapter_sync",
+    "_generate_v7_chapter_worker",
 }
 
 # Explicit non-AI/deterministic exceptions. These functions must not return

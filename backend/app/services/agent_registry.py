@@ -1,6 +1,8 @@
 """C3: Agent registry — register AgentNodes with contracts."""
 from __future__ import annotations
 
+import json
+
 # Agent definitions following denova AgentNode contract pattern
 # Each agent has: name, role, prompt_source, tools, output_schema
 
@@ -119,6 +121,53 @@ def execute_agent(agent_id: str, project_id: str, variables: dict,
     route = AGENT_EXECUTION_ROUTES.get(agent_id)
     if not agent or not route:
         raise KeyError(agent_id)
+
+    # A chapter writer is a product prose-generation entrypoint, so it must
+    # use the same canonical V7 Director as continue/batch/bootstrap.  Do not
+    # let this public agent endpoint silently reopen the retired V6 writer.
+    if agent_id == "writer":
+        novel_id = str(
+            variables.get("novel_id")
+            or variables.get("content_id")
+            or variables.get("parent_id")
+            or ""
+        ).strip()
+        if not novel_id:
+            raise ValueError("writer agent requires variables.novel_id")
+        chapter_number = variables.get("chapter_number") or variables.get("seq")
+        if chapter_number is not None:
+            try:
+                chapter_number = int(chapter_number)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("writer agent chapter_number must be an integer") from exc
+        outline = variables.get("outline")
+        if isinstance(outline, (dict, list)):
+            outline = json.dumps(outline, ensure_ascii=False)
+        from app.v7.runtime import generate_v7_chapter_sync
+
+        result = generate_v7_chapter_sync(
+            novel_id,
+            project_id,
+            chapter_number=chapter_number,
+            prompt=str(variables.get("prompt") or variables.get("instruction") or "") or None,
+            outline=str(outline) if outline else None,
+        )
+        status = str(result.get("status") or "failed")
+        output = {
+            "chapter": {
+                "title": result.get("title") or f"第{result.get('chapter_number', chapter_number or '')}章",
+                "body": result.get("content") or "",
+            },
+            **result,
+            "canonical_engine": "v7",
+        }
+        return {
+            "status": "succeeded" if status == "completed" else status,
+            "agent_id": agent_id,
+            "task_type": "v7_chapter_generation",
+            "output": output,
+        }
+
     from app.gateway import complete
 
     task_type, prompt_name = route

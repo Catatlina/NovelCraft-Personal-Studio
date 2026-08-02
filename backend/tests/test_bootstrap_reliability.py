@@ -58,6 +58,13 @@ def test_invalid_or_empty_bootstrap_output_is_not_persisted_or_succeeded(
     monkeypatch.setattr(tasks, "_write_before_search", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(tasks, "_strategy_directive_for_chapter", lambda *_args, **_kwargs: ("", []))
     monkeypatch.setattr(tasks, "_create_checkpoint", lambda *_args, **_kwargs: "")
+    if node_key == "write_chapter_draft":
+        from app.gateway import OutputValidationError
+
+        def invalid_canonical(*_args, **_kwargs):
+            raise OutputValidationError("canonical V7 output schema invalid")
+
+        monkeypatch.setattr(tasks, "_run_canonical_v7_task", invalid_canonical)
     monkeypatch.setattr(
         tasks,
         "_persist_output",

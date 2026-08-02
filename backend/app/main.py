@@ -618,7 +618,8 @@ async def continue_novel(request: Request, novel_id: str, user: dict = Depends(g
     result = gen_next_chapter_task.delay(novel_id, novel["project_id"],
                                          api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
                                          api_url=request.headers.get("X-Api-Base-Url", ""),
-                                         model=request.headers.get("X-Model", ""))
+                                         model=request.headers.get("X-Model", ""),
+                                         canonical=True)
     return ok({"task_id": result.id, "novel_id": novel_id, "status": "dispatched"})
 
 
@@ -698,6 +699,7 @@ async def manual_review_chapter(
         api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
         api_url=request.headers.get("X-Api-Base-Url", ""),
         model=request.headers.get("X-Model", ""),
+        canonical=True,
     )
     tracking_conn = connect()
     tracking_conn.execute(
@@ -2089,6 +2091,8 @@ def execute_agent_endpoint(request: Request, agent_id: str, payload: AgentExecut
                                payload.client_mutation_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"agent '{agent_id}' not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return ok(result)
 
 

@@ -750,14 +750,20 @@ class AIGateway:
         db: AsyncSession | None = None,
         novel_id: uuid.UUID | None = None,
         project_id: str | None = None,
+        provider_config: dict[str, str] | None = None,
     ):
         self.tracer = tracer
         self.db = db
         self.novel_id = novel_id
         self.project_id = project_id
-        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-        self.default_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        provider_config = provider_config or {}
+        self.api_key = provider_config.get("api_key") or os.getenv("DEEPSEEK_API_KEY", "")
+        self.base_url = provider_config.get("base_url") or os.getenv(
+            "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
+        )
+        self.default_model = provider_config.get("model") or os.getenv(
+            "DEEPSEEK_MODEL", "deepseek-chat"
+        )
         self.timeout = float(os.getenv("V7_AI_TIMEOUT", "180"))
         self.max_retries = int(os.getenv("V7_AI_MAX_RETRIES", "3"))
 
@@ -1210,6 +1216,7 @@ class GenerationEngine:
         tracer: ExecutionTracer,
         event_bus: EventBus,
         project_id: str | None = None,
+        provider_config: dict[str, str] | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -1217,12 +1224,14 @@ class GenerationEngine:
         self.tracer = tracer
         self.event_bus = event_bus
         self.project_id = project_id
+        self.provider_config = provider_config or {}
 
         self.ai_gateway = AIGateway(
             tracer,
             db=db,
             novel_id=novel_id,
             project_id=project_id,
+            provider_config=self.provider_config,
         )
         self.context_assembler = ContextAssembler(brain, project_id)
         self.scene_director = SceneDirector(brain, self.ai_gateway)
