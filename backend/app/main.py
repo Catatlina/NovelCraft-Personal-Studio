@@ -1596,6 +1596,21 @@ def ai_chapter_review(
         # Live audit must never break the editor; fall back to a null review.
         review_7dim = review_7dim or None
         next_chapter_plan = next_chapter_plan or None
+    if review_7dim is not None:
+        # The live audit is read-only, but it must expose the same quality
+        # contract as an AI edit; otherwise the editor can show an issue list
+        # without explaining that the candidate is still below the product
+        # acceptance bar.
+        from app.services.quality_risks import evaluate_editor_review_gate
+        from app.services.text_metrics import count_content_chars
+        live_gate = evaluate_editor_review_gate(
+            review_7dim,
+            chars=count_content_chars(text),
+            minimum_chars=int(os.getenv("MIN_CHAPTER_CHARS", "2000")),
+            minimum_score=85.0,
+        )
+        review_7dim["quality_gate"] = live_gate
+        review_7dim["quality_repair_contract"] = live_gate["quality_repair_contract"]
     # C5-03-audit: record each distinct audit as a version branch (dedupe identical).
     try:
         conn = connect()
