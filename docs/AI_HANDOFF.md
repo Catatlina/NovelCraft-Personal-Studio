@@ -13,6 +13,12 @@
 - 本地证据：后端 878 passed、138 skipped、1 xpassed；前端 34 passed；TypeScript、生产构建、前后端契约、AI 真实性和交付声明验证通过。开发门禁仅有已在 `docs/KNOWN_ISSUES.md` 解释的良性 warning。
 - 当前不能宣称真实 Provider 20 章长跑、两位人工盲评或最终生成质量验收完成；这些仍需外部凭据、费用授权和评审人完成。
 
+### 本轮发布证据
+
+- 运行时代码提交 `2fba0be` 已推送并部署；测试契约提交 `65a5973` 已推送。生产容器已重建，数据库迁移服务正常退出，API/worker/beat/frontend/PostgreSQL/Redis 正常运行。
+- `PROD_BASE=https://novel.xyjin.xyz backend/.venv/bin/python scripts/prod_smoke.py`：全部通过（healthz、注册登录、建书、V3 20 节点、八页面 API、切书）。
+- `BASE_URL=https://novel.xyjin.xyz npx playwright test e2e/prod-walkthrough-v2.spec.ts --project=chromium`：**1 passed**；V7 总览、成本账本和 Prompt provenance 均按真实 UI 验证，普通账号权限提示符合设计。
+
 ## 2026-08-02 本轮融合开发状态（已提交/已部署）
 
 本次发布内容包含运行时代码提交 `81672d8`（包含榜单/质量融合 `bfe20a1` 及 V7 trace 响应修复），并已随本状态文档 commit、push、部署到 `https://novel.xyjin.xyz`。状态口径只使用“已接线 / 可用 / 已验收”：

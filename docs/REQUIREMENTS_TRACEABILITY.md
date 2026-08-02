@@ -11,7 +11,7 @@
 | 失败状态、重试和编辑器兜底 | 可用 | App/Progress/WorkspaceDashboard/Editor；节点失败不再显示已完成，应用前预览且保存失败不清理预览 | 生产真实失败注入复测 |
 | 本轮自动回归与真实性门禁 | 可用 | 后端 878 passed、138 skipped、1 xpassed；前端 34 passed；build；truthfulness 通过 | 生产部署后 smoke |
 
-本批次工作树在提交前不宣称生产已更新；真实 Provider 长跑、人工盲评和最终读者体验仍按外部证据单独验收。
+运行时代码 `2fba0be` 已部署并通过生产 smoke 与 V7 浏览器走查；真实 Provider 长跑、人工盲评和最终读者体验仍按外部证据单独验收。
 
 ## 2026-08-02 融合开发批次（工作树，基线 `94fc731`）
 
