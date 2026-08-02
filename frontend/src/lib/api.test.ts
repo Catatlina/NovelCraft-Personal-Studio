@@ -41,6 +41,23 @@ describe("API response contract", () => {
     });
   });
 
+  it("surfaces the backend business error while preserving HTTP context", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        code: 502,
+        message: "去 AI 味改写幅度超出安全范围，请缩小选区后重试",
+        data: { code: "PROVIDER_OUTPUT_INVALID", retryable: false },
+      }),
+      { status: 502, headers: { "Content-Type": "application/json" } },
+    )));
+
+    const failure = api("/api/v1/contents/chapter-1/ai/deai", { method: "POST" });
+    await expect(failure).rejects.toMatchObject({
+      status: 502,
+      message: "去 AI 味改写幅度超出安全范围，请缩小选区后重试",
+    });
+  });
+
   it("normalizes non-string SSE text instead of breaking the editor preview", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
       'data: {"delta":123}\n\ndata: {"done":true,"text":456}\n\n',

@@ -8,11 +8,24 @@ const CONFIGURED_API_BASE = ((import.meta as any).env?.VITE_API_BASE as string |
 const API_BASE = CONFIGURED_API_BASE || "/api";
 let refreshInFlight: Promise<boolean> | null = null;
 
+function responseMessage(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const record = payload as Record<string, unknown>;
+  for (const candidate of [record.message, record.detail, record.error]) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+    if (candidate && typeof candidate === "object") {
+      const nested = (candidate as Record<string, unknown>).message;
+      if (typeof nested === "string" && nested.trim()) return nested;
+    }
+  }
+  return "";
+}
+
 export class ApiError extends Error {
   status: number;
   payload: unknown;
   constructor(status: number, payload: unknown) {
-    super(`API request failed with status ${status}`);
+    super(responseMessage(payload) || `API request failed with status ${status}`);
     this.status = status;
     this.payload = payload;
   }
