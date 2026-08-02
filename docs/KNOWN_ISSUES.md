@@ -2,11 +2,17 @@
 
 ## 2026-08-02 本轮融合开发的未闭合项
 
-### KI-023 榜单/质量融合代码尚未提交部署
+### KI-023 榜单/质量融合代码已提交部署
 
-- 状态：**已接线/可用（本地代码级）**，当前 Git 基线 `94fc731` 有未提交工作树改动。
-- 证据：后端离线回归 **867 passed、138 skipped、4 deselected、1 xpassed**；V7 质量契约、市场分析、榜单范围、规则学习回归通过；前端 lint、34 项测试和构建通过；AI 真实性脚本通过。
-- 边界：本轮未执行 commit、push、生产迁移或公网 smoke；不能写成已部署或已验收。
+- 状态：**可用（已部署）**，包含运行时代码提交 `81672d8` 的最终版本已推送并部署到 `https://novel.xyjin.xyz`。
+- 证据：后端离线回归 **868 passed、138 skipped、4 deselected、1 xpassed**；前端 lint、34 项测试和构建通过；AI 真实性脚本通过；生产 smoke **14/14**；登录账号浏览器走查无控制台错误。
+- 补充修复：V7 trace `list_runs` 补齐 `step_count`，解决历史记录触发 `ResponseValidationError`、导致 V7 生成运行视图暂时不可用的问题。
+
+### KI-025 V7 运行记录响应缺少 step_count —— ✅ 已修复（2026-08-02）
+
+- 根因：`ExecutionTracer.list_runs()` 的历史记录序列化漏掉 `step_count`，但 `RunResponse` 将其定义为必填。
+- 修复：补齐字段并新增 `test_v7_trace_contract.py`，用 `RunResponse.model_validate` 锁定接口契约。
+- 证据：目标回归通过；生产容器重建后 V7 四个监控视图均能读取，生产日志不再出现该响应校验异常。
 
 ### KI-024 真实生成质量仍缺长篇与人工证据
 
