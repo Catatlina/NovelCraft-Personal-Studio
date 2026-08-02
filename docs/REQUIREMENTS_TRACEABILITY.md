@@ -4,9 +4,17 @@
 
 质量对比已完成选型：V7 真实 20 章平均 92.0、最低 91.0，V6 平均 79.6、最低 72.0。故正文生成不再维护双轨，V7 为唯一 canonical chain；V6 只承担兼容事实、`contents`、编辑器和导出。
 
+## 2026-08-02 状态真实性修复与生产刷新
+
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
 |---|---|---|---|
-| 正文生成唯一链路 | 可用 | `08942f3` 已部署；`continue`、批量、自动续写、人工重生成和 Bootstrap 首章均委托 V7 Director；生产 smoke 15/15，V7 质量通过后幂等写回 V6 `contents` | 生产 20 章 Provider 长跑 |
+| 失败/等待结果不得显示已完成 | 可用 | `7851b7f`；canonical `pending_approval / needs_review / failed` 按真实状态投影到 Bootstrap 节点；历史截图 run 已定向纠正；canonical 回归 10 passed | 更多真实 Provider 运行覆盖 |
+| 质量拒绝草稿可见且不可发布 | 可用 | V7 rejected draft 写回 V6 `contents.status=needs_rewrite`，保留质量分、问题和版本快照；代码回归通过 | 生产真实质量长跑与人工盲评 |
+| 生产刷新与入口可达 | 可用 | `7851b7f` 已部署；healthz 200；`prod_smoke.py` 15/15 | 真实生产 20 章质量验收 |
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 正文生成唯一链路 | 可用 | `7851b7f` 已部署；`continue`、批量、自动续写、人工重生成和 Bootstrap 首章均委托 V7 Director；生产 smoke 15/15，V7 质量通过后幂等写回 V6 `contents` | 生产 20 章 Provider 长跑 |
 | V6 兼容承载 | 可用 | V6 仅作为事实/知识/章节存储、编辑器和导出层；V7 结果保留 `canonical_engine=v7`、run 和 transition provenance | 目标部署环境真实回放 |
 | 生成质量目标 | 可用 | V7 真实双轨自动证据优于 V6；本轮代码回归已通过 | 生产 20 章、两位人工盲评；不能标记已验收 |
 
@@ -39,7 +47,7 @@
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
 | NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 已验收 | 提交 `07a8c0f`：本地后端 761 passed / 9 skipped / 1 xpassed、前端 12 passed、build、E2E 4 passed / 4 skipped、三项静态校验；Actions `30439322188` 五项全绿 | 后续批次继续维持同提交 CI |
 | NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected “小说主线⑤” 1 passed (5.2m)；run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 20/20 nodes、22 succeeded ai_calls；Writer 含 Prompt Compiler 三层指令，最终一致性含五维读者体验；提交 `5c544ff` / Actions `30445384633` 五项全绿 | Repair Engine 正向 Provider 预览应用；最终生产 smoke 后提升已验收 |
-| NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 可用 | `7c06fe3` 已推送并部署到 `novel.xyjin.xyz`；迁移到 `nc_v7_novel_project_mapping`；生产 smoke 15/15、浏览器走查 4/4 | 生产真实 20 章双轨与人工盲评不属于部署 smoke |
+| NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 可用 | `7851b7f` 已推送并部署到 `novel.xyjin.xyz`；迁移到 `nc_v7_novel_project_mapping`；生产 smoke 15/15 | 生产真实 20 章双轨与人工盲评不属于部署 smoke |
 
 ## 更新规则
 
@@ -94,5 +102,5 @@
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
 |---|---|---|---|
-| 当前提交生产部署 | 可用 | `7c06fe3`；Docker 应用容器重建；迁移 head；公网 healthz 200 | 生产 20 章质量长跑 |
+| 当前提交生产部署 | 可用 | `7851b7f`；Docker 应用容器重建；迁移 head；公网 healthz 200 | 生产 20 章质量长跑 |
 | 生产用户入口 | 可用 | 生产 smoke 15/15；生产 Playwright 走查 4/4 | 真实 Provider 生成质量和人工盲评 |

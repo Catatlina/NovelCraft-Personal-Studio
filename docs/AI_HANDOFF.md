@@ -10,10 +10,21 @@
 - 公开 `/api/v1/agents/writer/execute` 也已统一调用 V7；缺少 `novel_id` 时返回参数错误，不会重新打开旧 V6 writer。
 - V6 仅作为兼容事实源和产品承载层：保存 `contents`、知识事实、项目映射，并继续服务编辑器和导出。通过质量门的 V7 结果幂等写回同一 V6 章节记录。
 - Bootstrap 的规划/蓝图节点仍负责结构化创作准备；这不是第二套正文生成链。正文生成和正文质量闭环只有 V7 一条。
-- 本轮路由收口已提交为 `08942f3`、推送并部署到 `https://novel.xyjin.xyz`；代码级回归和部署 smoke 已通过，但新路由尚未在生产做 20 章 Provider 长跑。
+- 本轮路由收口已提交为 `7851b7f`、推送并部署到 `https://novel.xyjin.xyz`；代码级回归和部署 smoke 已通过，但新路由尚未在生产做 20 章 Provider 长跑。
 - 质量状态仍为**可用**，不是**已验收**；人工盲评覆盖为 0/20 两位评审。
 - 本轮最终回归：后端 **849 passed、138 skipped、1 xpassed、2 warnings**；V7 单链路目标组合 **46 passed、2 warnings**；前端 **32 passed**，构建通过。
-- 部署证据：迁移 head `nc_v7_novel_project_mapping`；备份 `backups/pre-deploy-08942f3-20260802-171323.sql.gz`（24MB）；公网 healthz 200；`prod_smoke.py` 15/15；浏览器走查并发首跑 3 通过，剩余用例因注册限流 429 单 worker 重跑通过。
+- 部署证据：迁移 head `nc_v7_novel_project_mapping`；备份 `backups/pre-deploy-7851b7f-20260802-180101.sql.gz`（24MB）；公网 healthz 200；`prod_smoke.py` 15/15。
+
+## 2026-08-02 状态真实性修复与生产刷新（`7851b7f`）
+
+- 根因：Bootstrap 旧兼容层把 V7 `pending_approval`、质量拒绝和空产物统一写成 `run_nodes.succeeded`，导致进度页显示“已完成”而正文未产出。
+- 修复：V7 作为唯一正文链继续保留；Bootstrap 节点按 `completed / pending_approval / needs_review / failed` 真实投影；质量拒绝正文写回 V6 `contents.status=needs_rewrite` 并保存修复证据；直接 V7 API 也统一走 canonical runtime；进度页和 SSE 增加等待确认、质量待重写、Provider/预算/派发失败状态。
+- 首章策略：有完整创作 brief 且无结构性 blocker 时，允许首章进入独立质量门；置信度 override 写入决策上下文，不绕过正文质量门。
+- 代码回归：`backend/tests/test_canonical_v7_chain.py` 10 passed；`tests/test_streaming.py` 7 passed；前端 32 passed；前端构建通过。全量后端回归首次结果为 850 passed、138 skipped、1 xpassed，唯一旧认证命名契约随后单测修复并通过。
+- 真实性门禁：`GATE_ALLOW_WARNINGS=1 bash scripts/ai_development_gate.sh` 通过；剩余告警为已在 `docs/KNOWN_ISSUES.md` 解释的测试 mock、UI placeholder、合法空集合和非小说历史 fallback。
+- 生产：`7851b7f` 已 fast-forward 到 `/opt/NovelCraft-Personal-Studio` 并重建应用容器；备份 `backups/pre-deploy-7851b7f-20260802-180101.sql.gz`（24MB）；公网 healthz 200；`PROD_BASE=https://novel.xyjin.xyz backend/.venv/bin/python scripts/prod_smoke.py` 15/15 通过。
+- 数据修复：已定向纠正截图对应 workflow `37b01da0-76aa-4383-b2ea-1fd270e4014d`：canonical `pending_approval`，现为 workflow `waiting_human`，`write_chapter_draft=waiting_human`，其余 delegated 节点为 `pending`；正文和其他项目数据未改动。
+- 当前边界：生产部署/状态真实性为**可用**；真实生产 20 章 Provider 长跑、两位人工盲评和生成质量目标仍不能宣称已验收。
 
 ## 0. V7.0 Alpha 最新状态（2026-08-01 生产部署完成）
 
@@ -512,8 +523,8 @@ bash scripts/ai_development_gate.sh
 
 ## 2026-08-02 生产部署最终记录
 
-- 运行时代码提交 `7c06fe3` 已推送并部署到 `https://novel.xyjin.xyz`；生产目录为 `/opt/NovelCraft-Personal-Studio`，远端 fast-forward 成功。
-- 部署前数据库备份：`backups/pre-deploy-7c06fe3-20260802-161559.sql.gz`。
+- 运行时代码提交 `7851b7f` 已推送并部署到 `https://novel.xyjin.xyz`；生产目录为 `/opt/NovelCraft-Personal-Studio`，远端 fast-forward 成功。
+- 部署前数据库备份：`backups/pre-deploy-7851b7f-20260802-180101.sql.gz`。
 - `alembic upgrade head` 已执行到 `nc_v7_novel_project_mapping (head)`；8 个 runtime Prompt identity 已播种成功。
 - 生产容器 API/worker/beat/frontend/PostgreSQL/Redis 均运行正常，公网 healthz 200；生产 `prod_smoke.py` 15 项全部通过，生产浏览器走查 4/4 通过。
 - 首次 seed 因容器内 import path 未设置而失败，随后以 `PYTHONPATH=/app` 重试成功；这条运维纠偏保留在交接记录中。

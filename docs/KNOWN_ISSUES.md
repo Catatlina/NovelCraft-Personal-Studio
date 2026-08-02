@@ -7,8 +7,15 @@
 - V6 仅保留兼容事实、`contents` 存储、编辑器和导出承载；V7 通过质量门后幂等写回 V6，避免双链路重复生成和重复章节。
 - 公开 Agent `writer` 入口已同步改为 V7；独立编辑器润色入口仍属于编辑功能，不作为章节生成链路。
 - Bootstrap 规划/蓝图仍使用既有结构化准备步骤，但不再执行旧 V6 正文写作/定稿节点。
-- 本轮代码已部署为 `08942f3`；生产 smoke 和入口走查已通过，但生产链路仍需按 V7 单链路做 20 章质量长跑。
+- 本轮代码已部署为 `7851b7f`；生产 smoke 已通过，但生产链路仍需按 V7 单链路做 20 章质量长跑。
 - 这项收口不等于生成质量已验收；当前人工盲评仍是 0/20 两位评审覆盖。
+
+## 最新状态真实性修复（2026-08-02）
+
+- `7851b7f` 已部署生产。旧 Bootstrap 对 V7 `pending_approval`/质量拒绝的“伪完成”投影已修复；节点现在分别显示等待确认、质量待重写或失败，空产物不会标记为成功。
+- 质量门拒绝的真实正文会写入 V6 `contents.status=needs_rewrite`，并保留质量分、问题和版本快照，便于编辑器查看和重写；通过质量门才是 `reviewed`。
+- 截图对应的历史 workflow `37b01da0-76aa-4383-b2ea-1fd270e4014d` 已定向纠正为 `waiting_human`，不是批量修改其他 run。
+- 生产证据：healthz 200，`prod_smoke.py` 15/15；这只证明部署和状态链可用，不证明真实生产长篇质量达标。
 
 > 更新时间：2026-08-02。按阻断程度排序；解决后必须保留验证证据并从本表移除或标注历史。
 
@@ -84,7 +91,7 @@
 
 ### KI-007 `write_polish` 节点对 `deepseek-chat` 输出格式与保真不稳定
 
-- 状态：**可用**（真实 Provider 本地全链已通过；尚未部署生产）。
+- 状态：**可用**（真实 Provider 本地全链已通过；生产已部署，但尚未完成真实生产长篇复测）。
 - 现象:真实 AI 全链 E2E(小说主线5)连续两次在 `write_polish` 节点返回 `invalid_output`,导致 run failed;切换模型前旧链路上也曾出现相同问题。
 - 根因(已校正):失败发生在 `gateway.validate_task_output` 的 Pydantic 契约校验(`_WritePolishOutput` 要求 `polished.body: list[str]` 且 `changes_summary: str`),而非 `_persist_chapter_polish`。`deepseek-chat` 在此节点返回了**结构松散但内容有效**的载荷:裸 `body`(无 `polished` 包裹)、`body` 为字符串而非段落列表、或缺失 `changes_summary`。重试循环只是对同一种漂移重新采样 3 次后放弃。
 - 修复(commit 见下方部署记录):在 `gateway.validate_task_output` 前增加 `_normalize_bootstrap_output` 输出修复层(V3 Repair Engine 思路):
@@ -119,11 +126,17 @@
 - 本地证据：后端 `761 passed, 9 skipped, 1 xpassed`；前端 `12 passed`；构建通过；E2E `4 passed, 4 skipped`；交付声明、AI 真实性、前后端契约、`git diff --check` 通过。
 - CI 证据：修复提交 `07a8c0f` 的 Actions run `30439322188` 五项全绿（backend、e2e、frontend、frontend-test、security）。
 
-### KI-009 当前 V3 代码尚未部署生产
+### KI-009 当前 V3 代码尚未部署生产（历史条目，已关闭）
 
-- 状态：**已接线**。
-- 本轮接手远端基线为 `f8e343c`；文档可确认的生产 commit 仍为 `91bcf9b`，当前最新提交以实时 Git 为准。
-- 升级门禁：CI 同版本全绿后按部署手册发布，并完成 healthz、登录、八页面、切书、建书/保存、V3 真实 AI 20 节点主链 smoke。
+- 状态：**已验收（部署门）**，不是生成质量验收。
+- 生产当前提交为 `7851b7f`；已完成 healthz、登录、八页面、切书、建书/保存、V3 20 节点结构 smoke。
+- 仍需单独完成真实 Provider 20 章长跑和人工盲评，见 KI-018/KI-020。
+
+### KI-021 进度页旧 run 的状态投影修复 -- 已修复（2026-08-02）
+
+- 根因：旧 `_persist_canonical_bootstrap_result` 无条件把 delegated 节点写为 `succeeded`，没有区分 V7 `pending_approval`、`needs_review`、Provider 失败和实际完成。
+- 修复：状态机和进度页按 canonical 结果真实投影；SSE 也把等待确认、质量待重写、预算/Provider/派发失败视为终态；质量拒绝草稿保留在 V6 并标 `needs_rewrite`。
+- 证据：canonical 状态回归 10 passed；前端 32 passed；生产 smoke 15/15；截图对应 workflow 已定向改为 `waiting_human`。
 
 ### KI-010 V3 12 项存在“代码已建但产品闭环不完整”
 

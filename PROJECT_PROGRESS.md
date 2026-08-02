@@ -8,10 +8,10 @@
 - 公开 Agent 的 `writer` 入口也已改为 V7；没有 `novel_id` 时明确报参数错误，不会绕回旧 V6 writer。
 - V6 不再作为产品正文生成链路；仅保留 V6 `contents`、知识事实、项目归属、编辑器和 TXT/Markdown/EPUB 导出的兼容承载层。V7 通过质量门后幂等写回同一 V6 章节记录，避免双写重复。
 - Bootstrap 的策划、蓝图和结构化事实准备仍是既有工作流步骤，但它们不是第二套正文生成链；最终正文只由 V7 生成并审阅。
-- 本轮代码已提交为 `08942f3`、推送并部署到 `https://novel.xyjin.xyz`；当前状态是**单链路代码可用，质量验收未完成**。
+- 本轮代码已提交为 `7851b7f`、推送并部署到 `https://novel.xyjin.xyz`；当前状态是**单链路代码可用，质量验收未完成**。
 - 当前仍不能宣称“生成质量已达标”：生产真实长篇尚未按新单链路重跑，20 个匿名盲评 case 仍为 0/20 两位评审覆盖。
 - 本轮最终回归：后端 **849 passed、138 skipped、1 xpassed、2 warnings**；V7 单链路目标组合 **46 passed、2 warnings**；前端 **32 passed**，构建通过。
-- 部署证据：生产迁移 head 为 `nc_v7_novel_project_mapping`；部署前备份 `backups/pre-deploy-08942f3-20260802-171323.sql.gz`（24MB）；公网 healthz 200；生产 smoke 15/15；浏览器走查 4 个用例均有通过证据。
+- 部署证据：生产迁移 head 为 `nc_v7_novel_project_mapping`；部署前备份 `backups/pre-deploy-7851b7f-20260802-180101.sql.gz`（24MB）；公网 healthz 200；生产 smoke 15/15。
 
 ## 2026-08-01 V7.0 Alpha 端到端测试完成 + API Bug 修复
 
@@ -750,8 +750,8 @@
 
 ## 2026-08-02 生产部署收口
 
-- 提交 `7c06fe3` 已推送 `origin/main`，生产机 `/opt/NovelCraft-Personal-Studio` 已 fast-forward 到该版本；远端原有运行时生成的 `backend/celerybeat-schedule` 未被覆盖。
-- 发布前备份已生成：`backups/pre-deploy-7c06fe3-20260802-161559.sql.gz`。
+- 提交 `7851b7f` 已推送 `origin/main`，生产机 `/opt/NovelCraft-Personal-Studio` 已 fast-forward 到该版本；远端原有运行时生成的 `backend/celerybeat-schedule` 未被覆盖。
+- 发布前备份已生成：`backups/pre-deploy-7851b7f-20260802-180101.sql.gz`。
 - 生产迁移已执行到 `nc_v7_novel_project_mapping (head)`；8 个 runtime Prompt identity 已成功播种。
 - API、worker、beat、frontend、PostgreSQL、Redis 均正常；公网 `healthz` HTTP 200。
 - `PROD_BASE=https://novel.xyjin.xyz backend/.venv/bin/python scripts/prod_smoke.py` 全部 15 项通过；生产浏览器走查 `BASE_URL=https://novel.xyjin.xyz npx playwright test e2e/prod-walkthrough*.spec.ts` 为 **4 passed**。
