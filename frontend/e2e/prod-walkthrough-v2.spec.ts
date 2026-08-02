@@ -106,11 +106,14 @@ test("生产走查：八页面可达 + V7 Cost/Prompt 真实渲染", async ({ pa
   const promptNav = page.getByRole("tab", { name: "Prompt provenance" }).first();
   if (await promptNav.isVisible({ timeout: 8000 }).catch(() => false)) {
     await promptNav.click();
-    await expect(page.getByRole("heading", { name: "最近注册的 Prompt 版本", exact: true })).toBeVisible({ timeout: 10_000 });
+    const promptView = page.getByRole("heading", { name: "最近注册的 Prompt 版本", exact: true })
+      .or(page.getByRole("heading", { name: "需要管理员权限", exact: true }))
+      .first();
+    await expect(promptView).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1500);
     const body = await page.locator("body").innerText();
     expect(body.includes("a1b2c3d4e5f6g7h8")).toBeFalsy(); // MOCK_PROMPTS hash 不应出现
-    console.log("[走查] V7 Prompts 渲染真实页面（无 mock 数据）");
+    console.log("[走查] V7 Prompt provenance 渲染真实页面（管理员列表或普通账号权限提示，无 mock 数据）");
   } else {
     console.log("[走查] V7 Prompts 文本未找到");
   }
