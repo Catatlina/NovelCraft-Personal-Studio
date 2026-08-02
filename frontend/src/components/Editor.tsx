@@ -11,7 +11,28 @@ type Content = { id: string; title: string; body: { content?: { text?: string }[
 type Version = { id: string; label: string; reason?: string; snapshot: Record<string, unknown>; created_at: string };
 type PendingAiEdit = { op: string; originalText: string; proposedText: string; nextText: string };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce }: {
+function readableIssue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return String(value ?? "");
+  const item = value as Record<string, unknown>;
+  const description = item.description || item.issue || item.message || item.reason || item.title;
+  const suggestion = item.suggestion || item.recommendation || item.fix;
+  if (description && suggestion) return `${String(description)}（建议：${String(suggestion)}）`;
+  if (description) return String(description);
+  return Object.entries(item).filter(([, entry]) => entry !== null && entry !== undefined && entry !== "")
+    .map(([key, entry]) => `${key}：${typeof entry === "object" ? JSON.stringify(entry) : String(entry)}`)
+    .join("；");
+}
+
+const EDITOR_OPERATION_LABELS: Record<string, string> = {
+  continue: "续写",
+  polish: "润色",
+  rewrite: "改写",
+  rewrite_chapter: "整章重写",
+  deai: "去 AI 味",
+};
+
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -31,6 +52,8 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   projectId?: string;
   liveReviewing?: boolean;
   editorResetNonce?: number;
+  editorAiLoading?: boolean;
+  editorAiOperation?: string;
   onRequestReview?: () => void;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
@@ -115,17 +138,24 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </span>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button className="btn-sm btn-ghost" onClick={() => runEditorOp("continue")} style={{ gap: 4 }}>
+          <button className="btn-sm btn-ghost" disabled={editorAiLoading} onClick={() => runEditorOp("continue")} style={{ gap: 4 }}>
             <Bot size={13} />续写
           </button>
-          <button className="btn-sm btn-ghost" onClick={() => runEditorOp("polish")} style={{ gap: 4 }}>
+          <button className="btn-sm btn-ghost" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("polish")} style={{ gap: 4 }}>
             <Wand2 size={13} />润色
           </button>
-          <button onClick={saveChapter} disabled={!chapter} className="btn-sm btn-primary" style={{ gap: 4 }}>
+          <button onClick={saveChapter} disabled={!chapter || editorAiLoading} className="btn-sm btn-primary" style={{ gap: 4 }}>
             <Save size={14} />保存
           </button>
         </div>
       </div>
+
+      {editorAiLoading ? (
+        <div className="ai-msg" role="status" style={{ marginBottom: 12 }}>
+          <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite", marginRight: 8 }} />
+          AI 正在处理“{EDITOR_OPERATION_LABELS[editorAiOperation || ""] || editorAiOperation || "当前操作"}”，原文未改变；最多等待 2 分钟。
+        </div>
+      ) : null}
 
       {/* ── Stream preview ── */}
       {streamPreview ? (
@@ -254,6 +284,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onSelection={setSelection}
             selection={selection}
             onAiOp={(op, instruction) => runEditorOp(op, instruction)}
+            aiBusy={editorAiLoading}
             aiReview={editorAiReview ?? null}
             deaiResult={deaiResult ?? null}
             deaiLoading={deaiLoading ?? false}
@@ -282,11 +313,11 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           <div style={{ flex: 1, overflowY: "auto", marginBottom: 8 }}>
             <p className="editor-ai-help">选中正文后可润色、改写或去 AI 味；续写与整章重写可直接运行。所有结果都会先进入预览，不会直接覆盖正文。右侧为实时审阅，章节打开即自动审计，随文字更新持续审计。</p>
             <div className="editor-ai-tools">
-              <button type="button" onClick={() => runEditorOp("continue")}><Bot size={15} /><span><strong>续写本章</strong><small>沿当前正文继续</small></span></button>
-              <button type="button" onClick={() => runEditorOp("rewrite_chapter")}><RefreshCcw size={15} /><span><strong>整章重写</strong><small>保留核心剧情</small></span></button>
-              <button type="button" disabled={!selection.trim()} onClick={() => runEditorOp("polish")}><Wand2 size={15} /><span><strong>润色选区</strong><small>{selection.trim() ? `${selection.length} 字已选择` : "请先选择文字"}</small></span></button>
-              <button type="button" disabled={!selection.trim()} onClick={() => runEditorOp("deai")}><RefreshCcw size={15} /><span><strong>去 AI 味</strong><small>{selection.trim() ? "处理已选文字" : "请先选择文字"}</small></span></button>
-              <button type="button" disabled={!selection.trim()} onClick={() => markLiked?.(selection.trim())}><Check size={15} /><span><strong>标记喜欢</strong><small>{selection.trim() ? "记录为偏好表达" : "请先选择文字"}</small></span></button>
+              <button type="button" disabled={editorAiLoading} onClick={() => runEditorOp("continue")}><Bot size={15} /><span><strong>续写本章</strong><small>沿当前正文继续</small></span></button>
+              <button type="button" disabled={editorAiLoading} onClick={() => runEditorOp("rewrite_chapter")}><RefreshCcw size={15} /><span><strong>整章重写</strong><small>保留核心剧情</small></span></button>
+              <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("polish")}><Wand2 size={15} /><span><strong>润色选区</strong><small>{selection.trim() ? `${selection.length} 字已选择` : "请先选择文字"}</small></span></button>
+              <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("deai")}><RefreshCcw size={15} /><span><strong>去 AI 味</strong><small>{selection.trim() ? "处理已选文字" : "请先选择文字"}</small></span></button>
+              <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => markLiked?.(selection.trim())}><Check size={15} /><span><strong>标记喜欢</strong><small>{selection.trim() ? "记录为偏好表达" : "请先选择文字"}</small></span></button>
             </div>
 
             {editorAiReview?.review ? (
@@ -318,15 +349,15 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                 {editorAiReview.review.issues?.length ? (
                   <>
                     <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                      <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("polish", editorAiReview.review.issues.join("\n"))}>按全部建议润色</button>
-                      <button type="button" className="btn-sm btn-primary" onClick={() => runEditorOp("rewrite", editorAiReview.review.issues.join("\n"))}>按全部建议改写</button>
+                      <button type="button" className="btn-sm btn-primary" disabled={editorAiLoading} onClick={() => runEditorOp("polish", editorAiReview.review.issues.map(readableIssue).join("\n"))}>按全部建议润色</button>
+                      <button type="button" className="btn-sm btn-primary" disabled={editorAiLoading} onClick={() => runEditorOp("rewrite", editorAiReview.review.issues.map(readableIssue).join("\n"))}>按全部建议改写</button>
                     </div>
-                    {editorAiReview.review.issues.map((issue: string, index: number) => (
-                      <div key={`${issue}-${index}`} style={{ marginBottom: 8 }}>
-                        <div>• {issue}</div>
+                    {editorAiReview.review.issues.map((issue: unknown, index: number) => (
+                      <div key={`${readableIssue(issue)}-${index}`} style={{ marginBottom: 8 }}>
+                        <div>• {readableIssue(issue)}</div>
                         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                          <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("polish", issue)}>按此建议润色</button>
-                          <button type="button" className="btn-sm btn-ghost" onClick={() => runEditorOp("rewrite", issue)}>按此建议改写</button>
+                          <button type="button" className="btn-sm btn-ghost" disabled={editorAiLoading} onClick={() => runEditorOp("polish", readableIssue(issue))}>按此建议润色</button>
+                          <button type="button" className="btn-sm btn-ghost" disabled={editorAiLoading} onClick={() => runEditorOp("rewrite", readableIssue(issue))}>按此建议改写</button>
                         </div>
                       </div>
                     ))}

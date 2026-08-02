@@ -23,6 +23,7 @@ type Props = {
   onToggleFocusMode?: () => void;
   onToggleFullscreen?: () => void;
   onToggleNightMode?: () => void;
+  aiBusy?: boolean;
 };
 
 function toEditorHtml(value: string): string {
@@ -37,7 +38,7 @@ function toEditorHtml(value: string): string {
     .join("");
 }
 
-export function RichEditor({ value, onChange, onSelection, selection, onAiOp, aiReview, deaiResult, deaiLoading, deai, autoSavedAt, dirty, hideAiPanel, isFocusMode, isFullscreen, isNightMode, onToggleFocusMode, onToggleFullscreen, onToggleNightMode }: Props) {
+export function RichEditor({ value, onChange, onSelection, selection, onAiOp, aiReview, deaiResult, deaiLoading, deai, autoSavedAt, dirty, hideAiPanel, isFocusMode, isFullscreen, isNightMode, onToggleFocusMode, onToggleFullscreen, onToggleNightMode, aiBusy }: Props) {
   const [showAiBar, setShowAiBar] = useState(false);
   const [barPos, setBarPos] = useState({ x: 0, y: 0 });
   const lastEmittedValue = useRef(value);
@@ -86,19 +87,24 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
     lastEmittedValue.current = value;
   }, [value, editor]);
 
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.setEditable(!aiBusy);
+  }, [editor, aiBusy]);
+
   if (!editor) return <div>Loading editor...</div>;
 
   return (
     <div style={{ position: "relative" }}>
       {/* Toolbar */}
       <div style={{ display: "flex", gap: 4, padding: "4px 0", borderBottom: "1px solid var(--border-subtle)", marginBottom: 8 }}>
-        <button onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive("bold") ? "active" : ""}><Bold size={14} /></button>
-        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive("italic") ? "active" : ""}><Italic size={14} /></button>
-        <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive("heading") ? "active" : ""}><Heading size={14} /></button>
-        <button onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={14} /></button>
-        <button onClick={() => editor.chain().focus().undo().run()}><Undo size={14} /></button>
-        <button onClick={() => editor.chain().focus().redo().run()}><Redo size={14} /></button>
-        <button onClick={() => onAiOp?.("rewrite_chapter")} title="整章重写"><RefreshCcw size={14} />整章重写</button>
+        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive("bold") ? "active" : ""}><Bold size={14} /></button>
+        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive("italic") ? "active" : ""}><Italic size={14} /></button>
+        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive("heading") ? "active" : ""}><Heading size={14} /></button>
+        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={14} /></button>
+        <button disabled={aiBusy} onClick={() => editor.chain().focus().undo().run()}><Undo size={14} /></button>
+        <button disabled={aiBusy} onClick={() => editor.chain().focus().redo().run()}><Redo size={14} /></button>
+        <button disabled={aiBusy} onClick={() => onAiOp?.("rewrite_chapter")} title="整章重写"><RefreshCcw size={14} />整章重写</button>
       </div>
 
       {/* Editor area */}
@@ -113,10 +119,10 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
           background: "var(--surface-elevated)", borderRadius: 8,
           boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100,
         }}>
-          <button onClick={() => onAiOp?.("polish")} style={{ fontSize: 12 }}><Wand2 size={12} /> 润色</button>
-          <button onClick={() => onAiOp?.("rewrite")} style={{ fontSize: 12 }}><Sparkles size={12} /> 改写</button>
-          <button onClick={() => onAiOp?.("deai")} style={{ fontSize: 12 }}><RefreshCcw size={12} /> 去AI味</button>
-          <button onClick={() => onAiOp?.("continue")} style={{ fontSize: 12 }}><Bot size={12} /> 续写</button>
+          <button disabled={aiBusy} onClick={() => onAiOp?.("polish")} style={{ fontSize: 12 }}><Wand2 size={12} /> 润色</button>
+          <button disabled={aiBusy} onClick={() => onAiOp?.("rewrite")} style={{ fontSize: 12 }}><Sparkles size={12} /> 改写</button>
+          <button disabled={aiBusy} onClick={() => onAiOp?.("deai")} style={{ fontSize: 12 }}><RefreshCcw size={12} /> 去AI味</button>
+          <button disabled={aiBusy} onClick={() => onAiOp?.("continue")} style={{ fontSize: 12 }}><Bot size={12} /> 续写</button>
         </div>
       )}
     </div>

@@ -164,7 +164,7 @@ def test_fallback_keeps_original_when_retries_fail():
 
 
 def test_polish_fallback_logic():
-    """polish/rewrite 分支：重跑耗尽后 best 不足 2000 且原文达标 → 回退原文。"""
+    """polish/rewrite 分支：重跑耗尽后低于当前操作下限且原文达标 → 回退原文。"""
     src = open(
         "../frontend/src/App.tsx" if __import__("os").path.exists("../frontend/src/App.tsx")
         else "frontend/src/App.tsx"
@@ -174,4 +174,4 @@ def test_polish_fallback_logic():
     text = p.read_text()
     # 兜底分支必须存在：IMPROVE_OPS 且不足时回退原文
     assert "最终兜底：润色/改写重跑耗尽后仍不足 2000 → 回退原文" in text
-    assert "count_content_chars(output.get(\"text\") or \"\") < EDITOR_MIN_CHARS" in text
+    assert "count_content_chars(output.get(\"text\") or \"\") < operation_min_chars" in text

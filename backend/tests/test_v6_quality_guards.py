@@ -58,6 +58,21 @@ def test_final_humanize_passes_facts_and_style_to_real_gateway(monkeypatch):
     assert captured["user_id"] == "user-1"
 
 
+def test_final_humanize_repairs_provider_collapsed_paragraphs(monkeypatch):
+    source = _chapter(paragraphs=59, chars=5)
+    collapsed = "".join(source.split("\n\n"))
+
+    def fake_complete(**_kwargs):
+        return {"humanized_text": collapsed, "changes": []}
+
+    monkeypatch.setattr("app.gateway.complete", fake_complete)
+
+    result = DeaiPipeline("project-1", "content-1", "第1章").final_humanize(source)
+
+    assert len(result["final_text"].split("\n\n")) >= 36
+    assert len(result["final_text"].replace("\n", "").replace(" ", "")) == len(collapsed.replace("\n", "").replace(" ", ""))
+
+
 def test_fact_repair_requires_exact_anchor_and_never_invents_text():
     source = "周远山推开门。\n\n门后没有人。"
 

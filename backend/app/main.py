@@ -1418,6 +1418,17 @@ def ai_edit(
     # V3 deai → use the new DeaiPipeline (web novel style rewrite)
     IMPROVE_OPS = {"polish", "rewrite", "rewrite_chapter"}
     EDITOR_MIN_CHARS = int(os.getenv("MIN_CHAPTER_CHARS", "2000"))
+    from app.services.text_metrics import count_content_chars
+    from app.v7.quality.deai_metrics import analyze_deai_patterns
+    source_chars = count_content_chars(payload.selection)
+    # A selected paragraph is not a chapter.  Apply the chapter floor only to
+    # full-chapter operations; selection edits retain at least 75% of the
+    # selected material so the editor remains useful for small local fixes.
+    operation_min_chars = (
+        EDITOR_MIN_CHARS
+        if str(op) == "rewrite_chapter" or source_chars >= EDITOR_MIN_CHARS
+        else max(80, int(source_chars * 0.75))
+    )
     # An editor candidate is only quality-safe after the same product bar as
     # the canonical V7 writer.  The preview remains user-confirmed, but a
     # score in the low 80s or a material risk must trigger targeted rework.
@@ -1426,7 +1437,6 @@ def ai_edit(
 
     if str(op) == "deai":
         from app.services.deai_pipeline import DeaiPipeline
-        from app.services.text_metrics import count_content_chars
         pipeline = DeaiPipeline(
             project_id=content["project_id"],
             content_id=content_id,
@@ -1435,11 +1445,11 @@ def ai_edit(
         result = pipeline.run(payload.selection)
         candidate_text = _ensure_editor_paragraphs(result.get("final_text", payload.selection))
         # 字数硬门禁：去 AI 味不得压缩篇幅。不足则带反馈重跑一次
-        # （deai.rewrite 1.1.0 已含篇幅硬要求，此兜底防模型不执行）。
-        if count_content_chars(candidate_text) < EDITOR_MIN_CHARS:
+        # （deai.rewrite 已含篇幅硬要求，此兜底防模型不执行）。
+        if count_content_chars(candidate_text) < operation_min_chars:
             result2 = pipeline.run(
                 payload.selection
-                + f"\n\n【上一版去AI味字数不足（{count_content_chars(candidate_text)}字 < {EDITOR_MIN_CHARS}字）。"
+                + f"\n\n【上一版去AI味字数不足（{count_content_chars(candidate_text)}字 < {operation_min_chars}字）。"
                 + "请保持原文全部信息与字数，只改表达方式，不得压缩、总结或删减情节。】"
             )
             candidate2 = _ensure_editor_paragraphs(result2.get("final_text", payload.selection))
@@ -1447,14 +1457,13 @@ def ai_edit(
                 candidate_text = candidate2
         # 最终兜底：重跑后仍不足 2000 → 宁可少改也不压缩剧情。
         # 「去AI味」的目标是改表达，绝不是删内容；压缩原文属于破坏性操作。
-        if count_content_chars(candidate_text) < EDITOR_MIN_CHARS:
+        if count_content_chars(candidate_text) < operation_min_chars and source_chars >= operation_min_chars:
             candidate_text = _ensure_editor_paragraphs(payload.selection)
         output = {"text": candidate_text}
     else:
         instruction = payload.instruction
         best = None
         best_score = -1.0
-        from app.services.text_metrics import count_content_chars
         for attempt in range(MAX_EDITOR_RETRIES + 1):
             gen = complete(
                 run_id=None, node_key=None, project_id=content["project_id"],
@@ -1476,10 +1485,11 @@ def ai_edit(
                     evaluate_editor_review_gate,
                     repair_feedback,
                 )
+                review["deai_metrics"] = analyze_deai_patterns(candidate_text)
                 quality_gate = evaluate_editor_review_gate(
                     review,
                     chars=chars,
-                    minimum_chars=EDITOR_MIN_CHARS,
+                    minimum_chars=operation_min_chars,
                     minimum_score=EDITOR_REVIEW_PASS,
                 )
                 review["quality_gate"] = quality_gate
@@ -1495,12 +1505,12 @@ def ai_edit(
                     quality_gate["quality_repair_contract"],
                     list(review.get("issues", [])),
                 )
-                if chars < EDITOR_MIN_CHARS:
-                    issues.append(f"字数不足：当前 {chars} 字，必须扩写到 {EDITOR_MIN_CHARS} 字以上，不得压缩或总结情节")
+                if chars < operation_min_chars:
+                    issues.append(f"字数不足：当前 {chars} 字，必须保留至少 {operation_min_chars} 字，不得压缩或总结情节")
                 issues.append(
-                    "必须去除 AI 味：严格执行【去 AI 味改稿铁律】全部 5 条——段落炸碎（每段 1-3 句）、"
-                    "口语化（删书面连接词、『说』换具体动作、加口语插入语）、人味注入（每 3-5 段一句独白/吐槽、数字模糊化）、"
-                    "节奏控制（紧张处短句短段、场景有画面感细节）、删 AI 痕迹（去公文句式、情绪用动作表现、禁套话与章末总结体）"
+                    "必须去除 AI 味：按【去 AI 味改稿铁律】检查整章分布——打散同构段落与均匀句长，"
+                    "用动作/对白/具体细节承载情绪，减少空泛连接词和总结腔；不设置单个词或标点的禁用清单，"
+                    "只改高密度、连续重复、无语境必要的模板表达，保留人物口吻与全部事实。"
                 )
                 instruction = "；".join(issues)
             else:
@@ -1510,8 +1520,8 @@ def ai_edit(
         output = best or {"text": candidate_text}
         # 最终兜底：润色/改写重跑耗尽后仍不足 2000 → 回退原文。
         # 润色的目的是改表达，压缩/删减情节属于破坏性操作，宁可少改。
-        if str(op) in IMPROVE_OPS and count_content_chars(output.get("text") or "") < EDITOR_MIN_CHARS:
-            if count_content_chars(payload.selection) >= EDITOR_MIN_CHARS:
+        if str(op) in IMPROVE_OPS and count_content_chars(output.get("text") or "") < operation_min_chars:
+            if count_content_chars(payload.selection) >= operation_min_chars:
                 output = {"text": _ensure_editor_paragraphs(payload.selection)}
 
     # 附七维审查（deai 单遍在此补算）与续章规划
@@ -1525,12 +1535,12 @@ def ai_edit(
                 client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
             )
         from app.services.quality_risks import evaluate_editor_review_gate
-        from app.services.text_metrics import count_content_chars
         final_chars = count_content_chars(output.get("text") or payload.selection)
+        output["review_7dim"]["deai_metrics"] = analyze_deai_patterns(output.get("text") or payload.selection)
         final_gate = evaluate_editor_review_gate(
             output["review_7dim"],
             chars=final_chars,
-            minimum_chars=EDITOR_MIN_CHARS,
+            minimum_chars=operation_min_chars,
             minimum_score=EDITOR_REVIEW_PASS,
         )
         output["review_7dim"]["quality_gate"] = final_gate

@@ -48,7 +48,7 @@ class ContentUpdate(BaseModel):
 
 
 class AiEditRequest(BaseModel):
-    selection: str = Field(min_length=1, max_length=8000)
+    selection: str = Field(min_length=1, max_length=24000)
     instruction: str = Field(default="", max_length=1000)
     client_mutation_id: str | None = Field(default=None, min_length=8, max_length=100)
 

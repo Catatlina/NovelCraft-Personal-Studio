@@ -35,6 +35,12 @@ CRITICAL_DIMENSION_MINIMUMS: dict[str, float] = {
 
 AUDIT_HARD_MINIMUM = 85.0
 DEAI_HIGH_RISK_THRESHOLD = 70
+DEAI_BLOCKING_FLAGS = {
+    "dash_density",
+    "uniform_cadence",
+    "repeated_paragraph_opening",
+    "ai_phrase",
+}
 
 
 def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
@@ -85,6 +91,18 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
             "actual": deai_risk,
             "minimum": f"< {DEAI_HIGH_RISK_THRESHOLD}",
             "reason": "确定性表达指标显示 AI 腔风险过高，需要定向润色",
+        })
+    for flag in deai_metrics.get("flags") or []:
+        if not isinstance(flag, dict) or flag.get("code") not in DEAI_BLOCKING_FLAGS:
+            continue
+        severity = str(flag.get("severity") or "").lower()
+        if severity not in {"medium", "high"}:
+            continue
+        failures.append({
+            "dimension": str(flag.get("code")),
+            "actual": severity,
+            "minimum": "resolved",
+            "reason": str(flag.get("message") or "确定性表达风险需要定向修复"),
         })
     reader_experience = summarize_reader_experience(review_data.get("reader_experience"))
     return {

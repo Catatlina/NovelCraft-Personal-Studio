@@ -14,6 +14,8 @@ import logging
 import hashlib
 import re
 
+from app.services.text_quality import normalize_and_validate_rewrite
+
 logger = logging.getLogger(__name__)
 
 # 常见 AI 痕迹套话（启发式检测与轻量清洗共用）
@@ -131,9 +133,9 @@ class DeaiPipeline:
                 "ai_patterns_removed": [],
             }
 
-        source_chars = len(re.sub(r"\s+", "", text))
-        source_paragraphs = [p for p in re.split(r"\n{2,}|\n", text) if p.strip()]
-        mutation_seed = hashlib.sha256(text.encode("utf-8")).hexdigest()[:20]
+        mutation_seed = hashlib.sha256(
+            (text + "\n" + (quality_retry_feedback or "")).encode("utf-8")
+        ).hexdigest()[:20]
         out = complete(
             run_id=run_id,
             node_key="final_humanize",
@@ -148,24 +150,21 @@ class DeaiPipeline:
                 "quality_retry_feedback": quality_retry_feedback or "（首次最终定稿）",
                 "style_profile": style_profile or "（暂无作者文风卡）",
             },
-            client_mutation_id=f"final-humanize:{self.content_id}:{mutation_seed}:v1",
+            client_mutation_id=f"final-humanize:{self.content_id}:{mutation_seed}:v2",
         )
         final_text = str(out.get("humanized_text") or "").strip() if isinstance(out, dict) else ""
-        if len(final_text) < 50:
-            raise OutputValidationError("final_humanize returned empty or too-short text")
-
-        final_chars = len(re.sub(r"\s+", "", final_text))
-        if final_chars < int(source_chars * 0.8) or final_chars > int(source_chars * 1.2):
-            raise OutputValidationError(
-                f"final_humanize changed chapter length outside safe range: "
-                f"{source_chars}->{final_chars}"
+        try:
+            # A provider is allowed to reflow paragraphs, but not to lose the
+            # narrative.  The shared guard can recover accidental line-break
+            # loss by splitting at sentence boundaries before deciding that
+            # the result is destructive.
+            final_text, _shape = normalize_and_validate_rewrite(
+                text,
+                final_text,
+                minimum_chars=50,
             )
-        final_paragraphs = [p for p in re.split(r"\n{2,}|\n", final_text) if p.strip()]
-        if len(final_paragraphs) < max(1, int(len(source_paragraphs) * 0.6)):
-            raise OutputValidationError(
-                "final_humanize dropped too many paragraphs: "
-                f"{len(source_paragraphs)}->{len(final_paragraphs)}"
-            )
+        except ValueError as exc:
+            raise OutputValidationError(f"final_humanize {exc}") from exc
 
         return {
             "final_text": final_text,
@@ -179,12 +178,12 @@ class DeaiPipeline:
         Returns keys: original_score, final_score, layers, final_text.
         """
         if not text or not text.strip():
-                return {
-                    "original_score": 0,
-                    "final_score": 0,
-                    "layers": [{"name": n, "note": d, "applied": False} for n, d in _LAYER_NAMES],
-                    "final_text": text or "",
-                }
+            return {
+                "original_score": 0,
+                "final_score": 0,
+                "layers": [{"name": n, "note": d, "applied": False} for n, d in _LAYER_NAMES],
+                "final_text": text or "",
+            }
 
         original_score = quick_deai_score(text)
         layers: list[dict] = []
@@ -220,9 +219,21 @@ class DeaiPipeline:
         polished = rewritten
         layers.append({"name": "AI 网文风格重写", "note": "deai.rewrite", "applied": True})
 
-        # Layer 3: post-processing — enforce short paragraphs
-        polished = _enforce_short_paragraphs(polished)
-        layers.append({"name": "段落拆分", "note": "post-process", "applied": True})
+        # Layer 3: repair provider line-break loss without changing prose.
+        # This is the same lossless contract used by the canonical V7
+        # humanizer, so editor de-AI cannot silently collapse a chapter into
+        # fewer paragraphs either.
+        try:
+            polished, shape = normalize_and_validate_rewrite(
+                text,
+                polished,
+                min_ratio=0.8,
+                max_ratio=1.2,
+                minimum_chars=max(20, min(50, len(re.sub(r"\s+", "", text)))),
+            )
+        except ValueError as exc:
+            raise OutputValidationError(f"deai.rewrite {exc}") from exc
+        layers.append({"name": "段落拆分", "note": "lossless-reflow", "applied": True, "shape": shape})
 
         final_score = quick_deai_score(polished)
 
@@ -232,32 +243,3 @@ class DeaiPipeline:
             "layers": layers,
             "final_text": polished,
         }
-
-
-def _enforce_short_paragraphs(text: str) -> str:
-    """Post-process: 强制拆分过长段落，模拟网文短段落节奏。"""
-    paras = [p.strip() for p in text.split("\n") if p.strip()]
-    result: list[str] = []
-    for p in paras:
-        # 对话行保留不拆
-        if p and p[0] in ('\u300c', '\u201c', '\u2018', '\u0022', '\u0027'):
-            result.append(p)
-            continue
-        if len(p) > 120 and p.count("\u3002") >= 3:
-            sentences = re.split(r"(?<=[\u3002\uff01\uff1f!?])", p)
-            chunk = ""
-            for s in sentences:
-                s = s.strip()
-                if not s:
-                    continue
-                if len(chunk) + len(s) > 100 and chunk:
-                    result.append(chunk)
-                    chunk = s
-                else:
-                    chunk += s
-            if chunk:
-                result.append(chunk)
-        else:
-            result.append(p)
-    return "\n\n".join(result)
-    return "\n\n".join(result)

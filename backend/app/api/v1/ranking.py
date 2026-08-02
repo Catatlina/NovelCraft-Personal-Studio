@@ -577,9 +577,10 @@ def validate_snapshot_metadata(snapshot_id: str, payload: SnapshotMetadataValida
         for item in items:
             validation = validate_with_open_library(item["title"], item.get("author", ""))
             metadata_status, evidence = _classify_metadata_validation(item, validation)
+            current_metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+            merged_metrics = {**current_metrics, "validation": evidence}
             db.execute("""UPDATE ranking_items SET metadata_status=%s, metadata_checked_at=now(),
-                          metrics=COALESCE(metrics,'{}'::jsonb) || jsonb_build_object('validation',%s::jsonb)
-                          WHERE id=%s""", (metadata_status, json.dumps(evidence, ensure_ascii=False), item["id"]))
+                          metrics=%s WHERE id=%s""", (metadata_status, encode(merged_metrics), item["id"]))
             summary[metadata_status] += 1
         all_statuses = rows(db, "SELECT metadata_status FROM ranking_items WHERE snapshot_id=%s", (snapshot_id,))
         full_summary = dict(Counter(row["metadata_status"] for row in all_statuses))

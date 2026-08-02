@@ -16,6 +16,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
+import { cleanNovelTitle } from "../lib/titleDisplay";
 
 export type AppTab =
   | "dashboard" | "overview" | "workspace" | "ranking" | "library" | "wizard"
@@ -38,11 +39,16 @@ const NAV_ITEMS: Array<{ id: AppTab; label: string; icon: React.ReactNode }> = [
 
 const RUN_LABELS: Record<string, string> = {
   pending: "等待开始",
+  queued: "已排队",
   running: "AI 创作中",
   waiting_human: "等待确认",
+  pending_approval: "等待生成确认",
   succeeded: "创作完成",
   failed: "需要处理",
   pending_provider: "需要处理",
+  pending_budget: "需要处理",
+  needs_review: "质量待处理",
+  dispatch_failed: "派发失败",
 };
 
 export function Layout({
@@ -164,7 +170,7 @@ export function Layout({
                 aria-label="切换作品"
               >
                 {novels.map(n => (
-                  <option key={n.id} value={n.id}>{n.title || "待命名作品"}</option>
+                  <option key={n.id} value={n.id}>{cleanNovelTitle(n.title, "待命名作品")}</option>
                 ))}
               </select>
             )}

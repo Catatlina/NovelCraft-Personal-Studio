@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import type { AppTab } from "./Layout";
+import { bookTitle, cleanNovelTitle } from "../lib/titleDisplay";
 
 type Book = {
   id: string;
@@ -64,6 +65,16 @@ function greeting(): string {
   return "晚上好";
 }
 
+function displayRunStatus(run?: Run | null): string {
+  if (!run) return "pending";
+  const statuses = new Set((run.nodes || []).map(node => node.status));
+  if (statuses.has("running") || statuses.has("queued")) return "running";
+  if (statuses.has("pending_approval") || statuses.has("waiting_human")) return "pending_approval";
+  if (statuses.has("failed") || statuses.has("pending_budget") || statuses.has("pending_provider") || statuses.has("needs_review")) return "needs_review";
+  if (statuses.has("pending")) return "pending";
+  return run.status || "pending";
+}
+
 export function WorkspaceDashboard({
   projectId,
   currentNovelTitle,
@@ -98,25 +109,26 @@ export function WorkspaceDashboard({
     () => [...books].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 3),
     [books],
   );
-  const failedNodes = run?.nodes.filter(node => node.status === "failed") || [];
-  const waitingNodes = run?.nodes.filter(node => node.status === "waiting_human") || [];
+  const runDisplayStatus = displayRunStatus(run);
+  const failedNodes = run?.nodes.filter(node => ["failed", "pending_budget", "pending_provider", "needs_review"].includes(node.status)) || [];
+  const waitingNodes = run?.nodes.filter(node => ["waiting_human", "pending_approval"].includes(node.status)) || [];
   const rawName = userEmail?.split("@")[0] || "创作者";
   const firstName = rawName.length > 16 ? `${rawName.slice(0, 14)}…` : rawName;
-  const continueTab: AppTab = run?.status === "waiting_human" || run?.status === "running" || run?.status === "failed"
+  const continueTab: AppTab = runDisplayStatus === "pending_approval" || runDisplayStatus === "running" || runDisplayStatus === "needs_review"
     ? "progress"
     : currentNovelTitle || books.length
       ? "editor"
       : "wizard";
-  const focusTitle = run?.status === "waiting_human"
+  const focusTitle = runDisplayStatus === "pending_approval"
     ? "有一项创作结果等待你确认"
-    : run?.status === "running"
-      ? `Starlume 正在创作${currentNovelTitle ? `《${currentNovelTitle}》` : ""}`
-      : run?.status === "failed"
+    : runDisplayStatus === "running"
+      ? `Starlume 正在创作${currentNovelTitle ? bookTitle(currentNovelTitle) : ""}`
+      : runDisplayStatus === "needs_review"
         ? "创作流程需要你处理"
         : currentNovelTitle
-          ? `继续创作《${currentNovelTitle}》`
+          ? `继续创作${bookTitle(currentNovelTitle)}`
           : books[0]
-            ? `继续创作《${books[0].title}》`
+            ? `继续创作${bookTitle(books[0].title)}`
             : "从一个故事灵感开始";
 
   const activities = [
@@ -125,7 +137,7 @@ export function WorkspaceDashboard({
       text: `${call.status === "succeeded" ? "完成" : "执行"} ${call.prompt_name || call.task_type || "AI 创作任务"}`,
       at: call.created_at,
     })),
-    ...recentBooks.map(book => ({ id: `book-${book.id}`, text: `更新《${book.title || "未命名小说"}》`, at: book.updated_at })),
+    ...recentBooks.map(book => ({ id: `book-${book.id}`, text: `更新${bookTitle(book.title)}`, at: book.updated_at })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 5);
 
   return (
@@ -149,7 +161,7 @@ export function WorkspaceDashboard({
           </div>
           <h3>{focusTitle}</h3>
           <p>
-            {run?.status === "running" && run.current_node_key
+            {runDisplayStatus === "running" && run?.current_node_key
               ? `当前步骤：${run.nodes.find(node => node.node_key === run.current_node_key)?.title || run.current_node_key}`
               : `${chaptersCount} 个章节已进入当前工作区`}
           </p>
@@ -218,7 +230,7 @@ export function WorkspaceDashboard({
                     <span className="book-glyph"><BookOpen size={20} /></span>
                     <span className="book-status">{STATUS_LABELS[book.status] || "创作中"}</span>
                   </div>
-                  <h4>{book.title || "未命名小说"}</h4>
+                  <h4>{cleanNovelTitle(book.title)}</h4>
                   <p>{book.chapter_count || 0} 章 · {(book.total_words || 0).toLocaleString("zh-CN")} 字</p>
                   {percent !== null && <div className="fine-progress" aria-label={`目标字数完成 ${percent}%`}><span style={{ width: `${percent}%` }} /></div>}
                   <small>最近更新于 {relativeTime(book.updated_at || book.created_at)}</small>

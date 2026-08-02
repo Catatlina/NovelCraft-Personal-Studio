@@ -266,18 +266,27 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
       // P0-T3: aggregate per-snapshot market analysis across platforms and
       // collect the union of topic candidates (deduped by title).
       const platformKeys = [...new Set(succeeded.map(s => s.source_key))];
+      const results = await Promise.allSettled(succeeded.map(snap => apiRaw<Wrapped<any>>(
+        `/api/v1/ranking/snapshots/${snap.id}/analyze`,
+        { method: "POST", body: "{}" },
+      )));
       const allCandidates: Topic[] = [];
-      let lastSummary = "";
-      for (const snap of succeeded) {
-        const res = await apiRaw<Wrapped<any>>(`/api/v1/ranking/snapshots/${snap.id}/analyze`, {
-          method: "POST", body: "{}",
-        });
-        const d = res.data;
-        lastSummary = d.summary || lastSummary;
+      const summaries: string[] = [];
+      const failedAnalyses: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          failedAnalyses.push(succeeded[index].source_key);
+          return;
+        }
+        const d = result.value.data;
+        if (d.summary) summaries.push(d.summary);
         const cs: Topic[] = Array.isArray(d.candidates)
           ? d.candidates
           : (Array.isArray(d.topic_candidates) ? d.topic_candidates : []);
         allCandidates.push(...cs);
+      });
+      if (!allCandidates.length && failedAnalyses.length === results.length) {
+        throw new Error(`所有平台分析均失败：${failedAnalyses.join("、")}`);
       }
       const seen = new Set<string>();
       const deduped = allCandidates.filter(c => {
@@ -287,11 +296,11 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         return true;
       });
       setMultiAnalysisResult({
-        summary: lastSummary || `多平台聚合分析完成：${platformKeys.length} 个平台，产出 ${deduped.length} 个选题候选`,
+        summary: summaries[0] || `多平台聚合分析完成：${platformKeys.length} 个平台，产出 ${deduped.length} 个选题候选`,
         candidates: deduped,
         platform_keys: platformKeys,
       });
-      setMessage(`多平台聚合分析完成：${platformKeys.length} 个平台，产出 ${deduped.length} 个选题候选`);
+      setMessage(`多平台聚合分析完成：${platformKeys.length} 个平台，成功 ${results.length - failedAnalyses.length}/${results.length} 个平台，产出 ${deduped.length} 个选题候选${failedAnalyses.length ? `；失败：${failedAnalyses.join("、")}` : ""}`);
     } catch (error) { setMessage(`聚合分析失败：${errorText(error)}`); }
     finally { setMultiAnalysisLoading(false); }
   }

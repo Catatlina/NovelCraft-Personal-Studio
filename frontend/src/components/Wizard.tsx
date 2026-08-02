@@ -126,7 +126,7 @@ export function Wizard({
     if (!genre.trim()) nextErrors.genre = "请选择小说题材";
     if (!style.trim()) nextErrors.style = "请描述希望保持的写作风格";
     if (targetWords < 10000) nextErrors.targetWords = "目标字数不能少于 10,000";
-    if (targetWords > 5000000) nextErrors.targetWords = "目标字数不能超过 500 万";
+    if (targetWords > 3000000) nextErrors.targetWords = "目标字数不能超过 300 万";
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length === 0) startBootstrap();
   }
@@ -231,7 +231,7 @@ export function Wizard({
               type="number"
               value={targetWords}
               min={10000}
-              max={5000000}
+              max={3000000}
               step={10000}
               onChange={event => { setTargetWords(Number(event.target.value)); clearError("targetWords"); }}
               aria-invalid={Boolean(errors.targetWords)}

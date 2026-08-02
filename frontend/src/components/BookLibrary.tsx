@@ -169,6 +169,16 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
     return match ? [{ seq: match[1], title: match[2].trim(), raw: line }] : [];
   });
 
+  async function readDirectoryFile(file?: File) {
+    if (!file) return;
+    try {
+      setDirectoryText(await file.text());
+      setNotice(`已读取目录文件：${file.name}`);
+    } catch (caught) {
+      setNotice(`目录文件读取失败：${String(caught)}`);
+    }
+  }
+
   const importDirectory = async (book: Book) => {
     if (!importPreview.length) { setNotice("没有识别到章节目录，请使用“第1章 标题”等格式。"); return; }
     setBusy(book.id); setNotice("");
@@ -190,8 +200,13 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = `${book.title}.${format === "txt" ? "txt" : "md"}`;
+      link.style.display = "none";
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(link.href);
+      window.setTimeout(() => {
+        link.remove();
+        URL.revokeObjectURL(link.href);
+      }, 0);
     } catch (caught) { setNotice(`导出失败：${String(caught)}`); } finally { setBusy(""); }
   };
 
@@ -477,6 +492,10 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
           {importBookId === book.id && <div style={{ marginTop: 14, padding: 14, background: "var(--bg)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
             <strong style={{ fontSize: 13 }}>章节目录预览</strong>
             <small style={{ display: "block", color: "var(--text-3)", marginTop: 4 }}>粘贴 TXT 目录；预览不会写入，点击确认后才创建空白计划章节。重复标题由后端跳过。</small>
+            <label className="btn-sm" style={{ display: "inline-flex", marginTop: 8, background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)", cursor: "pointer" }}>
+              读取目录文件
+              <input type="file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv" style={{ display: "none" }} onChange={event => { void readDirectoryFile(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+            </label>
             <textarea className="form-input" rows={5} value={directoryText} onChange={event => setDirectoryText(event.target.value)} placeholder={"第1章 初入异界\n第2章 规则觉醒"} style={{ marginTop: 8 }} />
             <small style={{ display: "block", color: "var(--text-3)", marginTop: 4 }}>识别 {importPreview.length} 条{directoryText.trim() && !importPreview.length ? "；当前格式无法识别" : ""}</small>
             {importPreview.length > 0 && <ol style={{ maxHeight: 120, overflow: "auto", margin: "6px 0", paddingLeft: 24, fontSize: 12, color: "var(--text-2)" }}>

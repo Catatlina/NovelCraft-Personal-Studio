@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ApiEnvelope, ApiError, apiRaw } from "../lib/api";
+import { cleanNovelTitle } from "../lib/titleDisplay";
 
 type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string }> };
 type Content = {
@@ -75,6 +76,16 @@ const RUN_LABELS: Record<string, string> = {
   needs_review: "质量待处理",
   pending_approval: "等待生成确认",
 };
+
+function visibleRunStatus(run: Run | null): string {
+  if (!run) return "pending";
+  const statuses = new Set((run.nodes || []).map(node => node.status));
+  if (statuses.has("running") || statuses.has("queued")) return "running";
+  if (statuses.has("pending_approval") || statuses.has("waiting_human")) return "pending_approval";
+  if (statuses.has("failed") || statuses.has("pending_budget") || statuses.has("pending_provider") || statuses.has("needs_review")) return "needs_review";
+  if (statuses.has("pending")) return "pending";
+  return run.status || "pending";
+}
 
 function formatTime(value?: string | null): string {
   if (!value) return "—";
@@ -161,7 +172,9 @@ export function Progress({
   );
   const succeededCount = nodes.filter(node => node.status === "succeeded").length;
   const percent = nodes.length ? Math.round((succeededCount / nodes.length) * 100) : 0;
-  const activeNode = nodes.find(node => node.status === "running" || node.node_key === currentKey);
+  const activeNode = nodes.find(node => node.status === "running")
+    || nodes.find(node => node.node_key === currentKey && ["pending", "queued"].includes(node.status));
+  const runDisplayStatus = visibleRunStatus(run);
   const failedCount = nodes.filter(node => node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" || node.status === "needs_review").length;
   const pendingApproval = nodes.some(node => node.status === "pending_approval" || node.status === "waiting_human") || run?.status === "pending_approval";
   const canonicalGeneration = (run?.context?.canonical_generation || {}) as Record<string, unknown>;
@@ -170,7 +183,7 @@ export function Progress({
   const canonicalScore = canonicalGeneration.review_score;
   const canonicalNeedsReview = canonicalStatus === "needs_review" || canonicalStatus === "needs_rewrite" || run?.status === "needs_review";
   const planningNodes = nodes.filter(node => PLANNING_NODES.has(node.node_key));
-  const novelName = novel?.title || selectedTitle || titles[0] || "未命名小说";
+  const novelName = cleanNovelTitle(novel?.title || selectedTitle || titles[0]);
 
   async function retry(node: RunNode) {
     if (!run) return;
@@ -178,6 +191,7 @@ export function Progress({
     setNotice(null);
     try {
       await apiRaw(`/api/v1/runs/${run.id}/nodes/${node.node_key}/retry`, { method: "POST", body: "{}" });
+      await onNewRun(run.id);
       setNotice({ kind: "success", text: `“${node.title}”已重新排队，页面会自动刷新状态。` });
     } catch (caught) {
       const detail = caught instanceof ApiError ? caught.message : String(caught);
@@ -280,11 +294,11 @@ export function Progress({
           <p className="eyebrow">CREATION PROGRESS</p>
           <h2>{novelName}</h2>
           <p>
-            {activeNode ? `正在执行：${activeNode.title}` : pendingApproval ? "正文生成等待确认，尚未写入最终章节。" : canonicalNeedsReview ? "正文草稿已保存，但质量门未通过，等待重写。" : failedCount ? "流程遇到问题，请查看失败步骤。" : run.status === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
+            {activeNode ? `正在执行：${activeNode.title}` : pendingApproval ? "正文生成等待确认，尚未写入最终章节。" : canonicalNeedsReview ? "正文草稿已保存，但质量门未通过，等待重写。" : failedCount ? "流程遇到问题，请查看失败步骤。" : runDisplayStatus === "succeeded" ? "策划与首章生成已经完成。" : "等待流程继续。"}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span className={`progress-run-state ${run.status || "pending"}`}>{RUN_LABELS[run.status || "pending"] || run.status}</span>
+          <span className={`progress-run-state ${runDisplayStatus}`}>{RUN_LABELS[runDisplayStatus] || runDisplayStatus}</span>
           {failedCount > 0 && (
             <button className="btn-sm btn-primary" disabled={retrying !== ""} onClick={() => {
               nodes.filter(n => RETRYABLE_STATUSES.has(n.status)).forEach(n => retry(n));

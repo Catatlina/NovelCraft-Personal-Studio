@@ -35,9 +35,23 @@ const DIMENSION_LABELS: Record<string, string> = {
   pacing: "节奏",
 };
 
+function readableItem(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return String(item ?? "");
+  const record = item as Record<string, unknown>;
+  const description = record.description || record.issue || record.message || record.reason || record.title;
+  const suggestion = record.suggestion || record.recommendation || record.fix;
+  if (description && suggestion) return `${String(description)}（建议：${String(suggestion)}）`;
+  if (description) return String(description);
+  return Object.entries(record)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(([key, value]) => `${key}：${typeof value === "object" ? JSON.stringify(value) : String(value)}`)
+    .join("；");
+}
+
 function cleanItems(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.map(item => typeof item === "string" ? item : JSON.stringify(item)).filter(Boolean);
+  return value.map(readableItem).map(item => item.trim()).filter(Boolean);
 }
 
 function statusLabel(status?: string) {

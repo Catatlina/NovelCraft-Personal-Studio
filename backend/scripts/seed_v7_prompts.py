@@ -21,9 +21,9 @@ RUNTIME_PROMPTS: tuple[tuple[str, str], ...] = (
     ("v7.memory.extract", "1.0.0"),
     ("v7.review.seven_dimension", "1.1.0"),
     ("v7.generation.scene_plan", "1.1.0"),
-    ("v7.generation.chapter", "1.1.0"),
+    ("v7.generation.chapter", "1.2.0"),
     ("v7.generation.continuation", "1.1.0"),
-    ("bootstrap.final_humanize", "1.0.4"),
+    ("bootstrap.final_humanize", "1.0.5"),
     ("editor.polish", "runtime-1"),
 )
 

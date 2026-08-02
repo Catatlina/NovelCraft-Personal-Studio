@@ -48,6 +48,20 @@ def _repeated_phrases(text: str) -> list[dict[str, Any]]:
     ][:5]
 
 
+def _repeated_paragraph_opening(text: str) -> dict[str, Any]:
+    """Detect a mechanical paragraph opening without banning pronouns."""
+    paras = [item for item in re.split(r"\n{2,}|\n", text) if item.strip()]
+    if len(paras) < 12:
+        return {"opening": "", "count": 0, "ratio": 0.0}
+    openings: Counter[str] = Counter()
+    for paragraph in paras:
+        first = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", paragraph.strip())
+        if first:
+            openings[first[:1]] += 1
+    opening, count = openings.most_common(1)[0] if openings else ("", 0)
+    return {"opening": opening, "count": count, "ratio": round(count / len(paras), 4)}
+
+
 def analyze_deai_patterns(text: str) -> dict[str, Any]:
     """Return explainable risk signals; higher risk means more review needed."""
     if not text or not text.strip():
@@ -63,6 +77,7 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
             "ellipsis_count": 0,
             "ai_phrase_hits": 0,
             "repeated_phrases": [],
+            "repeated_paragraph_opening": {"opening": "", "count": 0, "ratio": 0.0},
         }
 
     compact = re.sub(r"\s+", "", text)
@@ -70,10 +85,15 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
     lengths = _sentence_lengths(text)
     average = mean(lengths) if lengths else 0.0
     burstiness = (pstdev(lengths) / average) if len(lengths) > 1 and average else 0.0
-    dash_count = text.count("——") + text.count("—") + text.count("--")
-    ellipsis_count = text.count("……") + text.count("...")
+    # Match long dashes as one token; counting both "——" and its two "—"
+    # characters overstated the density and made the metric hard to explain.
+    dash_count = len(re.findall(r"——|--|—", text))
+    ellipsis_count = len(re.findall(r"……|\.\.\.|…{2,}", text))
     ai_phrase_hits = sum(text.count(phrase) for phrase in _AI_PHRASES)
     repeated = _repeated_phrases(text)
+    repeated_opening = _repeated_paragraph_opening(text)
+    dash_density = dash_count / size * 1000
+    ellipsis_density = ellipsis_count / size * 1000
 
     flags: list[dict[str, Any]] = []
     # Density is meaningful at chapter scale.  A single deliberate dash in a
@@ -84,6 +104,12 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         flags.append({"code": "ellipsis_density", "severity": "low", "message": "省略号密度偏高，可能形成固定情绪模板"})
     if len(lengths) >= 10 and burstiness < 0.18:
         flags.append({"code": "uniform_cadence", "severity": "medium", "message": "句长过于整齐，缺少网文阅读所需的节奏起伏"})
+    if repeated_opening["ratio"] >= 0.3:
+        flags.append({
+            "code": "repeated_paragraph_opening",
+            "severity": "medium",
+            "message": f"{repeated_opening['opening']}字开头段落占比偏高，可能形成机械句式",
+        })
     if ai_phrase_hits:
         flags.append({"code": "ai_phrase", "severity": "medium", "message": f"命中 {ai_phrase_hits} 个高风险套话"})
     if repeated:
@@ -91,10 +117,12 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
 
     risk_score = min(
         100,
-        ai_phrase_hits * 8
+        ai_phrase_hits * 12
         + max(0, int((0.18 - burstiness) * 100))
-        + (max(0, int((dash_count / size * 1000 - 5) * 8)) if size >= 200 else 0)
-        + len(repeated) * 3,
+        + (max(0, int((dash_density - 4) * 6)) if size >= 200 else 0)
+        + (max(0, int((ellipsis_density - 3) * 4)) if size >= 200 else 0)
+        + (max(0, int((repeated_opening["ratio"] - 0.25) * 45)) if repeated_opening["ratio"] else 0)
+        + len(repeated) * 4,
     )
     return {
         "schema_version": "deai-metrics-v1",
@@ -104,8 +132,10 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         "sentence_length_mean": round(average, 2),
         "sentence_length_burstiness": round(burstiness, 4),
         "dash_count": dash_count,
-        "dash_density_per_1000": round(dash_count / size * 1000, 3),
+        "dash_density_per_1000": round(dash_density, 3),
         "ellipsis_count": ellipsis_count,
+        "ellipsis_density_per_1000": round(ellipsis_density, 3),
         "ai_phrase_hits": ai_phrase_hits,
         "repeated_phrases": repeated,
+        "repeated_paragraph_opening": repeated_opening,
     }

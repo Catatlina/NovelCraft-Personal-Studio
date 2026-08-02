@@ -5,6 +5,8 @@ from app.prompt_registry import PROMPT_SEEDS, render_prompt
 from app.workers.tasks import (
     _assert_story_revision_quality,
     _humanize_quality_feedback,
+    _normalize_final_humanize_output,
+    _target_words_guard,
     _polish_quality_feedback,
     _reflow_polish_paragraphs,
 )
@@ -70,6 +72,29 @@ def test_humanize_quality_feedback_explains_retry_constraints():
     assert "本章必须至少输出" in feedback
     assert "逐段等量改写" in feedback
     assert "60%" in feedback
+
+
+def test_final_humanize_normalizes_collapsed_provider_paragraphs_without_loss():
+    before = "\n\n".join(
+        f"第{i + 1}段：人物走到门前，门内传来脚步声，事情继续变化。"
+        for i in range(59)
+    )
+    candidate = before.replace("\n\n", "")
+
+    normalized, feedback = _normalize_final_humanize_output(
+        before,
+        {"humanized_text": candidate},
+    )
+
+    assert not feedback
+    assert len(normalized["humanized_text"].split("\n\n")) >= 36
+    assert normalized["quality_shape"]["candidate_chars"] == len(candidate.replace("\n", ""))
+
+
+def test_plan_target_words_is_a_hard_fidelity_requirement():
+    assert _target_words_guard({"creative_bible": "目标总字数：12万字"}, 120000) == ""
+    feedback = _target_words_guard({"creative_bible": "总字数：200万字"}, 120000)
+    assert "120000" in feedback
 
 
 def test_polish_quality_feedback_explains_real_paragraph_merge_failure():

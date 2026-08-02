@@ -29,6 +29,7 @@ from ...services.ai_runtime import (
     record_async_execution,
 )
 from ...services.unified_gateway import UnifiedAIGateway
+from ...services.text_quality import normalize_and_validate_rewrite
 from ..quality.deai_metrics import analyze_deai_patterns
 
 logger = logging.getLogger(__name__)
@@ -576,31 +577,27 @@ class DeAIPipeline:
             max_tokens=max(3500, int(chinese_word_count(text) * 1.4)),
             temperature=0.45,
             prompt_name="bootstrap.final_humanize",
-            prompt_version="1.0.4",
+            prompt_version="1.0.5",
         )
         payload = ai.get("data") or {}
         humanized = str(payload.get("humanized_text") or "").strip()
-        if not humanized:
-            raise AIGatewayError("final_humanize returned empty text")
-        before_chars = chinese_word_count(text)
-        after_chars = chinese_word_count(humanized)
-        if before_chars < 1 or after_chars < int(before_chars * 0.8) or after_chars > int(before_chars * 1.2):
-            raise AIGatewayError(
-                f"final_humanize changed chapter length outside safe range: {before_chars}->{after_chars}"
+        try:
+            # The provider may accidentally collapse JSON newlines.  Reflow
+            # only at sentence boundaries; reject actual content loss.
+            text, shape = normalize_and_validate_rewrite(
+                text,
+                humanized,
+                minimum_chars=50,
             )
-        before_paragraphs = [p for p in text.split("\n") if p.strip()]
-        after_paragraphs = [p for p in humanized.split("\n") if p.strip()]
-        if len(after_paragraphs) < max(1, int(len(before_paragraphs) * 0.6)):
-            raise AIGatewayError(
-                f"final_humanize dropped too many paragraphs: {len(before_paragraphs)}->{len(after_paragraphs)}"
-            )
-        text = humanized
+        except ValueError as exc:
+            raise AIGatewayError(f"final_humanize {exc}") from exc
         after_metrics = analyze_deai_patterns(text)
         layers.append(
             {
                 "layer": "semantic_final_humanize",
                 "changes": len(payload.get("changes") or []),
                 "patterns_removed": payload.get("ai_patterns_removed") or [],
+                "shape": shape,
                 "usage": ai.get("usage") or {},
             }
         )
@@ -1337,12 +1334,13 @@ class GenerationEngine:
                 system_prompt=(
                     "你是一位专业中文网络小说作者。写作要求：画面感强、对白自然、"
                     "避免总结性旁白与说教结尾、避免翻译腔。直接输出正文，不要标题、"
-                    "不要任何解释或markdown标记。"
+                    "不要任何解释或markdown标记。标点不设禁用清单，按人物语气和"
+                    "场景功能使用；只避免整章高密度、连续重复的模板化符号。"
                 ),
                 max_tokens=4000,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
-                prompt_version="1.1.0",
+                prompt_version="1.2.0",
             )
             add_usage(step, first)
             text = first["text"].strip()
@@ -1359,11 +1357,12 @@ class GenerationEngine:
                     system_prompt=(
                         "你是一位专业中文网络小说作者，正在续写同一章的后半部分。"
                         "直接接着写正文，不要重复已有内容，不要写标题或说明。"
+                        "保持自然分段和人物语气；标点按语义使用，不要批量堆叠同一符号。"
                     ),
                     max_tokens=3000,
                     temperature=0.85,
                     prompt_name="v7.generation.continuation",
-                    prompt_version="1.1.0",
+                    prompt_version="1.2.0",
                 )
                 add_usage(step, cont)
                 text = text.rstrip() + "\n" + cont["text"].strip()
@@ -1475,7 +1474,6 @@ class GenerationEngine:
             f"====================\n"
             f"现在写第 {chapter_number} 章：《{scene_plan.get('chapter_title')}》\n"
             f"视角人物：{scene_plan.get('pov_character', '主角')}\n"
-            f"本章目的：{scene_plan.get('scene_goal', '')}\n"
             f"核心冲突：{scene_plan.get('conflict', '')}\n"
             f"节奏：{scene_plan.get('pacing', 'medium')}\n"
             f"读者承诺：{scene_plan.get('reader_promise', '')}\n"
@@ -1489,16 +1487,22 @@ class GenerationEngine:
             f"请写出不少于 {target_word_count} 个汉字的完整章节正文。"
             f"必须与前情提要和已有设定保持一致，不得与【必须遵守的约束】冲突。"
             "正文质量要求：开头两段直接承接上一章的动作、地点或未决问题，不要重新讲背景；"
-            "在篇幅允许时每约 800-1200 字推进一次局部变化、信息揭示或情绪转折，但不要机械插入；"
+            "每个场景都要完成‘目标→阻碍→选择→代价/结果’，在篇幅允许时推进局部变化、"
+            "信息揭示或情绪转折；可参考每约 800-1200 字出现一次局部变化，但只能作为节奏检查，"
+            "不得按固定字数机械插入；"
+            "转折前给读者可见的动作、线索或异常，高潮后留下具体余波；"
+            "人物只能使用自己已经获得的信息，能力、物品、时间和地点必须有来源；"
+            "句式长短要有变化，避免连续段落用同一主语和同一收束方式。"
             "章末必须把钩子落实为动作、发现或新的选择，不得用总结/说教代替；"
-            "情绪要有起伏，避免每段都用同一种‘提出问题-解释-总结’结构。"
+            "情绪要有起伏，避免每段都用同一种‘提出问题-解释-总结’结构；"
+            "不要为了‘去AI味’禁用任何单个词或标点，判断标准是整章分布、语境和阅读体验。"
         )
 
     @staticmethod
     def _build_continuation_prompt(
         text: str, scene_plan: dict[str, Any], missing: int
     ) -> str:
-        tail = text[-800:]
+        tail = text[-1600:]
         beats = scene_plan.get("beats") or []
         remaining = "、".join(b.get("name", "") for b in beats[-2:]) if beats else ""
         return (

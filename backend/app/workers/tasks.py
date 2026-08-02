@@ -33,6 +33,7 @@ from app.core.context_budget import cap_context_tokens
 from app.core.byok import resolve_byok_key, stash_byok_key
 from app.core.concurrency import acquire_ai_slot, release_ai_slot
 from app.services.novel_export import extract_body_text
+from app.services.text_quality import normalize_and_validate_rewrite
 from app.services.prompt_compiler import (select_strategies, compile_strategy_directive,
                                            compile_prompt, skill_hints_for_strategies,
                                            SKILL_GENERATE_CONFLICT, SKILL_GENERATE_HOOK)
@@ -538,6 +539,64 @@ def _humanize_quality_feedback(before_text: str, output: dict) -> str:
             "自然分段数必须保留至少 60%。"
         )
     return ""
+
+
+def _normalize_final_humanize_output(before_text: str, output: dict) -> tuple[dict, str]:
+    """Make provider paragraph collapse lossless before the quality retry.
+
+    The final humanizer is allowed to change wording, never to delete story
+    material.  A provider can still serialize several paragraphs into one
+    string, so normalize at sentence boundaries before applying the normal
+    paragraph/length gate.  Returning feedback instead of raising lets the
+    existing three-attempt loop obtain a fresh provider result.
+    """
+    candidate = str(output.get("humanized_text") or "")
+    try:
+        normalized, shape = normalize_and_validate_rewrite(
+            before_text,
+            candidate,
+            min_ratio=0.8,
+            max_ratio=1.2,
+            minimum_chars=50,
+        )
+    except ValueError as exc:
+        return output, (
+            f"final_humanize {exc}。请逐段等量改写完整原文，保留全部事件、动作、对话和细节，"
+            "不得概括、删减或只返回摘要。"
+        )
+    normalized_output = dict(output)
+    normalized_output["humanized_text"] = normalized
+    normalized_output["quality_shape"] = shape
+    return normalized_output, ""
+
+
+def _target_words_guard(output: dict, target_words: Any) -> str:
+    """Require the creative bible to carry the user's exact length target.
+
+    The model may express a round target as ``12万字`` instead of ``120000``;
+    both forms are accepted.  A different explicit total is not accepted,
+    because downstream volume/chapter planning would otherwise drift.
+    """
+    try:
+        target = int(target_words or 0)
+    except (TypeError, ValueError):
+        target = 0
+    if target <= 0:
+        return ""
+    bible = str(output.get("creative_bible") or "")
+    compact = re.sub(r"[\\s,，_、]", "", bible)
+    exact = str(target)
+    if exact in compact:
+        return ""
+    if target % 10000 == 0:
+        wan = str(target // 10000)
+        if re.search(rf"{re.escape(wan)}(?:\\.0+)?万", compact):
+            return ""
+    else:
+        wan = f"{target / 10000:.4f}".rstrip("0").rstrip(".")
+        if re.search(rf"{re.escape(wan)}万", compact):
+            return ""
+    return f"原始需求目标总字数为 {target} 字，creative_bible 必须明确写出该目标，不能改成其他总字数"
 
 
 def _reflow_polish_paragraphs(before_text: str, output: dict) -> dict:
@@ -1455,6 +1514,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         ),
                     )
                     output = validate_task_output(task_type, output)
+                    target_feedback = _target_words_guard(
+                        output,
+                        run_context.get("target_words"),
+                    )
+                    if target_feedback:
+                        fidelity_feedback = [target_feedback]
+                        continue
                     audit = complete(
                         run_id=run_id,
                         node_key=node_key,
@@ -1463,6 +1529,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         prompt_name="bootstrap.audit_plan_fidelity",
                         variables={
                             "idea": run_context.get("idea", ""),
+                            "target_words": run_context.get("target_words", ""),
                             "plan_output": json.dumps(output, ensure_ascii=False),
                         },
                         client_mutation_id=(
@@ -1526,6 +1593,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         ),
                     )
                     output = validate_task_output(task_type or "", output)
+                    if task_type == "final_humanize":
+                        output, normalize_feedback = _normalize_final_humanize_output(
+                            str(run_context.get("_chapter_body") or ""),
+                            output,
+                        )
+                        if normalize_feedback:
+                            quality_feedback = normalize_feedback
+                            continue
                     if task_type == "write_polish":
                         output = _reflow_polish_paragraphs(
                             str(run_context.get("chapter_text") or ""),
@@ -2193,16 +2268,27 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             if cid and output.get("humanized_text"):
                 current = db.execute("SELECT body FROM contents WHERE id = %s", (cid,)).fetchone()
                 before_text = extract_body_text(current["body"] if current else "")
-                paragraphs = _chapter_paragraphs_from_text(output.get("humanized_text", ""))
                 try:
+                    normalized_text, shape = normalize_and_validate_rewrite(
+                        before_text,
+                        str(output.get("humanized_text") or ""),
+                        min_ratio=0.8,
+                        max_ratio=1.2,
+                        minimum_chars=50,
+                    )
+                    output["humanized_text"] = normalized_text
+                    output["quality_shape"] = shape
+                    paragraphs = _chapter_paragraphs_from_text(normalized_text)
                     _assert_story_revision_quality(
                         task_type=task_type,
                         before_text=before_text,
                         after_paragraphs=paragraphs,
-                        # story-deslop's medium pass permits up to 25% removal.
-                        min_ratio=0.75,
+                        min_ratio=0.8,
                     )
                     _assert_min_chapter_length(task_type, "\n".join(paragraphs))
+                except ValueError as exc:
+                    db.close()
+                    raise OutputValidationError(f"final_humanize {exc}") from exc
                 except OutputValidationError:
                     db.close()
                     raise

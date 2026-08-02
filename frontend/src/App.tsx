@@ -14,6 +14,7 @@ import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
 import { RankingCenter } from "./components/RankingCenter";
 import { NotFoundPage } from "./components/NotFoundPage";
 import { buildAiEditPreview, normalizeParagraphBreaks } from "./lib/editorPreview";
+import { cleanNovelTitle } from "./lib/titleDisplay";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
@@ -91,6 +92,31 @@ function textToDoc(text: unknown): TipTapDoc {
   return { type: "doc", content: normalized.split(/\n{2,}/).map(t => t.trim()).filter(Boolean).map(t => ({ type: "paragraph", text: t })) };
 }
 
+const EDITOR_OPERATION_TIMEOUT_MS = 120_000;
+
+function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    work.then(value => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }).catch(error => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+function displayRunStatus(run: Run | null): string | undefined {
+  if (!run) return undefined;
+  const statuses = new Set((run.nodes || []).map(node => node.status));
+  if (statuses.has("running") || statuses.has("queued")) return "running";
+  if (statuses.has("pending_approval") || statuses.has("waiting_human")) return "pending_approval";
+  if (statuses.has("failed") || statuses.has("pending_budget") || statuses.has("pending_provider") || statuses.has("needs_review")) return "needs_review";
+  if (statuses.has("pending")) return "pending";
+  return run.status;
+}
+
 export default function App() {
   const initialRoute = useMemo(routeFromLocation, []);
   const [tab, setTabState] = useState<Tab>(initialRoute.tab);
@@ -127,6 +153,8 @@ export default function App() {
   const [offlineNotice, setOfflineNotice] = useState("");
   const [streamPreview, setStreamPreview] = useState("");
   const [pendingAiEdit, setPendingAiEdit] = useState<PendingAiEdit | null>(null);
+  const [editorAiLoading, setEditorAiLoading] = useState(false);
+  const [editorAiOperation, setEditorAiOperation] = useState("");
   // 应用 AI 建议后强制 RichEditor 用最新正文重建一次，确保编辑区立即显示新内容（修复受控同步竞态）。
   const [editorResetNonce, setEditorResetNonce] = useState(0);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
@@ -278,8 +306,10 @@ export default function App() {
 
   useEffect(() => {
     if (!run) return;
-    // 终态（成功/失败）后停止轮询，避免无限每 2 秒请求 runs/contents
-    if (run.status === "succeeded" || run.status === "failed") return;
+    // 只有 run 与节点都进入终态后才停止轮询；旧数据可能出现 run=succeeded
+    // 但节点仍是 pending/failed，不能继续把页面显示成“已完成”。
+    const hasActiveNode = run.nodes.some(node => ["pending", "queued", "running"].includes(node.status));
+    if ((run.status === "succeeded" || run.status === "failed") && !hasActiveNode) return;
     const poll = setInterval(() => { if (run) refreshRun(run.id); }, 2000);
     return () => clearInterval(poll);
   }, [run?.id, run?.status]);
@@ -452,8 +482,8 @@ export default function App() {
     }
   }
 
-  async function saveChapter(textOverride?: string) {
-    if (!chapter) return;
+  async function saveChapter(textOverride?: string): Promise<boolean> {
+    if (!chapter) return false;
     const prevText = docToText(chapter.body);
     const nextText = textOverride ?? editorText;
     const mutationId = crypto.randomUUID();
@@ -467,7 +497,7 @@ export default function App() {
       setChapter(optimistic);
       await cacheSet(`offline-content:${chapter.id}`, optimistic);
       setOfflineNotice("内容已离线保存，联网后自动同步");
-      return;
+      return true;
     }
     try {
       const updated = await api<Content>(`/api/v1/contents/${chapter.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -476,10 +506,11 @@ export default function App() {
         await cacheDelete(`offline-content:${chapter.id}`);
         setOfflineNotice("检测到版本冲突，离线稿已保存到版本树");
         await loadVersions(chapter.id);
-        return;
+        return false;
       }
       setChapter(updated); await cacheDelete(`offline-content:${chapter.id}`); loadVersions(updated.id);
       sendEditSignal(updated.id, prevText, nextText);
+      return true;
     } catch (caught) {
       if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
       await queueOfflineMutation(mutationId, "content_update", `/api/v1/contents/${chapter.id}`, "PUT", body);
@@ -487,6 +518,7 @@ export default function App() {
       setChapter(optimistic);
       await cacheSet(`offline-content:${chapter.id}`, optimistic);
       setOfflineNotice("网络不可用，内容已进入同步队列");
+      return true;
     }
   }
 
@@ -539,8 +571,8 @@ export default function App() {
         { method: "POST", body: JSON.stringify({ selection: text, client_mutation_id: crypto.randomUUID() }) },
       );
       setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
-    } catch {
-      /* 实时审计失败静默，绝不阻断写作 */
+    } catch (caught) {
+      setOfflineNotice(caught instanceof ApiError ? `实时审计失败：${caught.message}` : "实时审计失败，请稍后重试");
     } finally {
       setLiveReviewing(false);
     }
@@ -570,50 +602,69 @@ export default function App() {
       setOfflineNotice("AI 操作已排队，联网后自动执行");
       return;
     }
+    setEditorAiLoading(true);
+    setEditorAiOperation(op);
     try {
       if (!["polish", "rewrite", "rewrite_chapter", "deai"].includes(op)) {
         // 流式优先：增量预览，完成后一次性替换选区
         setStreamPreview("");
-        const { text } = await apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
-          delta => setStreamPreview(previous => previous + delta));
-        setStreamPreview("");
-        const normalizedText = normalizeParagraphBreaks(textValue(text));
+        try {
+          const { text } = await withTimeout(
+            apiStream(`${url}/stream`, { method: "POST", body: JSON.stringify(body) },
+              delta => setStreamPreview(previous => previous + delta)),
+            EDITOR_OPERATION_TIMEOUT_MS,
+            "AI 续写等待超时，请检查模型服务后重试",
+          );
+          setStreamPreview("");
+          const normalizedText = normalizeParagraphBreaks(textValue(text));
+          if (!normalizedText.trim()) {
+            setError("AI 未返回可用正文，请重试");
+            return;
+          }
+          const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
+          setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
+          if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
+          return;
+        } catch (streamError) {
+          setStreamPreview("");
+          if (streamError instanceof ApiError && streamError.status === 404) {
+            // 旧后端无流式端点 → 走非流式
+          } else if (streamError instanceof ApiError && isOfflineApiError(streamError)) {
+            await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
+            setOfflineNotice("网络不可用，AI 操作已进入出站队列");
+            return;
+          } else {
+            setError(streamError instanceof ApiError ? (streamError.message || "AI 操作失败") : (streamError instanceof Error ? streamError.message : "AI 操作失败，请重试"));
+            return;
+          }
+        }
+      }
+      try {
+        const output = await withTimeout(
+          api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) }),
+          EDITOR_OPERATION_TIMEOUT_MS,
+          "AI 操作等待超时，请检查模型服务后重试",
+        );
+        const normalizedText = normalizeParagraphBreaks(textValue(output?.text));
         if (!normalizedText.trim()) {
           setError("AI 未返回可用正文，请重试");
           return;
         }
         const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
         setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
+        setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
         if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
-        return;
+      } catch (caught) {
+        if (!(caught instanceof ApiError) || !isOfflineApiError(caught)) {
+          setError(caught instanceof ApiError ? (caught.message || "AI 操作失败") : (caught instanceof Error ? caught.message : "AI 操作失败，请重试"));
+          return;
+        }
+        await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
+        setOfflineNotice("网络不可用，AI 操作已进入出站队列");
       }
-    } catch (streamError) {
-      setStreamPreview("");
-      if (streamError instanceof ApiError && streamError.status === 404) {
-        // 旧后端无流式端点 → 走非流式
-      } else if (streamError instanceof ApiError && !isOfflineApiError(streamError) && streamError.status !== 502) {
-        setError(streamError.message || "AI 操作失败");
-        return;
-      }
-    }
-    try {
-      const output = await api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) });
-      const normalizedText = normalizeParagraphBreaks(textValue(output?.text));
-      if (!normalizedText.trim()) {
-        setError("AI 未返回可用正文，请重试");
-        return;
-      }
-      const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
-      setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
-      setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
-      if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
-    } catch (caught) {
-      if (!(caught instanceof ApiError) || !isOfflineApiError(caught)) {
-        setError(caught instanceof ApiError ? (caught.message || "AI 操作失败") : "AI 操作失败，请重试");
-        return;
-      }
-      await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
-      setOfflineNotice("网络不可用，AI 操作已进入出站队列");
+    } finally {
+      setEditorAiLoading(false);
+      setEditorAiOperation("");
     }
   }
 
@@ -724,25 +775,29 @@ export default function App() {
 
   async function applyPendingAiEdit() {
     if (!pendingAiEdit) return;
-    setEditorText(pendingAiEdit.nextText);
-    setSelection("");
-    if (pendingAiEdit.sourceMutationId) {
-      await deleteMutation(pendingAiEdit.sourceMutationId);
-      setOfflineAiResults(results => results.filter(result => result.id !== pendingAiEdit.sourceMutationId));
-      setOfflineQueueCount((await listMutations()).length);
-    }
-    setPendingAiEdit(null);
-    setEditorResetNonce(n => n + 1);
-    // AI 建议应用后立即落库一次：拿到最新 updated_at 作为后续 autosave 的
-    // base 基准，否则 3 秒 debounce autosave 会用过期 base_updated_at 提交，
-    // 服务器判定 offline_conflict 并把 AI 文本回滚成旧内容（用户看到
-    // "建议应用不上"）。保存失败不阻塞 UI，冲突仍走版本树。
+    const proposed = pendingAiEdit;
     try {
-      await saveChapter(pendingAiEdit.nextText);
-    } catch {
-      // 保留原行为：autosave 或手动保存会兜底
+      // 先用最新 base_updated_at 落库，再清理预览；这样失败时原文和
+      // “待确认”建议都还在，不会出现 UI 显示已应用但服务器仍是旧稿。
+      const saved = await saveChapter(pendingAiEdit.nextText);
+      if (!saved) {
+        setOfflineNotice("应用失败：服务器存在版本冲突，原文未改变，请先处理冲突");
+        return;
+      }
+      setEditorText(proposed.nextText);
+      setSelection("");
+      if (proposed.sourceMutationId) {
+        await deleteMutation(proposed.sourceMutationId);
+        setOfflineAiResults(results => results.filter(result => result.id !== proposed.sourceMutationId));
+        setOfflineQueueCount((await listMutations()).length);
+      }
+      setPendingAiEdit(null);
+      setEditorResetNonce(n => n + 1);
+      setOfflineNotice("AI 建议已应用到草稿，已创建可恢复版本");
+    } catch (caught) {
+      setError(caught instanceof ApiError ? `应用 AI 建议失败：${caught.message}` : "应用 AI 建议失败，原文未改变，请重试");
+      setOfflineNotice("AI 建议尚未应用，原文保持不变");
     }
-    setOfflineNotice("AI 建议已应用到草稿，自动保存会创建可恢复版本");
   }
 
   function discardPendingAiEdit() {
@@ -819,8 +874,8 @@ export default function App() {
   };
 
   return (
-    <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={run?.status} userEmail={userEmail}
-      novels={novels.map(n => ({ id: n.id, title: n.title }))}
+    <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={displayRunStatus(run)} userEmail={userEmail}
+      novels={novels.map(n => ({ id: n.id, title: cleanNovelTitle(n.title, "待命名作品") }))}
       currentNovelId={novel?.id}
       onNovelChange={(novelId) => { void activateNovel(novelId); }}
       showSelector={tab === "progress" || tab === "editor" || tab === "review"}>
@@ -863,7 +918,7 @@ export default function App() {
       }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, editorResetNonce, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorText); } }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, editorResetNonce, editorAiLoading, editorAiOperation, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorText); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}

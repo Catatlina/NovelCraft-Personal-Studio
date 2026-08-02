@@ -1,5 +1,18 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-02 本轮一次性质量整改（当前发布批次）
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 生成前质量控制与跨章交接 | 可用 | V7 GenerationEngine、ContextAssembler、TruthStore、transition contract、场景目标/阻碍/选择/代价约束 | 真实 Provider 20 章长跑 |
+| 33 项内部审计与读者体验门 | 可用 | `audit_dimensions.py`、`ReviewEngine`、V7 quality gate；关键维度不能被平均分掩盖 | Provider 完整审计样本与人工相关性 |
+| 去 AI 味规则与生成前约束 | 可用 | `DEAI_IRON_RULES`、`deai_metrics.py`；按密度/重复/同构风险，不禁单个标点 | 真人样本误伤率和盲评 |
+| 去 AI 味/人文化内容保真 | 可用 | `text_quality.py`、Bootstrap/V7/编辑器统一字符比例与段落保真门 | 真实 Provider 多轮重写 |
+| 失败状态、重试和编辑器兜底 | 可用 | App/Progress/WorkspaceDashboard/Editor；节点失败不再显示已完成，应用前预览且保存失败不清理预览 | 生产真实失败注入复测 |
+| 本轮自动回归与真实性门禁 | 可用 | 后端 878 passed、138 skipped、1 xpassed；前端 34 passed；build；truthfulness 通过 | 生产部署后 smoke |
+
+本批次工作树在提交前不宣称生产已更新；真实 Provider 长跑、人工盲评和最终读者体验仍按外部证据单独验收。
+
 ## 2026-08-02 融合开发批次（工作树，基线 `94fc731`）
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
