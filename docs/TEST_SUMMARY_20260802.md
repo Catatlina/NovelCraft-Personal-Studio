@@ -98,3 +98,10 @@
 自动回放和产品链当前为**可用**。盲评包虽已生成 20 个 case，但 0/20 case 有两位评审，故生成质量目标仍不能标记为**已验收**。
 
 浏览器 E2E 最终复跑：**17 passed、10 skipped、0 failed**；10 个 skip 均为 Provider/异步状态/截图 opt-in 条件，不计入生成质量验收。
+
+## 10. 生产部署验证（2026-08-02）
+
+- `PROD_BASE=https://novel.xyjin.xyz backend/.venv/bin/python scripts/prod_smoke.py`：**15/15 通过**，未注入 Provider Key。
+- `BASE_URL=https://novel.xyjin.xyz npx playwright test e2e/prod-walkthrough*.spec.ts`：**4 passed**。
+- 生产迁移：`nc_v7_novel_project_mapping (head)`；8 个 runtime Prompt identity 已播种；发布前备份已生成。
+- 生产 smoke/浏览器走查只证明部署和用户入口可用，不替代真实 20 章质量长跑与人工盲评。

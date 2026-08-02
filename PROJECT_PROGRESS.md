@@ -734,3 +734,13 @@
 - 统一账本已完成本地真实对账：369/369 成功、0 失败、3.190506 元；V6 232 条、V7 137 条；Prompt provenance 可按版本和执行记录追溯。
 - 长跑中发现并修复批次提交、Provider schema 失败收口和 EPUB 依赖问题；修复后恢复运行完成，失败经历已保留在交接记录。
 - 人工盲评包已生成 20 个匿名 case，但 0/20 case 有两位独立评审；因此自动双轨与产品链标记为**可用**，人工盲评为**已接线**，生成质量达标与生产 V6/V7 合并验收不能宣称完成。
+
+## 2026-08-02 生产部署收口
+
+- 提交 `7c06fe3` 已推送 `origin/main`，生产机 `/opt/NovelCraft-Personal-Studio` 已 fast-forward 到该版本；远端原有运行时生成的 `backend/celerybeat-schedule` 未被覆盖。
+- 发布前备份已生成：`backups/pre-deploy-7c06fe3-20260802-161559.sql.gz`。
+- 生产迁移已执行到 `nc_v7_novel_project_mapping (head)`；8 个 runtime Prompt identity 已成功播种。
+- API、worker、beat、frontend、PostgreSQL、Redis 均正常；公网 `healthz` HTTP 200。
+- `PROD_BASE=https://novel.xyjin.xyz backend/.venv/bin/python scripts/prod_smoke.py` 全部 15 项通过；生产浏览器走查 `BASE_URL=https://novel.xyjin.xyz npx playwright test e2e/prod-walkthrough*.spec.ts` 为 **4 passed**。
+- 部署过程中首次 seed 因容器脚本导入路径缺少 `/app` 失败，已用正确 `PYTHONPATH=/app` 重试成功；该运行时问题已记录，不隐藏为无异常部署。
+- 生产部署当前标记为**可用**；生产真实 20 章双轨和人工盲评仍未执行，不能把部署 smoke 当作生成质量验收。

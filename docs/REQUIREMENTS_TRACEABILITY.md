@@ -29,7 +29,7 @@
 | NOV-S-003 | 修改密码 | `Settings.tsx` | auth password API | 已接线 | 页面/API 接线 | 正负例 E2E |
 | NOV-Q-001 | 单元、构建和确定性主链门禁 | Vitest、Playwright | 真 PostgreSQL/FastAPI | 已验收 | 提交 `07a8c0f`：本地后端 761 passed / 9 skipped / 1 xpassed、前端 12 passed、build、E2E 4 passed / 4 skipped、三项静态校验；Actions `30439322188` 五项全绿 | 后续批次继续维持同提交 CI |
 | NOV-Q-002 | 真实 AI 新 UI 全链 | protected Playwright | DeepSeek、run/ai_calls | 可用 | protected “小说主线⑤” 1 passed (5.2m)；run `955d4719-8e21-4043-8a3e-2352c06c0ce2` 20/20 nodes、22 succeeded ai_calls；Writer 含 Prompt Compiler 三层指令，最终一致性含五维读者体验；提交 `5c544ff` / Actions `30445384633` 五项全绿 | Repair Engine 正向 Provider 预览应用；最终生产 smoke 后提升已验收 |
-| NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 已接线 | 历史生产版本为 `91bcf9b`；当前 main 与本批修复均未部署 | 当前提交推送、CI 全绿、部署及生产 smoke |
+| NOV-D-001 | 当前版本推送和部署 | GitHub Actions、Docker | 生产基础设施 | 可用 | `7c06fe3` 已推送并部署到 `novel.xyjin.xyz`；迁移到 `nc_v7_novel_project_mapping`；生产 smoke 15/15、浏览器走查 4/4 | 生产真实 20 章双轨与人工盲评不属于部署 smoke |
 
 ## 更新规则
 
@@ -79,3 +79,10 @@
 | V7→V6 书库/编辑器/导出 | 可用 | 20 章 `contents`、mapping、编辑器、完成度、TXT/Markdown/EPUB 真实接口证据 | 目标部署环境回放 |
 | 人工盲评 | 已接线 | 20 个匿名 case 和评分模板已生成 | 0/20 case 达到两位评审 |
 | 生成质量目标 | 已接线 | 自动连续性、审稿、去味和重复风险指标已生成 | 人工评分及人感差异报告 |
+
+## 2026-08-02 生产部署证据
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 当前提交生产部署 | 可用 | `7c06fe3`；Docker 应用容器重建；迁移 head；公网 healthz 200 | 生产 20 章质量长跑 |
+| 生产用户入口 | 可用 | 生产 smoke 15/15；生产 Playwright 走查 4/4 | 真实 Provider 生成质量和人工盲评 |

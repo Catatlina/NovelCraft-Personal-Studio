@@ -496,3 +496,12 @@ bash scripts/ai_development_gate.sh
 - 运行时修复：补齐批次进度提交、子任务失败落批次 `failed`、EPUB 依赖；一次真实 schema 错误通过失败语义和恢复运行处理，未伪造为成功。
 - 人工盲评：`blind-review-packet.json` 已生成 20 个匿名 case，`blind-scores.template.csv` 已准备，但 0/20 case 达到两位评审，脚本仍是 `pending_manual_or_failed`。
 - 当前口径：真实本地双轨和产品链**可用**；人工盲评**已接线**；生成质量目标和生产 V6/V7 合并验收不能宣称完成。
+
+## 2026-08-02 生产部署最终记录
+
+- 运行时代码提交 `7c06fe3` 已推送并部署到 `https://novel.xyjin.xyz`；生产目录为 `/opt/NovelCraft-Personal-Studio`，远端 fast-forward 成功。
+- 部署前数据库备份：`backups/pre-deploy-7c06fe3-20260802-161559.sql.gz`。
+- `alembic upgrade head` 已执行到 `nc_v7_novel_project_mapping (head)`；8 个 runtime Prompt identity 已播种成功。
+- 生产容器 API/worker/beat/frontend/PostgreSQL/Redis 均运行正常，公网 healthz 200；生产 `prod_smoke.py` 15 项全部通过，生产浏览器走查 4/4 通过。
+- 首次 seed 因容器内 import path 未设置而失败，随后以 `PYTHONPATH=/app` 重试成功；这条运维纠偏保留在交接记录中。
+- 当前生产状态：部署链**可用**；真实生产 20 章长跑、人工盲评和生成质量目标仍未验收。
