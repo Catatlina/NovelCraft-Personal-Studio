@@ -170,6 +170,30 @@ def test_extract_body_text_reads_nested_tiptap_and_plain_shapes():
     assert extract_body_text(None) == ""
 
 
+def test_extract_body_text_does_not_concat_v7_denormalized_copies():
+    from app.services.novel_export import extract_body_text
+
+    body = {
+        "type": "doc",
+        "text": "第一段正文。\n\n第二段正文。",
+        "paragraphs": ["第一段正文。", "第二段正文。"],
+        "content": [
+            {
+                "type": "paragraph",
+                "text": "第一段正文。",
+                "content": [{"type": "text", "text": "第一段正文。"}],
+            },
+            {
+                "type": "paragraph",
+                "text": "第二段正文。",
+                "content": [{"type": "text", "text": "第二段正文。"}],
+            },
+        ],
+    }
+
+    assert extract_body_text(body) == "第一段正文。\n第二段正文。"
+
+
 def test_txt_export_includes_chapter_body_from_doc_format(monkeypatch):
     from app.services import novel_export
 

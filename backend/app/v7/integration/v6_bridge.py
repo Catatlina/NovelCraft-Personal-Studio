@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from ...db import connect, encode, new_id, row_to_dict
+from ...services.text_quality import duplicate_paragraph_stats
 from .project_mapping import ensure_novel_project_link
 from ..quality.continuity import build_state_delta
 
@@ -136,6 +137,12 @@ def _persist_v7_chapter(
 
     key = generation_key(novel_id, chapter_number)
     paragraphs = [p.strip() for p in text.replace("\r\n", "\n").split("\n") if p.strip()]
+    duplicate_paragraphs = duplicate_paragraph_stats(text)
+    if status == "reviewed" and float(duplicate_paragraphs.get("duplicate_ratio") or 0.0) >= 0.01:
+        raise ValueError(
+            "cannot persist a reviewed chapter with repeated full paragraphs: "
+            f"ratio={duplicate_paragraphs.get('duplicate_ratio')}"
+        )
     body = _tiptap_body(paragraphs)
     meta = {
         "seq": chapter_number,
@@ -153,6 +160,7 @@ def _persist_v7_chapter(
         "reader_experience": reader_experience or {},
         "review_issues": review_issues or [],
         "quality_gate": quality_gate or {},
+        "duplicate_paragraphs": duplicate_paragraphs,
         "rework_count": rework_count,
         "quality_reason": (
             "quality gate passed"

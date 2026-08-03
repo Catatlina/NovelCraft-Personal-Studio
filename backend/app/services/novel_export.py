@@ -21,12 +21,23 @@ def extract_body_text(body) -> str:
     if isinstance(body, list):
         return "\n".join(filter(None, (extract_body_text(node) for node in body)))
     if isinstance(body, dict):
-        parts = []
+        # V7 stores a denormalised compatibility shape with a top-level
+        # ``text`` copy, paragraph-node ``text`` copies, and standard nested
+        # TipTap text leaves.  They are representations of the same prose,
+        # not three pieces to concatenate.  Prefer the canonical content tree
+        # whenever it exists and only fall back to the legacy text field.
+        content = body.get("content")
+        if isinstance(content, list) and content:
+            return extract_body_text(content)
+        if isinstance(body.get("paragraphs"), list) and body["paragraphs"]:
+            return "\n".join(
+                str(item.get("text", "") if isinstance(item, dict) else item)
+                for item in body["paragraphs"]
+                if str(item.get("text", "") if isinstance(item, dict) else item).strip()
+            )
         if isinstance(body.get("text"), str):
-            parts.append(body["text"])
-        if isinstance(body.get("content"), list):
-            parts.append(extract_body_text(body["content"]))
-        return "\n".join(filter(None, parts))
+            return body["text"]
+        return ""
     return str(body)
 
 

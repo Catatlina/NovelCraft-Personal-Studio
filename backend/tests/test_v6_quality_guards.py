@@ -73,6 +73,36 @@ def test_final_humanize_repairs_provider_collapsed_paragraphs(monkeypatch):
     assert len(result["final_text"].replace("\n", "").replace(" ", "")) == len(collapsed.replace("\n", "").replace(" ", ""))
 
 
+def test_final_humanize_keeps_source_when_provider_expands_outside_safe_range(monkeypatch):
+    source = _chapter(paragraphs=4, chars=5)
+
+    def fake_complete(**_kwargs):
+        return {"humanized_text": source + "\n\n" + source, "changes": []}
+
+    monkeypatch.setattr("app.gateway.complete", fake_complete)
+
+    result = DeaiPipeline("project-1", "content-1", "第1章").final_humanize(source)
+
+    assert result["final_text"] == source
+    assert result["quality_gate"]["passed"] is False
+    assert "safe range" in result["quality_gate"]["message"]
+
+
+def test_deai_rewrite_keeps_source_when_provider_expands_outside_safe_range(monkeypatch):
+    source = _chapter(paragraphs=4, chars=5)
+
+    def fake_complete(**_kwargs):
+        return {"text": source + "\n\n" + source}
+
+    monkeypatch.setattr("app.gateway.complete", fake_complete)
+
+    result = DeaiPipeline("project-1", "content-1", "第1章").run(source)
+
+    assert result["final_text"] == source
+    assert result["quality_gate"]["code"] == "changed_length_outside_safe_range"
+    assert result["quality_gate"]["passed"] is False
+
+
 def test_fact_repair_requires_exact_anchor_and_never_invents_text():
     source = "周远山推开门。\n\n门后没有人。"
 

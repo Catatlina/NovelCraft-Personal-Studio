@@ -14,7 +14,11 @@ import logging
 import hashlib
 import re
 
-from app.services.text_quality import normalize_and_validate_rewrite
+from app.services.text_quality import (
+    content_chars,
+    duplicate_paragraph_stats,
+    normalize_and_validate_rewrite,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +97,10 @@ def _heuristic_polish(text: str) -> str:
     cleaned = text
     for phrase in _AI_TELLS:
         cleaned = cleaned.replace(phrase, "")
-    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    # Do not collapse newlines: a paragraph boundary is narrative structure,
+    # not expendable whitespace.  The old ``\s`` pattern turned a safe
+    # fallback into one giant paragraph with spaces.
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip() or text
 
 
@@ -163,13 +170,41 @@ class DeaiPipeline:
                 final_text,
                 minimum_chars=50,
             )
+            duplicate_stats = duplicate_paragraph_stats(final_text)
+            if float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01:
+                raise ValueError(
+                    "rewrite candidate contains repeated full paragraphs: "
+                    f"ratio={duplicate_stats.get('duplicate_ratio')}"
+                )
         except ValueError as exc:
-            raise OutputValidationError(f"final_humanize {exc}") from exc
+            message = str(exc)
+            if not (
+                "changed chapter length outside safe range" in message
+                or "repeated full paragraphs" in message
+            ):
+                raise OutputValidationError(f"final_humanize {message}") from exc
+            # A provider that expands or duplicates a chapter has returned an
+            # unsafe candidate.  Preserve the source and keep the operation
+            # visibly unverified; never turn the bad candidate into a success.
+            logger.warning("final_humanize candidate rejected: %s", message)
+            return {
+                "final_text": text,
+                "changes": [],
+                "ai_patterns_removed": [],
+                "quality_gate": {
+                    "passed": False,
+                    "code": "rewrite_candidate_rejected",
+                    "message": message,
+                },
+                "warnings": [message],
+            }
 
         return {
             "final_text": final_text,
             "changes": out.get("changes", []) if isinstance(out, dict) else [],
             "ai_patterns_removed": out.get("ai_patterns_removed", []) if isinstance(out, dict) else [],
+            "quality_gate": {"passed": True},
+            "warnings": [],
         }
 
     def run(self, text: str, *, style_profile: str = "") -> dict:
@@ -210,11 +245,53 @@ class DeaiPipeline:
         rewritten = (out.get("text") if isinstance(out, dict) else None) or ""
         if len(rewritten.strip()) < 20:
             raise OutputValidationError("deai.rewrite returned empty or too-short text")
-        source_chars = len(re.sub(r"\s+", "", text))
-        rewritten_chars = len(re.sub(r"\s+", "", rewritten))
+
+        source_chars = content_chars(text)
+        rewritten_chars = content_chars(rewritten)
+
+        def _reject_candidate(code: str, message: str) -> dict:
+            # Heuristic cleanup is deterministic and loss-aware.  It is safe
+            # only when it retained essentially all source material; otherwise
+            # the exact source is the only honest fallback.
+            heuristic_chars = content_chars(polished)
+            fallback_text = (
+                polished if heuristic_chars >= int(source_chars * 0.95) else text
+            )
+            layers.append({
+                "name": "AI 网文风格重写",
+                "note": code,
+                "applied": False,
+                "source_chars": source_chars,
+                "candidate_chars": rewritten_chars,
+                "reason": message,
+            })
+            logger.warning("deai.rewrite candidate rejected: %s", message)
+            return {
+                "original_score": original_score,
+                "final_score": quick_deai_score(fallback_text),
+                "layers": layers,
+                "final_text": fallback_text,
+                "quality_gate": {
+                    "passed": False,
+                    "code": code,
+                    "message": message,
+                    "source_chars": source_chars,
+                    "candidate_chars": rewritten_chars,
+                },
+                "warnings": [message],
+            }
+
         if rewritten_chars < int(source_chars * 0.8) or rewritten_chars > int(source_chars * 1.2):
-            raise OutputValidationError(
-                f"deai.rewrite changed length outside safe range: {source_chars}->{rewritten_chars}"
+            return _reject_candidate(
+                "changed_length_outside_safe_range",
+                f"deai.rewrite changed length outside safe range: {source_chars}->{rewritten_chars}",
+            )
+        duplicate_stats = duplicate_paragraph_stats(rewritten)
+        if float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01:
+            return _reject_candidate(
+                "duplicate_paragraph",
+                "deai.rewrite returned repeated full paragraphs: "
+                f"ratio={duplicate_stats.get('duplicate_ratio')}",
             )
         polished = rewritten
         layers.append({"name": "AI 网文风格重写", "note": "deai.rewrite", "applied": True})
@@ -242,4 +319,6 @@ class DeaiPipeline:
             "final_score": final_score,
             "layers": layers,
             "final_text": polished,
+            "quality_gate": {"passed": True},
+            "warnings": [],
         }

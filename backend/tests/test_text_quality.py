@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.text_quality import content_chars, normalize_and_validate_rewrite, normalize_narrative_paragraphs
+from app.services.text_quality import (
+    content_chars,
+    duplicate_paragraph_stats,
+    normalize_and_validate_rewrite,
+    normalize_narrative_paragraphs,
+)
 from app.v7.quality.deai_metrics import analyze_deai_patterns
 
 
@@ -42,3 +47,19 @@ def test_dash_metric_counts_long_dash_as_one_and_flags_density_only():
     assert metrics["dash_count"] == 8
     assert metrics["dash_density_per_1000"] < 5
     assert not any(flag["code"] == "dash_density" for flag in metrics["flags"])
+
+
+def test_duplicate_paragraph_stats_flags_material_full_paragraph_repetition():
+    paragraph = "沈夜把手按在门上，门内的声音停了一瞬，随后又传来三下敲击，事情因此留下新的后果。"
+    stats = duplicate_paragraph_stats("\n\n".join([paragraph, paragraph, "林薇没有回头，只把短棍往掌心里收紧。" ]))
+
+    assert stats["duplicate_paragraph_count"] == 1
+    assert stats["duplicate_ratio"] > 0.01
+    assert stats["adjacent_duplicate_count"] == 1
+
+
+def test_duplicate_paragraph_stats_ignores_short_refrains():
+    stats = duplicate_paragraph_stats("好。\n\n好。\n\n好。")
+
+    assert stats["duplicate_paragraph_count"] == 0
+    assert stats["duplicate_ratio"] == 0.0

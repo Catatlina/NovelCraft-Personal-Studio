@@ -39,6 +39,8 @@ DEAI_BLOCKING_FLAGS = {
     "dash_density",
     "uniform_cadence",
     "repeated_paragraph_opening",
+    "duplicate_paragraph",
+    "rewrite_candidate_rejected",
     "ai_phrase",
 }
 
@@ -91,6 +93,19 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
             "actual": deai_risk,
             "minimum": f"< {DEAI_HIGH_RISK_THRESHOLD}",
             "reason": "确定性表达指标显示 AI 腔风险过高，需要定向润色",
+        })
+    duplicate_summary = deai_metrics.get("duplicate_paragraphs") or {}
+    duplicate_ratio = duplicate_summary.get("duplicate_ratio")
+    if (
+        isinstance(duplicate_ratio, (int, float))
+        and duplicate_ratio >= 0.01
+        and not any(item.get("dimension") == "duplicate_paragraph" for item in failures)
+    ):
+        failures.append({
+            "dimension": "duplicate_paragraph",
+            "actual": duplicate_ratio,
+            "minimum": "< 0.01",
+            "reason": "正文存在完整段落重复，不能进入已完成/已发布状态",
         })
     for flag in deai_metrics.get("flags") or []:
         if not isinstance(flag, dict) or flag.get("code") not in DEAI_BLOCKING_FLAGS:

@@ -1443,6 +1443,7 @@ def ai_edit(
             chapter_title=str(content.get("title", "")),
         )
         result = pipeline.run(payload.selection)
+        deai_result = result
         candidate_text = _ensure_editor_paragraphs(result.get("final_text", payload.selection))
         # 字数硬门禁：去 AI 味不得压缩篇幅。不足则带反馈重跑一次
         # （deai.rewrite 已含篇幅硬要求，此兜底防模型不执行）。
@@ -1455,11 +1456,16 @@ def ai_edit(
             candidate2 = _ensure_editor_paragraphs(result2.get("final_text", payload.selection))
             if count_content_chars(candidate2) > count_content_chars(candidate_text):
                 candidate_text = candidate2
+                deai_result = result2
         # 最终兜底：重跑后仍不足 2000 → 宁可少改也不压缩剧情。
         # 「去AI味」的目标是改表达，绝不是删内容；压缩原文属于破坏性操作。
         if count_content_chars(candidate_text) < operation_min_chars and source_chars >= operation_min_chars:
             candidate_text = _ensure_editor_paragraphs(payload.selection)
-        output = {"text": candidate_text}
+        output = {
+            "text": candidate_text,
+            "deai_quality_gate": deai_result.get("quality_gate") or {"passed": True},
+            "deai_warnings": deai_result.get("warnings") or [],
+        }
     else:
         instruction = payload.instruction
         best = None
@@ -1537,6 +1543,17 @@ def ai_edit(
         from app.services.quality_risks import evaluate_editor_review_gate
         final_chars = count_content_chars(output.get("text") or payload.selection)
         output["review_7dim"]["deai_metrics"] = analyze_deai_patterns(output.get("text") or payload.selection)
+        deai_gate = output.get("deai_quality_gate") or {}
+        if deai_gate.get("passed") is False:
+            output["review_7dim"].setdefault("issues", []).append({
+                "dimension": "writing_quality",
+                "type": "rewrite_candidate_rejected",
+                "severity": "high",
+                "description": str(
+                    deai_gate.get("message") or "去 AI 味候选未通过篇幅/重复安全校验"
+                ),
+                "suggestion": "保留原文并重新发起去 AI 味，不能把未验证结果标为完成",
+            })
         final_gate = evaluate_editor_review_gate(
             output["review_7dim"],
             chars=final_chars,

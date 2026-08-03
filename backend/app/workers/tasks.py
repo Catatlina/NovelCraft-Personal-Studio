@@ -33,7 +33,7 @@ from app.core.context_budget import cap_context_tokens
 from app.core.byok import resolve_byok_key, stash_byok_key
 from app.core.concurrency import acquire_ai_slot, release_ai_slot
 from app.services.novel_export import extract_body_text
-from app.services.text_quality import normalize_and_validate_rewrite
+from app.services.text_quality import duplicate_paragraph_stats, normalize_and_validate_rewrite
 from app.services.prompt_compiler import (select_strategies, compile_strategy_directive,
                                            compile_prompt, skill_hints_for_strategies,
                                            SKILL_GENERATE_CONFLICT, SKILL_GENERATE_HOOK)
@@ -2796,6 +2796,20 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         score = float(review["score"])
         last_score = score
         issues = list(review.get("issues", []))
+        duplicate_paragraphs = duplicate_paragraph_stats(current_text)
+        duplicate_ratio = float(duplicate_paragraphs.get("duplicate_ratio") or 0.0)
+        if duplicate_ratio >= 0.01:
+            issues.append({
+                "dimension": "writing_quality",
+                "type": "duplicate_paragraph",
+                "severity": "high",
+                "description": (
+                    "正文存在完整段落重复，重复字符占比 "
+                    f"{duplicate_ratio:.1%}；必须删除重复副本，不能只标记完成"
+                ),
+                "suggestion": "保留一份原始段落，并重新检查段落边界和上下文承接",
+                "evidence": duplicate_paragraphs.get("examples") or [],
+            })
         if length_issue:
             score = min(score, threshold - 1)
             issues.append(length_issue)

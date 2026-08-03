@@ -11,6 +11,8 @@ from collections import Counter
 from statistics import mean, pstdev
 from typing import Any
 
+from ...services.text_quality import duplicate_paragraph_stats
+
 
 _SENTENCE_RE = re.compile(r"[^。！？!?\n]+[。！？!?]?")
 _AI_PHRASES = (
@@ -78,6 +80,7 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
             "ai_phrase_hits": 0,
             "repeated_phrases": [],
             "repeated_paragraph_opening": {"opening": "", "count": 0, "ratio": 0.0},
+            "duplicate_paragraphs": duplicate_paragraph_stats(""),
         }
 
     compact = re.sub(r"\s+", "", text)
@@ -92,6 +95,7 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
     ai_phrase_hits = sum(text.count(phrase) for phrase in _AI_PHRASES)
     repeated = _repeated_phrases(text)
     repeated_opening = _repeated_paragraph_opening(text)
+    duplicate_paragraphs = duplicate_paragraph_stats(text)
     dash_density = dash_count / size * 1000
     ellipsis_density = ellipsis_count / size * 1000
 
@@ -114,6 +118,20 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         flags.append({"code": "ai_phrase", "severity": "medium", "message": f"命中 {ai_phrase_hits} 个高风险套话"})
     if repeated:
         flags.append({"code": "repeated_phrase", "severity": "low", "message": "存在跨句重复短语，需要确认是否为刻意回环"})
+    duplicate_ratio = float(duplicate_paragraphs.get("duplicate_ratio") or 0.0)
+    adjacent_duplicates = int(duplicate_paragraphs.get("adjacent_duplicate_count") or 0)
+    if duplicate_ratio >= 0.01:
+        severity = "high" if duplicate_ratio >= 0.08 or adjacent_duplicates >= 2 else "medium"
+        flags.append({
+            "code": "duplicate_paragraph",
+            "severity": severity,
+            "message": (
+                "检测到完整段落重复："
+                f"重复字符占比 {duplicate_ratio:.1%}，额外重复段落 "
+                f"{duplicate_paragraphs.get('duplicate_paragraph_count') or 0} 个"
+            ),
+            "evidence": duplicate_paragraphs.get("examples") or [],
+        })
 
     risk_score = min(
         100,
@@ -124,6 +142,8 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         + (max(0, int((repeated_opening["ratio"] - 0.25) * 45)) if repeated_opening["ratio"] else 0)
         + len(repeated) * 4,
     )
+    if duplicate_ratio >= 0.01:
+        risk_score = min(100, max(risk_score, 70 if duplicate_ratio < 0.08 else 95))
     return {
         "schema_version": "deai-metrics-v1",
         "risk_score": risk_score,
@@ -138,4 +158,5 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         "ai_phrase_hits": ai_phrase_hits,
         "repeated_phrases": repeated,
         "repeated_paragraph_opening": repeated_opening,
+        "duplicate_paragraphs": duplicate_paragraphs,
     }

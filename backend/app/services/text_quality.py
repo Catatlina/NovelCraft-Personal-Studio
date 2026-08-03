@@ -8,6 +8,7 @@ for a destructive rewrite just because its line breaks changed.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from math import ceil
 
 
@@ -22,6 +23,51 @@ def content_chars(text: str) -> int:
 def paragraphs(text: str) -> list[str]:
     """Return non-empty paragraphs without changing their contents."""
     return [part.strip() for part in re.split(r"\n{2,}|\n", str(text or "")) if part.strip()]
+
+
+def duplicate_paragraph_stats(
+    text: str,
+    *,
+    minimum_paragraph_chars: int = 40,
+) -> dict[str, object]:
+    """Measure repeated full paragraphs without treating normal callbacks as bugs.
+
+    A repeated character, line of dialogue, or short refrain is common in
+    web-fiction.  The signal therefore only considers full paragraphs above a
+    conservative length floor and reports *extra* characters, not all matching
+    characters.  The review gate can use the ratio while the UI can show a
+    short evidence preview.
+    """
+    source_paragraphs = paragraphs(text)
+    normalized = [re.sub(r"\s+", "", item) for item in source_paragraphs]
+    eligible = [item for item in normalized if len(item) >= minimum_paragraph_chars]
+    counts = Counter(eligible)
+    duplicate_items = [
+        (item, count) for item, count in counts.items() if count > 1
+    ]
+    duplicate_chars = sum((count - 1) * len(item) for item, count in duplicate_items)
+    adjacent_count = sum(
+        1
+        for left, right in zip(normalized, normalized[1:])
+        if len(left) >= minimum_paragraph_chars and left == right
+    )
+    total_chars = len(re.sub(r"\s+", "", str(text or "")))
+    examples = [
+        {"count": count, "chars": len(item), "preview": item[:80]}
+        for item, count in sorted(
+            duplicate_items,
+            key=lambda pair: (-(pair[1] - 1) * len(pair[0]), -len(pair[0])),
+        )[:5]
+    ]
+    return {
+        "paragraph_count": len(source_paragraphs),
+        "eligible_paragraph_count": len(eligible),
+        "duplicate_paragraph_count": sum(count - 1 for _, count in duplicate_items),
+        "duplicate_chars": duplicate_chars,
+        "duplicate_ratio": round(duplicate_chars / max(1, total_chars), 4),
+        "adjacent_duplicate_count": adjacent_count,
+        "examples": examples,
+    }
 
 
 def _split_long_paragraph(paragraph: str, max_chars: int) -> list[str]:

@@ -27,6 +27,30 @@ def test_quality_gate_rejects_weak_continuity_even_when_average_is_high():
     assert any(item["dimension"] == "consistency" for item in result["failures"])
 
 
+def test_quality_gate_rejects_material_duplicate_paragraphs():
+    result = evaluate_review(
+        {
+            "overall_score": 95,
+            "dimension_scores": {
+                "consistency": 95,
+                "character_voice": 95,
+                "plot_logic": 95,
+                "pacing": 95,
+                "writing_quality": 95,
+                "constraint_compliance": 95,
+            },
+            "deai_metrics": {
+                "risk_score": 10,
+                "duplicate_paragraphs": {"duplicate_ratio": 0.74},
+                "flags": [],
+            },
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(item["dimension"] == "duplicate_paragraph" for item in result["failures"])
+
+
 def test_context_budget_keeps_cross_chapter_anchors_after_state_compression():
     layers = {
         "characters": [

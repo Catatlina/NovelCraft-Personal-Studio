@@ -1175,6 +1175,13 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             run_id=run_id,
             user_id=user_id,
         )
+        humanize_gate = humanized.get("quality_gate") or {}
+        if humanize_gate.get("passed") is False:
+            quality_blocked = True
+            quality_block_reasons.append(
+                "final_humanize candidate rejected: "
+                + str(humanize_gate.get("message") or humanize_gate.get("code") or "unverified")
+            )
         humanized_text = humanized["final_text"]
         humanized_paragraphs = [
             p for p in re.split(r"\n{2,}|\n", humanized_text) if p.strip()
@@ -1184,7 +1191,8 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
         report["steps"].append({
             "step": "final_humanize",
-            "applied": True,
+            "applied": humanize_gate.get("passed", True) is not False,
+            "quality_blocked": humanize_gate.get("passed") is False,
             "changes": len(humanized.get("changes") or []),
             "ai_patterns_removed": len(humanized.get("ai_patterns_removed") or []),
             "chars": len(text),

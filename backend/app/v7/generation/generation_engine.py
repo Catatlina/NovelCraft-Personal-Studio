@@ -29,7 +29,7 @@ from ...services.ai_runtime import (
     record_async_execution,
 )
 from ...services.unified_gateway import UnifiedAIGateway
-from ...services.text_quality import normalize_and_validate_rewrite
+from ...services.text_quality import duplicate_paragraph_stats, normalize_and_validate_rewrite
 from ..quality.deai_metrics import analyze_deai_patterns
 
 logger = logging.getLogger(__name__)
@@ -581,16 +581,68 @@ class DeAIPipeline:
         )
         payload = ai.get("data") or {}
         humanized = str(payload.get("humanized_text") or "").strip()
+        pre_humanized_text = text
         try:
             # The provider may accidentally collapse JSON newlines.  Reflow
             # only at sentence boundaries; reject actual content loss.
             text, shape = normalize_and_validate_rewrite(
-                text,
+                pre_humanized_text,
                 humanized,
                 minimum_chars=50,
             )
+            duplicate_stats = duplicate_paragraph_stats(text)
+            if float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01:
+                raise ValueError(
+                    "rewrite candidate contains repeated full paragraphs: "
+                    f"ratio={duplicate_stats.get('duplicate_ratio')}"
+                )
         except ValueError as exc:
-            raise AIGatewayError(f"final_humanize {exc}") from exc
+            message = str(exc)
+            if not (
+                "changed chapter length outside safe range" in message
+                or "repeated full paragraphs" in message
+            ):
+                raise AIGatewayError(f"final_humanize {message}") from exc
+            # Preserve the rule-cleaned source, but carry a blocking evidence
+            # flag into ReviewEngine.  The director may retry; if retries are
+            # exhausted this chapter becomes needs_review, never reviewed.
+            logger.warning("V7 final_humanize candidate rejected: %s", message)
+            text = pre_humanized_text
+            after_metrics = analyze_deai_patterns(text)
+            after_metrics.setdefault("flags", []).append({
+                "code": "rewrite_candidate_rejected",
+                "severity": "high",
+                "message": message,
+            })
+            after_metrics["risk_score"] = max(95, int(after_metrics.get("risk_score") or 0))
+            layers.append({
+                "layer": "semantic_final_humanize",
+                "changes": 0,
+                "applied": False,
+                "reason": message,
+            })
+            return {
+                "original_text": original,
+                "processed_text": text,
+                "layers_applied": layers,
+                "total_changes": sum(item["changes"] for item in layers),
+                "original_chars": chinese_word_count(original),
+                "processed_chars": chinese_word_count(text),
+                "semantic_humanize": False,
+                "humanize_changes": [],
+                "ai_patterns_removed": [],
+                "metrics": {
+                    "before": before_metrics,
+                    "after": after_metrics,
+                    "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
+                },
+                "quality_gate": {
+                    "passed": False,
+                    "code": "rewrite_candidate_rejected",
+                    "message": message,
+                },
+                "usage": ai.get("usage") or {},
+            }
         after_metrics = analyze_deai_patterns(text)
         layers.append(
             {
@@ -618,6 +670,7 @@ class DeAIPipeline:
                 "after": after_metrics,
                 "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
             },
+            "quality_gate": {"passed": True},
             "usage": ai.get("usage") or {},
         }
 
