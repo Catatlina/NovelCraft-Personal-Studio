@@ -81,6 +81,22 @@ def test_transition_contract_passes_with_structured_state_delta():
     assert current["state_delta"]["causal_events"][0]["key"] == "door"
 
 
+def test_transition_contract_persists_state_conflicts_for_runtime_gate():
+    conflicts = [{"key": "location", "description": "地点冲突", "severity": "high"}]
+    contract = build_transition_contract(
+        chapter_number=1,
+        title="第一章",
+        text="他停在门口。",
+        summary="主角发现异常。",
+        word_count=6,
+        review_score=80,
+        dimension_scores={},
+        state_conflicts=conflicts,
+    )
+
+    assert contract["state_conflicts"] == conflicts
+
+
 def test_deai_metrics_flag_abnormal_dash_density_without_banning_punctuation():
     natural = "他停了一下——不是犹豫，只是在听门后的动静。门里没有声音。"
     noisy = "".join(f"他说——然后又想了想——接着解释——事情还没结束——。" for _ in range(8))

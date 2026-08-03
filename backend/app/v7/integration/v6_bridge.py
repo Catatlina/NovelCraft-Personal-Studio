@@ -51,10 +51,12 @@ def build_transition_contract(
     previous_context: dict[str, Any] | None = None,
     memory_items: list[dict[str, Any]] | None = None,
     constraints: list[dict[str, Any]] | None = None,
+    state_conflicts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the small, durable hand-off object used by the next chapter."""
     previous_context = previous_context or {}
     items = memory_items or []
+    conflicts = [item for item in (state_conflicts or []) if isinstance(item, dict)]
     open_threads = [
         {
             "key": item.get("key"),
@@ -85,6 +87,7 @@ def build_transition_contract(
             if item.get("key") and item.get("summary")
         ],
         "state_delta": build_state_delta(items),
+        "state_conflicts": conflicts,
         "open_threads": open_threads,
         "forbidden_changes": [
             {"name": c.get("name"), "description": c.get("description"), "severity": c.get("severity")}
