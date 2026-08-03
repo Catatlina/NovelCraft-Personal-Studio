@@ -14,6 +14,7 @@ from app.services.t5_long_run import (
     T5RunError,
     adjacent_repeat_scores,
     build_evidence,
+    _new_chapters,
     write_evidence,
 )
 
@@ -70,6 +71,40 @@ def test_evidence_is_computed_from_real_chapter_fields(tmp_path):
     json_path, report_path = write_evidence(evidence, tmp_path)
     assert json.loads(json_path.read_text())["new_chapters"] == 2
     assert "验收结论：通过" in report_path.read_text()
+
+
+def test_evidence_accepts_v7_continuity_v1_passed_shape():
+    chapters = [
+        {
+            **_chapter(1, "第一章正文"),
+            "meta": {
+                "seq": 1,
+                "review_score": 85,
+                "continuity": {"schema_version": "continuity-v1", "passed": True, "issues": []},
+            },
+        },
+        {
+            **_chapter(2, "第二章正文"),
+            "meta": {
+                "seq": 2,
+                "review_score": 85,
+                "continuity": {"schema_version": "continuity-v1", "passed": False, "issues": ["断点"]},
+            },
+        },
+    ]
+    evidence = build_evidence(chapters, Checkpoint("p", "n", 2), [])
+    assert evidence["continuity"] == {"clean": 1, "flagged": 1}
+    # ``flagged`` is a recorded, reviewable continuity result; only missing
+    # or unchecked evidence blocks the harness at this layer.
+    assert evidence["accepted"] is True
+
+
+def test_evidence_filters_new_chapters_by_baseline_identity_not_row_offset():
+    chapters = [_chapter(1, "基线"), _chapter(3, "新章三"), _chapter(2, "新章二")]
+    checkpoint = Checkpoint("p", "n", 2, baseline_chapters=1, baseline_chapter_ids=["c1"])
+    assert [row["id"] for row in _new_chapters(chapters, checkpoint)] == ["c3", "c2"]
+    evidence = build_evidence(chapters, checkpoint, [])
+    assert evidence["new_chapters"] == 2
 
 
 def test_restart_recovers_checkpointed_provider_batch_before_creating_new_one(tmp_path):

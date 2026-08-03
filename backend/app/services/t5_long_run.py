@@ -93,6 +93,7 @@ class Checkpoint:
     novel_id: str
     target_new_chapters: int
     baseline_chapters: int = 0
+    baseline_chapter_ids: list[str] = field(default_factory=list)
     batch_ids: list[str] = field(default_factory=list)
     resume_attempts: dict[str, int] = field(default_factory=dict)
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -138,12 +139,38 @@ def adjacent_repeat_scores(chapters: list[dict]) -> list[dict]:
     return scores
 
 
+def _new_chapters(chapters: list[dict], checkpoint: Checkpoint) -> list[dict]:
+    """Return chapters created after the run baseline without relying on row order."""
+    baseline_ids = {str(chapter_id) for chapter_id in checkpoint.baseline_chapter_ids if chapter_id}
+    if baseline_ids:
+        return [chapter for chapter in chapters if str(chapter.get("id") or "") not in baseline_ids]
+    # Backward compatibility for checkpoints created before baseline IDs were
+    # persisted.  New runs always use the identity-based branch above.
+    return chapters[checkpoint.baseline_chapters:]
+
+
 def build_evidence(chapters: list[dict], checkpoint: Checkpoint, batches: list[dict]) -> dict:
-    generated = chapters[checkpoint.baseline_chapters:]
+    generated = _new_chapters(chapters, checkpoint)
     scores = [float((item.get("meta") or {}).get("review_score")) for item in generated
               if (item.get("meta") or {}).get("review_score") is not None]
-    continuity = [((item.get("meta") or {}).get("continuity") or {}).get("status", "missing")
-                  for item in generated]
+    continuity = []
+    for item in generated:
+        report = (item.get("meta") or {}).get("continuity") or {}
+        if not isinstance(report, dict):
+            continuity.append("missing")
+            continue
+        # Legacy batch chapters persist the canonical cross-chapter report as
+        # ``status=clean|flagged``.  V7 chapters also persist the richer
+        # continuity-v1 contract, whose equivalent gate is ``passed``.  Read
+        # both shapes so the evidence report reflects the real result instead
+        # of turning every V7 chapter into a false ``missing`` state.
+        status = report.get("status")
+        if status in {"clean", "flagged", "unchecked"}:
+            continuity.append(status)
+        elif isinstance(report.get("passed"), bool):
+            continuity.append("clean" if report["passed"] else "flagged")
+        else:
+            continuity.append("missing")
     repeats = adjacent_repeat_scores(generated)
     return {
         "schema_version": 1,
@@ -152,6 +179,7 @@ def build_evidence(chapters: list[dict], checkpoint: Checkpoint, batches: list[d
         "novel_id": checkpoint.novel_id,
         "target_new_chapters": checkpoint.target_new_chapters,
         "baseline_chapters": checkpoint.baseline_chapters,
+        "baseline_chapter_ids": checkpoint.baseline_chapter_ids,
         "new_chapters": len(generated),
         "reviewed_chapters": sum(item.get("status") == "reviewed" for item in generated),
         "needs_rewrite_chapters": sum(item.get("status") == "needs_rewrite" for item in generated),
@@ -198,16 +226,24 @@ class LongRunRunner:
         self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         self.checkpoint_path.write_text(json.dumps(asdict(checkpoint), ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _load_or_create(self, baseline: int) -> Checkpoint:
+    def _load_or_create(self, baseline: int, baseline_ids: list[dict] | None = None) -> Checkpoint:
         if self.checkpoint_path.exists():
-            checkpoint = Checkpoint(**json.loads(self.checkpoint_path.read_text(encoding="utf-8")))
+            payload = json.loads(self.checkpoint_path.read_text(encoding="utf-8"))
+            # Checkpoints from the first harness version do not contain the
+            # identity snapshot; keep them resumable with the old count-based
+            # fallback instead of failing deserialization.
+            payload.setdefault("baseline_chapter_ids", [])
+            checkpoint = Checkpoint(**payload)
             if (checkpoint.project_id, checkpoint.novel_id) != (self.config.project_id, self.config.novel_id):
                 raise T5RunError("checkpoint belongs to another project/novel")
             if checkpoint.target_new_chapters != self.config.target_new_chapters:
                 raise T5RunError("checkpoint target differs from requested target_new_chapters")
             return checkpoint
         checkpoint = Checkpoint(self.config.project_id, self.config.novel_id,
-                                self.config.target_new_chapters, baseline_chapters=baseline)
+                                self.config.target_new_chapters,
+                                baseline_chapters=baseline,
+                                baseline_chapter_ids=[str(chapter.get("id")) for chapter in (baseline_ids or [])
+                                                      if chapter.get("id")])
         self._save(checkpoint)
         return checkpoint
 
@@ -250,7 +286,10 @@ class LongRunRunner:
         if novel.get("project_id") != self.config.project_id or novel.get("type") != "novel":
             raise T5RunError("novel does not belong to project or is not type=novel")
         initial = self._chapters()
-        checkpoint = self._load_or_create(len(initial))
+        checkpoint = self._load_or_create(
+            len(initial),
+            baseline_ids=initial,
+        )
         batch_evidence = []
         # A process may have died after persisting a batch id but before that
         # batch finished. Reconcile every checkpointed batch before creating a
@@ -262,8 +301,9 @@ class LongRunRunner:
             if batch.get("status") == "needs_review" and not self.config.allow_needs_review:
                 raise T5RunError(f"batch {batch_id} requires review; explicit override is required")
             batch_evidence.append(batch)
-        while len(self._chapters()) - checkpoint.baseline_chapters < checkpoint.target_new_chapters:
-            remaining = checkpoint.target_new_chapters - (len(self._chapters()) - checkpoint.baseline_chapters)
+        current = self._chapters()
+        while len(_new_chapters(current, checkpoint)) < checkpoint.target_new_chapters:
+            remaining = checkpoint.target_new_chapters - len(_new_chapters(current, checkpoint))
             count = min(self.config.batch_size, remaining)
             created = self.client.request("POST", f"/novels/{self.config.novel_id}/chapters/batch",
                                           {"chapter_count": count})
@@ -271,4 +311,5 @@ class LongRunRunner:
             checkpoint.batch_ids.append(batch_id)
             self._save(checkpoint)
             batch_evidence.append(self._wait_batch(batch_id, checkpoint))
-        return checkpoint, self._chapters(), batch_evidence
+            current = self._chapters()
+        return checkpoint, current, batch_evidence
