@@ -52,6 +52,24 @@ AGENT_LOOP_STEPS: tuple[str, ...] = (
     "update",
 )
 
+
+def _format_quality_failure(item: dict[str, Any]) -> str:
+    """Render a gate failure without assuming every value is numeric.
+
+    Model-derived dimension failures use numeric scores, while deterministic
+    risk failures intentionally use labels such as ``high``/``resolved``.
+    Rework feedback must remain diagnostic for both shapes; formatting a
+    string with ``:.0f`` used to crash the real-provider path before a rejected
+    chapter could be persisted.
+    """
+    def render(value: Any) -> str:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f"{value:.0f}"
+        return str(value or "—")
+
+    dimension = str(item.get("dimension") or "质量项")
+    return f"{dimension} {render(item.get('actual'))}/{render(item.get('minimum'))}"
+
 class DecisionPermissionSystem:
     """
     Decision permission system.
@@ -679,9 +697,9 @@ class StoryDirector:
             rework_count += 1
             issues = review_data.get("issues") or []
             failures = "；".join(
-                f"{item['dimension']} {item['actual']:.0f}/{item['minimum']:.0f}"
+                _format_quality_failure(item)
                 for item in gate["failures"][:8]
-                if isinstance(item.get("actual"), (int, float))
+                if isinstance(item, dict)
             )
             issue_text = "；".join(
                 (

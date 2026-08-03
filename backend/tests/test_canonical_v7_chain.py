@@ -313,6 +313,22 @@ def test_first_chapter_structural_blocker_still_waits_for_review():
     assert "confidence" in result["blocked_reason"]
 
 
+def test_quality_rework_feedback_formats_labeled_risk_failures():
+    from app.v7.director.story_director import _format_quality_failure
+
+    assert _format_quality_failure({
+        "dimension": "ai_feel",
+        "actual": "high",
+        "minimum": "resolved",
+    }) == "ai_feel high/resolved"
+
+    assert _format_quality_failure({
+        "dimension": "pacing",
+        "actual": 78,
+        "minimum": 85,
+    }) == "pacing 78/85"
+
+
 def test_public_writer_agent_requires_novel_id():
     from app.services.agent_registry import execute_agent
 
