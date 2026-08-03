@@ -137,17 +137,20 @@ class MemoryEngine(BaseEngine):
             '  "chapter_summary": "本章 100 字以内梗概"\n'
             "}\n"
             "confidence 取 0-1：正文明确写出的取 0.85-0.95，需要推断的取 0.5-0.75，"
-            "纯猜测取 0.3 以下。key 用简短稳定的标识符，同一事物多章之间必须用同一个 key。"
+            "纯猜测取 0.3 以下。key 用简短稳定的标识符，同一事物多章之间必须用同一个 key。\n"
+            "为保证 JSON 完整：每个数组最多输出 3 条；只保留会影响后续章节的事实；"
+            "summary 不超过 30 字，detail 和 evidence 各不超过 60 字，chapter_summary 不超过 80 字；"
+            "不要重复已知设定，不要输出额外字段、Markdown 或解释。"
         )
 
         try:
             ai = await self.ai_gateway.generate_json(
                 prompt,
                 system_prompt="你是小说设定管理员，只输出合法 JSON。",
-                max_tokens=3000,
+                max_tokens=1800,
                 temperature=0.2,
                 prompt_name="v7.memory.extract",
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
