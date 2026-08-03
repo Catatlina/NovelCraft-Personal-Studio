@@ -32,6 +32,7 @@ PAYOFF_TYPE_ALIASES = {
     "地位反转": "status_reversal",
     "逆袭": "status_reversal",
     "打脸": "status_reversal",
+    "身份逆转": "status_reversal",
     "权力确立": "status_reversal",
     "权威确立": "status_reversal",
     "正式掌权": "status_reversal",
@@ -123,7 +124,7 @@ def _infer_payoff_type(data: dict[str, Any]) -> str:
     if any(token in signal for token in (
         "身份反转", "地位反转", "逆袭", "打脸", "成为新老板", "当上老板",
         "正式掌权", "权力确立", "权威确立", "站稳脚跟", "解雇", "被保安带走",
-        "员工重新评估", "掌权",
+        "员工重新评估", "掌权", "收购公司", "买下公司", "最大股东", "原CEO被解职",
     )):
         return "status_reversal"
     if any(token in signal for token in ("境界突破", "实力突破", "突破", "晋级", "升级")):
@@ -245,7 +246,11 @@ def validate_payoff_evidence(
             invalid.append(f"evidence[{index}] 缺少可见结果")
             continue
         checked.append({"type": _text(item.get("type") or item.get("payoff_type")) or "other", "anchor": anchor, "result": result})
-    passed = bool(checked) and not invalid if required else not invalid
+    # A provider may append a second illustrative evidence item whose anchor
+    # is not verbatim, even though another item is exactly locatable.  Keep the
+    # invalid items in the report for diagnosis, but require at least one real
+    # anchor instead of rejecting an otherwise verifiable chapter wholesale.
+    passed = bool(checked) if required else not invalid
     return {
         "schema_version": PAYOFF_SCHEMA_VERSION,
         "passed": passed,

@@ -55,6 +55,17 @@ def test_payoff_evidence_must_be_locatable_in_actual_text():
     assert good["passed"] is True
     assert bad["passed"] is False
 
+    partial = validate_payoff_evidence(
+        text,
+        [
+            {"type": "status_reversal", "anchor": "石碑显示出新的数值", "result": "数值发生变化"},
+            {"type": "status_reversal", "anchor": "主角击败了长老", "result": "赢了"},
+        ],
+        required=True,
+    )
+    assert partial["passed"] is True
+    assert len(partial["invalid"]) == 1
+
 
 def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     contract = normalize_payoff_contract({"chapter_number": 1, "payoff_type": "身份反转"})
@@ -65,6 +76,14 @@ def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
         "payoff_type": "other",
         "active_choice": "主角选择当场解雇财务总监",
         "visible_result": "财务总监被保安带走，员工重新评估主角",
+    })
+    assert contract["payoff_type"] == "status_reversal"
+
+    contract = normalize_payoff_contract({
+        "chapter_number": 1,
+        "payoff_type": "other",
+        "reader_promise": "主角用年终奖买下公司，实现身份逆转",
+        "visible_result": "主角成为公司最大股东，原CEO被解职",
     })
     assert contract["payoff_type"] == "status_reversal"
 
