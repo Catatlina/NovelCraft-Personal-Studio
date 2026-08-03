@@ -647,17 +647,63 @@ class DeAIPipeline:
             "输出 JSON：{\"humanized_text\":\"完整正文\","
             "\"changes\":[\"改动说明\"],\"ai_patterns_removed\":[\"消除的痕迹\"]}"
         )
-        ai = await self.gateway.generate_json(
-            humanize_prompt,
-            system_prompt="你是严格的真人网文责任编辑，只输出合法 JSON。",
-            max_tokens=max(3500, int(chinese_word_count(text) * 1.4)),
-            temperature=0.45,
-            prompt_name="bootstrap.final_humanize",
-            prompt_version="1.0.5",
-        )
+        pre_humanized_text = text
+        try:
+            ai = await self.gateway.generate_json(
+                humanize_prompt,
+                system_prompt="你是严格的真人网文责任编辑，只输出合法 JSON。",
+                max_tokens=max(3500, int(chinese_word_count(text) * 1.4)),
+                temperature=0.45,
+                prompt_name="bootstrap.final_humanize",
+                prompt_version="1.0.5",
+            )
+        except AIGatewayError as exc:
+            # A malformed/truncated semantic rewrite is a quality failure, not
+            # an HTTP 500.  Keep the deterministic rule-cleaned text intact and
+            # surface a blocking flag so StoryDirector's bounded rework loop
+            # can retry the whole chapter or persist needs_review truthfully.
+            logger.warning(
+                "V7 final_humanize provider output invalid; retaining rule-cleaned text (%s)",
+                type(exc).__name__,
+            )
+            after_metrics = analyze_deai_patterns(pre_humanized_text)
+            after_metrics.setdefault("flags", []).append({
+                "code": "rewrite_candidate_rejected",
+                "severity": "high",
+                "message": "语义去 AI 改写返回了无效 JSON，保留规则清洗稿并进入质量重试",
+            })
+            after_metrics["risk_score"] = max(95, int(after_metrics.get("risk_score") or 0))
+            layers.append({
+                "layer": "semantic_final_humanize",
+                "changes": 0,
+                "applied": False,
+                "reason": "provider_invalid_json",
+            })
+            return {
+                "original_text": original,
+                "processed_text": pre_humanized_text,
+                "layers_applied": layers,
+                "total_changes": sum(item["changes"] for item in layers),
+                "original_chars": chinese_word_count(original),
+                "processed_chars": chinese_word_count(pre_humanized_text),
+                "semantic_humanize": False,
+                "humanize_changes": [],
+                "ai_patterns_removed": [],
+                "metrics": {
+                    "before": before_metrics,
+                    "after": after_metrics,
+                    "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
+                },
+                "quality_gate": {
+                    "passed": False,
+                    "code": "rewrite_candidate_rejected",
+                    "message": "语义去 AI 改写返回了无效 JSON，已保留规则清洗稿",
+                },
+                "usage": {},
+            }
+
         payload = ai.get("data") or {}
         humanized = str(payload.get("humanized_text") or "").strip()
-        pre_humanized_text = text
         try:
             # The provider may accidentally collapse JSON newlines.  Reflow
             # only at sentence boundaries; reject actual content loss.

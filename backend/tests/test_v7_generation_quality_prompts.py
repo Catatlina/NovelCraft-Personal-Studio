@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from app.v7.generation.generation_engine import DeAIPipeline, GenerationEngine
+from app.v7.generation.generation_engine import AIGatewayError, DeAIPipeline, GenerationEngine
 
 
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
@@ -59,6 +59,33 @@ def test_deai_blocks_duplicate_paragraphs_without_semantic_rewrite():
     assert result["quality_gate"]["passed"] is False
     assert result["quality_gate"]["code"] == "duplicate_paragraph"
     assert result["semantic_humanize"] is False
+
+
+def test_deai_provider_invalid_json_becomes_auditable_quality_failure():
+    text = "\n\n".join(
+        ["顾沉低头看了一眼门缝，手指没有离开锁扣。" for _ in range(8)]
+        + [
+            "林岚把灯光压低，示意他先别出声。",
+            "陈姨站在门外，迟迟没有敲门。",
+            "赵启明收起文件，转身走向电梯。",
+            "雨水沿着窗框往下淌，屋里没人说话。",
+        ]
+    )
+
+    class BrokenGateway:
+        async def generate_json(self, *_args, **_kwargs):
+            raise AIGatewayError("invalid provider JSON")
+
+    result = asyncio.run(DeAIPipeline(BrokenGateway()).process(text))
+
+    assert result["processed_text"]
+    assert result["semantic_humanize"] is False
+    assert result["quality_gate"]["passed"] is False
+    assert result["quality_gate"]["code"] == "rewrite_candidate_rejected"
+    assert any(
+        flag["code"] == "rewrite_candidate_rejected"
+        for flag in result["metrics"]["after"]["flags"]
+    )
 
 
 def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
