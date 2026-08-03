@@ -66,6 +66,14 @@ def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     contract = normalize_payoff_contract({"chapter_number": 1, "kind": "资源获取"})
     assert contract["payoff_type"] == "resource_gain"
 
+    contract = normalize_payoff_contract({
+        "chapter_number": 1,
+        "payoff_type": "other",
+        "reader_promise": "完成身份反转",
+        "visible_result": "主角成为公司新老板",
+    })
+    assert contract["payoff_type"] == "status_reversal"
+
 
 def test_low_payoff_schedule_is_a_soft_reader_gate_not_a_word_count_gate():
     profile = select_quality_profile(platform="番茄", genre="都市", subgenre="都市神豪")

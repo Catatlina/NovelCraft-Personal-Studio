@@ -85,11 +85,52 @@ def _normalize_payoff_type(value: Any) -> str:
     return PAYOFF_TYPE_ALIASES.get(raw, "other")
 
 
+def _infer_payoff_type(data: dict[str, Any]) -> str:
+    """Infer a canonical type from payoff evidence when the enum is ``other``.
+
+    Providers sometimes put the useful reader-facing label in the promise or
+    visible-result field and emit ``other`` in the enum field.  Inference is
+    intentionally limited to explicit commercial-narrative signals; when no
+    signal is present we keep ``other`` so a required contract still fails
+    truthfully instead of inventing a payoff.
+    """
+    signal = " ".join(
+        _text(data.get(key), 600)
+        for key in (
+            "reader_promise", "reader_expectation", "promise", "visible_result",
+            "result", "outcome", "payoff", "witness_reaction", "reaction",
+        )
+    )
+    if not signal:
+        return ""
+    if any(token in signal for token in ("身份反转", "地位反转", "逆袭", "打脸", "成为新老板", "正式掌权")):
+        return "status_reversal"
+    if any(token in signal for token in ("境界突破", "实力突破", "突破", "晋级", "升级")):
+        return "breakthrough"
+    if any(token in signal for token in ("资源获取", "资源获得", "获得资源", "拿到资源", "财富增长", "拿到钱")):
+        return "resource_gain"
+    if any(token in signal for token in ("真相揭示", "信息揭示", "揭开真相", "发现线索", "信息优势")):
+        return "reveal"
+    if any(token in signal for token in ("关系变化", "关系转变", "获得认可", "收服")):
+        return "relationship_shift"
+    if any(token in signal for token in ("活下来", "逃出生天", "成功逃脱", "生存")):
+        return "survival"
+    if any(token in signal for token in ("规则利用", "利用规则", "规则漏洞")):
+        return "rule_exploit"
+    if any(token in signal for token in ("系统奖励", "获得奖励")):
+        return "system_reward"
+    if any(token in signal for token in ("隐藏实力", "暴露实力")):
+        return "hidden_strength"
+    return ""
+
+
 def normalize_payoff_contract(value: Any, *, chapter_number: int | None = None) -> dict[str, Any]:
     """Normalize provider/outline aliases into one stable contract."""
     data = value if isinstance(value, dict) else {}
     raw_type = _first(data, "payoff_type", "type", "kind")
     payoff_type = _normalize_payoff_type(raw_type)
+    if payoff_type in {"", "other"}:
+        payoff_type = _infer_payoff_type(data) or payoff_type
     return {
         "schema_version": str(data.get("schema_version") or PAYOFF_SCHEMA_VERSION),
         "chapter_number": int(data.get("chapter_number") or chapter_number or 0),
