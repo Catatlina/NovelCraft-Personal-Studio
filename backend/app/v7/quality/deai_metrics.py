@@ -51,17 +51,31 @@ def _repeated_phrases(text: str) -> list[dict[str, Any]]:
 
 
 def _repeated_paragraph_opening(text: str) -> dict[str, Any]:
-    """Detect a mechanical paragraph opening without banning pronouns."""
+    """Detect repeated multi-character paragraph openings.
+
+    A single leading pronoun is common in readable Chinese web fiction and is
+    not, by itself, evidence of a template.  Counting only the first character
+    made ordinary passages such as several paragraphs beginning with ``他``
+    fail the hard quality gate.  Keep the signal, but require the same
+    two-character opening phrase to recur across paragraphs.
+    """
     paras = [item for item in re.split(r"\n{2,}|\n", text) if item.strip()]
     if len(paras) < 12:
-        return {"opening": "", "count": 0, "ratio": 0.0}
+        return {"opening": "", "count": 0, "ratio": 0.0, "unit_length": 2}
     openings: Counter[str] = Counter()
     for paragraph in paras:
         first = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", paragraph.strip())
         if first:
-            openings[first[:1]] += 1
+            # Two characters retain useful signals such as ``顾沉``/``他把``
+            # while avoiding a false positive for the generic ``他``/``她``.
+            openings[first[:2]] += 1
     opening, count = openings.most_common(1)[0] if openings else ("", 0)
-    return {"opening": opening, "count": count, "ratio": round(count / len(paras), 4)}
+    return {
+        "opening": opening,
+        "count": count,
+        "ratio": round(count / len(paras), 4),
+        "unit_length": 2,
+    }
 
 
 def analyze_deai_patterns(text: str) -> dict[str, Any]:

@@ -109,6 +109,47 @@ def test_deai_metrics_flag_abnormal_dash_density_without_banning_punctuation():
     assert any(flag["code"] == "dash_density" for flag in noisy_report["flags"])
 
 
+def test_deai_metrics_does_not_treat_generic_single_pronoun_as_template():
+    varied = "\n\n".join(
+        [
+            "他抬头看了一眼门牌，随后把钥匙收回口袋。",
+            "他转身走到窗边，先确认楼下没有人。",
+            "他把报纸折好，压在桌角的旧账本下面。",
+            "他停在楼梯口，听见水管里传来一声闷响。",
+            "他低头检查鞋底，发现沾着一小片红泥。",
+            "他推开半掩的门，屋里只剩一盏应急灯。",
+            "他拿出手机记下门牌，没有立刻拨电话。",
+            "他回到街口，才发现林岚一直站在雨棚下。",
+            "他问了一句，陈姨却把视线移向别处。",
+            "他没有追问，先把工具箱重新扣好。",
+            "他看着那张图，终于认出被划掉的线。",
+            "他走出巷子，身后的铁门又响了一次。",
+        ]
+    )
+
+    report = analyze_deai_patterns(varied)
+
+    assert report["repeated_paragraph_opening"]["opening"] != "他"
+    assert not any(flag["code"] == "repeated_paragraph_opening" for flag in report["flags"])
+
+
+def test_deai_metrics_flags_repeated_two_character_opening():
+    repeated = "\n\n".join(
+        ["顾沉低头看了一眼门缝，手指没有离开锁扣。" for _ in range(8)]
+        + [
+            "林岚把灯光压低，示意他先别出声。",
+            "陈姨站在门外，迟迟没有敲门。",
+            "赵启明收起文件，转身走向电梯。",
+            "雨水沿着窗框往下淌，屋里没人说话。",
+        ]
+    )
+
+    report = analyze_deai_patterns(repeated)
+
+    assert report["repeated_paragraph_opening"]["opening"] == "顾沉"
+    assert any(flag["code"] == "repeated_paragraph_opening" for flag in report["flags"])
+
+
 class _LearningState:
     def __init__(self):
         self.values = {}
