@@ -1523,6 +1523,15 @@ class GenerationEngine:
             minimum_chapter_chars + 200,
             int(target_word_count * 1.45),
         )
+        # DeepSeek's tokenisation can produce substantially more Chinese
+        # characters than the nominal token count. A fixed 4000-token cap
+        # therefore let a 3000-character chapter expand past the 4350-char
+        # product ceiling. Derive the cap from the hard ceiling so the first
+        # draft is length-safe instead of relying on a later rejection.
+        generation_max_tokens = max(
+            1200,
+            min(4000, int(maximum_chapter_chars * 0.74)),
+        )
 
         def add_usage(step_ctx: Any, u: dict[str, Any]) -> None:
             usage["tokens_input"] += u.get("tokens_input", 0)
@@ -1596,7 +1605,7 @@ class GenerationEngine:
                     "不要任何解释或markdown标记。标点不设禁用清单，按人物语气和"
                     "场景功能使用；只避免整章高密度、连续重复的模板化符号。"
                 ),
-                max_tokens=4000,
+                max_tokens=generation_max_tokens,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
                 prompt_version="1.2.0",

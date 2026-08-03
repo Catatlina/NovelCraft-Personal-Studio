@@ -66,6 +66,18 @@ def test_payoff_evidence_must_be_locatable_in_actual_text():
     assert partial["passed"] is True
     assert len(partial["invalid"]) == 1
 
+    punctuation_only_difference = validate_payoff_evidence(
+        "她说：“我宣布，从今天起，公司进入内部审计程序。所有支出重新核查。”",
+        [{
+            "type": "status_reversal",
+            "anchor": "“我宣布，从今天起，公司进入内部审计程序。”",
+            "result": "主角宣布审计",
+        }],
+        required=True,
+    )
+    assert punctuation_only_difference["passed"] is True
+    assert punctuation_only_difference["checked"][0]["match_mode"] == "punctuation_normalized"
+
 
 def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     contract = normalize_payoff_contract({"chapter_number": 1, "payoff_type": "身份反转"})

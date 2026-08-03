@@ -8,6 +8,7 @@ store.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -75,6 +76,11 @@ def _text(value: Any, limit: int = 500) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _anchor_key(value: Any) -> str:
+    """Compare evidence anchors without making punctuation a hard failure."""
+    return re.sub(r"[\W_]+", "", str(value or ""), flags=re.UNICODE)
+
+
 def _first(data: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = _text(data.get(key))
@@ -125,6 +131,7 @@ def _infer_payoff_type(data: dict[str, Any]) -> str:
         "身份反转", "地位反转", "逆袭", "打脸", "成为新老板", "当上老板",
         "正式掌权", "权力确立", "权威确立", "站稳脚跟", "解雇", "被保安带走",
         "员工重新评估", "掌权", "收购公司", "买下公司", "最大股东", "原CEO被解职",
+        "新老板", "展现新老板", "完成交接", "宣布审计", "内部审计", "身份确立", "权威",
     )):
         return "status_reversal"
     if any(token in signal for token in ("境界突破", "实力突破", "突破", "晋级", "升级")):
@@ -239,13 +246,24 @@ def validate_payoff_evidence(
             continue
         anchor = _text(item.get("anchor") or item.get("text_anchor"), 240)
         result = _text(item.get("result") or item.get("visible_result"), 300)
-        if not anchor or anchor not in str(text or ""):
+        exact_match = bool(anchor) and anchor in str(text or "")
+        normalized_match = (
+            not exact_match
+            and len(_anchor_key(anchor)) >= 6
+            and _anchor_key(anchor) in _anchor_key(text)
+        )
+        if not anchor or not (exact_match or normalized_match):
             invalid.append(f"evidence[{index}] 缺少正文中可定位的原文锚点")
             continue
         if not result:
             invalid.append(f"evidence[{index}] 缺少可见结果")
             continue
-        checked.append({"type": _text(item.get("type") or item.get("payoff_type")) or "other", "anchor": anchor, "result": result})
+        checked.append({
+            "type": _text(item.get("type") or item.get("payoff_type")) or "other",
+            "anchor": anchor,
+            "result": result,
+            "match_mode": "exact" if exact_match else "punctuation_normalized",
+        })
     # A provider may append a second illustrative evidence item whose anchor
     # is not verbatim, even though another item is exactly locatable.  Keep the
     # invalid items in the report for diagnosis, but require at least one real
