@@ -7,6 +7,7 @@ repository uses psycopg2.  It is called from the async director through
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -18,6 +19,18 @@ from ..quality.continuity import build_state_delta
 
 def generation_key(novel_id: str, chapter_number: int) -> str:
     return f"v7:{novel_id}:chapter:{chapter_number}:v1"
+
+
+def rejected_version_mutation_id(generation_key_value: str, run_id: str) -> str:
+    """Return a bounded, deterministic id for rejected-draft snapshots.
+
+    ``versions.client_mutation_id`` is a VARCHAR(100), while the readable
+    generation key plus a UUID run id can exceed that limit.  Keep the full
+    identity in the digest so rejected-draft persistence is still idempotent
+    without making the database write depend on the length of a UUID or key.
+    """
+    raw = f"{generation_key_value}:before-rejected:{run_id}".encode("utf-8")
+    return f"v7-rejected:{hashlib.sha256(raw).hexdigest()}"
 
 
 def _tiptap_body(paragraphs: list[str]) -> dict[str, Any]:
@@ -220,7 +233,7 @@ def _persist_v7_chapter(
                 """,
                 (
                     new_id("version"),
-                    f"{key}:before-rejected:{run_id}",
+                    rejected_version_mutation_id(key, str(run_id)),
                     existing["id"],
                 ),
             )

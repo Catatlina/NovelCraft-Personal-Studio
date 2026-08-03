@@ -9,6 +9,7 @@ from app.v7.integration.quality import QUALITY_PASS_SCORE, evaluate_review
 from app.v7.integration.v6_bridge import (
     build_transition_contract,
     generation_key,
+    rejected_version_mutation_id,
     _tiptap_body,
 )
 from app.v7.quality.continuity import validate_transition_contract
@@ -247,6 +248,19 @@ def test_v6_bridge_uses_stable_generation_key_and_tiptap_body():
     assert body["type"] == "doc"
     assert body["content"][1]["content"][0]["text"] == "第二段"
     assert body["text"] == "第一段\n\n第二段"
+
+
+def test_rejected_version_mutation_id_fits_schema_and_is_stable():
+    value = rejected_version_mutation_id(
+        generation_key("12345678-1234-1234-1234-123456789012", 14),
+        "87654321-4321-4321-4321-210987654321",
+    )
+    assert len(value) <= 100
+    assert value == rejected_version_mutation_id(
+        generation_key("12345678-1234-1234-1234-123456789012", 14),
+        "87654321-4321-4321-4321-210987654321",
+    )
+    assert value.startswith("v7-rejected:")
 
 
 def test_story_director_result_contract_exposes_bridge_evidence():
