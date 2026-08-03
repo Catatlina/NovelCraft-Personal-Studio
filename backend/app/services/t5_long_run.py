@@ -105,9 +105,19 @@ def extract_body_text(body: Any) -> str:
     if isinstance(body, list):
         return "\n".join(extract_body_text(item) for item in body)
     if isinstance(body, dict):
-        own = body.get("text") if isinstance(body.get("text"), str) else ""
-        nested = extract_body_text(body.get("content", []))
-        return "\n".join(part for part in (own, nested) if part)
+        # V7 bodies carry denormalised compatibility copies.  The content tree
+        # is canonical; concatenating it with top-level/paragraph ``text``
+        # makes every generated paragraph appear twice or three times in T5
+        # evidence and adjacent-repeat metrics.
+        content = body.get("content")
+        if isinstance(content, list) and content:
+            return extract_body_text(content)
+        paragraphs = body.get("paragraphs")
+        if isinstance(paragraphs, list) and paragraphs:
+            return "\n".join(extract_body_text(item) for item in paragraphs)
+        if isinstance(body.get("text"), str):
+            return body["text"]
+        return ""
     return ""
 
 

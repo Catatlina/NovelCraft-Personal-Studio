@@ -10,6 +10,39 @@ type Batch = { id: string; status: string; completed_count: number; requested_co
 type Completion = { total_chapters: number; reviewed_chapters: number; total_words: number; average_review_score: number; generation_percent?: number | null; review_percent?: number; continuity_flagged?: number; continuity_unchecked?: number; needs_rewrite_chapters?: number; quality_warnings?: string[]; ready_for_release?: boolean; exportable: boolean };
 type ImportPreview = { seq: string; title: string; raw: string };
 type RewriteState = { status: "regenerating" | "pending_review" | "failed"; taskId?: string; message?: string };
+
+function bookIdea(book: Book): string {
+  return String(book.synopsis || book.meta?.idea || "").trim();
+}
+
+function BookIdeaPreview({ book }: { book: Book }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = bookIdea(book);
+  const isLong = text.length > 220 || text.split(/\r?\n/).length > 4;
+
+  return (
+    <div className="book-library-idea-wrap">
+      <div className="book-library-idea-label">
+        <span>{isLong ? "创作灵感" : "简介"}</span>
+        {text && <small>{text.length.toLocaleString()} 字</small>}
+      </div>
+      <p className={`book-library-idea${expanded ? " is-expanded" : ""}`}>
+        {text || "暂无简介"}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          className="book-library-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(previous => !previous)}
+        >
+          {expanded ? "收起灵感" : "展开灵感"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function formatBookOutline(outline: unknown): string {
   if (typeof outline === "string") return outline.trim();
   if (!outline || typeof outline !== "object") return "";
@@ -437,43 +470,45 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       </select>
     </div>
     {!loading && !books.length && !error ? <EmptyState icon={<BookOpen size={26} />} title="书库为空" description="从创作向导创建第一本小说，或导入已有章节目录。" /> : <>
-      <div className="grid grid-3">{bookPager.pageData.map((book, index) => {
+      <div className="book-list">{bookPager.pageData.map((book, index) => {
         const batch = batches[book.id];
         const completion = completions[book.id];
         const rank = (bookPager.page - 1) * bookPager.pageSize + index + 1;
         const badgeClass = book.status === "draft" ? "gray" : book.status === "planning" ? "cyan" : book.status === "generated" ? "purple" : book.status === "completed" ? "green" : "gray";
-        return <div className="card" key={book.id}>
-          <div className="card-head">
-            <div className="card-title" style={{ gap: 6 }}>
-              <input type="checkbox" checked={selectedBooks.has(book.id)}
-                onChange={() => setSelectedBooks(prev => {
-                  const next = new Set(prev);
-                  next.has(book.id) ? next.delete(book.id) : next.add(book.id);
-                  return next;
-                })} title="选择批量删除" />
-              <span>{rank}. {book.title}</span>
+        return <article className="card book-library-card" key={book.id}>
+          <div className="book-library-content">
+            <div className="card-head">
+              <div className="card-title" style={{ gap: 6 }}>
+                <input type="checkbox" checked={selectedBooks.has(book.id)}
+                  onChange={() => setSelectedBooks(prev => {
+                    const next = new Set(prev);
+                    next.has(book.id) ? next.delete(book.id) : next.add(book.id);
+                    return next;
+                  })} title="选择批量删除" />
+                <span>{rank}. {book.title}</span>
+              </div>
+              <span className={`badge ${badgeClass}`}>{book.status}</span>
             </div>
-            <span className={`badge ${badgeClass}`}>{book.status}</span>
+            <BookIdeaPreview book={book} />
+            <div className="card-sub" style={{ marginBottom: 8 }}>
+              {book.genre || book.meta?.genre || "未分类"} · 创建 {new Date(book.created_at).toLocaleDateString()} · {book.total_words ?? completion?.total_words ?? 0} 字
+            </div>
+            {completion ? <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 8, lineHeight: 1.7 }}>
+              <div>章节 {book.chapter_count ?? completion.total_chapters} · 已审核 {completion.reviewed_chapters}</div>
+              <div>生成进度 {completion.generation_percent ?? "目标未设置"}{completion.generation_percent !== null && completion.generation_percent !== undefined ? "%" : ""} · 审核覆盖 {completion.review_percent ?? 0}% · 平均分 {completion.average_review_score || "暂无"}</div>
+              {(completion.quality_warnings || []).length > 0 && <div style={{ color: "var(--red)", fontWeight: 500 }}>⚠ 质量警告：{completion.quality_warnings?.join("；")}</div>}
+              {!completion.ready_for_release && completion.total_chapters > 0 && <div>当前仅表示章节已生成，不代表质量验收或整书完成。</div>}
+            </div> : <div className="card-sub" style={{ marginBottom: 8 }}>正在加载章节完成度与质量状态…</div>}
+            {batch && <div style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
+              {batch.status === "failed" ? <span className="badge red">批次失败</span> : batch.status === "succeeded" ? <span className="badge green">批次完成</span> : <span className="badge orange">批次 {batch.status}</span>}
+              <span style={{ color: "var(--text-3)", marginLeft: 6 }}>{batch.completed_count}/{batch.requested_count}</span>
+              {batch.cancel_requested ? <span style={{ color: "var(--orange)", marginLeft: 6 }}>· 已请求取消</span> : ""}
+              {batch.blocker_code ? <span style={{ color: "var(--text-3)", marginLeft: 6 }}>· {batch.blocker_code}</span> : ""}
+              {batch.error && <div style={{ color: "var(--red)", fontSize: 11, marginTop: 3 }}>{batch.error}</div>}
+              {batch.status === "succeeded" && <div style={{ color: "var(--text-3)", fontSize: 11, marginTop: 3 }}>生成批次已结束，请继续核对审核覆盖和连续性风险。</div>}
+            </div>}
           </div>
-          <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 10, lineHeight: 1.5 }}>{book.synopsis || book.meta?.idea || "暂无简介"}</p>
-          <div className="card-sub" style={{ marginBottom: 8 }}>
-            {book.genre || book.meta?.genre || "未分类"} · 创建 {new Date(book.created_at).toLocaleDateString()} · {book.total_words ?? completion?.total_words ?? 0} 字
-          </div>
-          {completion ? <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 8, lineHeight: 1.7 }}>
-            <div>章节 {book.chapter_count ?? completion.total_chapters} · 已审核 {completion.reviewed_chapters}</div>
-            <div>生成进度 {completion.generation_percent ?? "目标未设置"}{completion.generation_percent !== null && completion.generation_percent !== undefined ? "%" : ""} · 审核覆盖 {completion.review_percent ?? 0}% · 平均分 {completion.average_review_score || "暂无"}</div>
-            {(completion.quality_warnings || []).length > 0 && <div style={{ color: "var(--red)", fontWeight: 500 }}>⚠ 质量警告：{completion.quality_warnings?.join("；")}</div>}
-            {!completion.ready_for_release && completion.total_chapters > 0 && <div>当前仅表示章节已生成，不代表质量验收或整书完成。</div>}
-          </div> : <div className="card-sub" style={{ marginBottom: 8 }}>正在加载章节完成度与质量状态…</div>}
-          {batch && <div style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
-            {batch.status === "failed" ? <span className="badge red">批次失败</span> : batch.status === "succeeded" ? <span className="badge green">批次完成</span> : <span className="badge orange">批次 {batch.status}</span>}
-            <span style={{ color: "var(--text-3)", marginLeft: 6 }}>{batch.completed_count}/{batch.requested_count}</span>
-            {batch.cancel_requested ? <span style={{ color: "var(--orange)", marginLeft: 6 }}>· 已请求取消</span> : ""}
-            {batch.blocker_code ? <span style={{ color: "var(--text-3)", marginLeft: 6 }}>· {batch.blocker_code}</span> : ""}
-            {batch.error && <div style={{ color: "var(--red)", fontSize: 11, marginTop: 3 }}>{batch.error}</div>}
-            {batch.status === "succeeded" && <div style={{ color: "var(--text-3)", fontSize: 11, marginTop: 3 }}>生成批次已结束，请继续核对审核覆盖和连续性风险。</div>}
-          </div>}
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
+          <div className="book-library-actions">
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} onClick={() => void openDetail(book)}>查看详情</button>
             <button className="btn-sm" style={{ background: "var(--primary-dim)", color: "var(--primary-light)" }} onClick={() => void onOpen(book.id)}>进入编辑</button>
             <button className="btn-sm" style={{ background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)" }} disabled={busy === book.id} onClick={() => void continueOne(book)}>续写一章</button>
@@ -489,7 +524,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
               <Trash2 size={14} />
             </button>
           </div>
-          {importBookId === book.id && <div style={{ marginTop: 14, padding: 14, background: "var(--bg)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+          {importBookId === book.id && <div className="book-library-import" style={{ marginTop: 14, padding: 14, background: "var(--bg)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
             <strong style={{ fontSize: 13 }}>章节目录预览</strong>
             <small style={{ display: "block", color: "var(--text-3)", marginTop: 4 }}>粘贴 TXT 目录；预览不会写入，点击确认后才创建空白计划章节。重复标题由后端跳过。</small>
             <label className="btn-sm" style={{ display: "inline-flex", marginTop: 8, background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)", cursor: "pointer" }}>
@@ -504,7 +539,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
             {importPreview.length > 20 && <small style={{ display: "block", color: "var(--text-3)" }}>仅预览前 20 条，确认时提交全部 {importPreview.length} 条。</small>}
             <button className="btn-sm" style={{ background: "var(--primary-dim)", color: "var(--primary-light)", marginTop: 8 }} disabled={busy === book.id || !importPreview.length} onClick={() => void importDirectory(book)}>{busy === book.id ? "导入中…" : `确认导入 ${importPreview.length} 条`}</button>
           </div>}
-        </div>;
+        </article>;
       })}</div>
       {/* NC-LIB-002: Pagination */}
       <Pagination

@@ -52,9 +52,15 @@ def _text(value: Any) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        own = value.get("text") if isinstance(value.get("text"), str) else ""
-        nested = _text(value.get("content", []))
-        return "\n".join(part for part in (own, nested) if part)
+        content = value.get("content")
+        if isinstance(content, list) and content:
+            return _text(content)
+        paragraphs = value.get("paragraphs")
+        if isinstance(paragraphs, list) and paragraphs:
+            return "\n".join(_text(item) for item in paragraphs)
+        if isinstance(value.get("text"), str):
+            return value["text"]
+        return ""
     if isinstance(value, list):
         return "\n".join(_text(item) for item in value)
     return ""

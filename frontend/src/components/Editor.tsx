@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X } from "lucide-react";
+import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 import { PacingCurve } from "./PacingCurve";
 import { SceneBoard } from "./SceneBoard";
@@ -32,11 +32,11 @@ const EDITOR_OPERATION_LABELS: Record<string, string> = {
   deai: "去 AI 味",
 };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter, nextChapterLoading }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
-  saveChapter: () => void; runEditorOp: (op: string, instruction?: string) => void;
+  saveChapter: () => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string) => void;
   versions: Version[]; restoreVersion: (id: string) => void;
   offlineNotice?: string; offlineQueueCount?: number;
   offlineAiResults?: Array<{ id: string; text: string }>;
@@ -54,6 +54,8 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   editorResetNonce?: number;
   editorAiLoading?: boolean;
   editorAiOperation?: string;
+  onGenerateNextChapter?: () => void | Promise<void>;
+  nextChapterLoading?: boolean;
   onRequestReview?: () => void;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
@@ -87,6 +89,17 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   const [autoSavedAt, setAutoSavedAt] = useState("");
   const dirty = !!chapter && editorText !== serverText;
   useEffect(() => {
+    const handler = async (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
+      event.preventDefault();
+      if (editorAiLoading || !chapter) return;
+      const saved = await Promise.resolve(saveRef.current());
+      if (saved !== false) setAutoSavedAt(new Date().toLocaleTimeString());
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [chapter?.id, editorAiLoading]);
+  useEffect(() => {
     if (!chapter || !dirty) return;
     if (conflict && !conflictDismissed) return;
     const timer = setTimeout(() => {
@@ -108,6 +121,27 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   // Paginate the outline / offline-result lists.
   const chapterTreePager = usePagination({ items: chapterTree, pageSize: 10, mode: "client" });
   const offlineResultsPager = usePagination({ items: offlineAiResults ?? [], pageSize: 10, mode: "client" });
+  const currentChapterIndex = chapter ? chapterTree.findIndex(item => item.id === chapter.id) : -1;
+  const previousChapter = currentChapterIndex > 0 ? chapterTree[currentChapterIndex - 1] : null;
+  const nextChapter = currentChapterIndex >= 0 && currentChapterIndex < chapterTree.length - 1
+    ? chapterTree[currentChapterIndex + 1]
+    : null;
+  const [chapterNavigationBusy, setChapterNavigationBusy] = useState(false);
+
+  async function moveToChapter(chapterId: string) {
+    if (!chapter || chapterId === chapter.id || chapterNavigationBusy) return;
+    setChapterNavigationBusy(true);
+    try {
+      if (dirty) {
+        const saved = await Promise.resolve(saveChapter());
+        if (saved === false) return;
+      }
+      setSelection("");
+      selectChapter(chapterId);
+    } finally {
+      setChapterNavigationBusy(false);
+    }
+  }
 
   // ── Word count ──
   const wordCount = useMemo(() => {
@@ -222,7 +256,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               <div
                 key={ch.id}
                 className={`outline-item${chapter?.id === ch.id ? " active" : ""}`}
-                onClick={() => selectChapter(ch.id)}
+                onClick={() => void moveToChapter(ch.id)}
                 style={chapter?.id === ch.id ? { color: "var(--primary-light)", background: "var(--primary-dim)" } : {}}
               >
                 <span style={{ opacity: 0.5, fontSize: 11, minWidth: 24 }}>{ch.seq}.</span>
@@ -260,7 +294,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             <div style={{ marginTop: 12 }}>
               <select
                 value={chapter?.id ?? ""}
-                onChange={event => selectChapter(event.target.value)}
+                onChange={event => void moveToChapter(event.target.value)}
                 aria-label="选择章节"
                 className="form-input"
                 style={{ height: 34, fontSize: 12 }}
@@ -298,6 +332,42 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onToggleFocusMode={() => setFocusMode(!isFocusMode)}
             hideAiPanel={true}
           />
+          <nav className="editor-chapter-nav" aria-label="章节导航">
+            <button
+              type="button"
+              className="btn-sm btn-ghost editor-chapter-nav-button"
+              disabled={!previousChapter || chapterNavigationBusy || editorAiLoading}
+              onClick={() => previousChapter && void moveToChapter(previousChapter.id)}
+            >
+              <ChevronLeft size={15} />上一章
+            </button>
+            <div className="editor-chapter-position">
+              <strong>第 {currentChapterIndex >= 0 ? currentChapterIndex + 1 : "-"} 章</strong>
+              <span>/ {chapterTree.length || "-"}</span>
+              {dirty && <small>未保存</small>}
+            </div>
+            <div className="editor-chapter-nav-actions">
+              <button
+                type="button"
+                className="btn-sm btn-ghost editor-chapter-nav-button"
+                disabled={!nextChapter || chapterNavigationBusy || editorAiLoading}
+                title={nextChapter ? "打开下一章" : "当前已经是最新章节"}
+                onClick={() => nextChapter && void moveToChapter(nextChapter.id)}
+              >
+                下一章<ChevronRight size={15} />
+              </button>
+              <button
+                type="button"
+                className="btn-sm btn-primary editor-generate-next"
+                disabled={!!nextChapter || !!nextChapterLoading || chapterNavigationBusy || editorAiLoading || !onGenerateNextChapter}
+                title={nextChapter ? "下一章已经生成，直接点击“下一章”打开" : "保存当前章节并生成下一章"}
+                onClick={() => void onGenerateNextChapter?.()}
+              >
+                <Sparkles size={14} />
+                {nextChapterLoading ? "生成中…" : nextChapter ? "下一章已存在" : "生成下一章"}
+              </button>
+            </div>
+          </nav>
         </div>
 
         {/* RIGHT: AI Assistant */}
