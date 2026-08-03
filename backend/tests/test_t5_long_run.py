@@ -99,6 +99,18 @@ def test_evidence_accepts_v7_continuity_v1_passed_shape():
     assert evidence["accepted"] is True
 
 
+def test_evidence_never_accepts_review_validation_hold():
+    chapters = [
+        _chapter(1, "第一章正文"),
+        _chapter(2, "第二章正文", status="needs_review"),
+    ]
+    chapters[1]["meta"]["quality_status"] = "v7_review_validation_failed"
+    evidence = build_evidence(chapters, Checkpoint("p", "n", 2), [])
+    assert evidence["reviewed_chapters"] == 1
+    assert evidence["needs_review_chapters"] == 1
+    assert evidence["accepted"] is False
+
+
 def test_evidence_filters_new_chapters_by_baseline_identity_not_row_offset():
     chapters = [_chapter(1, "基线"), _chapter(3, "新章三"), _chapter(2, "新章二")]
     checkpoint = Checkpoint("p", "n", 2, baseline_chapters=1, baseline_chapter_ids=["c1"])

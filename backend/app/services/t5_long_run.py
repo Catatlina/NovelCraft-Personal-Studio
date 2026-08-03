@@ -172,8 +172,15 @@ def build_evidence(chapters: list[dict], checkpoint: Checkpoint, batches: list[d
         else:
             continuity.append("missing")
     repeats = adjacent_repeat_scores(generated)
+    needs_review = sum(
+        item.get("status") == "needs_review"
+        or (item.get("meta") or {}).get("quality_status") == "v7_review_validation_failed"
+        for item in generated
+    )
+    needs_rewrite = sum(item.get("status") == "needs_rewrite" for item in generated)
+    reviewed = sum(item.get("status") == "reviewed" for item in generated)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "project_id": checkpoint.project_id,
         "novel_id": checkpoint.novel_id,
@@ -181,8 +188,9 @@ def build_evidence(chapters: list[dict], checkpoint: Checkpoint, batches: list[d
         "baseline_chapters": checkpoint.baseline_chapters,
         "baseline_chapter_ids": checkpoint.baseline_chapter_ids,
         "new_chapters": len(generated),
-        "reviewed_chapters": sum(item.get("status") == "reviewed" for item in generated),
-        "needs_rewrite_chapters": sum(item.get("status") == "needs_rewrite" for item in generated),
+        "reviewed_chapters": reviewed,
+        "needs_review_chapters": needs_review,
+        "needs_rewrite_chapters": needs_rewrite,
         "average_review_score": round(sum(scores) / len(scores), 2) if scores else None,
         "continuity": {status: continuity.count(status) for status in sorted(set(continuity))},
         "max_adjacent_5gram_jaccard": max((item["jaccard_5gram"] for item in repeats), default=0.0),
@@ -190,7 +198,9 @@ def build_evidence(chapters: list[dict], checkpoint: Checkpoint, batches: list[d
         "batches": batches,
         "checkpoint": asdict(checkpoint),
         "accepted": len(generated) >= checkpoint.target_new_chapters
-                    and not any(item.get("status") == "needs_rewrite" for item in generated)
+                    and reviewed >= checkpoint.target_new_chapters
+                    and needs_review == 0
+                    and needs_rewrite == 0
                     and all(status in {"clean", "flagged"} for status in continuity),
     }
 
@@ -204,7 +214,8 @@ def write_evidence(evidence: dict, output_dir: Path) -> tuple[Path, Path]:
         f"- 生成时间：{evidence['generated_at']}",
         f"- Novel：`{evidence['novel_id']}`",
         f"- 目标/新增章节：{evidence['target_new_chapters']} / {evidence['new_chapters']}",
-        f"- 已审核/待返工：{evidence['reviewed_chapters']} / {evidence['needs_rewrite_chapters']}",
+        f"- 已审核/待复核/待返工：{evidence['reviewed_chapters']} / "
+        f"{evidence['needs_review_chapters']} / {evidence['needs_rewrite_chapters']}",
         f"- 平均审核分：{evidence['average_review_score']}",
         f"- 连续性状态：`{json.dumps(evidence['continuity'], ensure_ascii=False)}`",
         f"- 相邻章节最大 5-gram Jaccard：{evidence['max_adjacent_5gram_jaccard']}",
