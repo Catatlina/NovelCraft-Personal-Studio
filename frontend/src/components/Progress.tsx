@@ -179,9 +179,26 @@ export function Progress({
   const pendingApproval = nodes.some(node => node.status === "pending_approval" || node.status === "waiting_human") || run?.status === "pending_approval";
   const canonicalGeneration = (run?.context?.canonical_generation || {}) as Record<string, unknown>;
   const canonicalStatus = String(canonicalGeneration.status || run?.context?.canonical_generation_status || "");
-  const canonicalReason = String(canonicalGeneration.blocked_reason || canonicalGeneration.reason || "");
+  const generationQuality = (canonicalGeneration.generation_quality || {}) as Record<string, unknown>;
+  const generationFailures = Array.isArray(generationQuality.failures)
+    ? generationQuality.failures as Array<Record<string, unknown>>
+    : [];
+  const generationFailureReason = generationFailures
+    .map(item => String(item.message || item.code || ""))
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("；");
+  const canonicalReason = String(
+    canonicalGeneration.blocked_reason
+      || canonicalGeneration.reason
+      || generationFailureReason
+      || "",
+  );
   const canonicalScore = canonicalGeneration.review_score;
-  const canonicalNeedsReview = canonicalStatus === "needs_review" || canonicalStatus === "needs_rewrite" || run?.status === "needs_review";
+  const canonicalNeedsReview = canonicalStatus === "needs_review"
+    || canonicalStatus === "needs_rewrite"
+    || run?.status === "needs_review"
+    || generationQuality.passed === false;
   const planningNodes = nodes.filter(node => PLANNING_NODES.has(node.node_key));
   const novelName = cleanNovelTitle(novel?.title || selectedTitle || titles[0]);
 

@@ -51,6 +51,28 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
     blocking = int(review_data.get("blocking_violations") or 0)
     dimensions = review_data.get("dimension_scores") or review_data.get("dimensions") or {}
     failures: list[dict[str, Any]] = []
+    generation_quality = review_data.get("generation_quality") or {}
+    if generation_quality.get("passed") is False:
+        for failure in generation_quality.get("failures") or []:
+            if not isinstance(failure, dict):
+                continue
+            failures.append(
+                {
+                    "dimension": str(failure.get("code") or "generation_quality"),
+                    "actual": failure.get("severity") or "high",
+                    "minimum": "resolved",
+                    "reason": str(failure.get("message") or "生成结构质量未通过"),
+                }
+            )
+        if not generation_quality.get("failures"):
+            failures.append(
+                {
+                    "dimension": "generation_quality",
+                    "actual": "failed",
+                    "minimum": "passed",
+                    "reason": "生成结构质量门禁未通过",
+                }
+            )
     if overall_score < QUALITY_PASS_SCORE:
         failures.append({"dimension": "overall_score", "actual": overall_score, "minimum": QUALITY_PASS_SCORE})
     for name, minimum in CRITICAL_DIMENSION_MINIMUMS.items():

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+
 from app.v7.generation.generation_engine import ContextAssembler
+from app.v7.engines.base import EngineResult
+from app.v7.engines.memory_engine import MemoryEngine
 from app.v7.integration.quality import QUALITY_PASS_SCORE, evaluate_review
 from app.v7.integration.v6_bridge import (
     build_transition_contract,
     generation_key,
     _tiptap_body,
 )
+from app.v7.quality.continuity import validate_transition_contract
 
 
 def test_quality_gate_rejects_weak_continuity_even_when_average_is_high():
@@ -49,6 +54,109 @@ def test_quality_gate_rejects_material_duplicate_paragraphs():
 
     assert result["passed"] is False
     assert any(item["dimension"] == "duplicate_paragraph" for item in result["failures"])
+
+
+def test_quality_gate_rejects_failed_generation_quality_even_with_high_scores():
+    result = evaluate_review(
+        {
+            "overall_score": 96,
+            "dimension_scores": {
+                "consistency": 96,
+                "character_voice": 96,
+                "plot_logic": 96,
+                "pacing": 96,
+                "writing_quality": 96,
+                "constraint_compliance": 96,
+            },
+            "generation_quality": {
+                "passed": False,
+                "failures": [
+                    {
+                        "code": "continuation_duplicate",
+                        "severity": "high",
+                        "message": "续写候选重复",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(item["dimension"] == "continuation_duplicate" for item in result["failures"])
+
+
+def test_continuity_gate_rejects_high_confidence_state_conflict():
+    previous = build_transition_contract(
+        chapter_number=1,
+        title="第一章",
+        text="他站在诊所门口。",
+        summary="主角抵达诊所。",
+        word_count=8,
+        review_score=90,
+        dimension_scores={"consistency": 90},
+        memory_items=[{"category": "plot_events", "key": "clinic", "summary": "抵达诊所"}],
+    )
+    current = build_transition_contract(
+        chapter_number=2,
+        title="第二章",
+        text="他在海边醒来。",
+        summary="主角发现新的线索。",
+        word_count=8,
+        review_score=96,
+        dimension_scores={"consistency": 96},
+        previous_context={"previous_transition_contract": previous},
+        memory_items=[{"category": "plot_events", "key": "clinic", "summary": "离开诊所"}],
+    )
+    result = validate_transition_contract(
+        current,
+        chapter_number=2,
+        previous_contract=previous,
+        state_conflicts=[
+            {"key": "location", "description": "上一章仍在诊所，本章无过渡直接出现在海边", "severity": "high"}
+        ],
+    )
+
+    assert result["passed"] is False
+    assert any(item["code"] == "state_conflict" for item in result["issues"])
+
+
+def test_rejected_chapter_is_not_loaded_as_future_context():
+    class State:
+        async def list_states(self, _state_type, limit=200):
+            return [
+                {"key": "chapter_1", "value": {"chapter_number": 1, "passed_review": True}},
+                {"key": "chapter_2", "value": {"chapter_number": 2, "passed_review": False}},
+            ]
+
+    class Brain:
+        state = State()
+
+    chapters = asyncio.run(ContextAssembler(Brain()).load_previous_chapters(3, count=5))
+    assert [item["chapter_number"] for item in chapters] == [1]
+
+
+def test_memory_extraction_defers_writes_for_unaccepted_draft():
+    result = asyncio.run(
+        MemoryEngine.update(
+            None,
+            EngineResult(
+                success=True,
+                result={
+                    "apply_updates": False,
+                    "chapter_number": 2,
+                    "valid_items": [{"key": "door", "state_type": "plot"}],
+                    "rejected_items": [],
+                    "conflicts": [],
+                    "chapter_summary": "草稿",
+                },
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert result.result["deferred"] is True
+    assert result.result["brain_updated"] is False
+    assert result.result["states_applied"] == 0
 
 
 def test_context_budget_keeps_cross_chapter_anchors_after_state_compression():

@@ -67,6 +67,7 @@ class MemoryEngine(BaseEngine):
         analysis = {
             "chapter_number": input_data.get("chapter_number"),
             "run_id": input_data.get("run_id"),
+            "apply_updates": bool(input_data.get("apply_updates", True)),
             "text_length": chinese_word_count(chapter_text),
             "chapter_text": chapter_text,
             "existing_keys": {
@@ -273,12 +274,8 @@ class MemoryEngine(BaseEngine):
             warnings=output.warnings,
         )
 
-    # ── Phase 5: update (confidence gated writes) ───────────────────────
-    async def update(self, validated: EngineResult) -> EngineResult:
-        if not validated.success:
-            return validated
-
-        data = validated.result or {}
+    async def apply_validated_items(self, data: dict[str, Any]) -> EngineResult:
+        """Commit extracted memory only after the chapter quality gate passes."""
         chapter_number = data.get("chapter_number")
         run_id = data.get("run_id")
         if isinstance(run_id, str):
@@ -306,7 +303,7 @@ class MemoryEngine(BaseEngine):
                 item["confidence"],
                 source="memory_engine",
                 source_run_id=run_id,
-                reason=f"extracted from chapter {chapter_number}",
+                reason=f"extracted from accepted chapter {chapter_number}",
             )
             action = outcome.get("action")
             if action in ("updated", "created"):
@@ -355,7 +352,7 @@ class MemoryEngine(BaseEngine):
             0.9,
             source="memory_engine",
             source_run_id=run_id,
-            reason="memory extraction summary",
+            reason="accepted chapter memory extraction summary",
         )
 
         return EngineResult(
@@ -374,10 +371,44 @@ class MemoryEngine(BaseEngine):
                     for r in data.get("rejected_items", [])
                 ],
             },
-            confidence=validated.confidence,
+            confidence=float(data.get("confidence") or 0.9),
             reason=(
                 f"Applied {applied}, pending {pending}, discarded {discarded} "
                 f"state update(s) through the confidence gate"
             ),
-            warnings=validated.warnings,
         )
+
+    # ── Phase 5: update (confidence gated writes) ───────────────────────
+    async def update(self, validated: EngineResult) -> EngineResult:
+        if not validated.success:
+            return validated
+
+        data = validated.result or {}
+        if not data.get("apply_updates", True):
+            # The Story Director uses this dry-run mode while the chapter is
+            # still being reviewed.  A rejected draft must not become truth
+            # state for the next chapter.
+            return EngineResult(
+                success=True,
+                result={
+                    "brain_updated": False,
+                    "deferred": True,
+                    "chapter_number": data.get("chapter_number"),
+                    "run_id": data.get("run_id"),
+                    "valid_items": data.get("valid_items", []),
+                    "extracted_items": data.get("valid_items", []),
+                    "rejected_items": data.get("rejected_items", []),
+                    "conflicts": data.get("conflicts", []),
+                    "conflicts_found": data.get("conflicts_found", 0),
+                    "extracted_count": data.get("extracted_count", 0),
+                    "chapter_summary": data.get("chapter_summary", ""),
+                    "states_applied": 0,
+                    "states_pending_review": 0,
+                    "states_discarded": len(data.get("rejected_items", [])),
+                },
+                confidence=validated.confidence,
+                reason="Memory extraction deferred until chapter quality acceptance",
+                warnings=validated.warnings,
+            )
+
+        return await self.apply_validated_items(data)

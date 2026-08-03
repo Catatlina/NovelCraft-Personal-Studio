@@ -23,6 +23,7 @@ from ..events.subscribers import BrainStateSubscribers
 from ..engines.plot_engine import PlotEngine
 from ..engines.memory_engine import MemoryEngine
 from ..engines.review_engine import ReviewEngine
+from ..engines.base import EngineResult
 from ..generation.generation_engine import (
     CHAPTER_STATE_TYPE,
     GenerationEngine,
@@ -239,6 +240,17 @@ class StoryDirector:
                     data=perception,
                 )
 
+            if perception.get("blocked_by_quality"):
+                result = {
+                    "run_id": str(run_id),
+                    "chapter_number": chapter_number,
+                    "status": "blocked_quality",
+                    "blocked_reason": perception["blocked_by_quality"],
+                    "steps_executed": ["perceive"],
+                }
+                await self.tracer.complete_run(run_id, output_data=result)
+                return result
+
             # ── 2. ASSESS ──────────────────────────────────────────────
             async with self.tracer.trace_step(
                 "director.assess", "assess",
@@ -378,6 +390,7 @@ class StoryDirector:
                 "scene_plan": generation["scene_plan"],
                 "review_score": observation["review_score"],
                 "dimension_scores": observation["dimension_scores"],
+                "generation_quality": generation.get("generation_quality") or {},
                 "reader_experience": observation.get("reader_experience", {}),
                 "issues": observation.get("issues", []),
                 "quality_gate": observation.get("quality_gate", {}),
@@ -439,8 +452,14 @@ class StoryDirector:
         progress = (progress_state or {}).get("value") or {}
         pending_states = await self.brain.state.get_pending_review(limit=20)
         previous = await self.generation_engine.context_assembler.load_previous_chapters(
-            chapter_number, count=1
+            chapter_number, count=1, include_rejected=True
         )
+        blocked_by_quality = None
+        if previous and previous[-1].get("passed_review") is False:
+            blocked_by_quality = (
+                f"第{previous[-1].get('chapter_number')}章未通过质量门禁，"
+                "必须先完成返工，不能继续生成下一章"
+            )
 
         return {
             "chapter_number": chapter_number,
@@ -455,6 +474,7 @@ class StoryDirector:
                 s.get("key") for s in (pending_states or [])
             ][:20],
             "has_previous_chapter": bool(previous),
+            "blocked_by_quality": blocked_by_quality,
             "truth_domains": await self.brain.truth.digest(),
         }
 
@@ -674,6 +694,7 @@ class StoryDirector:
                 "chapter_plan": plan.get("plot_brief") or {},
                 "scene_plan": current.get("scene_plan") or {},
                 "deai_metrics": metrics.get("after") or metrics,
+                "generation_quality": current.get("generation_quality") or {},
             }
 
         review = await self.review_engine.run(review_input(generation))
@@ -804,10 +825,38 @@ class StoryDirector:
                 "chapter_text": generation["text"],
                 "chapter_number": chapter_number,
                 "run_id": str(run_id),
+                # Extract first; commit to Novel Brain only after the review
+                # and continuity gates have accepted the final text.
+                "apply_updates": False,
             }
         )
         memory_data = memory.result or {}
         summary = memory_data.get("chapter_summary") or ""
+        memory_items = memory_data.get("valid_items") or memory_data.get("extracted_items") or []
+
+        if not memory.success:
+            observation["passed_review"] = False
+            quality_gate = observation.get("quality_gate") or {}
+            quality_gate["passed"] = False
+            quality_gate["failures"] = [
+                *(quality_gate.get("failures") or []),
+                {
+                    "dimension": "memory_state_extraction",
+                    "actual": "failed",
+                    "minimum": "succeeded",
+                    "reason": memory.reason or "章节状态抽取失败，不能更新真相状态",
+                },
+            ]
+            observation["quality_gate"] = quality_gate
+            observation["issues"] = [
+                *(observation.get("issues") or []),
+                {
+                    "dimension": "continuity",
+                    "severity": "high",
+                    "description": memory.reason or "章节状态抽取失败",
+                    "suggestion": "修复状态抽取后重新提交，不能让未确认状态进入后续章节",
+                },
+            ]
 
         transition_contract = build_transition_contract(
             chapter_number=chapter_number,
@@ -819,8 +868,9 @@ class StoryDirector:
             dimension_scores=observation["dimension_scores"],
             reader_experience=observation.get("reader_experience"),
             previous_context=generation.get("context"),
-            memory_items=memory_data.get("extracted_items") or [],
+            memory_items=memory_items,
             constraints=(generation.get("context") or {}).get("constraints") or [],
+            state_conflicts=memory_data.get("conflicts") or [],
         )
         continuity = validate_transition_contract(
             transition_contract,
@@ -828,6 +878,7 @@ class StoryDirector:
             previous_contract=(generation.get("context") or {}).get(
                 "previous_transition_contract", {}
             ),
+            state_conflicts=memory_data.get("conflicts") or [],
         )
         transition_contract["continuity"] = continuity
         if not continuity["passed"]:
@@ -872,6 +923,73 @@ class StoryDirector:
             source_run_id=run_id,
         )
 
+        # Commit extracted truth only after every quality gate has passed and
+        # before the V6 boundary is allowed to call the chapter "reviewed".
+        # Otherwise a database/state-write failure could leave an accepted V6
+        # chapter behind a failed Novel Brain update.
+        memory_update = memory
+        if observation["passed_review"] and memory.success:
+            try:
+                async with self.db.begin_nested():
+                    memory_update = await self.memory_engine.apply_validated_items(
+                        {
+                            **memory_data,
+                            "valid_items": memory_items,
+                            "chapter_number": chapter_number,
+                            "run_id": str(run_id),
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001 - convert to a visible gate failure
+                observation["passed_review"] = False
+                memory_update = EngineResult(
+                    success=False,
+                    reason=f"accepted chapter state write failed: {type(exc).__name__}",
+                )
+                quality_gate = observation.get("quality_gate") or {}
+                quality_gate["passed"] = False
+                quality_gate["failures"] = [
+                    *(quality_gate.get("failures") or []),
+                    {
+                        "dimension": "memory_state_write",
+                        "actual": "failed",
+                        "minimum": "succeeded",
+                        "reason": memory_update.reason,
+                    },
+                ]
+                observation["quality_gate"] = quality_gate
+                observation["issues"] = [
+                    *(observation.get("issues") or []),
+                    {
+                        "dimension": "continuity",
+                        "severity": "high",
+                        "description": memory_update.reason,
+                        "suggestion": "状态写回成功后才能把章节标记为已完成",
+                    },
+                ]
+            if observation["passed_review"] and not memory_update.success:
+                observation["passed_review"] = False
+                quality_gate = observation.get("quality_gate") or {}
+                quality_gate["passed"] = False
+                quality_gate["failures"] = [
+                    *(quality_gate.get("failures") or []),
+                    {
+                        "dimension": "memory_state_write",
+                        "actual": "failed",
+                        "minimum": "succeeded",
+                        "reason": memory_update.reason or "章节状态写回未完成",
+                    },
+                ]
+                observation["quality_gate"] = quality_gate
+                observation["issues"] = [
+                    *(observation.get("issues") or []),
+                    {
+                        "dimension": "continuity",
+                        "severity": "high",
+                        "description": memory_update.reason or "章节状态写回未完成",
+                        "suggestion": "状态写回成功后才能把章节标记为已完成",
+                    },
+                ]
+
         # Persist both outcomes at the product boundary.  A failed quality
         # gate stays fail-closed (`needs_rewrite`), but the author must still
         # be able to inspect the actual draft and repair evidence.
@@ -896,6 +1014,7 @@ class StoryDirector:
                 **self.generation_metadata,
                 "audit_report": observation.get("audit_report") or {},
                 "continuity": continuity,
+                "generation_quality": generation.get("generation_quality") or {},
             },
         }
         if not observation["passed_review"]:
@@ -921,6 +1040,8 @@ class StoryDirector:
                 "review_score": observation["review_score"],
                 "reader_experience": observation.get("reader_experience", {}),
                 "passed_review": observation["passed_review"],
+                "generation_quality": generation.get("generation_quality") or {},
+                "quality_gate": observation.get("quality_gate") or {},
                 "rework_count": observation["rework_count"],
                 "run_id": str(run_id),
                 "transition_contract": transition_contract,
@@ -939,11 +1060,12 @@ class StoryDirector:
             "continuity": continuity,
             "rule_learning": rule_learning,
             "chapter_summary": summary,
-            "states_applied": memory_data.get("states_applied", 0),
-            "states_pending_review": memory_data.get("states_pending_review", 0),
-            "states_discarded": memory_data.get("states_discarded", 0),
-            "conflicts_found": memory_data.get("conflicts_found", 0),
-            "memory_success": memory.success,
+            "states_applied": (memory_update.result or {}).get("states_applied", 0),
+            "states_pending_review": (memory_update.result or {}).get("states_pending_review", 0),
+            "states_discarded": (memory_update.result or {}).get("states_discarded", 0),
+            "conflicts_found": (memory_update.result or {}).get("conflicts_found", 0),
+            "memory_success": memory_update.success,
+            "memory_deferred": bool((memory_update.result or {}).get("deferred")),
         }
 
     # ── helpers ─────────────────────────────────────────────────────────

@@ -90,15 +90,23 @@ class ContextAssembler:
         return await asyncio.to_thread(_read)
 
     async def load_previous_chapters(
-        self, chapter_number: int, *, count: int = 2
+        self,
+        chapter_number: int,
+        *,
+        count: int = 2,
+        include_rejected: bool = False,
     ) -> list[dict[str, Any]]:
-        """Load the most recent already-generated chapters from brain state."""
+        """Load accepted chapters; rejected drafts never become story context."""
         states = await self.brain.state.list_states(CHAPTER_STATE_TYPE, limit=200)
         chapters: list[dict[str, Any]] = []
         for s in states:
             value = s.get("value") or {}
             num = value.get("chapter_number")
-            if isinstance(num, int) and num < chapter_number:
+            if (
+                isinstance(num, int)
+                and num < chapter_number
+                and (include_rejected or value.get("passed_review") is not False)
+            ):
                 chapters.append(value)
         chapters.sort(key=lambda c: c.get("chapter_number", 0))
         return chapters[-count:] if count > 0 else chapters
@@ -508,6 +516,14 @@ class DeAIPipeline:
         "?": "？",
         "!": "！",
     }
+    SEMANTIC_REWRITE_FLAGS = {
+        "dash_density",
+        "ellipsis_density",
+        "uniform_cadence",
+        "repeated_paragraph_opening",
+        "ai_phrase",
+        "repeated_phrase",
+    }
 
     def __init__(self, gateway: "AIGateway | None" = None):
         self.gateway = gateway
@@ -551,6 +567,66 @@ class DeAIPipeline:
 
         text, n = self._layer_trailing_moral(text)
         layers.append({"layer": "trailing_moral_removal", "changes": n})
+
+        # Do not send every chapter through a whole-chapter semantic rewrite.
+        # A clean chapter should keep its original voice; the provider pass is
+        # reserved for measured risks that deterministic rules cannot safely
+        # repair.  This also makes a missing provider an explicit problem only
+        # when semantic humanization is actually needed.
+        rule_metrics = analyze_deai_patterns(text)
+        duplicate_flags = [
+            flag
+            for flag in rule_metrics.get("flags") or []
+            if isinstance(flag, dict) and flag.get("code") == "duplicate_paragraph"
+        ]
+        semantic_flags = [
+            flag
+            for flag in rule_metrics.get("flags") or []
+            if isinstance(flag, dict)
+            and flag.get("code") in self.SEMANTIC_REWRITE_FLAGS
+        ]
+        if duplicate_flags or not semantic_flags:
+            quality_gate: dict[str, Any] = {
+                "passed": not duplicate_flags,
+                "mode": "deterministic_only",
+            }
+            if duplicate_flags:
+                quality_gate.update(
+                    {
+                        "code": "duplicate_paragraph",
+                        "message": str(duplicate_flags[0].get("message") or "正文存在完整段落重复"),
+                    }
+                )
+            layers.append(
+                {
+                    "layer": "semantic_final_humanize",
+                    "changes": 0,
+                    "applied": False,
+                    "reason": (
+                        "duplicate paragraph detected; semantic rewrite is blocked"
+                        if duplicate_flags
+                        else "rule-cleaned text is below semantic rewrite trigger"
+                    ),
+                }
+            )
+            return {
+                "original_text": original,
+                "processed_text": text,
+                "layers_applied": layers,
+                "total_changes": sum(item["changes"] for item in layers),
+                "original_chars": chinese_word_count(original),
+                "processed_chars": chinese_word_count(text),
+                "semantic_humanize": False,
+                "humanize_changes": [],
+                "ai_patterns_removed": [],
+                "metrics": {
+                    "before": before_metrics,
+                    "after": rule_metrics,
+                    "risk_delta": before_metrics["risk_score"] - rule_metrics["risk_score"],
+                },
+                "quality_gate": quality_gate,
+                "usage": {},
+            }
 
         if self.gateway is None:
             raise AIGatewayError("semantic final_humanize gateway is not configured")
@@ -1316,11 +1392,21 @@ class GenerationEngine:
         prompt: str | None = None,
         outline: str | None = None,
         target_word_count: int = 3000,
-        max_continuations: int = 3,
+        max_continuations: int = 1,
         plot_brief: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate one chapter of at least `target_word_count` Chinese characters."""
+        """Generate one chapter with a soft length target and hard quality gates.
+
+        Length is a planning signal, not a reason to append unlimited prose.
+        One continuation is allowed only when the first draft is materially
+        short; every continuation is checked before it can be appended.
+        """
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+        minimum_chapter_chars = max(600, int(target_word_count * 0.72))
+        maximum_chapter_chars = max(
+            minimum_chapter_chars + 200,
+            int(target_word_count * 1.45),
+        )
 
         def add_usage(step_ctx: Any, u: dict[str, Any]) -> None:
             usage["tokens_input"] += u.get("tokens_input", 0)
@@ -1373,11 +1459,11 @@ class GenerationEngine:
                 confidence=float(scene_plan.get("confidence", 0.8) or 0.8),
             )
 
-        # Step: AI generation (with continuation until target length is met)
+        # Step: AI generation (at most one quality-checked continuation)
         async with self.tracer.trace_step(
             "generation.ai_generate",
             "ai_generation",
-            input_summary=f"Generate >= {target_word_count} chars with AI",
+            input_summary=f"Generate a complete chapter near {target_word_count} chars with AI",
         ) as step:
             gen_prompt = self._build_generation_prompt(
                 chapter_number, context, scene_plan, outline or prompt, target_word_count
@@ -1399,9 +1485,14 @@ class GenerationEngine:
             text = first["text"].strip()
 
             continuations = 0
+            continuation_failures: list[dict[str, Any]] = []
+            # A chapter that is already close to its target should finish on
+            # its hook.  Repeatedly asking for more text is a common source of
+            # padding and duplicated paragraphs.
+            continuation_limit = min(max(0, int(max_continuations)), 1)
             while (
-                chinese_word_count(text) < target_word_count
-                and continuations < max_continuations
+                chinese_word_count(text) < minimum_chapter_chars
+                and continuations < continuation_limit
             ):
                 continuations += 1
                 missing = target_word_count - chinese_word_count(text)
@@ -1418,12 +1509,45 @@ class GenerationEngine:
                     prompt_version="1.2.0",
                 )
                 add_usage(step, cont)
-                text = text.rstrip() + "\n" + cont["text"].strip()
+                candidate = text.rstrip() + "\n\n" + cont["text"].strip()
+                duplicate_stats = duplicate_paragraph_stats(candidate)
+                if (
+                    float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01
+                    or int(duplicate_stats.get("adjacent_duplicate_count") or 0) > 0
+                ):
+                    continuation_failures.append(
+                        {
+                            "code": "continuation_duplicate",
+                            "severity": "high",
+                            "message": "续写候选与已有正文出现完整段落重复，已丢弃候选",
+                            "evidence": duplicate_stats,
+                        }
+                    )
+                    break
+                if chinese_word_count(candidate) > maximum_chapter_chars:
+                    continuation_failures.append(
+                        {
+                            "code": "continuation_overflow",
+                            "severity": "high",
+                            "message": (
+                                f"续写候选超过本章最大长度 {maximum_chapter_chars} 字，"
+                                "已丢弃候选"
+                            ),
+                            "candidate_chars": chinese_word_count(candidate),
+                        }
+                    )
+                    break
+                text = candidate
 
             raw_count = chinese_word_count(text)
             step.set_output(
                 f"{raw_count} chars, {continuations} continuation(s)",
-                data={"raw_word_count": raw_count, "continuations": continuations},
+                data={
+                    "raw_word_count": raw_count,
+                    "continuations": continuations,
+                    "continuation_limit": continuation_limit,
+                    "continuation_failures": continuation_failures,
+                },
             )
 
         # Step: de-AI pipeline (real transformations)
@@ -1464,6 +1588,49 @@ class GenerationEngine:
 
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
+        generation_failures = list(continuation_failures)
+        if word_count < minimum_chapter_chars:
+            generation_failures.append(
+                {
+                    "code": "chapter_too_short",
+                    "severity": "high",
+                    "message": (
+                        f"最终正文 {word_count} 字，低于本章最低生成阈值 "
+                        f"{minimum_chapter_chars} 字"
+                    ),
+                }
+            )
+        if word_count > maximum_chapter_chars:
+            generation_failures.append(
+                {
+                    "code": "chapter_too_long",
+                    "severity": "high",
+                    "message": (
+                        f"最终正文 {word_count} 字，超过本章最大生成阈值 "
+                        f"{maximum_chapter_chars} 字"
+                    ),
+                }
+            )
+        deai_gate = deai_result.get("quality_gate") or {}
+        if deai_gate.get("passed") is False:
+            generation_failures.append(
+                {
+                    "code": str(deai_gate.get("code") or "deai_quality_gate_failed"),
+                    "severity": "high",
+                    "message": str(
+                        deai_gate.get("message") or "去 AI 味候选未通过安全校验"
+                    ),
+                }
+            )
+        generation_quality = {
+            "schema_version": "generation-quality-v1",
+            "passed": not generation_failures,
+            "minimum_chars": minimum_chapter_chars,
+            "maximum_chars": maximum_chapter_chars,
+            "failures": generation_failures,
+            "continuations": continuations,
+            "continuation_limit": continuation_limit,
+        }
 
         await self.event_bus.publish(
             "generation_completed",
@@ -1486,6 +1653,7 @@ class GenerationEngine:
             "word_count": word_count,
             "target_word_count": target_word_count,
             "meets_target": word_count >= target_word_count,
+            "generation_quality": generation_quality,
             "context": {
                 "rendered_chars": context["rendered_chars"],
                 "previous_chapters": context["previous_chapters"],
@@ -1504,6 +1672,7 @@ class GenerationEngine:
                 "humanize_changes": deai_result.get("humanize_changes", []),
                 "ai_patterns_removed": deai_result.get("ai_patterns_removed", []),
                 "metrics": deai_result.get("metrics", {}),
+                "quality_gate": deai_result.get("quality_gate") or {"passed": True},
             },
             "usage": usage,
         }
@@ -1537,7 +1706,9 @@ class GenerationEngine:
             "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"
             f"节拍安排：\n{beat_lines}\n\n"
             f"额外要求：{outline or '无'}\n\n"
-            f"请写出不少于 {target_word_count} 个汉字的完整章节正文。"
+            f"请写出约 {target_word_count} 个汉字的完整章节正文，合理范围为"
+            f" {max(600, int(target_word_count * 0.72))}-{max(max(600, int(target_word_count * 0.72)) + 200, int(target_word_count * 1.45))} 字；"
+            "完成节拍和章尾钩子后立即收束，不要为了凑字数继续解释或重复描写。"
             f"必须与前情提要和已有设定保持一致，不得与【必须遵守的约束】冲突。"
             "正文质量要求：开头两段直接承接上一章的动作、地点或未决问题，不要重新讲背景；"
             "每个场景都要完成‘目标→阻碍→选择→代价/结果’，在篇幅允许时推进局部变化、"
@@ -1560,8 +1731,9 @@ class GenerationEngine:
         remaining = "、".join(b.get("name", "") for b in beats[-2:]) if beats else ""
         return (
             f"以下是本章已写好的结尾部分：\n\n{tail}\n\n"
-            f"请无缝接着往下写，至少再写 {missing} 个汉字，"
+            f"请只补足剩余节拍，目标补写约 {missing} 个汉字，"
             f"完成剩余节拍（{remaining}）并以钩子收束："
             f"{scene_plan.get('hook', '')}。保持上一段的时间线、地点、人物状态和情绪，"
+            "如果节拍和钩子已经完成就立即停止，不要为了凑字数继续解释；"
             "不要重新开场、不要重复上文，不要写任何说明。"
         )

@@ -1,4 +1,7 @@
-from app.v7.generation.generation_engine import GenerationEngine
+import asyncio
+from contextlib import asynccontextmanager
+
+from app.v7.generation.generation_engine import DeAIPipeline, GenerationEngine
 
 
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
@@ -36,3 +39,108 @@ def test_continuation_prompt_does_not_reset_chapter_context():
 
     assert "不要重新开场" in prompt
     assert "时间线、地点、人物状态和情绪" in prompt
+
+
+def test_deai_skips_provider_for_rule_clean_text():
+    result = asyncio.run(DeAIPipeline(None).process("他推开门。屋里没人。"))
+
+    assert result["semantic_humanize"] is False
+    assert result["quality_gate"] == {"passed": True, "mode": "deterministic_only"}
+    assert result["processed_text"] == "他推开门。屋里没人。"
+
+
+def test_deai_blocks_duplicate_paragraphs_without_semantic_rewrite():
+    paragraph = (
+        "沈夜推开门，看见院里的灯还亮着，便停在门口没有进去。屋里没有人回应，"
+        "只有桌上的茶还冒着热气，像是有人刚刚离开。"
+    )
+    result = asyncio.run(DeAIPipeline(None).process(f"{paragraph}\n\n{paragraph}"))
+
+    assert result["quality_gate"]["passed"] is False
+    assert result["quality_gate"]["code"] == "duplicate_paragraph"
+    assert result["semantic_humanize"] is False
+
+
+def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
+    paragraph_a = "沈夜把手按在门上，听见门内传来三下敲击，便停住了呼吸。" * 3
+    paragraph_b = "林薇没有催他，只把短棍横在身前，目光落向院墙外的黑暗。" * 3
+    first_text = f"{paragraph_a}\n\n{paragraph_b}"
+
+    class Step:
+        def set_output(self, *_args, **_kwargs):
+            pass
+
+    class Tracer:
+        @asynccontextmanager
+        async def trace_step(self, *_args, **_kwargs):
+            yield Step()
+
+    class ContextAssembler:
+        async def assemble_context(self, *_args, **_kwargs):
+            return {
+                "rendered_context": "",
+                "rendered_chars": 0,
+                "truncated": False,
+                "previous_chapters": 0,
+                "context_layers": {},
+            }
+
+    class SceneDirector:
+        async def plan_scene(self, *_args, **_kwargs):
+            return {
+                "chapter_title": "门后的声音",
+                "hook": "门内再次敲响",
+                "beats": [],
+                "_usage": {},
+            }
+
+    class Gateway:
+        def __init__(self):
+            self.calls = []
+
+        async def generate(self, prompt, **_kwargs):
+            self.calls.append(prompt)
+            text = first_text if len(self.calls) == 1 else first_text
+            return {
+                "text": text,
+                "tokens_input": 0,
+                "tokens_output": 0,
+                "cost": 0.0,
+                "model": "test",
+            }
+
+    class Deai:
+        async def process(self, text, **_kwargs):
+            return {
+                "processed_text": text,
+                "layers_applied": [],
+                "total_changes": 0,
+                "semantic_humanize": False,
+                "humanize_changes": [],
+                "ai_patterns_removed": [],
+                "metrics": {},
+                "quality_gate": {"passed": True},
+                "usage": {},
+            }
+
+    class EventBus:
+        async def publish(self, *_args, **_kwargs):
+            pass
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.tracer = Tracer()
+    engine.context_assembler = ContextAssembler()
+    engine.scene_director = SceneDirector()
+    engine.ai_gateway = Gateway()
+    engine.deai_pipeline = Deai()
+    engine.event_bus = EventBus()
+
+    result = asyncio.run(engine.generate_chapter(1, target_word_count=600))
+
+    assert result["text"] == first_text
+    assert len(engine.ai_gateway.calls) == 2
+    assert result["generation_quality"]["passed"] is False
+    assert {item["code"] for item in result["generation_quality"]["failures"]} >= {
+        "continuation_duplicate",
+        "chapter_too_short",
+    }

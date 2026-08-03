@@ -109,6 +109,7 @@ class ReviewEngine(BaseEngine):
             "chapter_plan": input_data.get("chapter_plan") or {},
             "scene_plan": input_data.get("scene_plan") or {},
             "deai_metrics": input_data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
+            "generation_quality": input_data.get("generation_quality") or {},
             "chapter_text": chapter_text,
         }
 
@@ -323,6 +324,7 @@ class ReviewEngine(BaseEngine):
             "strengths": raw.get("strengths") or [],
             "constraints_checked": len(constraints),
             "deai_metrics": data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
+            "generation_quality": data.get("generation_quality") or {},
             "word_count": data.get("word_count", 0),
             "model": ai["usage"].get("model"),
             "reason": raw.get("reason", ""),

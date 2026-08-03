@@ -49,6 +49,7 @@ def validate_transition_contract(
     *,
     chapter_number: int,
     previous_contract: dict[str, Any] | None = None,
+    state_conflicts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Validate the durable hand-off between adjacent chapters."""
     contract = contract or {}
@@ -74,6 +75,18 @@ def validate_transition_contract(
                 "high",
                 f"当前第{chapter_number}章承接的不是第{chapter_number - 1}章",
             )
+        start_state = contract.get("start_state") or {}
+        handoff = (
+            start_state.get("previous_transition_contract")
+            if isinstance(start_state, dict)
+            else {}
+        ) or {}
+        if previous_contract and int(handoff.get("chapter_number") or 0) != previous_number:
+            issue(
+                "previous_transition_contract_mismatch",
+                "high",
+                "当前章保存的上一章契约与实际上一章契约不一致",
+            )
 
     start_state = contract.get("start_state") or {}
     if chapter_number > 1 and not start_state.get("previous_transition_contract"):
@@ -86,11 +99,30 @@ def validate_transition_contract(
         issue("summary_missing", "medium", "当前章缺少结构化摘要")
     if not str(contract.get("next_chapter_bridge") or "").strip():
         issue("next_bridge_missing", "high", "当前章没有下一章入口桥接")
+    elif str(end_state.get("last_tail") or "").strip() and not str(
+        end_state.get("last_tail")
+    ).endswith(str(contract.get("next_chapter_bridge"))):
+        issue("next_bridge_mismatch", "high", "下一章桥接文本不是当前章结尾的真实片段")
 
     if not isinstance(contract.get("state_delta"), dict):
         issue("state_delta_missing", "high", "当前章没有记录结构化状态变化")
     if not isinstance(contract.get("open_threads"), list):
         issue("open_threads_invalid", "medium", "未解决情节线不是列表")
+
+    for conflict in state_conflicts or []:
+        if not isinstance(conflict, dict):
+            continue
+        severity = str(conflict.get("severity") or "medium").lower()
+        if severity == "high":
+            issue(
+                "state_conflict",
+                "high",
+                str(
+                    conflict.get("description")
+                    or conflict.get("message")
+                    or f"故事状态冲突：{conflict.get('key') or '未命名'}"
+                ),
+            )
 
     blocking = [item for item in issues if item["severity"] == "high"]
     return {

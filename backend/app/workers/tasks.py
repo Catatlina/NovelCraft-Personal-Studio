@@ -1067,6 +1067,7 @@ def _persist_canonical_bootstrap_result(
         "reader_experience": result.get("reader_experience") or {},
         "issues": result.get("issues") or [],
         "quality_gate": result.get("quality_gate") or {},
+        "generation_quality": result.get("generation_quality") or {},
         "blocked_reason": result.get("blocked_reason") or "",
         "passed_review": result.get("passed_review"),
         "transition_contract": result.get("transition_contract") or {},
