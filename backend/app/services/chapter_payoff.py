@@ -32,6 +32,10 @@ PAYOFF_TYPE_ALIASES = {
     "地位反转": "status_reversal",
     "逆袭": "status_reversal",
     "打脸": "status_reversal",
+    "权力确立": "status_reversal",
+    "权威确立": "status_reversal",
+    "正式掌权": "status_reversal",
+    "职位反转": "status_reversal",
     "反转": "reversal",
     "财富增长": "money_or_resource",
     "金钱资源": "money_or_resource",
@@ -50,6 +54,8 @@ PAYOFF_TYPE_ALIASES = {
     "境界突破": "breakthrough",
     "战斗优势": "combat_advantage",
     "战力优势": "combat_advantage",
+    "击退": "combat_advantage",
+    "战胜": "combat_advantage",
     "生存": "survival",
     "逃生": "survival",
     "隐藏实力": "hidden_strength",
@@ -99,11 +105,26 @@ def _infer_payoff_type(data: dict[str, Any]) -> str:
         for key in (
             "reader_promise", "reader_expectation", "promise", "visible_result",
             "result", "outcome", "payoff", "witness_reaction", "reaction",
+            "active_choice", "choice", "decision", "action",
         )
     )
+    evidence = data.get("payoff_evidence")
+    if isinstance(evidence, list):
+        signal += " " + " ".join(
+            " ".join(
+                _text(item.get(key), 300)
+                for key in ("type", "payoff_type", "result", "visible_result", "reaction")
+            )
+            for item in evidence
+            if isinstance(item, dict)
+        )
     if not signal:
         return ""
-    if any(token in signal for token in ("身份反转", "地位反转", "逆袭", "打脸", "成为新老板", "正式掌权")):
+    if any(token in signal for token in (
+        "身份反转", "地位反转", "逆袭", "打脸", "成为新老板", "当上老板",
+        "正式掌权", "权力确立", "权威确立", "站稳脚跟", "解雇", "被保安带走",
+        "员工重新评估", "掌权",
+    )):
         return "status_reversal"
     if any(token in signal for token in ("境界突破", "实力突破", "突破", "晋级", "升级")):
         return "breakthrough"

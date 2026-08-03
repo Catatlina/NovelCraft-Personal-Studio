@@ -60,6 +60,21 @@ def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     contract = normalize_payoff_contract({"chapter_number": 1, "payoff_type": "身份反转"})
     assert contract["payoff_type"] == "status_reversal"
 
+    contract = normalize_payoff_contract({
+        "chapter_number": 2,
+        "payoff_type": "other",
+        "active_choice": "主角选择当场解雇财务总监",
+        "visible_result": "财务总监被保安带走，员工重新评估主角",
+    })
+    assert contract["payoff_type"] == "status_reversal"
+
+    contract = normalize_payoff_contract({
+        "chapter_number": 3,
+        "payoff_type": "other",
+        "payoff_evidence": [{"type": "权力确立", "result": "对手被迫退场"}],
+    })
+    assert contract["payoff_type"] == "status_reversal"
+
     contract = normalize_payoff_contract({"chapter_number": 1, "type": "突破"})
     assert contract["payoff_type"] == "breakthrough"
 
