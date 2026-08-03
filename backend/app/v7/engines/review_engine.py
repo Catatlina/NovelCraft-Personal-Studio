@@ -290,7 +290,16 @@ class ReviewEngine(BaseEngine):
                 success=False,
                 reason=f"AI review missing dimensions: {', '.join(missing)}",
                 confidence=0.0,
-                result={"raw": raw},
+                result={
+                    "raw": raw,
+                    "validation_failures": [
+                        {
+                            "code": "missing_dimensions",
+                            "fields": missing,
+                            "message": "AI 审稿缺少宏观评分维度",
+                        }
+                    ],
+                },
             )
 
         reader_experience = normalize_reader_experience(raw.get("reader_experience"))
@@ -306,7 +315,16 @@ class ReviewEngine(BaseEngine):
                     + ", ".join(missing_reader_experience)
                 ),
                 confidence=0.0,
-                result={"raw": raw},
+                result={
+                    "raw": raw,
+                    "validation_failures": [
+                        {
+                            "code": "missing_reader_experience",
+                            "fields": missing_reader_experience,
+                            "message": "AI 审稿缺少读者体验评分",
+                        }
+                    ],
+                },
             )
 
         overall = raw.get("overall_score")
@@ -428,12 +446,52 @@ class ReviewEngine(BaseEngine):
             "passed": result.get("overall_score", 0) >= QUALITY_PASS_SCORE and not high_violations,
         }
 
+        validation_failures: list[dict[str, Any]] = []
+        if not all_dimensions_present:
+            validation_failures.append({
+                "code": "missing_dimensions",
+                "message": "审稿结果缺少一个或多个宏观评分维度",
+            })
+        if not in_range or not overall_in_range:
+            validation_failures.append({
+                "code": "score_out_of_range",
+                "message": "审稿分数不在 0-100 范围内",
+            })
+        if not reader_experience_complete:
+            validation_failures.append({
+                "code": "reader_experience_incomplete",
+                "message": "读者体验五项评分不完整或不在 0-100 范围内",
+            })
+        if not audit_contract_valid:
+            validation_failures.append({
+                "code": "audit_contract_invalid",
+                "message": "33 维审计契约不完整",
+            })
+        if not payoff_evidence_valid:
+            validation_failures.append({
+                "code": "payoff_evidence_invalid",
+                "message": "爽点证据无法在正文中逐字定位",
+                "detail": payoff_evidence_validation,
+            })
+        validation["validation_failures"] = validation_failures
+
         if not validation["review_valid"]:
+            # A provider review contract failure is a quality hold, not a
+            # transport failure. Keep the structured result so the director
+            # can persist the generated draft as needs_review and continue an
+            # explicitly ordered batch without ever marking it accepted.
             return EngineResult(
-                success=False,
+                success=True,
                 result=validation,
-                confidence=0.0,
-                reason="Review output failed validation",
+                confidence=output.confidence,
+                reason=(
+                    "Review output held for validation: "
+                    + "; ".join(item["code"] for item in validation_failures)
+                ),
+                warnings=[
+                    *(output.warnings or []),
+                    "review_validation_failed",
+                ],
             )
 
         return EngineResult(
@@ -454,6 +512,22 @@ class ReviewEngine(BaseEngine):
 
         data = validated.result or {}
         chapter_number = data.get("chapter_number")
+
+        if data.get("review_valid") is False:
+            # Do not project an invalid provider review into Novel Brain's
+            # accepted-review state. The director persists the draft and the
+            # validation evidence at the V6 boundary instead.
+            return EngineResult(
+                success=True,
+                result={
+                    **data,
+                    "brain_updated": False,
+                    "score_recorded": False,
+                },
+                confidence=validated.confidence,
+                reason="Review held; invalid provider contract was not projected as accepted state",
+                warnings=validated.warnings,
+            )
 
         await self.brain.state.update_state(
             "global",

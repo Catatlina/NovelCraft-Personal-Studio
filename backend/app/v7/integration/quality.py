@@ -99,6 +99,23 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
             "minimum": "verifiable",
             "reason": "爽点证据无法在正文中定位",
         })
+    for validation_failure in review_data.get("validation_failures") or []:
+        if not isinstance(validation_failure, dict):
+            continue
+        code = str(validation_failure.get("code") or "review_validation")
+        # Payoff evidence is already rendered above with the shared gate
+        # wording. Avoid counting it twice while retaining every other review
+        # contract failure as a hard, explainable quality hold.
+        if code == "payoff_evidence_invalid" and any(
+            item.get("dimension") == "payoff_evidence" for item in failures
+        ):
+            continue
+        failures.append({
+            "dimension": code,
+            "actual": "invalid",
+            "minimum": "valid",
+            "reason": str(validation_failure.get("message") or "审稿契约校验失败"),
+        })
     if overall_score < QUALITY_PASS_SCORE:
         failures.append({"dimension": "overall_score", "actual": overall_score, "minimum": QUALITY_PASS_SCORE})
     for name, minimum in CRITICAL_DIMENSION_MINIMUMS.items():

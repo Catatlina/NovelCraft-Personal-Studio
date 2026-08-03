@@ -3213,7 +3213,7 @@ def _recount_batch_progress(db, batch_id: str) -> dict | None:
     # inflate reviewed/completed counters.
     needs_review = sum(status in {
         "needs_review", "needs_rewrite", "pending_review", "ai_review_passed",
-        "v7_quality_gate_failed",
+        "v7_quality_gate_failed", "v7_review_validation_failed",
     } for status in by_ordinal.values())
     reviewed = accepted + needs_review
     terminal = reviewed

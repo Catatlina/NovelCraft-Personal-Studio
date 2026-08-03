@@ -127,8 +127,14 @@ class ContextAssembler:
         *,
         scene_type: str = "normal",
         token_budget: int = 5400,
+        include_rejected: bool = False,
     ) -> dict[str, Any]:
-        """Assemble layered context: state / goals / constraints / recap."""
+        """Assemble layered context: state / goals / constraints / recap.
+
+        Rejected drafts are excluded by default. Ordered diagnostic batches may
+        opt in so a held chapter can still be measured for cross-chapter
+        continuity; the rendered context labels that chapter as provisional.
+        """
         overview = await self.brain.get_overview()
 
         # 长程连续性修复（2026-08-02）：此前 world/character/plot 各只取
@@ -150,13 +156,18 @@ class ContextAssembler:
         style_card = await self.load_style_card()
         active_rules = await self.brain.rules.active_instructions(chapter_number=chapter_number)
 
-        previous = await self.load_previous_chapters(chapter_number, count=3)
+        previous = await self.load_previous_chapters(
+            chapter_number,
+            count=3,
+            include_rejected=include_rejected,
+        )
         recap_parts: list[str] = []
         for prev in previous:
             summary = prev.get("summary") or ""
             if summary:
+                provisional = "（待复核草稿）" if prev.get("passed_review") is False else ""
                 recap_parts.append(
-                    f"第{prev.get('chapter_number')}章梗概：{summary}"
+                    f"第{prev.get('chapter_number')}章{provisional}梗概：{summary}"
                 )
         last_tail = ""
         previous_transition_contract: dict[str, Any] = {}
@@ -167,6 +178,12 @@ class ContextAssembler:
             # durable transition contract as well as the literal tail.
             last_tail = last_text[-1200:] if last_text else ""
             previous_transition_contract = previous[-1].get("transition_contract") or {}
+            if previous[-1].get("passed_review") is False:
+                previous_transition_contract = {
+                    **previous_transition_contract,
+                    "provisional": True,
+                    "warning": "上一章尚未通过质量复核；可承接事实，但不得把未确认状态当作真相写死。",
+                }
 
         layers = {
             "story_state": {
@@ -1526,7 +1543,10 @@ class GenerationEngine:
             "context_assembly",
             input_summary=f"Assemble context for chapter {chapter_number}",
         ) as step:
-            context = await self.context_assembler.assemble_context(chapter_number)
+            context = await self.context_assembler.assemble_context(
+                chapter_number,
+                include_rejected=bool(getattr(self, "include_rejected_context", False)),
+            )
             step.set_output(
                 f"context {context['rendered_chars']} chars, "
                 f"prev={context['previous_chapters']}",

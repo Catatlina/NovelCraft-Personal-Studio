@@ -150,7 +150,7 @@ def _persist_v7_chapter(
     """
     if not text.strip():
         raise ValueError("cannot persist an empty V7 chapter")
-    if status not in {"reviewed", "needs_rewrite"}:
+    if status not in {"reviewed", "needs_rewrite", "needs_review"}:
         raise ValueError(f"unsupported V7 content status: {status}")
     mapping = ensure_novel_project_link(novel_id, project_id)
     project_id = mapping["project_id"]
@@ -185,7 +185,11 @@ def _persist_v7_chapter(
         "quality_reason": (
             "quality gate passed"
             if status == "reviewed"
-            else "V7 quality gate did not pass; draft requires rewrite"
+            else (
+                "V7 review contract was invalid; draft requires review"
+                if status == "needs_review"
+                else "V7 quality gate did not pass; draft requires rewrite"
+            )
         ),
         "project_mapping": mapping,
         "canonical_engine": "v7",
@@ -219,7 +223,7 @@ def _persist_v7_chapter(
                 (project_id, novel_id, chapter_number),
             ).fetchone()
 
-        if existing and status == "needs_rewrite":
+        if existing and status != "reviewed":
             # A rejected canonical draft may replace an older V6 draft or an
             # accepted version during an explicit regeneration.  Preserve the
             # previous body before the update so the editor can restore it.
@@ -391,6 +395,53 @@ def persist_rejected_v7_draft(
         transition_contract=transition_contract,
         status="needs_rewrite",
         quality_status="v7_quality_gate_failed",
+        review_issues=review_issues,
+        quality_gate=quality_gate,
+        reader_experience=reader_experience,
+        rework_count=rework_count,
+        extra_meta=extra_meta,
+    )
+
+
+def persist_review_hold_v7_draft(
+    *,
+    novel_id: str,
+    project_id: str | None,
+    chapter_number: int,
+    title: str,
+    text: str,
+    review_score: float,
+    dimension_scores: dict[str, Any],
+    run_id: str,
+    chapter_summary: str,
+    deai: dict[str, Any],
+    transition_contract: dict[str, Any],
+    review_issues: list[dict[str, Any]] | None = None,
+    quality_gate: dict[str, Any] | None = None,
+    reader_experience: dict[str, Any] | None = None,
+    rework_count: int = 0,
+    extra_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a draft whose provider review contract could not be verified.
+
+    ``needs_review`` is distinct from ``needs_rewrite``: the text is retained
+    for diagnosis, but the product must not claim that its review evidence is
+    valid or that the chapter is publishable.
+    """
+    return _persist_v7_chapter(
+        novel_id=novel_id,
+        project_id=project_id,
+        chapter_number=chapter_number,
+        title=title,
+        text=text,
+        review_score=review_score,
+        dimension_scores=dimension_scores,
+        run_id=run_id,
+        chapter_summary=chapter_summary,
+        deai=deai,
+        transition_contract=transition_contract,
+        status="needs_review",
+        quality_status="v7_review_validation_failed",
         review_issues=review_issues,
         quality_gate=quality_gate,
         reader_experience=reader_experience,

@@ -39,6 +39,7 @@ from ..integration.quality import (
 from ..integration.v6_bridge import (
     build_transition_contract,
     persist_accepted_v7_chapter,
+    persist_review_hold_v7_draft,
     persist_rejected_v7_draft,
 )
 from ..quality.continuity import validate_transition_contract
@@ -203,6 +204,13 @@ class StoryDirector:
             project_id=project_id,
             provider_config=self.provider_config,
             quality_profile=self.quality_profile,
+        )
+        # Ordered batches are diagnostic runs: a rejected/held chapter remains
+        # provisional context so the run can measure cross-chapter continuity.
+        # It is never treated as accepted Novel Brain truth and single-chapter
+        # generation keeps the strict block below.
+        self.generation_engine.include_rejected_context = bool(
+            self.generation_metadata.get("batch_id")
         )
 
         # Event-driven state projection
@@ -401,6 +409,8 @@ class StoryDirector:
                 "issues": observation.get("issues", []),
                 "quality_gate": observation.get("quality_gate", {}),
                 "audit_report": observation.get("audit_report", {}),
+                "review_hold": observation.get("review_hold", False),
+                "review_validation": observation.get("review_validation", []),
                 "passed_review": observation["passed_review"],
                 "rework_count": observation["rework_count"],
                 "memory": {
@@ -461,7 +471,8 @@ class StoryDirector:
             chapter_number, count=1, include_rejected=True
         )
         blocked_by_quality = None
-        if previous and previous[-1].get("passed_review") is False:
+        batch_mode = bool(self.generation_metadata.get("batch_id"))
+        if previous and previous[-1].get("passed_review") is False and not batch_mode:
             blocked_by_quality = (
                 f"第{previous[-1].get('chapter_number')}章未通过质量门禁，"
                 "必须先完成返工，不能继续生成下一章"
@@ -480,6 +491,9 @@ class StoryDirector:
                 s.get("key") for s in (pending_states or [])
             ][:20],
             "has_previous_chapter": bool(previous),
+            "provisional_previous_chapter": bool(
+                batch_mode and previous and previous[-1].get("passed_review") is False
+            ),
             "blocked_by_quality": blocked_by_quality,
             "truth_domains": await self.brain.truth.digest(),
         }
@@ -714,17 +728,49 @@ class StoryDirector:
 
         review = await self.review_engine.run(review_input(generation))
         review_data = review.result or {}
+        review_hold = False
+        if not review.success:
+            # Provider output/schema failures must not strand a generated
+            # chapter as a Celery exception. Keep the real draft, expose the
+            # failed review contract, and let the product mark it needs_review.
+            raw = review_data.get("raw") if isinstance(review_data, dict) else {}
+            raw = raw if isinstance(raw, dict) else {}
+            validation_failures = review_data.get("validation_failures") or []
+            if not validation_failures:
+                validation_failures = [{
+                    "code": "review_execution_failed",
+                    "message": review.reason or "审稿输出未通过校验",
+                }]
+            review_data = {
+                **raw,
+                **review_data,
+                "chapter_number": chapter_number,
+                "overall_score": float(raw.get("overall_score") or 0.0),
+                "dimension_scores": raw.get("dimension_scores") or {},
+                "reader_experience": raw.get("reader_experience") or {},
+                "issues": raw.get("issues") or [],
+                "constraint_violations": raw.get("constraint_violations") or [],
+                "audit_report": raw.get("audit_report") or {},
+                "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
+                "payoff_contract": generation.get("payoff_contract") or (plan.get("plot_brief") or {}).get("payoff_contract") or {},
+                "payoff_evidence": raw.get("payoff_evidence") or [],
+                "validation_failures": validation_failures,
+            }
+            review_hold = True
+        elif review_data.get("review_valid") is False:
+            # The ReviewEngine keeps a structured but invalid contract alive
+            # so the director can persist it as a review hold instead of
+            # confusing it with a transport failure.
+            review_hold = True
         score = float(review_data.get("overall_score") or 0.0)
         rework_count = 0
-
-        if not review.success:
-            raise RuntimeError(f"Review failed: {review.reason}")
 
         # Rework is bounded, but the gate is not fail-open: after the retry
         # budget is exhausted the chapter remains needs_review and never enters
         # the V6 library as a reviewed chapter.
         while (
             allow_rework
+            and not review_hold
             and not evaluate_review(review_data)["passed"]
             and rework_count < MAX_REWORKS
             and await self.permission_system.can_auto_decide("chapter_rework", 0.9)
@@ -777,11 +823,45 @@ class StoryDirector:
             )
             review = await self.review_engine.run(review_input(generation))
             if not review.success:
-                raise RuntimeError(f"Review failed after rework: {review.reason}")
+                raw = review.result.get("raw") if isinstance(review.result, dict) else {}
+                raw = raw if isinstance(raw, dict) else {}
+                review_data = {
+                    **raw,
+                    **(review.result or {}),
+                    "chapter_number": chapter_number,
+                    "overall_score": float(raw.get("overall_score") or 0.0),
+                    "dimension_scores": raw.get("dimension_scores") or {},
+                    "reader_experience": raw.get("reader_experience") or {},
+                    "issues": raw.get("issues") or [],
+                    "constraint_violations": raw.get("constraint_violations") or [],
+                    "audit_report": raw.get("audit_report") or {},
+                    "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
+                    "payoff_contract": generation.get("payoff_contract") or (plan.get("plot_brief") or {}).get("payoff_contract") or {},
+                    "payoff_evidence": raw.get("payoff_evidence") or [],
+                    "validation_failures": (review.result or {}).get("validation_failures") or [{
+                        "code": "review_execution_failed",
+                        "message": review.reason or "重写后的审稿输出未通过校验",
+                    }],
+                }
+                review_hold = True
+                score = 0.0
+                break
             review_data = review.result or {}
             score = float(review_data.get("overall_score") or 0.0)
 
         gate = evaluate_review(review_data)
+        validation_failures = review_data.get("validation_failures") or []
+        if validation_failures:
+            for failure in validation_failures:
+                if not isinstance(failure, dict):
+                    continue
+                gate["failures"].append({
+                    "dimension": str(failure.get("code") or "review_validation"),
+                    "actual": "invalid",
+                    "minimum": "valid",
+                    "reason": str(failure.get("message") or "审稿契约校验失败"),
+                })
+            gate["passed"] = False
         blocking = gate["blocking_violations"]
         passed = gate["passed"]
 
@@ -798,6 +878,20 @@ class StoryDirector:
                 "blocking_violations": blocking,
             },
         )
+
+        issues = list(review_data.get("issues") or [])
+        if validation_failures:
+            issues.extend(
+                {
+                    "dimension": str(item.get("code") or "review_validation"),
+                    "severity": "high",
+                    "description": str(item.get("message") or "审稿契约校验失败"),
+                    "suggestion": "重新执行审稿并确认评分、33维审计和爽点证据均可验证",
+                }
+                for item in validation_failures
+                if isinstance(item, dict)
+            )
+        review_data["issues"] = issues
 
         if not passed:
             await self.brain.record_decision(
@@ -825,6 +919,8 @@ class StoryDirector:
             "rework_count": rework_count,
             "review_confidence": review.confidence,
             "quality_gate": gate,
+            "review_hold": review_hold,
+            "review_validation": validation_failures,
             "payoff_contract": review_data.get("payoff_contract") or generation.get("payoff_contract") or {},
             "payoff_evidence": review_data.get("payoff_evidence") or [],
         }
@@ -1013,11 +1109,12 @@ class StoryDirector:
         # Persist both outcomes at the product boundary.  A failed quality
         # gate stays fail-closed (`needs_rewrite`), but the author must still
         # be able to inspect the actual draft and repair evidence.
-        bridge = (
-            persist_accepted_v7_chapter
-            if observation["passed_review"]
-            else persist_rejected_v7_draft
-        )
+        if observation["passed_review"]:
+            bridge = persist_accepted_v7_chapter
+        elif observation.get("review_hold"):
+            bridge = persist_review_hold_v7_draft
+        else:
+            bridge = persist_rejected_v7_draft
         bridge_kwargs: dict[str, Any] = {
             "novel_id": str(self.novel_id),
             "project_id": self.project_id,
@@ -1039,6 +1136,7 @@ class StoryDirector:
                 "payoff_contract": generation.get("payoff_contract") or {},
                 "payoff_validation": generation.get("payoff_validation") or {},
                 "payoff_evidence": observation.get("payoff_evidence") or [],
+                "review_validation": observation.get("review_validation") or [],
             },
         }
         if not observation["passed_review"]:
