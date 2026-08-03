@@ -120,6 +120,16 @@ def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     })
     assert contract["payoff_type"] == "status_reversal"
 
+    contract = normalize_payoff_contract({
+        "chapter_number": 2,
+        "payoff_type": "other",
+        "reader_promise": "主角在会议上展现掌控力，并给出初步应对方案",
+        "visible_result": "会议通过主角的提案，部分高管态度转变",
+        "witness_reaction": "财务总监和销售总监从怀疑到配合",
+        "payoff_evidence": [{"type": "能力展示", "result": "主角提出明确决策"}],
+    })
+    assert contract["payoff_type"] == "status_reversal"
+
 
 def test_low_payoff_schedule_is_a_soft_reader_gate_not_a_word_count_gate():
     profile = select_quality_profile(platform="番茄", genre="都市", subgenre="都市神豪")

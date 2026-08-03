@@ -124,9 +124,11 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
     class Gateway:
         def __init__(self):
             self.calls = []
+            self.call_kwargs = []
 
         async def generate(self, prompt, **_kwargs):
             self.calls.append(prompt)
+            self.call_kwargs.append(_kwargs)
             text = first_text if len(self.calls) == 1 else first_text
             return {
                 "text": text,
@@ -166,6 +168,7 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
 
     assert result["text"] == first_text
     assert len(engine.ai_gateway.calls) == 2
+    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] <= 900
     assert result["generation_quality"]["passed"] is False
     assert {item["code"] for item in result["generation_quality"]["failures"]} >= {
         "continuation_duplicate",

@@ -68,6 +68,14 @@ PAYOFF_TYPE_ALIASES = {
     "牺牲": "sacrifice",
     "势力变化": "faction_shift",
     "家人存活": "family_survival",
+    "能力展示": "status_reversal",
+    "决策反馈": "status_reversal",
+    "掌控力": "status_reversal",
+    "权威建立": "status_reversal",
+    "获得认可": "relationship_shift",
+    "态度转变": "relationship_shift",
+    "事业推进": "career_progress",
+    "方案通过": "career_progress",
     "其他": "other",
 }
 
@@ -132,8 +140,21 @@ def _infer_payoff_type(data: dict[str, Any]) -> str:
         "正式掌权", "权力确立", "权威确立", "站稳脚跟", "解雇", "被保安带走",
         "员工重新评估", "掌权", "收购公司", "买下公司", "最大股东", "原CEO被解职",
         "新老板", "展现新老板", "完成交接", "宣布审计", "内部审计", "身份确立", "权威",
+        "展现掌控力", "掌控局面", "控制局面", "会议通过", "通过提案", "提案通过",
+        "董事会同意", "高管态度转变", "态度转变", "开始配合", "开始支持", "获得认可",
+        "得到认可", "赢得认可", "立威", "威信", "接管公司", "接手公司", "掌舵",
+        "获得授权", "同意试行", "试行改革", "占据主动",
     )):
         return "status_reversal"
+    if any(token in signal for token in (
+        "关系缓和", "建立信任", "成为盟友", "转为合作", "公开支持", "获得支持",
+    )):
+        return "relationship_shift"
+    if any(token in signal for token in (
+        "方案通过", "项目推进", "拿下项目", "签约成功", "合作达成", "客户同意",
+        "获得授权", "负责人", "完成交接",
+    )):
+        return "career_progress"
     if any(token in signal for token in ("境界突破", "实力突破", "突破", "晋级", "升级")):
         return "breakthrough"
     if any(token in signal for token in ("资源获取", "资源获得", "获得资源", "拿到资源", "财富增长", "拿到钱")):

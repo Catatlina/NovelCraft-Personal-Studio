@@ -1529,8 +1529,8 @@ class GenerationEngine:
         # product ceiling. Derive the cap from the hard ceiling so the first
         # draft is length-safe instead of relying on a later rejection.
         generation_max_tokens = max(
-            1200,
-            min(4000, int(maximum_chapter_chars * 0.74)),
+            900,
+            min(3200, int(maximum_chapter_chars * 0.58)),
         )
 
         def add_usage(step_ctx: Any, u: dict[str, Any]) -> None:
@@ -1625,6 +1625,19 @@ class GenerationEngine:
             ):
                 continuations += 1
                 missing = target_word_count - chinese_word_count(text)
+                continuation_max_tokens = max(
+                    900,
+                    min(
+                        2400,
+                        int(
+                            max(
+                                0,
+                                maximum_chapter_chars - chinese_word_count(text),
+                            )
+                            * 0.58
+                        ),
+                    ),
+                )
                 cont = await self.ai_gateway.generate(
                     self._build_continuation_prompt(text, scene_plan, missing),
                     system_prompt=(
@@ -1632,7 +1645,7 @@ class GenerationEngine:
                         "直接接着写正文，不要重复已有内容，不要写标题或说明。"
                         "保持自然分段和人物语气；标点按语义使用，不要批量堆叠同一符号。"
                     ),
-                    max_tokens=3000,
+                    max_tokens=continuation_max_tokens,
                     temperature=0.85,
                     prompt_name="v7.generation.continuation",
                     prompt_version="1.2.0",
