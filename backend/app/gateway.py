@@ -312,6 +312,7 @@ class _BlueprintChapterOutlineItem(_LenientOutput):
     function_type: str = Field(min_length=1)
     chapter_goal: str = Field(min_length=1)
     reader_expectation: str = Field(min_length=1)
+    payoff_contract: dict[str, Any] = Field(default_factory=dict)
 
 
 class _BlueprintChapterOutlineOutput(_LenientOutput):

@@ -15,6 +15,7 @@ from ...services.reader_experience import (
     summarize_reader_experience,
 )
 from ...services.quality_risks import build_quality_repair_contract
+from ...services.chapter_payoff import validate_payoff_contract
 from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 
 QUALITY_PASS_SCORE = 85.0
@@ -42,6 +43,7 @@ DEAI_BLOCKING_FLAGS = {
     "duplicate_paragraph",
     "rewrite_candidate_rejected",
     "ai_phrase",
+    "repeated_tic",
 }
 
 
@@ -73,6 +75,30 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
                     "reason": "生成结构质量门禁未通过",
                 }
             )
+    quality_profile = review_data.get("quality_profile") or {}
+    payoff_contract = review_data.get("payoff_contract") or {}
+    payoff_validation = review_data.get("payoff_validation") or {}
+    if quality_profile and payoff_contract:
+        payoff_validation = validate_payoff_contract(
+            payoff_contract,
+            profile=quality_profile,
+            required=True,
+        )
+        if not payoff_validation.get("passed"):
+            failures.append({
+                "dimension": "payoff_contract",
+                "actual": "missing",
+                "minimum": "complete",
+                "reason": "；".join(payoff_validation.get("issues") or ["爽点契约未完成"]),
+            })
+    payoff_evidence = review_data.get("payoff_evidence_validation") or {}
+    if payoff_evidence.get("required") and payoff_evidence.get("passed") is not True:
+        failures.append({
+            "dimension": "payoff_evidence",
+            "actual": "missing_or_unverifiable",
+            "minimum": "verifiable",
+            "reason": "爽点证据无法在正文中定位",
+        })
     if overall_score < QUALITY_PASS_SCORE:
         failures.append({"dimension": "overall_score", "actual": overall_score, "minimum": QUALITY_PASS_SCORE})
     for name, minimum in CRITICAL_DIMENSION_MINIMUMS.items():
@@ -152,6 +178,9 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         "audit_hard_minimum": AUDIT_HARD_MINIMUM,
         "deai_high_risk_threshold": DEAI_HIGH_RISK_THRESHOLD,
         "quality_repair_contract": repair_contract,
+        "payoff_validation": payoff_validation,
+        "payoff_evidence_validation": payoff_evidence,
+        "quality_profile": quality_profile,
         # Reader experience is advisory; it must not replace the continuity
         # and writing hard gates above.  It is nevertheless returned with the
         # decision so weak expectation/payoff is visible to rework and UI.

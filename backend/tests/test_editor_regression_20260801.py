@@ -87,6 +87,31 @@ def test_ensure_editor_paragraphs_handles_empty():
     assert _ensure_editor_paragraphs("") == ""
 
 
+def test_ensure_editor_paragraphs_extracts_nested_tiptap_without_object_string():
+    from app.main import _ensure_editor_paragraphs
+
+    nested = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "真实第一段。"}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "真实第二段。"}]},
+        ],
+    }
+    out = _ensure_editor_paragraphs(nested)
+    assert "真实第一段" in out and "真实第二段" in out
+    assert "[object Object]" not in out
+
+
+def test_editor_provenance_rejects_unrelated_long_candidate():
+    from app.main import _editor_provenance
+
+    source = "沈砚在旧城码头找到账本，林薇提醒他今晚不能回头。" * 20
+    unrelated = "顾长生握紧剑柄，窗外的雪落在青石台阶上。" * 20
+    result = _editor_provenance(source, unrelated)
+    assert result["passed"] is False
+    assert result["reason"] == "candidate_has_no_source_evidence"
+
+
 # ── 被测对象 4：前端 buildAiEditPreview 整章替换（Python 复刻校验） ────────
 def _py_build_ai_edit_preview(source: str, selected: str, proposed: str, op: str, has_sel: bool) -> str:
     if op == "rewrite_chapter":

@@ -145,11 +145,15 @@ def test_continuity_check_failure_is_recorded_not_hidden(monkeypatch):
 # --- resumable batch generation ------------------------------------------------
 
 class _Cursor:
-    def __init__(self, one=None):
+    def __init__(self, one=None, many=None):
         self.one = one
+        self.many = many or []
 
     def fetchone(self):
         return self.one
+
+    def fetchall(self):
+        return self.many
 
 
 class _BatchDb:
@@ -162,8 +166,14 @@ class _BatchDb:
         self.statements.append((compact, params))
         if "SELECT cancel_requested" in compact:
             return _Cursor({"cancel_requested": self.batch["cancel_requested"]})
+        if "SELECT meta FROM contents" in compact:
+            rows = [
+                {"meta": {"batch_id": self.batch["id"], "batch_ordinal": ordinal}}
+                for ordinal in range(1, int(self.batch.get("completed_count", 0)) + 1)
+            ]
+            return _Cursor(many=rows)
         if "SELECT * FROM generation_batches" in compact:
-            return _Cursor(dict(self.batch))
+            return _Cursor({**self.batch, "current_ordinal": self.batch.get("current_ordinal")})
         if "completed_count = completed_count + 1" in compact:
             self.batch["completed_count"] += 1
         if compact.startswith("UPDATE generation_batches SET status ="):
@@ -195,8 +205,9 @@ def test_batch_resumes_from_completed_count(monkeypatch):
     result = tasks.batch_generate_chapters_task.run("batch-1")
 
     assert result["status"] == "running"
-    assert result["dispatched"] == 3
-    assert len(calls) == 3  # only the remaining chapters, no duplicates
+    assert result["dispatched"] is True
+    assert len(calls) == 1  # only the next ordered slot is dispatched
+    assert calls[0][5:7] == ("batch-1", 3)
     # Child tasks own progress updates after each durable chapter commit.
     assert db.batch["completed_count"] == 2
 
@@ -216,7 +227,7 @@ def test_provider_failure_marks_batch_failed_with_cause(monkeypatch):
 
     assert result["status"] == "failed"
     assert "circuit breaker" in result["reason"]
-    assert any("status = 'failed'" in sql and "circuit breaker" in str(params)
+    assert any(("status = 'failed'" in sql or "status='failed'" in sql) and "circuit breaker" in str(params)
                for sql, params in db.statements)
     assert db.batch["completed_count"] == 1  # progress is preserved for resume
 

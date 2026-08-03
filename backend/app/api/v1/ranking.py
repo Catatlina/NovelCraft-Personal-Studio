@@ -680,6 +680,7 @@ def _snapshot_analysis_context(snapshot: dict[str, Any], items: list[dict]) -> d
     if hasattr(captured_at, "isoformat"):
         captured_at = captured_at.isoformat()
     return {
+        "platform": str(snapshot.get("source_key") or ""),
         "sample_size": len(items),
         "scan_scope": scope,
         "evidence_source": source_label,
@@ -1056,7 +1057,12 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
     if not snapshot_id:
         analysis = db.execute("SELECT snapshot_id FROM market_analyses WHERE id=%s", (topic["analysis_id"],)).fetchone()
         snapshot_id = analysis["snapshot_id"] if analysis else None
-    novel_id = new_id(); meta = {"idea": topic["premise"], "genre": topic["genre"], "style": payload.style,
+    topic_meta = topic.get("meta") if isinstance(topic.get("meta"), dict) else {}
+    analysis_context = topic_meta.get("analysis_context") if isinstance(topic_meta.get("analysis_context"), dict) else {}
+    selected_platform = str(topic_meta.get("platform") or analysis_context.get("platform") or "fanqie")
+    selected_subgenre = str(topic.get("sub_category") or topic_meta.get("sub_category") or "")
+    novel_id = new_id(); meta = {"idea": topic["premise"], "genre": topic["genre"],
+        "platform": selected_platform, "subgenre": selected_subgenre, "style": payload.style,
         "target_words": payload.target_words, "suggested_title": topic["title"], "source_type": "ranking_topic",
         "source_ref_id": topic_id, "analysis_id": topic["analysis_id"], "snapshot_id": snapshot_id,
         "workflow_scope": "planning_and_chapter1"}

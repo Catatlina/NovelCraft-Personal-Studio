@@ -14,6 +14,7 @@ from typing import Any
 
 from ..db import connect, decode
 from ..services.novel_export import extract_body_text
+from ..services.quality_profiles import profile_from_context, quality_profile_metadata
 from .brain.novel_brain import NovelBrain
 from .db import AsyncSessionLocal, async_engine
 from .director.story_director import StoryDirector
@@ -234,6 +235,20 @@ def _default_story_prompt(
         conn.close()
 
 
+def _load_quality_profile(novel_id: str) -> dict[str, Any]:
+    """Select the one runtime quality policy from the novel metadata."""
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT meta FROM contents WHERE id=%s AND type='novel'",
+            (novel_id,),
+        ).fetchone()
+        meta = decode((row or {}).get("meta"), {}) or {}
+        return profile_from_context(meta)
+    finally:
+        conn.close()
+
+
 async def generate_v7_chapter(
     novel_id: str,
     project_id: str,
@@ -258,6 +273,7 @@ async def generate_v7_chapter(
     )
     effective_outline = outline
     effective_prompt = prompt or _default_story_prompt(novel_id, resolved_number, outline)
+    quality_profile = await asyncio.to_thread(_load_quality_profile, novel_id)
     provider_config = {
         key: value
         for key, value in {
@@ -282,6 +298,7 @@ async def generate_v7_chapter(
             project_id=project_id,
             user_id=user_id,
             provider_config=provider_config,
+            quality_profile=quality_profile,
             generation_metadata={
                 key: value
                 for key, value in {
@@ -299,6 +316,7 @@ async def generate_v7_chapter(
         result["canonical_engine"] = "v7"
         result["chapter_number"] = resolved_number
         result["v7_context_seed"] = seed
+        result["quality_profile"] = quality_profile_metadata(quality_profile)
         if batch_id:
             result["batch_id"] = batch_id
             result["batch_ordinal"] = batch_ordinal

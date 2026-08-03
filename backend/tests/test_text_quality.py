@@ -4,6 +4,7 @@ import pytest
 
 from app.services.text_quality import (
     content_chars,
+    deduplicate_full_paragraphs,
     duplicate_paragraph_stats,
     normalize_and_validate_rewrite,
     normalize_narrative_paragraphs,
@@ -63,3 +64,14 @@ def test_duplicate_paragraph_stats_ignores_short_refrains():
 
     assert stats["duplicate_paragraph_count"] == 0
     assert stats["duplicate_ratio"] == 0.0
+
+
+def test_canonical_dedup_repair_removes_only_exact_full_paragraph_copies():
+    first = "沈夜按住门把手，门内的声音停了一瞬，随后又传来三下敲击，事情因此留下新的后果。那声音贴着门板往外渗，像有人在里面等他做出选择。"
+    second = "林薇把灯光压低，示意他先别出声，巷口的脚步声正在靠近。她没有回头，只用手指在墙上敲了两下，提醒他别急着开门。"
+    repaired, evidence = deduplicate_full_paragraphs(
+        "\n\n".join([first, second, first])
+    )
+
+    assert repaired == "\n\n".join([first, second])
+    assert evidence["removed_paragraphs"] == 1

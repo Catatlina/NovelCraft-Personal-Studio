@@ -17,6 +17,8 @@ from ...services.reader_experience import (
     normalize_reader_experience,
     summarize_reader_experience,
 )
+from ...services.chapter_payoff import validate_payoff_contract, validate_payoff_evidence
+from ...services.quality_profiles import quality_profile_metadata
 from ..quality.audit_dimensions import (
     AUDIT_DIMENSIONS,
     format_audit_dimensions,
@@ -110,6 +112,8 @@ class ReviewEngine(BaseEngine):
             "scene_plan": input_data.get("scene_plan") or {},
             "deai_metrics": input_data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
             "generation_quality": input_data.get("generation_quality") or {},
+            "quality_profile": input_data.get("quality_profile") or self.quality_profile or {},
+            "payoff_contract": input_data.get("payoff_contract") or {},
             "chapter_text": chapter_text,
         }
 
@@ -199,6 +203,8 @@ class ReviewEngine(BaseEngine):
                 "chapter_plan": data.get("chapter_plan") or {},
                 "scene_plan": data.get("scene_plan") or {},
                 "deai_metrics": data.get("deai_metrics") or {},
+                "quality_profile": data.get("quality_profile") or {},
+                "payoff_contract": data.get("payoff_contract") or {},
             },
             ensure_ascii=False,
         )
@@ -222,6 +228,8 @@ class ReviewEngine(BaseEngine):
             '  "audit_dimensions": {"chapter_goal":{"score":0,"evidence":"证据","repair":"修复动作"}},\n'
             '  "reader_experience": {"expectation":0,"conflict":0,"payoff":0,'
             '"emotion_shift":0,"worth_continuing":0},\n'
+            '  "payoff_evidence": [{"type":"兑现类型","anchor":"正文中逐字可定位的短片段",'
+            '"result":"正文中实际发生的可见结果","reaction":"人物/环境反应"}],\n'
             '  "issues": [{"dimension":"pacing","severity":"low|medium|high",'
             '"description":"问题","suggestion":"改法","excerpt":"原文片段"}],\n'
             '  "constraint_violations": [{"name":"约束名","description":"如何违反的",'
@@ -240,6 +248,8 @@ class ReviewEngine(BaseEngine):
             "中高严重度的问题不得只写‘可加强’，必须写清位置和修复动作。"
             "33个审计项必须全部出现；每项都要给 score、evidence、repair。"
             "如果某项确实不适用，也要给出 score，并在 evidence 说明不适用的理由。"
+            "如果提供了本章爽点契约，必须从正文逐字摘取至少一条 payoff_evidence；"
+            "anchor 必须能在正文中定位，不能用概括或虚构证据。"
             f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
             f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
             f"pacing/writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
@@ -311,6 +321,14 @@ class ReviewEngine(BaseEngine):
             macro_scores=dimension_scores,
             reader_experience=reader_experience,
         )
+        payoff_contract = data.get("payoff_contract") or {}
+        payoff_required = bool(data.get("quality_profile") and payoff_contract)
+        payoff_evidence = raw.get("payoff_evidence") or []
+        payoff_evidence_validation = validate_payoff_evidence(
+            chapter_text,
+            payoff_evidence,
+            required=payoff_required,
+        )
         review_result = {
             "chapter_number": data.get("chapter_number"),
             "overall_score": float(overall),
@@ -328,6 +346,10 @@ class ReviewEngine(BaseEngine):
             "word_count": data.get("word_count", 0),
             "model": ai["usage"].get("model"),
             "reason": raw.get("reason", ""),
+            "quality_profile": quality_profile_metadata(data.get("quality_profile") or {}) if data.get("quality_profile") else {},
+            "payoff_contract": payoff_contract,
+            "payoff_evidence": payoff_evidence,
+            "payoff_evidence_validation": payoff_evidence_validation,
         }
 
         confidence = raw.get("confidence")
@@ -379,6 +401,11 @@ class ReviewEngine(BaseEngine):
             and audit_report.get("count") == len(AUDIT_DIMENSIONS)
             and len(audit_report.get("items") or {}) == len(AUDIT_DIMENSIONS)
         )
+        payoff_evidence_validation = result.get("payoff_evidence_validation") or {}
+        payoff_evidence_valid = (
+            not payoff_evidence_validation.get("required")
+            or payoff_evidence_validation.get("passed") is True
+        )
 
         validation = {
             **result,
@@ -388,12 +415,14 @@ class ReviewEngine(BaseEngine):
                 and overall_in_range
                 and reader_experience_complete
                 and audit_contract_valid
+                and payoff_evidence_valid
             ),
             "dimensions_count": len(scores),
             "score_in_range": in_range and overall_in_range,
             "reader_experience_complete": reader_experience_complete,
             "audit_contract_valid": audit_contract_valid,
             "audit_coverage": audit_report.get("coverage", 0.0),
+            "payoff_evidence_validation": payoff_evidence_validation,
             "reader_experience_summary": summarize_reader_experience(reader_experience),
             "blocking_violations": len(high_violations),
             "passed": result.get("overall_score", 0) >= QUALITY_PASS_SCORE and not high_violations,

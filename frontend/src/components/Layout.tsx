@@ -57,6 +57,9 @@ export function Layout({
   title,
   runStatus,
   userEmail,
+  projects,
+  currentProjectId,
+  onProjectChange,
   novels,
   currentNovelId,
   onNovelChange,
@@ -68,6 +71,9 @@ export function Layout({
   title: string;
   runStatus?: string;
   userEmail?: string;
+  projects?: Array<{ id: string; name: string }>;
+  currentProjectId?: string | null;
+  onProjectChange?: (projectId: string) => void;
   novels?: Array<{ id: string; title: string }>;
   currentNovelId?: string | null;
   onNovelChange?: (novelId: string) => void;
@@ -158,6 +164,19 @@ export function Layout({
             {runStatus && <span className={`run-state ${runStatus}`}>{RUN_LABELS[runStatus] || runStatus}</span>}
           </div>
           <div className="header-actions">
+            {projects && projects.length > 1 && (
+              <select
+                className="project-selector"
+                value={currentProjectId || ""}
+                onChange={event => onProjectChange?.(event.target.value)}
+                aria-label="选择项目"
+                title="切换项目，查看对应书库和历史记录"
+              >
+                {projects.map(project => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+            )}
             {showSelector && novels && novels.length > 0 && (
               <select
                 className="novel-selector"

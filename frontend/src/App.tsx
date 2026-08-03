@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout, type AppTab } from "./components/Layout";
 import { Wizard } from "./components/Wizard";
-import { Progress } from "./components/Progress";
+import { Progress, type GenerationHistoryItem } from "./components/Progress";
 import { Review } from "./components/Review";
 import { CommandPalette } from "./components/CommandPalette";
 import { Settings } from "./components/Settings";
@@ -17,6 +17,7 @@ import { buildAiEditPreview, normalizeParagraphBreaks } from "./lib/editorPrevie
 import { cleanNovelTitle } from "./lib/titleDisplay";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
+type Project = { id: string; name: string; description?: string };
 type Content = { id: string; project_id: string; parent_id: string | null; type: string; title: string; body: TipTapDoc; meta: Record<string, unknown>; status: string; updated_at: string; sync_status?: "applied" | "conflict" };
 type TipTapDoc = { type?: string; content?: Array<{ type: string; text?: string }> };
 type RunNode = { node_key: string; kind: string; agent: string | null; title: string; status: string; output: Record<string, unknown> };
@@ -67,24 +68,34 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function docToText(doc: TipTapDoc): string {
-  return doc?.content?.map(i => typeof i?.text === "string" ? i.text : String(i?.text ?? "")).join("\n\n") ?? "";
+  return textValue(doc);
 }
 
-function textValue(value: unknown): string {
+export function textValue(value: unknown): string {
   if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const candidate = value as { text?: unknown; content?: unknown };
-    if (typeof candidate.text === "string") return candidate.text;
-    if (Array.isArray(candidate.content)) {
-      return candidate.content.map(item => {
-        if (item && typeof item === "object" && "text" in item) {
-          return String((item as { text?: unknown }).text ?? "");
-        }
-        return String(item ?? "");
-      }).join("\n\n");
-    }
+  if (Array.isArray(value)) {
+    return value.map(item => textValue(item)).filter(Boolean).join("\n\n");
   }
-  return value == null ? "" : String(value);
+  if (value && typeof value === "object") {
+    const candidate = value as {
+      text?: unknown;
+      content?: unknown;
+      paragraphs?: unknown;
+      body?: unknown;
+    };
+    if (typeof candidate.text === "string") return candidate.text;
+    if (candidate.text !== undefined) return textValue(candidate.text);
+    if (Array.isArray(candidate.content)) {
+      return textValue(candidate.content);
+    }
+    if (Array.isArray(candidate.paragraphs)) return textValue(candidate.paragraphs);
+    if (candidate.body !== undefined) return textValue(candidate.body);
+    // Never stringify an arbitrary response object.  That turns malformed
+    // TipTap/provider payloads into literal "[object Object]" prose and can
+    // corrupt the editor preview before the user has confirmed anything.
+    return "";
+  }
+  return typeof value === "number" || typeof value === "boolean" ? String(value) : "";
 }
 
 function textToDoc(text: unknown): TipTapDoc {
@@ -129,7 +140,8 @@ export default function App() {
   }, []);
   const [token, setToken] = useState(() => sessionStorage.getItem("nc_token") || "");
   const [userEmail, setUserEmail] = useState(() => sessionStorage.getItem("starlume_user_email") || "");
-  const [project, setProject] = useState<{ id: string; name: string } | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
   const [novel, setNovel] = useState<Content | null>(null);
   const [novels, setNovels] = useState<Content[]>([]);
   const [characters, setCharacters] = useState<any[]>([]);
@@ -138,12 +150,15 @@ export default function App() {
   const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
   const restoringRun = useRef(false);
+  const userSelectedProject = useRef(false);
   const userSelectedNovel = useRef(false);
   const novelSelectionEpoch = useRef(0);
   const [aiCalls, setAiCalls] = useState<AiCall[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [idea, setIdea] = useState("一个写作者发现自己删掉的章节正在现实里发生。");
   const [genre, setGenre] = useState("都市");
+  const [platform, setPlatform] = useState("fanqie");
+  const [subgenre, setSubgenre] = useState("");
   const [style, setStyle] = useState("克制、悬疑、强画面感");
   const [targetWords, setTargetWords] = useState(800000);
   const [editorText, setEditorText] = useState("");
@@ -171,6 +186,11 @@ export default function App() {
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
   const [liveReviewing, setLiveReviewing] = useState(false);
+  const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
   // NC-LIVE-AUDIT: refs so the debounced live reviewer always reads fresh guards.
@@ -181,6 +201,7 @@ export default function App() {
   useEffect(() => { pendingAiEditRef.current = pendingAiEdit; }, [pendingAiEdit]);
   useEffect(() => { streamPreviewRef.current = streamPreview; }, [streamPreview]);
   const projectsCacheKey = `projects:${userEmail || "signed-out"}`;
+  const selectedProjectKey = `currentProject:${userEmail || "signed-out"}`;
   const currentNovelCacheKey = `currentNovel:${userEmail || "signed-out"}`;
 
   useEffect(() => {
@@ -221,36 +242,49 @@ export default function App() {
     if (!token) return;
     let active = true;
     novelSelectionEpoch.current += 1;
+    userSelectedProject.current = false;
     userSelectedNovel.current = false;
     setProject(null);
+    setProjects([]);
     setNovel(null);
     setNovels([]);
     setRun(null);
     setChapters([]);
     setChapter(null);
     setEditorText("");
-    // Try this account's offline cache first, then let the API win.
-    void cacheGet<{ id: string; name: string }[]>(projectsCacheKey).then(cached => {
-      if (active && cached?.length) setProject(cached[0]);
+    setHistory([]);
+    setHistoryTotal(0);
+    setHistoryLoadingMore(false);
+    setHistoryError("");
+
+    const applyProjects = (items: Project[]) => {
+      if (!active || userSelectedProject.current) return;
+      setProjects(items);
+      const savedId = localStorage.getItem(selectedProjectKey) || "";
+      const selected = items.find(item => item.id === savedId) || items[0] || null;
+      setProject(selected);
+      if (selected) localStorage.setItem(selectedProjectKey, selected.id);
+    };
+
+    // Paint the cached project list first, then let the server refresh win.
+    void cacheGet<Project[]>(projectsCacheKey).then(cached => {
+      if (cached?.length) applyProjects(cached);
     });
-    void cacheGet<Content>(currentNovelCacheKey).then(cached => {
-      if (active && cached) setNovel(cached);
-    });
-    void api<{ id: string; name: string }[]>("/api/v1/projects").then(p => {
+    void api<Project[]>("/api/v1/projects").then(p => {
       if (!active) return;
-      setProject(p[0] ?? null);
+      applyProjects(p);
       void cacheSet(projectsCacheKey, p);
     }).catch(e => {
       if (active) setError(String(e));
     });
     return () => { active = false; };
-  }, [token, userEmail, projectsCacheKey, currentNovelCacheKey]);
+  }, [token, userEmail, projectsCacheKey, selectedProjectKey]);
 
   // 全局作品列表（供 Layout 作品选择器使用）
   useEffect(() => {
     if (!project) return;
     let active = true;
-    api<Content[]>(`/api/v1/contents?project_id=${project.id}`).then(items => {
+    api<Content[]>(`/api/v1/contents?project_id=${project.id}&limit=200`).then(items => {
       if (!active) return;
       const n = (items || []).filter(i => i.type === "novel");
       setNovels(n);
@@ -380,6 +414,84 @@ export default function App() {
     return () => { active = false; };
   }, [novel?.id, project?.id, run?.status]);
 
+  useEffect(() => {
+    if (!project) {
+      setHistory([]);
+      setHistoryTotal(0);
+      setHistoryLoadingMore(false);
+      setHistoryError("");
+      return;
+    }
+    let active = true;
+    setHistoryLoading(true);
+    setHistoryLoadingMore(false);
+    setHistoryError("");
+    const query = new URLSearchParams({ project_id: project.id, limit: "100" });
+    api<{ items: GenerationHistoryItem[]; total: number }>(`/api/v1/history?${query.toString()}`)
+      .then(result => {
+        if (!active) return;
+        setHistory(result.items || []);
+        setHistoryTotal(Number(result.total || 0));
+      })
+      .catch(caught => {
+        if (!active) return;
+        setHistory([]);
+        setHistoryTotal(0);
+        setHistoryError(caught instanceof Error ? caught.message : "历史记录加载失败");
+      })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [project?.id, run?.id, run?.status]);
+
+  async function loadMoreHistory() {
+    if (!project || historyLoading || historyLoadingMore || history.length >= historyTotal) return;
+    const currentProjectId = project.id;
+    setHistoryLoadingMore(true);
+    setHistoryError("");
+    const query = new URLSearchParams({
+      project_id: currentProjectId,
+      limit: "100",
+      offset: String(history.length),
+    });
+    try {
+      const result = await api<{ items: GenerationHistoryItem[]; total: number }>(`/api/v1/history?${query.toString()}`);
+      if (project?.id !== currentProjectId) return;
+      setHistory(previous => {
+        const known = new Set(previous.map(item => `${item.engine}:${item.id}`));
+        return [...previous, ...(result.items || []).filter(item => !known.has(`${item.engine}:${item.id}`))];
+      });
+      setHistoryTotal(Number(result.total || 0));
+    } catch (caught) {
+      if (project?.id === currentProjectId) setHistoryError(caught instanceof Error ? caught.message : "更多历史记录加载失败");
+    } finally {
+      setHistoryLoadingMore(false);
+    }
+  }
+
+  function handleProjectChange(projectId: string) {
+    const next = projects.find(item => item.id === projectId);
+    if (!next || next.id === project?.id) return;
+    userSelectedProject.current = true;
+    novelSelectionEpoch.current += 1;
+    userSelectedNovel.current = false;
+    localStorage.setItem(selectedProjectKey, next.id);
+    setProject(next);
+    setNovel(null);
+    setNovels([]);
+    setRun(null);
+    setChapters([]);
+    setChapter(null);
+    setEditorText("");
+    setVersions([]);
+    setCharacters([]);
+    setNarrative({ timeline: [], arcs: [] });
+    setHistory([]);
+    setHistoryTotal(0);
+    setHistoryLoadingMore(false);
+    setHistoryError("");
+    setError("");
+  }
+
   function selectChapter(chapterId: string) {
     const selected = chapters.find(item => item.id === chapterId) ?? null;
     setChapter(selected);
@@ -421,11 +533,28 @@ export default function App() {
     void cacheSet(currentNovelCacheKey, n);
   }
 
+  async function openGenerationHistory(item: GenerationHistoryItem) {
+    setError("");
+    if (item.engine === "v6") {
+      try {
+        await refreshRun(item.id);
+        setTab("progress");
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "旧版运行记录加载失败");
+      }
+      return;
+    }
+    if (item.novel_id) {
+      const opened = await activateNovel(item.novel_id);
+      if (opened) setTab("v7");
+    }
+  }
+
   async function startBootstrap() {
     if (!project) return;
     setBusy(true); setError("");
     try {
-      const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, style, target_words: targetWords }) });
+      const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, platform, subgenre, style, target_words: targetWords }) });
       setNovel(c);
       void cacheSet(currentNovelCacheKey, c);
       const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: JSON.stringify({ auto_confirm_title: false }) });
@@ -939,6 +1068,8 @@ export default function App() {
       sessionStorage.removeItem("starlume_user_email");
       setToken("");
       setUserEmail("");
+      userSelectedProject.current = false;
+      setProjects([]);
       setProject(null);
       setNovel(null);
       setNovels([]);
@@ -946,11 +1077,18 @@ export default function App() {
       setChapters([]);
       setChapter(null);
       setEditorText("");
+      setHistory([]);
+      setHistoryTotal(0);
+      setHistoryLoadingMore(false);
+      setHistoryError("");
     }
   };
 
   return (
     <Layout tab={tab} setTab={setTab} title={titles[tab]} runStatus={displayRunStatus(run)} userEmail={userEmail}
+      projects={projects.map(item => ({ id: item.id, name: item.name }))}
+      currentProjectId={project?.id}
+      onProjectChange={handleProjectChange}
       novels={novels.map(n => ({ id: n.id, title: cleanNovelTitle(n.title, "待命名作品") }))}
       currentNovelId={novel?.id}
       onNovelChange={(novelId) => { void activateNovel(novelId); }}
@@ -972,8 +1110,21 @@ export default function App() {
           }}
         />
       )}
-      {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap, projectId: project?.id }} />}
-      {tab === "progress" && <Progress run={run} novel={novel} onConfirm={confirmTitle} onRegenerateTitles={regenerateTitles} onNewRun={refreshRun} />}
+      {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, platform, setPlatform, subgenre, setSubgenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap, projectId: project?.id }} />}
+      {tab === "progress" && <Progress
+        run={run}
+        novel={novel}
+        history={history}
+        historyTotal={historyTotal}
+        historyLoading={historyLoading}
+        historyLoadingMore={historyLoadingMore}
+        historyError={historyError}
+        onOpenHistory={openGenerationHistory}
+        onLoadMoreHistory={loadMoreHistory}
+        onConfirm={confirmTitle}
+        onRegenerateTitles={regenerateTitles}
+        onNewRun={refreshRun}
+      />}
       {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onRepairApplied={(updated) => {
         if (!chapter) return;
         const merged = { ...chapter, ...updated, body: (updated.body as TipTapDoc | undefined) ?? chapter.body };

@@ -148,6 +148,8 @@ def compile_prompt(
     novel_dna: Any = None,
     chapter_function: Any = None,
     skill_hints: Any = None,
+    quality_profile_directive: str = "",
+    payoff_contract: Any = None,
     extra_layers: dict[str, str] | None = None,
 ) -> str:
     """Assemble the final Writer directive（兼容旧签名 + 通用层扩展）。
@@ -178,6 +180,10 @@ def compile_prompt(
         hints = [str(h).strip() for h in skill_hints if str(h).strip()]
         if hints:
             extras.append("【技巧提示】" + "；".join(hints))
+    if quality_profile_directive and quality_profile_directive.strip():
+        extras.append("【网文质量策略】\n" + quality_profile_directive.strip())
+    if isinstance(payoff_contract, dict) and payoff_contract:
+        extras.append("【本章爽点契约】\n" + str(payoff_contract))
     # ── V3-P3-⑫: 通用层扩展 ──
     if extra_layers:
         for name, text in extra_layers.items():

@@ -37,6 +37,11 @@ from app.services.text_quality import duplicate_paragraph_stats, normalize_and_v
 from app.services.prompt_compiler import (select_strategies, compile_strategy_directive,
                                            compile_prompt, skill_hints_for_strategies,
                                            SKILL_GENERATE_CONFLICT, SKILL_GENERATE_HOOK)
+from app.services.quality_profiles import (
+    compile_quality_directive,
+    profile_from_context,
+    quality_profile_metadata,
+)
 
 from .celery_app import celery_app
 
@@ -336,6 +341,24 @@ def _strategy_directive_for_chapter(run_context: dict) -> tuple[str, list[str]]:
         chapter_function=chapter_outline,
     )
     return compiled, hints
+
+
+def _quality_directive_for_chapter(run_context: dict) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """Compile the selected platform/genre policy without creating a second truth store."""
+    seq = int(run_context.get("_chapter_seq") or run_context.get("chapter_seq") or 1)
+    chapter_outline = run_context.get("_chapter_outline") or {}
+    if not isinstance(chapter_outline, dict):
+        chapter_outline = {}
+    profile = profile_from_context(run_context)
+    contract = chapter_outline.get("payoff_contract") if isinstance(chapter_outline, dict) else None
+    directive = compile_quality_directive(
+        profile,
+        chapter_number=seq,
+        chapter_function=chapter_outline,
+        payoff_contract=contract if isinstance(contract, dict) else None,
+        active_rules=run_context.get("active_rules") or [],
+    )
+    return directive, quality_profile_metadata(profile), contract if isinstance(contract, dict) else {}
 
 
 # V3 Repair Engine (§8): three-tier repair classification. Pure, deterministic.
@@ -1499,9 +1522,13 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                 output = {}
                 fidelity_cycle = int(node.get("attempt") or 0) + 1
                 for fidelity_attempt in range(1, 4):
+                    quality_directive, quality_metadata, payoff_contract = _quality_directive_for_chapter(run_context)
                     plan_variables = {
                         **run_context,
                         "fidelity_feedback": "；".join(fidelity_feedback),
+                        "quality_profile_directive": quality_directive,
+                        "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
+                        "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
                     }
                     output = complete(
                         run_id=run_id,
@@ -1568,10 +1595,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     else 1
                 )
                 for quality_attempt in range(1, quality_attempts + 1):
+                    quality_directive, quality_metadata, payoff_contract = _quality_directive_for_chapter(run_context)
                     variables = {
                         **run_context,
                         "length_retry_feedback": quality_feedback,
                         "quality_retry_feedback": quality_feedback,
+                        "quality_profile_directive": quality_directive,
+                        "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
+                        "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
                     }
                     # V3 Strategy Library (§6): inject the matched strategy
                     # directive + Writer skill hints into the prompt. Missing
@@ -1992,6 +2023,9 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (_novel_id,)).fetchone()
             if meta_row:
                 m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
+                selected_profile = profile_from_context(context)
+                m["quality_profile"] = quality_profile_metadata(selected_profile)
+                context["quality_profile"] = quality_profile_metadata(selected_profile)
                 m["creative_bible"] = creative_bible
                 m["core_hook"] = output.get("core_hook", "")
                 m["target_audience"] = output.get("target_audience", "")
@@ -2516,8 +2550,16 @@ def _run_canonical_v7_task(
             if result.get("v6_content_id") and result.get("status") in {
                 "completed",
                 "needs_review",
+                "needs_rewrite",
             }:
+                _clear_batch_current_ordinal(batch_id, batch_ordinal)
                 _reconcile_batch_progress(batch_id)
+                _dispatch_next_batch_slot(
+                    batch_id,
+                    api_url=api_url,
+                    model=model,
+                    api_key_ref=api_key_ref,
+                )
             else:
                 _mark_batch_failed(
                     batch_id,
@@ -3230,6 +3272,125 @@ def _reconcile_batch_progress(batch_id: str) -> dict | None:
         db.close()
 
 
+def _clear_batch_current_ordinal(batch_id: str, ordinal: int) -> None:
+    """Release the serialized slot claim after its worker persisted a result."""
+    db = connect()
+    try:
+        db.execute(
+            """UPDATE generation_batches
+               SET current_ordinal=NULL, updated_at=now()
+               WHERE id=%s AND current_ordinal=%s""",
+            (batch_id, ordinal),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _next_missing_batch_ordinal(db: Any, batch: dict[str, Any]) -> int | None:
+    """Return the first unpersisted slot, preserving chapter order on resume."""
+    requested = int(batch.get("requested_count", 0) or 0)
+    if requested <= 0:
+        return None
+    rows = db.execute(
+        """SELECT meta FROM contents
+           WHERE type='chapter'
+             AND (batch_id=%s OR meta->>'batch_id'=%s)
+             AND is_deleted=FALSE""",
+        (batch["id"], batch["id"]),
+    ).fetchall()
+    persisted: set[int] = set()
+    for row in rows or []:
+        meta = row.get("meta") if isinstance(row, dict) else None
+        if not isinstance(meta, dict):
+            continue
+        try:
+            ordinal = int(meta.get("batch_ordinal") or meta.get("ordinal") or 0)
+        except (TypeError, ValueError):
+            ordinal = 0
+        if 1 <= ordinal <= requested:
+            persisted.add(ordinal)
+    for ordinal in range(1, requested + 1):
+        if ordinal not in persisted:
+            return ordinal
+    return None
+
+
+def _dispatch_next_batch_slot(
+    batch_id: str,
+    *,
+    api_url: str = "",
+    model: str = "",
+    api_key_ref: str = "",
+) -> dict[str, Any]:
+    """Claim and dispatch exactly one batch slot.
+
+    The per-novel lock remains a safety net, not the scheduler. Serializing the
+    dispatch prevents five Celery messages from racing for one novel, exhausting
+    retries, and leaving gaps between chapter 1 and chapter 5.
+    """
+    db = connect()
+    try:
+        batch = db.execute(
+            "SELECT * FROM generation_batches WHERE id=%s FOR UPDATE",
+            (batch_id,),
+        ).fetchone()
+        if not batch:
+            return {"status": "error", "batch_id": batch_id, "message": "batch not found"}
+        # ``failed`` is recoverable: the resume endpoint deliberately
+        # re-enters this helper after clearing cancel_requested.
+        if batch.get("status") in {"succeeded", "needs_review", "cancelled"}:
+            return {"status": batch.get("status"), "batch_id": batch_id}
+        if batch.get("cancel_requested"):
+            db.execute(
+                "UPDATE generation_batches SET status='cancelled', current_ordinal=NULL, updated_at=now() WHERE id=%s",
+                (batch_id,),
+            )
+            db.commit()
+            return {"status": "cancelled", "batch_id": batch_id}
+        current = batch.get("current_ordinal")
+        if current is not None:
+            return {"status": "running", "batch_id": batch_id, "ordinal": int(current), "dispatched": False}
+
+        ordinal = _next_missing_batch_ordinal(db, batch)
+        if ordinal is None:
+            _recount_batch_progress(db, batch_id)
+            _maybe_finalize_batch(db, batch_id)
+            db.commit()
+            refreshed = db.execute("SELECT status FROM generation_batches WHERE id=%s", (batch_id,)).fetchone()
+            return {"status": (refreshed or {}).get("status", "succeeded"), "batch_id": batch_id}
+
+        db.execute(
+            """UPDATE generation_batches
+               SET status='running', current_ordinal=%s, error=NULL, updated_at=now()
+               WHERE id=%s""",
+            (ordinal, batch_id),
+        )
+        db.commit()
+        project_id = batch["project_id"]
+        novel_id = batch["novel_id"]
+    finally:
+        db.close()
+
+    try:
+        # The provider key is deliberately passed by reference only.
+        gen_next_chapter_task.delay(
+            novel_id,
+            project_id,
+            "",
+            api_url,
+            model,
+            batch_id,
+            ordinal,
+            api_key_ref=api_key_ref,
+            canonical=True,
+        )
+    except Exception as exc:
+        _mark_batch_failed(batch_id, exc)
+        raise
+    return {"status": "running", "batch_id": batch_id, "ordinal": ordinal, "dispatched": True}
+
+
 def _mark_batch_failed(batch_id: str, error: Exception) -> None:
     """Make a child-slot exception observable and resumable by the API."""
     db = connect()
@@ -3256,78 +3417,46 @@ def batch_generate_chapters_task(
     model: str = "",
     api_key_ref: str = "",
 ) -> dict:
-    """Fan out a persisted batch: dispatch one ``gen_next_chapter_task`` per
-    pending ordinal (P2-T5 / Q11). The per-novel lock inside that task keeps
-    chapters of the same novel serialized, while the global AI semaphore caps
-    total concurrency across all batches. Progress / finalization are driven by
-    ``gen_next_chapter_task`` itself, preserving idempotency and resume.
+    """Start or resume a persisted batch with one ordered slot in flight.
+
+    A batch is intentionally serialized per novel. The provider call is still
+    asynchronous at the queue level, but slot N+1 is not dispatched until slot
+    N has a durable accepted/review-needed result. This makes chapter order a
+    correctness invariant rather than a best-effort consequence of retries.
     """
     db = connect()
     batch = db.execute("SELECT * FROM generation_batches WHERE id = %s", (batch_id,)).fetchone()
     if not batch:
         db.close()
         return {"status": "error", "message": "batch not found"}
+    if batch.get("status") in {"succeeded", "needs_review", "cancelled"}:
+        db.close()
+        return {"status": batch.get("status"), "batch_id": batch_id}
     db.execute("UPDATE generation_batches SET status = 'running', error = NULL, updated_at = now() WHERE id = %s", (batch_id,))
     db.commit()
-
-    start_ordinal = int(batch.get("completed_count", 0) or 0) + 1
-    requested = int(batch.get("requested_count", 0) or 0)
-    project_id = batch["project_id"]
-    novel_id = batch["novel_id"]
-    start_seq = int(batch.get("start_seq", 1) or 1)
-    dispatched = 0
+    db.close()
     try:
-        for ordinal in range(start_ordinal, requested + 1):
-            state = db.execute(
-                "SELECT cancel_requested FROM generation_batches WHERE id = %s", (batch_id,)
-            ).fetchone()
-            if not state or state["cancel_requested"]:
-                db.commit(); db.close()
-                return {"status": "cancelled", "batch_id": batch_id}
-            # Idempotency: skip ordinals already generated (resume / re-dispatch).
-            canonical_key = f"v7:{novel_id}:chapter:{start_seq + ordinal - 1}:v1"
-            existing = db.execute(
-                """SELECT 1 FROM contents WHERE project_id=%s AND parent_id=%s
-                   AND generation_key IN (%s,%s) AND type='chapter' AND is_deleted=FALSE""",
-                (project_id, novel_id, _batch_generation_key(batch_id, ordinal), canonical_key),
-            ).fetchone()
-            if existing:
-                continue
-            # The BYOK key travels as a ref only — never the plaintext broker payload.
-            gen_next_chapter_task.delay(
-                novel_id, project_id, "", api_url, model,
-                batch_id, ordinal, api_key_ref=api_key_ref,
-                canonical=True,
-            )
-            dispatched += 1
+        return _dispatch_next_batch_slot(
+            batch_id,
+            api_url=api_url,
+            model=model,
+            api_key_ref=api_key_ref,
+        )
     except BudgetExceeded as exc:
-        db.execute("UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
-                   (str(exc), batch_id))
-        db.commit(); db.close()
+        _mark_batch_failed(batch_id, exc)
         from app.core.alerts import send_alert
         send_alert(f"批次 {batch_id} 因预算不足失败：{exc}", "warning")
         return {"status": "failed", "batch_id": batch_id, "reason": str(exc)}
     except ProviderError as exc:
-        db.execute("UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
-                   (str(exc), batch_id))
-        db.commit(); db.close()
+        _mark_batch_failed(batch_id, exc)
         from app.core.alerts import send_alert
         send_alert(f"批次 {batch_id} 因 AI provider 失败：{exc}", "warning")
         return {"status": "failed", "batch_id": batch_id, "reason": str(exc)}
     except Exception as exc:
-        db.execute("UPDATE generation_batches SET status = 'failed', error = %s, updated_at = now() WHERE id = %s",
-                   (str(exc), batch_id))
-        db.commit(); db.close()
+        _mark_batch_failed(batch_id, exc)
         from app.core.alerts import send_alert
         send_alert(f"批次 {batch_id} 失败：{exc}", "error")
         raise
-
-    db.close()
-    # If nothing new was dispatched (everything already done), make sure the
-    # final state is consistent.
-    if dispatched == 0:
-        _reconcile_batch_progress(batch_id)
-    return {"status": "running", "batch_id": batch_id, "dispatched": dispatched}
 @celery_app.task
 def expand_outline_task(novel_id: str, project_id: str) -> dict:
     """M2: Expand volume outline into chapter-level outlines."""

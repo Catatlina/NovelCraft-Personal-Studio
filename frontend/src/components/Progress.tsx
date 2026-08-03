@@ -44,6 +44,22 @@ type Run = {
   current_node_key?: string | null;
 };
 
+export type GenerationHistoryItem = {
+  id: string;
+  project_id: string;
+  novel_id: string | null;
+  novel_title: string;
+  engine: "v6" | "v7";
+  run_type: string;
+  status: string;
+  chapter_number: number | null;
+  step_count: number;
+  total_tokens: number | null;
+  total_cost: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 const HUMAN_NODE_KEYS = new Set(["human_confirm_title", "n2"]);
 const RETRYABLE_STATUSES = new Set(["failed", "pending_budget", "pending_provider", "needs_review"]);
 const RESTARTABLE_RUN = new Set(["pending", "dispatch_failed", "failed", "pending_provider"]);
@@ -76,6 +92,19 @@ const RUN_LABELS: Record<string, string> = {
   needs_review: "质量待处理",
   pending_approval: "等待生成确认",
 };
+const HISTORY_STATUS_LABELS: Record<string, string> = {
+  ...STATUS_LABELS,
+  completed: "已完成",
+  cancelled: "已取消",
+  paused: "已暂停",
+};
+const HISTORY_TYPE_LABELS: Record<string, string> = {
+  bootstrap: "完整创作",
+  chapter_generation: "章节生成",
+  continue: "续写章节",
+  rewrite: "章节重写",
+  review: "质量审阅",
+};
 
 function visibleRunStatus(run: Run | null): string {
   if (!run) return "pending";
@@ -96,6 +125,112 @@ function formatTime(value?: string | null): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function historyTypeLabel(value: string): string {
+  return HISTORY_TYPE_LABELS[value] || value.replaceAll("_", " ");
+}
+
+function historyStatusLabel(value: string): string {
+  return HISTORY_STATUS_LABELS[value] || value;
+}
+
+function formatCost(value: number | null): string | null {
+  if (value === null || value === undefined) return null;
+  return `¥${Number(value).toFixed(4)}`;
+}
+
+function GenerationHistoryPanel({
+  items,
+  total,
+  loading,
+  error,
+  onOpen,
+  loadingMore,
+  onLoadMore,
+}: {
+  items: GenerationHistoryItem[];
+  total: number;
+  loading: boolean;
+  error: string;
+  onOpen?: (item: GenerationHistoryItem) => Promise<void> | void;
+  loadingMore: boolean;
+  onLoadMore?: () => Promise<void> | void;
+}) {
+  const [openingId, setOpeningId] = useState("");
+
+  async function open(item: GenerationHistoryItem) {
+    if (!onOpen) return;
+    setOpeningId(`${item.engine}:${item.id}`);
+    try {
+      await onOpen(item);
+    } finally {
+      setOpeningId("");
+    }
+  }
+
+  return (
+    <section className="generation-history starlume-card" aria-label="创作历史">
+      <div className="generation-history-head">
+        <div>
+          <p className="eyebrow">RUN HISTORY</p>
+          <h3>创作历史</h3>
+        </div>
+        <span>{total > 0 ? `共 ${total} 条` : ""}</span>
+      </div>
+
+      {loading && (
+        <div className="generation-history-message"><Loader2 className="spin" size={17} /> 正在加载历史记录…</div>
+      )}
+      {!loading && error && (
+        <div className="generation-history-message error"><AlertTriangle size={17} /> {error}</div>
+      )}
+      {!loading && !error && items.length === 0 && (
+        <div className="generation-history-message">当前项目暂无历史记录。V6/V7 的运行记录会统一显示在这里。</div>
+      )}
+      {!loading && !error && items.length > 0 && (
+        <div className="generation-history-list">
+          {items.map(item => {
+            const itemKey = `${item.engine}:${item.id}`;
+            const cost = formatCost(item.total_cost);
+            return (
+              <div className="generation-history-row" key={itemKey}>
+                <div className="generation-history-main">
+                  <div className="generation-history-title">
+                    <span className={`generation-history-engine ${item.engine}`}>
+                      {item.engine === "v7" ? "V7 正文链" : "V6 工作流"}
+                    </span>
+                    <strong>{cleanNovelTitle(item.novel_title, "未命名作品")}</strong>
+                  </div>
+                  <div className="generation-history-meta">
+                    <span>{historyTypeLabel(item.run_type)}</span>
+                    {item.chapter_number !== null && <span>第 {item.chapter_number} 章</span>}
+                    <span className={`generation-history-status ${item.status}`}>{historyStatusLabel(item.status)}</span>
+                    {item.step_count > 0 && <span>{item.step_count} 步</span>}
+                    {cost && <span>{cost}</span>}
+                    <span>{formatTime(item.updated_at || item.created_at)}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-sm btn-ghost generation-history-open"
+                  disabled={!onOpen || openingId !== "" || loadingMore}
+                  onClick={() => void open(item)}
+                >
+                  {openingId === itemKey ? <><Loader2 className="spin" size={14} /> 正在打开…</> : "打开记录"}
+                </button>
+              </div>
+            );
+          })}
+          {total > items.length && onLoadMore && (
+            <button type="button" className="btn-sm btn-ghost generation-history-more" disabled={loadingMore} onClick={() => void onLoadMore()}>
+              {loadingMore ? <><Loader2 className="spin" size={14} /> 正在加载更多…</> : `加载更多历史（已显示 ${items.length}/${total}）`}
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function readableLabel(key: string): string {
@@ -141,12 +276,26 @@ export function Progress({
   onConfirm,
   onRegenerateTitles,
   onNewRun,
+  history = [],
+  historyTotal = 0,
+  historyLoading = false,
+  historyLoadingMore = false,
+  historyError = "",
+  onOpenHistory,
+  onLoadMoreHistory,
 }: {
   run: Run | null;
   novel: Content | null;
   onConfirm: (title: string) => Promise<void>;
   onRegenerateTitles: (feedback: string) => Promise<void>;
   onNewRun: (runId: string) => Promise<void>;
+  history?: GenerationHistoryItem[];
+  historyTotal?: number;
+  historyLoading?: boolean;
+  historyLoadingMore?: boolean;
+  historyError?: string;
+  onOpenHistory?: (item: GenerationHistoryItem) => Promise<void> | void;
+  onLoadMoreHistory?: () => Promise<void> | void;
 }) {
   const nodes = run?.nodes || [];
   const currentKey = run?.current_node_key || String(run?.context?.current_node_key || "");
@@ -290,17 +439,20 @@ export function Progress({
 
   if (!run) {
     return (
-      <section className="progress-empty page-enter">
-        <span><Sparkles size={25} /></span>
-        <p className="eyebrow">CREATION PROGRESS</p>
-        <h2>还没有正在运行的创作。</h2>
-        <p>从「创作向导」启动一本小说后，AI 的每一步真实状态、产物和失败原因都会显示在这里。</p>
-        {novel?.id && (
-          <button className="btn-sm btn-primary" disabled={bootstrapping} onClick={() => void reexecuteAll()}>
-            <Sparkles size={15} /> {bootstrapping ? "正在启动…" : "开始创作"}
-          </button>
-        )}
-      </section>
+      <div className="progress-page page-enter">
+        <section className="progress-empty">
+          <span><Sparkles size={25} /></span>
+          <p className="eyebrow">CREATION PROGRESS</p>
+          <h2>还没有正在运行的创作。</h2>
+          <p>从「创作向导」启动一本小说后，AI 的每一步真实状态、产物和失败原因都会显示在这里。</p>
+          {novel?.id && (
+            <button className="btn-sm btn-primary" disabled={bootstrapping} onClick={() => void reexecuteAll()}>
+              <Sparkles size={15} /> {bootstrapping ? "正在启动…" : "开始创作"}
+            </button>
+          )}
+        </section>
+        <GenerationHistoryPanel items={history} total={historyTotal} loading={historyLoading} error={historyError} onOpen={onOpenHistory} loadingMore={historyLoadingMore} onLoadMore={onLoadMoreHistory} />
+      </div>
     );
   }
 
@@ -335,6 +487,8 @@ export function Progress({
       </section>
 
       {notice && <div className={`progress-notice ${notice.kind}`} role="status">{notice.kind === "error" ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}{notice.text}</div>}
+
+      <GenerationHistoryPanel items={history} total={historyTotal} loading={historyLoading} error={historyError} onOpen={onOpenHistory} loadingMore={historyLoadingMore} onLoadMore={onLoadMoreHistory} />
 
       {(pendingApproval || canonicalNeedsReview || canonicalReason) && (
         <section className={`progress-notice ${canonicalNeedsReview ? "error" : "success"}`} role="status">

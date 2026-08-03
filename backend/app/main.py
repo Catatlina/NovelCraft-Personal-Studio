@@ -1081,6 +1081,109 @@ def get_latest_run(project_id: str | None = None, novel_id: str | None = None, u
     return ok(hydrated)
 
 
+@app.get("/api/v1/history")
+def list_generation_history(
+    project_id: str = Query(...),
+    novel_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Return one paginated history across the legacy V6 and canonical V7 runs.
+
+    V6 ``workflow_runs`` is the blueprint/bootstrap progress contract, while
+    V7 ``v7_agent_runs`` is the canonical chapter-generation trace.  They are
+    intentionally kept in their source tables, but the product must expose a
+    single read model so a project never appears to have lost its history
+    merely because a run was created by the other engine.
+    """
+    conn = connect()
+    member = conn.execute(
+        "SELECT 1 FROM project_members WHERE project_id=%s AND user_id=%s",
+        (project_id, user["id"]),
+    ).fetchone()
+    if not member:
+        conn.close()
+        raise HTTPException(status_code=403, detail="not a project member")
+
+    v6_filters = ["wr.project_id=%s"]
+    v6_params: list[str] = [project_id]
+    v7_filters = [
+        "n.project_id=%s",
+        "n.type='novel'",
+        "n.is_deleted=FALSE",
+    ]
+    v7_params: list[str] = [project_id]
+    if novel_id:
+        v6_filters.append("wr.novel_id=%s")
+        v6_params.append(novel_id)
+        v7_filters.append("ar.novel_id=%s")
+        v7_params.append(novel_id)
+
+    v6_sql = f"""
+        SELECT
+            wr.id::text AS id,
+            wr.project_id::text AS project_id,
+            wr.novel_id::text AS novel_id,
+            COALESCE(n.title, '未命名作品') AS novel_title,
+            'v6'::text AS engine,
+            COALESCE(wr.workflow_key, 'bootstrap') AS run_type,
+            wr.status::text AS status,
+            NULL::integer AS chapter_number,
+            (
+                SELECT COUNT(*)::integer FROM run_nodes rn WHERE rn.run_id=wr.id
+            ) AS step_count,
+            NULL::integer AS total_tokens,
+            NULL::double precision AS total_cost,
+            COALESCE(wr.created_at, wr.started_at, wr.updated_at) AS created_at,
+            COALESCE(wr.updated_at, wr.finished_at, wr.created_at) AS updated_at
+        FROM workflow_runs wr
+        LEFT JOIN contents n ON n.id=wr.novel_id
+        WHERE {' AND '.join(v6_filters)}
+    """
+    v7_sql = f"""
+        SELECT
+            ar.id::text AS id,
+            n.project_id::text AS project_id,
+            ar.novel_id::text AS novel_id,
+            COALESCE(n.title, '未命名作品') AS novel_title,
+            'v7'::text AS engine,
+            ar.run_type::text AS run_type,
+            ar.status::text AS status,
+            ar.chapter_number,
+            COALESCE(
+                ar.step_count,
+                (SELECT COUNT(*)::integer FROM v7_agent_traces at WHERE at.run_id=ar.id),
+                0
+            ) AS step_count,
+            ar.total_tokens,
+            ar.total_cost,
+            COALESCE(ar.created_at, ar.started_at) AS created_at,
+            COALESCE(ar.updated_at, ar.completed_at, ar.created_at, ar.started_at) AS updated_at
+        FROM v7_agent_runs ar
+        JOIN contents n ON n.id=ar.novel_id
+        WHERE {' AND '.join(v7_filters)}
+    """
+    params = tuple(v6_params + v7_params)
+    history_cte = f"WITH history AS ({v6_sql} UNION ALL {v7_sql})"
+    total = int(conn.execute(f"{history_cte} SELECT COUNT(*) AS total FROM history", params).fetchone()["total"])
+    rows = conn.execute(
+        f"""{history_cte}
+            SELECT * FROM history
+            ORDER BY created_at DESC NULLS LAST, id DESC
+            LIMIT %s OFFSET %s
+        """,
+        params + (limit, offset),
+    ).fetchall()
+    conn.close()
+    return ok({
+        "items": [dict(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
+
+
 @app.get("/api/v1/runs/{run_id}")
 def get_run(run_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, run = load_run_for_user(run_id, user)
@@ -1346,7 +1449,39 @@ def restore_version(content_id: str, payload: VersionRestore, user: dict = Depen
     return ok(row)
 
 
-def _ensure_editor_paragraphs(text: str) -> str:
+def _editor_provenance(source: str, candidate: str) -> dict[str, Any]:
+    """Detect a catastrophic unrelated editor candidate before preview.
+
+    A rewrite may change wording, but a full-chapter polish/rewrite must retain
+    enough exact local phrases to prove it is editing the submitted chapter.
+    This is deliberately a low bar: it only blocks a completely different
+    story, not legitimate paraphrase or de-AI rewriting.
+    """
+    import re as _re2
+
+    def compact(value: str) -> str:
+        return _re2.sub(r"[\s\W_]+", "", str(value or ""))
+
+    source_compact = compact(source)
+    candidate_compact = compact(candidate)
+    if len(source_compact) < 180 or len(candidate_compact) < 120:
+        return {"passed": True, "shared_ngrams": 0, "candidate_ngrams": 0, "reason": "short_text_exempt"}
+    source_ngrams = {source_compact[i:i + 4] for i in range(max(0, len(source_compact) - 3))}
+    candidate_ngrams = {candidate_compact[i:i + 4] for i in range(max(0, len(candidate_compact) - 3))}
+    shared = len(source_ngrams & candidate_ngrams)
+    # Zero shared four-character phrases is the signature of a wholly unrelated
+    # provider answer. Three shared phrases is intentionally enough for a real
+    # paraphrase with changed sentence structure.
+    passed = shared >= 3
+    return {
+        "passed": passed,
+        "shared_ngrams": shared,
+        "candidate_ngrams": len(candidate_ngrams),
+        "reason": "ok" if passed else "candidate_has_no_source_evidence",
+    }
+
+
+def _ensure_editor_paragraphs(text: Any) -> str:
     """保证编辑器 AI 文本带段落分隔（空行），避免应用后折叠成一大段。
 
     网文风格分段规则：
@@ -1354,6 +1489,17 @@ def _ensure_editor_paragraphs(text: str) -> str:
     - 每段 1-2 句，不超过 80 字
     - 标点规范化（破折号/省略号/引号）
     """
+    if isinstance(text, (dict, list)):
+        # Some older provider adapters returned a TipTap document under
+        # ``text``.  Coerce it through the canonical extractor instead of
+        # allowing Python/JavaScript to turn nested nodes into
+        # ``[object Object]``.
+        from .services.novel_export import extract_body_text
+        text = extract_body_text(text)
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
     if not text:
         return text
     import re as _re2
@@ -1461,23 +1607,38 @@ def ai_edit(
         # 「去AI味」的目标是改表达，绝不是删内容；压缩原文属于破坏性操作。
         if count_content_chars(candidate_text) < operation_min_chars and source_chars >= operation_min_chars:
             candidate_text = _ensure_editor_paragraphs(payload.selection)
+        provenance = _editor_provenance(payload.selection, candidate_text)
+        if not provenance["passed"]:
+            # 去 AI 味也只能改当前章节；完全没有原章片段证据时宁可保留
+            # 原文，不把另一篇故事写进编辑器预览。
+            candidate_text = _ensure_editor_paragraphs(payload.selection)
+            deai_result.setdefault("warnings", []).append("候选与当前章节缺少内容证据，已保留原文")
         output = {
             "text": candidate_text,
             "deai_quality_gate": deai_result.get("quality_gate") or {"passed": True},
             "deai_warnings": deai_result.get("warnings") or [],
+            "editor_provenance": provenance,
         }
     else:
         instruction = payload.instruction
         best = None
         best_score = -1.0
+        last_candidate_text = payload.selection
         for attempt in range(MAX_EDITOR_RETRIES + 1):
             gen = complete(
                 run_id=None, node_key=None, project_id=content["project_id"],
                 task_type=f"editor_{task_op}", prompt_name=f"editor.{task_op}",
-                variables={"selection": payload.selection, "instruction": instruction},
+                variables={
+                    "selection": payload.selection,
+                    "instruction": instruction,
+                    "chapter_title": content.get("title", ""),
+                    "chapter_seq": (content.get("meta") or {}).get("seq", "") if isinstance(content.get("meta"), dict) else "",
+                    "editing_contract": "只编辑提交的当前章节，保留人物、地点、物品、时间线和事件事实；不得换成另一篇故事。",
+                },
                 client_mutation_id=(f"{payload.client_mutation_id}:gen:{attempt}" if payload.client_mutation_id else None),
             )
             candidate_text = _ensure_editor_paragraphs(gen.get("text") or payload.selection)
+            last_candidate_text = candidate_text
             if str(op) in IMPROVE_OPS:
                 review = complete(
                     run_id=None, node_key=None, project_id=content["project_id"],
@@ -1487,11 +1648,19 @@ def ai_edit(
                 )
                 score = float(review.get("score") or 0)
                 chars = count_content_chars(candidate_text)
+                provenance = _editor_provenance(payload.selection, candidate_text)
                 from app.services.quality_risks import (
                     evaluate_editor_review_gate,
                     repair_feedback,
                 )
                 review["deai_metrics"] = analyze_deai_patterns(candidate_text)
+                review["editor_provenance"] = provenance
+                if not provenance["passed"]:
+                    instruction = (
+                        "候选与原文缺少内容证据，必须重写当前原文而不是另起一篇故事；"
+                        "保留原文中的人物、地点、物品、事件和关键四字以上短语。"
+                    )
+                    continue
                 quality_gate = evaluate_editor_review_gate(
                     review,
                     chars=chars,
@@ -1523,7 +1692,16 @@ def ai_edit(
                 # continue 等非改善操作：单遍生成
                 best = {"text": candidate_text}
                 break
-        output = best or {"text": candidate_text}
+        if str(op) in IMPROVE_OPS and best is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EDITOR_CANDIDATE_UNSAFE",
+                    "message": "AI 返回的候选与当前章节缺少内容证据，原文未改变，请重试",
+                    "candidate_chars": count_content_chars(last_candidate_text),
+                },
+            )
+        output = best or {"text": last_candidate_text}
         # 最终兜底：润色/改写重跑耗尽后仍不足 2000 → 回退原文。
         # 润色的目的是改表达，压缩/删减情节属于破坏性操作，宁可少改。
         if str(op) in IMPROVE_OPS and count_content_chars(output.get("text") or "") < operation_min_chars:

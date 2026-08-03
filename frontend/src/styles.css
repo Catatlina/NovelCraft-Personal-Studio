@@ -460,7 +460,7 @@ button:active:not(:disabled) { transform: scale(.96); }
 .run-state.failed { color: var(--danger); background: var(--danger-soft); }
 .run-state.succeeded { color: var(--success); background: var(--success-soft); }
 .header-actions { gap: 14px; }
-.novel-selector {
+.project-selector, .novel-selector {
   height: 36px;
   min-height: 36px;
   min-width: 160px;
@@ -478,7 +478,8 @@ button:active:not(:disabled) { transform: scale(.96); }
   background-repeat: no-repeat;
   background-position: right 10px center;
 }
-.novel-selector:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px var(--primary-soft); }
+.project-selector { min-width: 180px; max-width: 260px; }
+.project-selector:focus, .novel-selector:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px var(--primary-soft); }
 /* Collapsible card sections (扫榜源/快照) */
 details.card { margin-bottom: var(--space-4); }
 details.card > summary.card-head { cursor: pointer; list-style: none; user-select: none; transition: background .15s; }
@@ -731,6 +732,28 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .progress-notice.error { color: var(--danger); background: var(--danger-soft); }
 .progress-notice > div { display: flex; flex-direction: column; gap: 3px; }
 .progress-notice > div span { color: inherit; opacity: .86; line-height: 1.5; }
+.generation-history { padding: 22px 24px; box-shadow: none; }
+.generation-history:hover { transform: none; }
+.generation-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 15px; border-bottom: 1px solid var(--border-subtle); }
+.generation-history-head h3 { margin-top: 2px; font-size: 20px; letter-spacing: -.025em; }
+.generation-history-head > span { color: var(--text-muted); font-size: 12px; }
+.generation-history-list { display: flex; flex-direction: column; }
+.generation-history-row { min-width: 0; padding: 14px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border-subtle); }
+.generation-history-row:last-child { border-bottom: 0; }
+.generation-history-main { min-width: 0; flex: 1; }
+.generation-history-title { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.generation-history-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.generation-history-engine, .generation-history-status { padding: 4px 7px; flex: 0 0 auto; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.generation-history-engine.v7 { color: var(--brand-500); background: var(--brand-50); }
+.generation-history-engine.v6 { color: var(--text-secondary); background: var(--bg-hover); }
+.generation-history-meta { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-muted); font-size: 11px; }
+.generation-history-status.succeeded, .generation-history-status.completed { color: var(--success); background: var(--success-soft); }
+.generation-history-status.failed, .generation-history-status.pending_provider, .generation-history-status.needs_review { color: var(--danger); background: var(--danger-soft); }
+.generation-history-status.pending, .generation-history-status.running, .generation-history-status.pending_approval, .generation-history-status.waiting_human { color: var(--warning); background: var(--warning-soft); }
+.generation-history-open { min-height: 32px; flex: 0 0 auto; }
+.generation-history-message { min-height: 74px; display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.generation-history-message.error { color: var(--danger); }
+.generation-history-more { width: fit-content; min-height: 32px; margin-top: 12px; color: var(--text-secondary); font-size: 11px; }
 
 /* 全流程重执行确认弹窗（进度页） */
 .modal-backdrop {
@@ -1130,6 +1153,7 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
   .app-main { margin-left: 0; padding-bottom: 74px; }
   .app-header { height: 56px; padding: 0 18px; }
   .app-header-title h1 { font-size: 16px; }
+  .project-selector, .novel-selector { min-width: 112px; max-width: 145px; }
   .run-state, .command-trigger span, .command-trigger kbd { display: none; }
   .command-trigger { min-width: 36px; width: 36px; padding: 0; justify-content: center; border: 0; background: transparent; }
   .user-avatar { width: 32px; height: 32px; }

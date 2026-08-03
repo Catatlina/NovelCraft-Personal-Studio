@@ -61,6 +61,8 @@ def build_transition_contract(
     review_score: float,
     dimension_scores: dict[str, Any],
     reader_experience: dict[str, Any] | None = None,
+    payoff_contract: dict[str, Any] | None = None,
+    payoff_evidence: list[dict[str, Any]] | None = None,
     previous_context: dict[str, Any] | None = None,
     memory_items: list[dict[str, Any]] | None = None,
     constraints: list[dict[str, Any]] | None = None,
@@ -112,6 +114,8 @@ def build_transition_contract(
             "review_score": review_score,
             "dimension_scores": dimension_scores,
             "reader_experience": reader_experience or {},
+            "payoff_contract": payoff_contract or {},
+            "payoff_evidence": payoff_evidence or [],
         },
     }
 

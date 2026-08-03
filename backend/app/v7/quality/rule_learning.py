@@ -15,7 +15,10 @@ from ..brain.state_manager import StoryStateManager
 
 
 RULE_SCHEMA_VERSION = "rule-learning-v2"
-LOW_RISK_CODES = {"dash_density", "ellipsis_density", "uniform_cadence", "ai_phrase", "repeated_phrase"}
+LOW_RISK_CODES = {
+    "dash_density", "ellipsis_density", "uniform_cadence", "ai_phrase", "repeated_phrase",
+    "repeated_tic",
+}
 RULE_STATUSES = {"candidate", "canary", "active", "rolled_back"}
 CANARY_ROLLOUT_PERCENT = 25
 

@@ -42,6 +42,7 @@ from ..integration.v6_bridge import (
     persist_rejected_v7_draft,
 )
 from ..quality.continuity import validate_transition_contract
+from ...services.quality_profiles import quality_profile_metadata, select_quality_profile
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
     "perceive",
@@ -165,6 +166,7 @@ class StoryDirector:
         user_id: str | None = None,
         provider_config: dict[str, str] | None = None,
         generation_metadata: dict[str, Any] | None = None,
+        quality_profile: dict[str, Any] | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -175,6 +177,7 @@ class StoryDirector:
         self.user_id = user_id
         self.provider_config = provider_config or {}
         self.generation_metadata = generation_metadata or {}
+        self.quality_profile = quality_profile or select_quality_profile()
         self.permission_system = DecisionPermissionSystem(db, novel_id)
 
         # Engines
@@ -182,6 +185,7 @@ class StoryDirector:
             db, novel_id, brain, tracer, event_bus,
             project_id=project_id,
             provider_config=self.provider_config,
+            quality_profile=self.quality_profile,
         )
         self.memory_engine = MemoryEngine(
             db, novel_id, brain, tracer, event_bus,
@@ -192,11 +196,13 @@ class StoryDirector:
             db, novel_id, brain, tracer, event_bus,
             project_id=project_id,
             provider_config=self.provider_config,
+            quality_profile=self.quality_profile,
         )
         self.generation_engine = GenerationEngine(
             db, novel_id, brain, tracer, event_bus,
             project_id=project_id,
             provider_config=self.provider_config,
+            quality_profile=self.quality_profile,
         )
 
         # Event-driven state projection
@@ -521,6 +527,7 @@ class StoryDirector:
             "must_accomplish": assessment_data.get("must_accomplish") or [],
             "suggested_beats": assessment_data.get("suggested_beats") or [],
             "chapter_title_hint": assessment_data.get("chapter_title_hint"),
+            "payoff_contract": assessment_data.get("payoff_contract") or {},
             "gaps": gaps,
             "blockers": blockers,
             # A bootstrap first chapter is allowed to start when the writer
@@ -667,7 +674,13 @@ class StoryDirector:
                     "pacing_advice"
                 ),
                 "risks": (assessment.get("plot_result") or {}).get("risks") or [],
+                "reader_promise": assessment.get("reader_promise") or (assessment.get("plot_result") or {}).get("reader_promise"),
+                "emotional_target": assessment.get("emotional_target") or (assessment.get("plot_result") or {}).get("emotional_target"),
+                "opening_anchor": assessment.get("opening_anchor") or (assessment.get("plot_result") or {}).get("opening_anchor"),
+                "hook": (assessment.get("plot_result") or {}).get("hook") or "",
+                "payoff_contract": assessment.get("payoff_contract") or (assessment.get("plot_result") or {}).get("payoff_contract") or {},
             },
+            "quality_profile": quality_profile_metadata(self.quality_profile),
             "status": "planned",
         }
 
@@ -695,6 +708,8 @@ class StoryDirector:
                 "scene_plan": current.get("scene_plan") or {},
                 "deai_metrics": metrics.get("after") or metrics,
                 "generation_quality": current.get("generation_quality") or {},
+                "quality_profile": current.get("quality_profile") or quality_profile_metadata(self.quality_profile),
+                "payoff_contract": current.get("payoff_contract") or (plan.get("plot_brief") or {}).get("payoff_contract") or {},
             }
 
         review = await self.review_engine.run(review_input(generation))
@@ -758,6 +773,7 @@ class StoryDirector:
                 + f"【上一稿正文】\n{generation.get('text', '')[:16000]}",
                 outline=plan.get("outline"),
                 target_word_count=plan["target_word_count"],
+                plot_brief=plan.get("plot_brief"),
             )
             review = await self.review_engine.run(review_input(generation))
             if not review.success:
@@ -809,6 +825,8 @@ class StoryDirector:
             "rework_count": rework_count,
             "review_confidence": review.confidence,
             "quality_gate": gate,
+            "payoff_contract": review_data.get("payoff_contract") or generation.get("payoff_contract") or {},
+            "payoff_evidence": review_data.get("payoff_evidence") or [],
         }
 
     # ── step 7 ──────────────────────────────────────────────────────────
@@ -867,6 +885,8 @@ class StoryDirector:
             review_score=observation["review_score"],
             dimension_scores=observation["dimension_scores"],
             reader_experience=observation.get("reader_experience"),
+            payoff_contract=generation.get("payoff_contract") or {},
+            payoff_evidence=observation.get("payoff_evidence") or [],
             previous_context=generation.get("context"),
             memory_items=memory_items,
             constraints=(generation.get("context") or {}).get("constraints") or [],
@@ -1015,6 +1035,10 @@ class StoryDirector:
                 "audit_report": observation.get("audit_report") or {},
                 "continuity": continuity,
                 "generation_quality": generation.get("generation_quality") or {},
+                "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
+                "payoff_contract": generation.get("payoff_contract") or {},
+                "payoff_validation": generation.get("payoff_validation") or {},
+                "payoff_evidence": observation.get("payoff_evidence") or [],
             },
         }
         if not observation["passed_review"]:
@@ -1041,6 +1065,8 @@ class StoryDirector:
                 "reader_experience": observation.get("reader_experience", {}),
                 "passed_review": observation["passed_review"],
                 "generation_quality": generation.get("generation_quality") or {},
+                "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
+                "payoff_contract": generation.get("payoff_contract") or {},
                 "quality_gate": observation.get("quality_gate") or {},
                 "rework_count": observation["rework_count"],
                 "run_id": str(run_id),

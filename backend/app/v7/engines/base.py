@@ -68,6 +68,7 @@ class BaseEngine(ABC):
         event_bus: EventBus,
         project_id: str | None = None,
         provider_config: dict[str, str] | None = None,
+        quality_profile: dict[str, Any] | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -79,6 +80,7 @@ class BaseEngine(ABC):
         # from a V6-compatible HTTP entrypoint.  Empty values intentionally
         # fall back to the worker environment in AIGateway.
         self.provider_config = provider_config or {}
+        self.quality_profile = quality_profile or {}
         # Set by run() so phase implementations can report token usage / cost
         # onto the trace step that is currently open.
         self._step_ctx: Any = None

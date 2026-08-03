@@ -187,10 +187,57 @@ def test_batch_runner_is_slot_based_not_completed_counter_based():
     from app.workers import tasks
 
     names = set(tasks.batch_generate_chapters_task.run.__code__.co_names)
-    assert "_batch_generation_key" in names
-    assert "gen_next_chapter_task" in names
+    assert "_dispatch_next_batch_slot" in names
+    dispatch_names = set(tasks._dispatch_next_batch_slot.__code__.co_names)
+    assert "_next_missing_batch_ordinal" in dispatch_names
+    assert "gen_next_chapter_task" in dispatch_names
     source_constants = " ".join(str(value) for value in tasks.batch_generate_chapters_task.run.__code__.co_consts)
     assert "completed_count = completed_count + 1" not in source_constants
+
+
+def test_dispatch_next_batch_slot_claims_first_missing_ordinal(monkeypatch):
+    from app.workers import tasks
+
+    batch = {
+        "id": "batch-1",
+        "project_id": "project-1",
+        "novel_id": "novel-1",
+        "requested_count": 4,
+        "status": "running",
+        "cancel_requested": False,
+        "current_ordinal": None,
+    }
+    events = []
+
+    class Db:
+        def execute(self, sql, params=()):
+            compact = " ".join(sql.split())
+            events.append((compact, params))
+            if "FROM generation_batches" in compact and "FOR UPDATE" in compact:
+                return _Cursor(batch)
+            if "SELECT meta FROM contents" in compact:
+                return _Cursor(many=[{"meta": {"batch_id": "batch-1", "batch_ordinal": 1}}])
+            return _Cursor()
+
+        def commit(self):
+            events.append(("commit",))
+
+        def close(self):
+            events.append(("close",))
+
+    dispatched = []
+    monkeypatch.setattr(tasks, "connect", lambda: Db())
+    monkeypatch.setattr(
+        tasks.gen_next_chapter_task,
+        "delay",
+        lambda *args, **kwargs: dispatched.append((args, kwargs)),
+    )
+
+    result = tasks._dispatch_next_batch_slot("batch-1", api_url="https://provider", model="deepseek")
+
+    assert result == {"status": "running", "batch_id": "batch-1", "ordinal": 2, "dispatched": True}
+    assert dispatched and dispatched[0][0][5:7] == ("batch-1", 2)
+    assert any("current_ordinal=%s" in event[0] for event in events if event and isinstance(event[0], str))
 
 
 def test_cancel_response_explains_in_flight_slot(monkeypatch):

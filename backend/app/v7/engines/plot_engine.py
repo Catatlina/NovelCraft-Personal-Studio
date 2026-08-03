@@ -26,6 +26,7 @@ from ..generation.generation_engine import (
     chinese_word_count,
 )
 from ..repositories.plot import PlotNodeRepository
+from ...services.quality_profiles import compile_quality_directive, quality_profile_metadata
 
 MODE_ASSESS = "assess"
 MODE_ANALYZE = "analyze"
@@ -202,8 +203,10 @@ class PlotEngine(BaseEngine):
             "tension_target": ai_payload.get("tension_target"),
             "pacing_advice": ai_payload.get("pacing_advice"),
             "reader_promise": ai_payload.get("reader_promise"),
+            "payoff_contract": ai_payload.get("payoff_contract") or {},
             "emotional_target": ai_payload.get("emotional_target"),
             "opening_anchor": ai_payload.get("opening_anchor"),
+            "hook": ai_payload.get("hook"),
             "risks": ai_payload.get("risks") or [],
             "suggested_beats": ai_payload.get("suggested_beats") or [],
             "chapter_title_hint": ai_payload.get("chapter_title"),
@@ -219,6 +222,7 @@ class PlotEngine(BaseEngine):
             "blockers": blockers,
             "ai_confidence": ai_confidence,
             "existing_node_status": existing_node.status if existing_node else None,
+            "quality_profile": quality_profile_metadata(self.quality_profile) if self.quality_profile else {},
         }
 
         return EngineResult(
@@ -263,6 +267,12 @@ class PlotEngine(BaseEngine):
                 f"梗概：{(previous_node.description or '')[:300]}"
             )
 
+        quality_directive = compile_quality_directive(
+            self.quality_profile or None,
+            chapter_number=chapter_number,
+            chapter_function={"reader_expectation": "本章读完仍想继续"},
+        )
+
         return f"""你正在为一部中文长篇小说规划第 {chapter_number} 章的结构。
 
 【本章大纲】
@@ -278,6 +288,9 @@ class PlotEngine(BaseEngine):
 {prev_line}
 
 【当前状态总数】{perception.get('state_total', 0)} 条，待人工复核 {perception.get('pending_review', 0)} 条。
+
+【网文质量策略】
+{quality_directive}
 
 请判断：这一章应该完成什么、张力应该推到什么位置、节奏如何安排、有什么风险，
 并给出 4-6 个节拍建议。同时给出你对"现在就自动生成这一章是否安全"的置信度。
@@ -297,6 +310,8 @@ class PlotEngine(BaseEngine):
   "reader_promise": "本章给读者的情绪/信息承诺，以及读者为什么要继续追读",
   "emotional_target": "情绪曲线：开场情绪 -> 中段转折 -> 章末情绪",
   "opening_anchor": "本章开头必须承接上一章尾部的具体动作、地点或未决问题",
+  "hook": "章末必须落到具体动作、发现或选择的追读钩子",
+  "payoff_contract": {{"reader_promise":"读者本章要等什么","pressure":"当前压力", "active_choice":"主角主动选择", "payoff_type":"兑现类型", "visible_result":"可见结果", "witness_reaction":"他人反应", "cost":"代价/余波", "next_pressure":"章末新增压力", "setup_refs":[]}},
   "risks": ["风险 1", "风险 2"],
   "suggested_beats": [
     {{"name": "节拍名", "content": "这一节拍发生什么", "target_words": 600,

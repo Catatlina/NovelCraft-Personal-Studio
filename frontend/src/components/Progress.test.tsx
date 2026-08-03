@@ -23,6 +23,92 @@ describe("创作进度门禁", () => {
     expect(screen.queryByText("预计完成")).toBeNull();
   });
 
+  it("合并展示 V6/V7 历史，并能打开对应记录", async () => {
+    const onOpenHistory = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Progress
+        run={null}
+        novel={null}
+        historyTotal={2}
+        history={[
+          {
+            id: "v7-run-1",
+            project_id: "project-1",
+            novel_id: "novel-1",
+            novel_title: "天命债主",
+            engine: "v7",
+            run_type: "chapter_generation",
+            status: "completed",
+            chapter_number: 3,
+            step_count: 8,
+            total_tokens: 1200,
+            total_cost: 0.12,
+            created_at: "2026-08-03T10:00:00Z",
+            updated_at: "2026-08-03T10:01:00Z",
+          },
+          {
+            id: "v6-run-1",
+            project_id: "project-1",
+            novel_id: "novel-1",
+            novel_title: "天命债主",
+            engine: "v6",
+            run_type: "bootstrap",
+            status: "succeeded",
+            chapter_number: null,
+            step_count: 12,
+            total_tokens: null,
+            total_cost: null,
+            created_at: "2026-08-03T09:00:00Z",
+            updated_at: "2026-08-03T09:02:00Z",
+          },
+        ]}
+        onOpenHistory={onOpenHistory}
+        onConfirm={vi.fn()}
+        onRegenerateTitles={vi.fn()}
+        onNewRun={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("创作历史")).toBeTruthy();
+    expect(screen.getByText("V7 正文链")).toBeTruthy();
+    expect(screen.getByText("V6 工作流")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "打开记录" })[0]);
+    await waitFor(() => expect(onOpenHistory).toHaveBeenCalledWith(expect.objectContaining({ id: "v7-run-1", engine: "v7" })));
+  });
+
+  it("历史超过首屏时提供加载更多入口", async () => {
+    const onLoadMore = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Progress
+        run={null}
+        novel={null}
+        historyTotal={101}
+        history={[{
+          id: "v7-run-1",
+          project_id: "project-1",
+          novel_id: "novel-1",
+          novel_title: "测试小说",
+          engine: "v7",
+          run_type: "chapter_generation",
+          status: "completed",
+          chapter_number: 1,
+          step_count: 1,
+          total_tokens: 1,
+          total_cost: 0,
+          created_at: null,
+          updated_at: null,
+        }]}
+        onLoadMoreHistory={onLoadMore}
+        onConfirm={vi.fn()}
+        onRegenerateTitles={vi.fn()}
+        onNewRun={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /加载更多历史/ }));
+    await waitFor(() => expect(onLoadMore).toHaveBeenCalledTimes(1));
+  });
+
   it("人工节点等待时必须由用户确认书名", async () => {
     const confirm = vi.fn().mockResolvedValue(undefined);
     render(

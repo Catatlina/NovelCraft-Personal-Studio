@@ -3,6 +3,11 @@ import { AlertTriangle, ArrowRight, BookOpen, Copy, Feather, FileUp, Link2, Load
 import { api, apiRaw, getApiKey } from "../lib/api";
 
 const GENRES = ["都市", "科幻", "玄幻", "仙侠", "悬疑", "历史", "游戏", "轻小说", "短篇", "其他"];
+const SUBGENRES: Record<string, string[]> = {
+  都市: ["都市神豪", "都市商战", "都市重生", "都市异能", "都市高武", "都市脑洞", "都市系统"],
+  玄幻: ["传统升级流", "凡人流", "史诗玄幻", "宿命流", "设定流", "家族修仙", "系统流"],
+  仙侠: ["传统升级流", "凡人流", "史诗玄幻", "宿命流", "设定流", "家族修仙", "系统流"],
+};
 const WORD_PRESETS = [
   { value: 100000, label: "短篇", hint: "约 10 万字" },
   { value: 300000, label: "中篇", hint: "约 30 万字" },
@@ -15,6 +20,10 @@ export function Wizard({
   setIdea,
   genre,
   setGenre,
+  platform,
+  setPlatform,
+  subgenre,
+  setSubgenre,
   style,
   setStyle,
   targetWords,
@@ -27,6 +36,10 @@ export function Wizard({
   setIdea: (value: string) => void;
   genre: string;
   setGenre: (value: string) => void;
+  platform: string;
+  setPlatform: (value: string) => void;
+  subgenre: string;
+  setSubgenre: (value: string) => void;
   style: string;
   setStyle: (value: string) => void;
   targetWords: number;
@@ -51,6 +64,7 @@ export function Wizard({
     copyright_warning?: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const subgenreOptions = SUBGENRES[genre] || [];
 
   function handleImitFile(file: File | undefined) {
     if (!file) return;
@@ -184,13 +198,27 @@ export function Wizard({
               <span>小说题材</span>
               <select
                 value={genre}
-                onChange={event => { setGenre(event.target.value); clearError("genre"); }}
+                onChange={event => { setGenre(event.target.value); setSubgenre(""); clearError("genre"); }}
                 aria-invalid={Boolean(errors.genre)}
               >
                 <option value="">选择题材</option>
                 {GENRES.map(item => <option key={item} value={item}>{item}</option>)}
               </select>
               {errors.genre && <small className="field-error">{errors.genre}</small>}
+            </label>
+            <label className="wizard-field">
+              <span>目标平台</span>
+              <select value={platform} onChange={event => setPlatform(event.target.value)} aria-label="目标平台">
+                <option value="fanqie">番茄小说（高留存）</option>
+                <option value="qidian">起点中文网（长线）</option>
+              </select>
+            </label>
+            <label className="wizard-field">
+              <span>细分流派 <small>可选</small></span>
+              <select value={subgenre} onChange={event => setSubgenre(event.target.value)} aria-label="细分流派">
+                <option value="">自动匹配</option>
+                {subgenreOptions.map(item => <option key={item} value={item}>{item}</option>)}
+              </select>
             </label>
             <label className="wizard-field">
               <span>写作风格</span>

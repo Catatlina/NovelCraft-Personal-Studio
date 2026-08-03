@@ -70,6 +70,39 @@ def duplicate_paragraph_stats(
     }
 
 
+def deduplicate_full_paragraphs(
+    text: str,
+    *,
+    minimum_paragraph_chars: int = 40,
+) -> tuple[str, dict[str, object]]:
+    """Remove only exact repeated narrative paragraphs, preserving first use.
+
+    This is intentionally narrower than a semantic deduplicator.  It repairs
+    the provider failure mode where an entire paragraph stream is appended a
+    second time, while leaving short refrains and near-duplicates to the
+    reviewer.  The returned evidence is persisted with the generation record.
+    """
+    source = paragraphs(text)
+    seen: set[str] = set()
+    kept: list[str] = []
+    removed: list[dict[str, object]] = []
+    for paragraph in source:
+        normalized = re.sub(r"\s+", "", paragraph)
+        if len(normalized) >= minimum_paragraph_chars and normalized in seen:
+            removed.append({"chars": len(normalized), "preview": paragraph[:80]})
+            continue
+        kept.append(paragraph)
+        if len(normalized) >= minimum_paragraph_chars:
+            seen.add(normalized)
+    repaired = "\n\n".join(kept)
+    return repaired, {
+        "source_paragraphs": len(source),
+        "kept_paragraphs": len(kept),
+        "removed_paragraphs": len(removed),
+        "removed": removed[:8],
+    }
+
+
 def _split_long_paragraph(paragraph: str, max_chars: int) -> list[str]:
     """Split only at sentence boundaries, retaining every source character."""
     if len(paragraph) <= max_chars:

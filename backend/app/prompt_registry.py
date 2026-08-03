@@ -59,7 +59,7 @@ DEAI_IRON_RULES = """【去 AI 味改稿铁律——逐条执行，不得跳过�
 # ===== PROMPT SEEDS =====
 PROMPT_SEEDS = [
     # ── Bootstrap: 开书链 (oh-story Phase 1-5 映射) ──
-    ("bootstrap.gen_titles", "3.3.0", "deepseek",
+    ("bootstrap.gen_titles", "3.4.0", "deepseek",
      """你是资深网文主编，深谙番茄小说、起点中文网的爆款书名套路。请基于以下设定生成 5 个「像真人在榜单上发的」小说书名。
      
 题材：$genre
@@ -72,11 +72,12 @@ PROMPT_SEEDS = [
 - 反差/冲突/悬念：《都重生了才告诉我全家是反派》《系统赋我长生，我熬死了所有人》《这游戏也太真实了》
 - 人物状态/情绪：《我不是戏神》《我在精神病院学斩神》《道诡异仙》
 
-【绝对禁止——出现以下任意一种直接判零分】
-1. 书名中直接出现「AI、人工智能、2010、重生、穿越、系统、算法、科技帝国、比特币、区块链、元宇宙」等题材/设定关键词（除非这个词已经被彻底口语化、吐槽化、情绪化成人物态度的一部分，例如《都重生了还带什么AI》勉强合格，但仍不优先推荐）
-2. 把题材关键词平铺堆砌成标题，例如《重生2010：我的AI笔记本》《带着AI去2010》《重生2010：科技帝国从比特币开始》《我的AI能预知未来》《重生之算法为王》——这些就是用户正在吐槽的「机器味/SEO味/老土」书名
-3. 用「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」这类万能模板句
-4. 烂俗模板词：废柴/逆袭/无双/天才/横扫/称霸/震惊/开局/签到
+【书名质量判断——不是禁词清单；旧式“出现即判零分”规则不再使用】
+1. 题材词可以出现，但不能把题材词、年份、金手指和升级结果机械堆在一起；只有当关键词本身是人物处境、时代符号或冲突钩子时才保留
+2. 重点淘汰《重生2010：我的AI笔记本》《我的AI能预知未来》《重生之算法为王》这类关键词堆砌、SEO感强、读者一眼看完就知道套路的标题
+   也要警惕《带着AI去2010》这类把工具、年份和行动模板硬拼在一起的标题
+3. 谨慎使用「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」等万能模板；只有形成明显人物态度或反差时才可保留
+4. 「废柴/逆袭/无双/天才/横扫/称霸/震惊/开局/签到」不是绝对禁词，但连续使用或与其他模板叠加时判为老套
 
 【反面案例——以下书名全部不合格，绝对不能生成类似风格的】
 - ❌《重生2010：科技帝国从比特币开始》← 关键词堆砌 + 年份 + 万能模板
@@ -89,19 +90,24 @@ PROMPT_SEEDS = [
 【硬性要求】
 1. 像真实榜单书名，有网感、有钩子，读起来像人取的
 2. 从「人物状态、情绪、时代符号、反差/悬念」切入，不要从「设定/金手指/年代」切入
-3. 如果创意里有 AI/2010/重生，书名里反而不要直接出现这些词；用「人在这处境下会怎么自嘲/紧张/贪婪/后悔」来取
+3. 如果创意里有 AI/2010/重生，至少给出两种策略：一组用人物处境/情绪/时代符号转译，一组允许保留最有辨识度的题材词但避免堆叠；最终按读者点击和记忆点排序
+   不要直接出现这些词的机械组合；是否保留单个词要看它是否真的构成故事钩子
 4. 字数 6-14 字为主，可用逗号、冒号制造节奏，但不得写成一句话简介
-5. 每个书名附一句「为什么能爆」（点明踩中哪条爆款范式，并说明没有出现被禁止的关键词）
+5. 每个书名附一句「为什么能爆」（点明人物钩子、冲突或情绪记忆点，并指出是否存在模板堆叠风险）
+
+平台/题材质量策略：$quality_profile_directive
 
 输出 JSON: {"title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》]}"""),
 
-    ("bootstrap.gen_synopsis", "3.1.0", "deepseek",
+    ("bootstrap.gen_synopsis", "3.2.0", "deepseek",
      """你是资深网文编辑和市场营销专家。请根据以下设定生成一句话简介和 3-5 个核心卖点。
 
 书名：$selected_title
 题材：$genre
 风格：$style
 核心创意：$idea
+
+平台/题材质量策略：$quality_profile_directive
 
 简介要求：
 1. 一句话能说清「谁 + 在什么世界 + 要做什么 + 为什么读者想看」
@@ -772,7 +778,7 @@ $instruction
      '生成 $platform 短视频脚本(≤$max_duration秒)。\n风格：$style\n内容：$body\n输出 JSON: {"hook_3s":"","scenes":[{"duration":5,"visual":"","audio":""}],"title":"","cta":""}'),
 
     # ═══ V2 四阶段 Bootstrap：规划阶段（7 节点，oh-story Phase 1-2 + harnessNovel 分层规划） ═══
-    ("bootstrap.plan_idea", "1.4.0", "deepseek",
+    ("bootstrap.plan_idea", "1.5.0", "deepseek",
      """你是资深网文策划（StoryArchitect）和长篇项目制片人。请先像专业创作顾问一样，把用户的原始需求整理成可供后续 AI 写作链路执行的"创作圣经"，再给出书名候选。
 
 灵感：$idea
@@ -781,12 +787,14 @@ $instruction
 用户目标总字数：$target_words（这是硬约束；创作圣经、分卷规划和后续交付物必须围绕这个数字，不能擅自改成另一个总字数）
 上一轮忠实度审计反馈（首轮为空；若非空，必须逐条修正）：$fidelity_feedback
 
+平台/题材质量策略：$quality_profile_directive
+
 要求：
 0. 原始需求是最高优先级事实源。先逐条提取 source_facts，必须忠实保留用户明确写出的年代、年龄、职业、设备、能力、人物关系、前三章事件和篇幅目标；不得用你更熟悉的套路替换。任何创作补强只能进入 design_additions，并且不能与 source_facts 冲突
 1. idea_expanded：把灵感展开为 150-300 字的完整创意——谁、在什么世界、遇到什么变故、要达成什么、代价是什么；不得改变 source_facts
 2. core_hook：一句话核心卖点，读者为什么非看不可（爽感/悬念/情感/新奇中至少占一）
 3. target_audience：目标读者画像（年龄段+阅读偏好，不要写"所有人"）
-4. title_candidates：生成 3-10 个书名候选（默认 5 个），像真人在榜单发的书名。书名必须从「人物状态、情绪、时代符号、反差/悬念」切入，禁止从「设定/金手指/年代」切入。书名中绝对禁止直接出现「AI、人工智能、2010、重生、穿越、系统、算法、科技帝国、比特币、区块链、元宇宙」等题材关键词（除非已被彻底口语化/吐槽化）；禁止《重生2010：我的AI笔记本》《我的AI能预知未来》《重生之算法为王》《带着AI去2010》这类关键词堆砌/SEO 式书名；禁止「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」万能模板；6-14 字为主。爆款范式参考：第一人称/口语吐槽（《我真没想重生啊》《都重生了谁谈恋爱啊》）、具体时代符号非裸年份（《1979黄金时代》《重生野性时代》）、反差悬念（《都重生了才告诉我全家是反派》）、人物状态情绪（《我不是戏神》）。如果有 suggested_title，只把它作为一个候选参考，不得直接替用户确认
+4. title_candidates：生成 3-10 个书名候选（默认 5 个），像真人在榜单发的书名。以人物状态、情绪、时代符号、反差/悬念为主要切入；题材词可以使用，但不得与年份、金手指、升级结果机械堆叠。至少提供两种不同取向：口语/情绪型与概念/反差型。可参考《我真没想重生啊》《1979黄金时代》的记忆点，但不能照抄结构。把《重生2010：我的AI笔记本》视为 SEO 式书名反例，谨慎使用「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」模板，6-14 字为主或按平台策略调整。如果有 suggested_title，只把它作为一个候选参考，不得直接替用户确认
 5. creative_bible：800-1800 字，必须把用户需求补强为长篇可执行设定，结构必须包含：
    - 核心设定：主角身份、金手指/能力、时代背景、最大卖点
    - ⚠️ 主角名必须从创意中推导出独特的、有辨识度的名字。禁止使用以下高频默认名：陈默、林默、苏默、陆默、叶凡、萧炎、林风、张伟、李明。名字要能体现角色性格或背景（如程序员出身可带技术隐喻，小镇青年用接地气的名字），2-3字为主，避免过于中二或过于普通。
@@ -978,7 +986,7 @@ $plan_output
 
 输出 JSON: {"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}"""),
 
-    ("bootstrap.blueprint_chapter_outline", "1.0.0", "deepseek",
+    ("bootstrap.blueprint_chapter_outline", "1.1.0", "deepseek",
      """你是细纲策划师。请为《$selected_title》第一卷生成前 10 章逐章细纲。
 
 用户原始需求：$idea
@@ -990,8 +998,10 @@ $plan_output
 爽点系统：$pleasure_points
 创作圣经：$creative_bible
 
+平台/题材质量策略：$quality_profile_directive
+
 要求（AI_NovelGenerator 章法）：
-1. 每章含：volume、seq（章节序号）、title（章名）、outline（80-150 字梗概：目标→阻碍→行动→代价→转折）、beats（3-5 个节拍）、foreshadow_plant（本章埋的伏笔，可空）、foreshadow_reap（本章回收的伏笔，可空）
+1. 每章含：volume、seq（章节序号）、title（章名）、outline（80-150 字梗概：目标→阻碍→行动→代价→转折）、beats（3-5 个节拍）、foreshadow_plant（本章埋的伏笔，可空）、foreshadow_reap（本章回收的伏笔，可空）以及 payoff_contract（reader_promise/pressure/active_choice/payoff_type/visible_result/witness_reaction/cost/next_pressure/setup_refs）。爽点不等于每章打脸，也可以是揭示、资源、关系变化、逃生或规则利用，但必须有可见结果和下一压力
 2. 第 1-3 章必须按创作圣经里的黄金三章目标推进；如果用户要求前三章坦白/立规矩/完成关键事件，不得拖延
 3. 每 2-3 章安排一个小爽点、第 9-10 章安排第一个中型高潮
 4. 严格核对年代顺序：重生前事件必须发生在用户指定的未来年份，醒来后才进入过去年份；不得把两个年代混写
@@ -1002,7 +1012,7 @@ $plan_output
    - reader_expectation：读者读完本章应有的期待（如"想知道主角如何赚钱"）
    连续多章不得全部是同一 function_type（如连续 5 章都是"信息展示"会被判定节奏问题）。
 
-输出 JSON: {"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1","节拍2","节拍3"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"主角发现文字成真","reader_expectation":"想知道能力代价是什么"}]}"""),
+输出 JSON: {"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1","节拍2","节拍3"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"主角发现文字成真","reader_expectation":"想知道能力代价是什么","payoff_contract":{"reader_promise":"读者要等什么","pressure":"当前压力","active_choice":"主角选择","payoff_type":"reveal","visible_result":"可见结果","witness_reaction":"他人反应","cost":"代价","next_pressure":"新压力","setup_refs":[]}}]}"""),
 
     ("bootstrap.blueprint_scene_beat", "1.0.0", "deepseek",
      """你是场景节拍设计师。请为《$selected_title》第一章生成场景节拍表。
@@ -1068,7 +1078,7 @@ $plan_output
 输出 JSON: {"story_arcs":[{"name":"第一次创业","goal":"主角从零建立公司","start_state":"失业负债","end_state":"公司走上正轨","participants":["主角","合伙人"],"core_conflict":"资金与对手打压","key_events":["凑启动资金","首个订单"],"payoff_points":["首笔大单落地"],"foreshadowing_refs":[],"outcome_impact":"奠定后续资本局","status":"planning","chapter_range":[5,40]}]}"""),
 
     # ═══ V2 写作阶段（5 节点，oh-story Phase 4-5 写作铁律 + show-me-the-story 事实链） ═══
-    ("bootstrap.write_chapter_draft", "1.3.0", "deepseek",
+    ("bootstrap.write_chapter_draft", "1.4.0", "deepseek",
      """你是资深网文作家。请写《$selected_title》第 $_chapter_seq 章正文。
 
 原始创作需求/用户灵感：$idea
@@ -1081,6 +1091,8 @@ $plan_output
 【V3 Chapter Function 约束】细纲 JSON 中含 function_type / chapter_goal / reader_expectation 三项本章功能约束。生成时本章所有事件必须服务于 chapter_goal（本章目标），并在章末满足 reader_expectation（读者期待）；禁止"有事件无作用"的水字——若某段不推进 function_type 对应的功能，必须删去或改写。
 前文上下文：$_context_window
 V3 创作上下文（人物状态/故事弧/伏笔/知识库/风格卡/场景分镜）：$_assembled_context
+网文质量策略：$quality_profile_directive
+本章爽点契约：$payoff_contract
 上次长度门禁反馈：$length_retry_feedback
 
 创作目标：

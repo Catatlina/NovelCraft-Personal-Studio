@@ -29,7 +29,17 @@ from ...services.ai_runtime import (
     record_async_execution,
 )
 from ...services.unified_gateway import UnifiedAIGateway
-from ...services.text_quality import duplicate_paragraph_stats, normalize_and_validate_rewrite
+from ...services.text_quality import (
+    deduplicate_full_paragraphs,
+    duplicate_paragraph_stats,
+    normalize_and_validate_rewrite,
+)
+from ...services.chapter_payoff import build_payoff_contract, validate_payoff_contract
+from ...services.quality_profiles import (
+    compile_quality_directive,
+    quality_profile_metadata,
+    select_quality_profile,
+)
 from ..quality.deai_metrics import analyze_deai_patterns
 
 logger = logging.getLogger(__name__)
@@ -399,6 +409,7 @@ class SceneDirector:
             "conflict": plot_brief.get("tension_target"),
             "hook": plot_brief.get("hook"),
             "reader_promise": plot_brief.get("reader_promise"),
+            "payoff_contract": plot_brief.get("payoff_contract") or {},
             "emotional_target": plot_brief.get("emotional_target"),
             "opening_anchor": plot_brief.get("opening_anchor"),
             "risks": plot_brief.get("risks") or [],
@@ -416,6 +427,7 @@ class SceneDirector:
         outline: str | None = None,
         target_word_count: int = 3000,
         plot_brief: dict[str, Any] | None = None,
+        quality_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Produce a beat sheet. Returns dict including `_usage` for accounting.
 
@@ -438,12 +450,21 @@ class SceneDirector:
                     + f"\n节奏建议：{plot_brief.get('pacing_advice') or '未指定'}\n"
                 )
 
+        quality_directive = compile_quality_directive(
+            quality_profile,
+            chapter_number=chapter_number,
+            chapter_function=plot_brief or {},
+            payoff_contract=(plot_brief or {}).get("payoff_contract") if plot_brief else None,
+            active_rules=(context.get("context_layers") or {}).get("active_rules") or [],
+        )
+
         prompt = (
             f"你是小说的场景导演。请为第 {chapter_number} 章设计场景结构。\n\n"
             f"{context.get('rendered_context', '')}\n\n"
             f"本章大纲/要求：{outline or '（无，请依据故事目标自行推进）'}\n"
             f"{brief_block}\n"
             f"目标字数：{target_word_count} 字。\n\n"
+            f"【网文质量策略】\n{quality_directive}\n\n"
             "请只输出 JSON，格式：\n"
             "{\n"
             '  "chapter_title": "本章标题",\n'
@@ -457,6 +478,10 @@ class SceneDirector:
             '  "reader_promise": "读者在本章应获得的情绪/信息承诺",\n'
             '  "emotional_target": "开场情绪 -> 中段转折 -> 章末情绪",\n'
             '  "opening_anchor": "与上一章尾部衔接的具体动作/地点/未决问题",\n'
+            '  "payoff_contract": {"reader_promise":"读者本章要等什么","pressure":"当前压力",'
+            '"active_choice":"主角主动选择","payoff_type":"兑现类型",'
+            '"visible_result":"正文中必须出现的可见结果","witness_reaction":"他人反应",'
+            '"cost":"代价或余波","next_pressure":"章末新增压力","setup_refs":[]},\n'
             '  "confidence": 0.85\n'
             "}\n"
             "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数。"
@@ -523,6 +548,7 @@ class DeAIPipeline:
         "repeated_paragraph_opening",
         "ai_phrase",
         "repeated_phrase",
+        "repeated_tic",
     }
 
     def __init__(self, gateway: "AIGateway | None" = None):
@@ -536,6 +562,9 @@ class DeAIPipeline:
         forbidden_changes: str = "",
         quality_retry_feedback: str = "",
         style_profile: str = "",
+        quality_profile: dict[str, Any] | None = None,
+        safe_deduplicate: bool = False,
+        active_rules: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Run rule pre-clean and semantic humanization.
 
@@ -544,7 +573,7 @@ class DeAIPipeline:
         silently returning the weaker heuristic result.
         """
         original = text
-        before_metrics = analyze_deai_patterns(text)
+        before_metrics = analyze_deai_patterns(text, profile=quality_profile)
         layers: list[dict[str, Any]] = []
 
         text, n = self._layer_cliches(text)
@@ -568,12 +597,27 @@ class DeAIPipeline:
         text, n = self._layer_trailing_moral(text)
         layers.append({"layer": "trailing_moral_removal", "changes": n})
 
+        # Provider retries occasionally append an exact second copy of the
+        # paragraph stream.  In the canonical generation path this repair is
+        # safe because it removes only exact full-paragraph duplicates and
+        # keeps the first occurrence; the evidence is retained for audit.
+        dedup_evidence: dict[str, Any] = {}
+        if safe_deduplicate:
+            text, dedup_evidence = deduplicate_full_paragraphs(text)
+            removed = int(dedup_evidence.get("removed_paragraphs") or 0)
+            layers.append({
+                "layer": "exact_duplicate_paragraph_repair",
+                "changes": removed,
+                "applied": bool(removed),
+                "evidence": dedup_evidence,
+            })
+
         # Do not send every chapter through a whole-chapter semantic rewrite.
         # A clean chapter should keep its original voice; the provider pass is
         # reserved for measured risks that deterministic rules cannot safely
         # repair.  This also makes a missing provider an explicit problem only
         # when semantic humanization is actually needed.
-        rule_metrics = analyze_deai_patterns(text)
+        rule_metrics = analyze_deai_patterns(text, profile=quality_profile)
         duplicate_flags = [
             flag
             for flag in rule_metrics.get("flags") or []
@@ -623,6 +667,7 @@ class DeAIPipeline:
                     "before": before_metrics,
                     "after": rule_metrics,
                     "risk_delta": before_metrics["risk_score"] - rule_metrics["risk_score"],
+                    "duplicate_repair": dedup_evidence,
                 },
                 "quality_gate": quality_gate,
                 "usage": {},
@@ -643,6 +688,7 @@ class DeAIPipeline:
             f"【禁止改动】\n{forbidden_changes or '情节、人物、时间线、设定与对白信息'}\n\n"
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
+            f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=None, active_rules=active_rules)}\n\n"
             f"【原文】\n{text}\n\n"
             "输出 JSON：{\"humanized_text\":\"完整正文\","
             "\"changes\":[\"改动说明\"],\"ai_patterns_removed\":[\"消除的痕迹\"]}"
@@ -666,7 +712,7 @@ class DeAIPipeline:
                 "V7 final_humanize provider output invalid; retaining rule-cleaned text (%s)",
                 type(exc).__name__,
             )
-            after_metrics = analyze_deai_patterns(pre_humanized_text)
+            after_metrics = analyze_deai_patterns(pre_humanized_text, profile=quality_profile)
             after_metrics.setdefault("flags", []).append({
                 "code": "rewrite_candidate_rejected",
                 "severity": "high",
@@ -693,6 +739,7 @@ class DeAIPipeline:
                     "before": before_metrics,
                     "after": after_metrics,
                     "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
+                    "duplicate_repair": dedup_evidence,
                 },
                 "quality_gate": {
                     "passed": False,
@@ -730,7 +777,7 @@ class DeAIPipeline:
             # exhausted this chapter becomes needs_review, never reviewed.
             logger.warning("V7 final_humanize candidate rejected: %s", message)
             text = pre_humanized_text
-            after_metrics = analyze_deai_patterns(text)
+            after_metrics = analyze_deai_patterns(text, profile=quality_profile)
             after_metrics.setdefault("flags", []).append({
                 "code": "rewrite_candidate_rejected",
                 "severity": "high",
@@ -757,6 +804,7 @@ class DeAIPipeline:
                     "before": before_metrics,
                     "after": after_metrics,
                     "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
+                    "duplicate_repair": dedup_evidence,
                 },
                 "quality_gate": {
                     "passed": False,
@@ -765,7 +813,7 @@ class DeAIPipeline:
                 },
                 "usage": ai.get("usage") or {},
             }
-        after_metrics = analyze_deai_patterns(text)
+        after_metrics = analyze_deai_patterns(text, profile=quality_profile)
         layers.append(
             {
                 "layer": "semantic_final_humanize",
@@ -791,6 +839,7 @@ class DeAIPipeline:
                 "before": before_metrics,
                 "after": after_metrics,
                 "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
+                "duplicate_repair": dedup_evidence,
             },
             "quality_gate": {"passed": True},
             "usage": ai.get("usage") or {},
@@ -1411,6 +1460,7 @@ class GenerationEngine:
         event_bus: EventBus,
         project_id: str | None = None,
         provider_config: dict[str, str] | None = None,
+        quality_profile: dict[str, Any] | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -1419,6 +1469,7 @@ class GenerationEngine:
         self.event_bus = event_bus
         self.project_id = project_id
         self.provider_config = provider_config or {}
+        self.quality_profile = quality_profile or select_quality_profile()
 
         self.ai_gateway = AIGateway(
             tracer,
@@ -1447,6 +1498,8 @@ class GenerationEngine:
         One continuation is allowed only when the first draft is materially
         short; every continuation is checked before it can be appended.
         """
+        if not hasattr(self, "quality_profile"):
+            self.quality_profile = select_quality_profile()
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
         minimum_chapter_chars = max(600, int(target_word_count * 0.72))
         maximum_chapter_chars = max(
@@ -1496,6 +1549,7 @@ class GenerationEngine:
                 outline=outline or prompt,
                 target_word_count=target_word_count,
                 plot_brief=plot_brief,
+                quality_profile=self.quality_profile,
             )
             add_usage(step, scene_plan.pop("_usage", {}))
             step.set_output(
@@ -1624,6 +1678,9 @@ class GenerationEngine:
                     },
                     ensure_ascii=False,
                 ),
+                quality_profile=self.quality_profile,
+                safe_deduplicate=True,
+                active_rules=context_layers.get("active_rules") or [],
             )
             add_usage(step, deai_result.get("usage") or {})
             step.set_output(
@@ -1668,6 +1725,32 @@ class GenerationEngine:
                     ),
                 }
             )
+        raw_payoff_contract = scene_plan.get("payoff_contract")
+        payoff_contract_required = plot_brief is not None
+        payoff_contract = (
+            build_payoff_contract(
+                raw_payoff_contract or {},
+                chapter_number=chapter_number,
+                profile=self.quality_profile,
+            )
+            if payoff_contract_required
+            else {}
+        )
+        payoff_validation = (
+            validate_payoff_contract(
+                payoff_contract,
+                profile=self.quality_profile,
+                required=True,
+            )
+            if payoff_contract_required
+            else {"passed": True, "required": False, "missing": [], "warnings": []}
+        )
+        if payoff_contract and not payoff_validation.get("passed"):
+            generation_failures.append({
+                "code": "payoff_contract_missing",
+                "severity": "high",
+                "message": "本章爽点契约缺少必要字段：" + "、".join(payoff_validation.get("missing") or []),
+            })
         generation_quality = {
             "schema_version": "generation-quality-v1",
             "passed": not generation_failures,
@@ -1676,6 +1759,8 @@ class GenerationEngine:
             "failures": generation_failures,
             "continuations": continuations,
             "continuation_limit": continuation_limit,
+            "payoff_validation": payoff_validation,
+            "quality_profile": quality_profile_metadata(self.quality_profile),
         }
 
         await self.event_bus.publish(
@@ -1711,6 +1796,9 @@ class GenerationEngine:
                 "style_card": context["context_layers"].get("style_card", {}),
             },
             "scene_plan": scene_plan,
+            "payoff_contract": payoff_contract,
+            "payoff_validation": payoff_validation,
+            "quality_profile": quality_profile_metadata(self.quality_profile),
             "deai": {
                 "layers_applied": deai_result["layers_applied"],
                 "total_changes": deai_result["total_changes"],
@@ -1732,6 +1820,13 @@ class GenerationEngine:
         target_word_count: int,
     ) -> str:
         beats = scene_plan.get("beats") or []
+        quality_directive = compile_quality_directive(
+            getattr(self, "quality_profile", None) or select_quality_profile(),
+            chapter_number=chapter_number,
+            chapter_function=scene_plan,
+            payoff_contract=scene_plan.get("payoff_contract") or None,
+            active_rules=(context.get("context_layers") or {}).get("active_rules") or [],
+        )
         beat_lines = "\n".join(
             f"{i + 1}. {b.get('name')}（约{b.get('target_words', 0)}字，情绪：{b.get('emotion','')}）："
             f"{b.get('content', '')}"
@@ -1748,6 +1843,8 @@ class GenerationEngine:
             f"情绪曲线：{scene_plan.get('emotional_target', '')}\n"
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
+            f"【网文质量策略】\n{quality_directive}\n\n"
+            f"【本章爽点契约】\n{json.dumps(scene_plan.get('payoff_contract') or {}, ensure_ascii=False)}\n\n"
             "【连续性硬门禁】上一章结尾、交接契约和本章第一场必须处于同一"
             "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"
             f"节拍安排：\n{beat_lines}\n\n"

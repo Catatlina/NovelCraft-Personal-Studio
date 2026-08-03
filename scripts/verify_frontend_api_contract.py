@@ -59,7 +59,14 @@ def main() -> int:
         if source.suffix not in {".ts", ".tsx"}:
             continue
         for match in FRONTEND_PATH.finditer(source.read_text(encoding="utf-8")):
-            path = normalize_frontend_path(match.group(1))
+            raw_path = match.group(1)
+            # Ignore a quoted prefix that is immediately concatenated with a
+            # dynamic id (for example "/api/v1/novels/" + novelId). It is not
+            # an endpoint by itself; the following literal suffix completes
+            # the route and is checked by the dynamic-path matcher below.
+            if raw_path.endswith("/"):
+                continue
+            path = normalize_frontend_path(raw_path)
             used_paths.setdefault(path, set()).add(str(source.relative_to(ROOT)))
 
     missing_frontend = {

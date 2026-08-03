@@ -27,6 +27,24 @@ _AI_PHRASES = (
     "故事才刚刚开始",
 )
 
+# These are observations, not forbidden words.  A character can legitimately
+# smile or take a breath; the signal is only raised when the same small action
+# is repeated across a chapter and starts replacing actual character reaction.
+_TIC_PHRASES = (
+    "笑了笑",
+    "点了点头",
+    "深吸一口气",
+    "眼中闪过",
+    "眼里闪过",
+    "不由得",
+    "下意识地",
+    "本能地",
+    "心中一动",
+    "没有说话",
+    "沉默了片刻",
+    "嘴角微微上扬",
+)
+
 
 def _sentence_lengths(text: str) -> list[int]:
     return [len(re.sub(r"\s+", "", item)) for item in _SENTENCE_RE.findall(text) if item.strip()]
@@ -78,7 +96,31 @@ def _repeated_paragraph_opening(text: str) -> dict[str, Any]:
     }
 
 
-def analyze_deai_patterns(text: str) -> dict[str, Any]:
+def _tic_metrics(text: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    counts = {phrase: text.count(phrase) for phrase in _TIC_PHRASES if text.count(phrase)}
+    total = sum(counts.values())
+    size = max(1, len(re.sub(r"\s+", "", text)))
+    dominant = max(counts.items(), key=lambda item: item[1]) if counts else ("", 0)
+    # Thresholds scale gently with chapter size.  They are intentionally much
+    # looser than a ban: one or two legitimate tics must never be rewritten.
+    chapter_floor = max(4, int(size / 900))
+    dominant_floor = 4 if size >= 1800 else 3
+    repeated = total >= chapter_floor and dominant[1] >= dominant_floor
+    return {
+        "hits": total,
+        "density_per_1000": round(total / size * 1000, 3),
+        "breakdown": counts,
+        "dominant": dominant[0],
+        "dominant_count": dominant[1],
+        "repeated": repeated,
+    }
+
+
+def analyze_deai_patterns(
+    text: str,
+    *,
+    profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return explainable risk signals; higher risk means more review needed."""
     if not text or not text.strip():
         return {
@@ -94,6 +136,7 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
             "ai_phrase_hits": 0,
             "repeated_phrases": [],
             "repeated_paragraph_opening": {"opening": "", "count": 0, "ratio": 0.0},
+            "tic_metrics": {"hits": 0, "density_per_1000": 0.0, "breakdown": {}, "dominant": "", "dominant_count": 0, "repeated": False},
             "duplicate_paragraphs": duplicate_paragraph_stats(""),
         }
 
@@ -109,6 +152,7 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
     ai_phrase_hits = sum(text.count(phrase) for phrase in _AI_PHRASES)
     repeated = _repeated_phrases(text)
     repeated_opening = _repeated_paragraph_opening(text)
+    tic_metrics = _tic_metrics(text, profile)
     duplicate_paragraphs = duplicate_paragraph_stats(text)
     dash_density = dash_count / size * 1000
     ellipsis_density = ellipsis_count / size * 1000
@@ -132,6 +176,16 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         flags.append({"code": "ai_phrase", "severity": "medium", "message": f"命中 {ai_phrase_hits} 个高风险套话"})
     if repeated:
         flags.append({"code": "repeated_phrase", "severity": "low", "message": "存在跨句重复短语，需要确认是否为刻意回环"})
+    if tic_metrics["repeated"]:
+        flags.append({
+            "code": "repeated_tic",
+            "severity": "medium",
+            "message": (
+                f"动作/反应短语「{tic_metrics['dominant']}」重复 {tic_metrics['dominant_count']} 次，"
+                "需要用人物具体反应或场景后果替换部分模板动作"
+            ),
+            "evidence": tic_metrics["breakdown"],
+        })
     duplicate_ratio = float(duplicate_paragraphs.get("duplicate_ratio") or 0.0)
     adjacent_duplicates = int(duplicate_paragraphs.get("adjacent_duplicate_count") or 0)
     if duplicate_ratio >= 0.01:
@@ -156,6 +210,8 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         + (max(0, int((repeated_opening["ratio"] - 0.25) * 45)) if repeated_opening["ratio"] else 0)
         + len(repeated) * 4,
     )
+    if tic_metrics["repeated"]:
+        risk_score = min(100, risk_score + min(18, tic_metrics["dominant_count"] * 2))
     if duplicate_ratio >= 0.01:
         risk_score = min(100, max(risk_score, 70 if duplicate_ratio < 0.08 else 95))
     return {
@@ -172,5 +228,6 @@ def analyze_deai_patterns(text: str) -> dict[str, Any]:
         "ai_phrase_hits": ai_phrase_hits,
         "repeated_phrases": repeated,
         "repeated_paragraph_opening": repeated_opening,
+        "tic_metrics": tic_metrics,
         "duplicate_paragraphs": duplicate_paragraphs,
     }

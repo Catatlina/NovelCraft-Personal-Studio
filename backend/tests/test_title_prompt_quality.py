@@ -21,12 +21,12 @@ def _body(name, version):
 
 # (name, version, 必须出现的范式标记, 不得出现的退化标记)
 PROMPT_CONTRACTS = [
-    ("bootstrap.gen_titles", "3.3.0",
+    ("bootstrap.gen_titles", "3.4.0",
      ["爆款书名范式", "我真没想重生啊", "1979黄金时代", "判零分",
       "重生2010：我的AI笔记本", "我的AI能预知未来", "重生之算法为王",
       "带着AI去2010", "不要直接出现这些词", "人物状态、情绪"],
      ["4-8 个字", "商业感和时代感"]),
-    ("bootstrap.plan_idea", "1.4.0",
+    ("bootstrap.plan_idea", "1.5.0",
      ["我真没想重生啊", "1979黄金时代", "SEO 式书名",
       "重生2010：我的AI笔记本", "人物状态、情绪"],
      []),
@@ -37,7 +37,7 @@ PROMPT_CONTRACTS = [
     ("shortstory.gen_titles", "3.1.0",
      ["像真人在榜单", "平铺堆砌", "烂俗模板词", "4-12 字"],
      []),
-    ("bootstrap.gen_synopsis", "3.1.0",
+    ("bootstrap.gen_synopsis", "3.2.0",
      ["我不是戏神", "反差/悬念", "空泛总结"],
      ["制造期待感和好奇心"]),
     ("editor.deai", "3.2.0",
@@ -67,7 +67,7 @@ def test_prompt_keeps_bestseller_paradigm(name, version, required, forbidden):
 def test_title_prompt_renders_with_variables():
     from app.prompt_registry import render_prompt
 
-    body = _body("bootstrap.gen_titles", "3.3.0")
+    body = _body("bootstrap.gen_titles", "3.4.0")
     out = render_prompt(body, {"genre": "都市", "style": "重生爽文", "idea": "重生2010创业"})
     assert "题材：都市" in out
     assert "风格：重生爽文" in out
