@@ -20,6 +20,49 @@ PAYOFF_TYPES = {
     "family_survival", "reversal", "other",
 }
 
+# Providers and outline prompts frequently return reader-facing Chinese labels
+# instead of the canonical enum values above.  Treating every unfamiliar label
+# as ``other`` makes a valid early-chapter payoff fail the hard contract (for
+# example, ``身份反转`` was being downgraded to ``other``).  Keep the canonical
+# enum as the storage contract, but normalize common genre/platform wording at
+# the boundary.  This is an alias map, not a banned-word list: novel prose and
+# punctuation remain unrestricted.
+PAYOFF_TYPE_ALIASES = {
+    "身份反转": "status_reversal",
+    "地位反转": "status_reversal",
+    "逆袭": "status_reversal",
+    "打脸": "status_reversal",
+    "反转": "reversal",
+    "财富增长": "money_or_resource",
+    "金钱资源": "money_or_resource",
+    "资源获取": "resource_gain",
+    "资源获得": "resource_gain",
+    "信息优势": "information_advantage",
+    "信息揭示": "reveal",
+    "真相揭示": "reveal",
+    "揭示": "reveal",
+    "关系变化": "relationship_shift",
+    "关系转变": "relationship_shift",
+    "事业进展": "career_progress",
+    "职业进展": "career_progress",
+    "行业突破": "industry_breakthrough",
+    "突破": "breakthrough",
+    "境界突破": "breakthrough",
+    "战斗优势": "combat_advantage",
+    "战力优势": "combat_advantage",
+    "生存": "survival",
+    "逃生": "survival",
+    "隐藏实力": "hidden_strength",
+    "规则利用": "rule_exploit",
+    "规则漏洞": "rule_exploit",
+    "系统奖励": "system_reward",
+    "能力发现": "ability_discovery",
+    "牺牲": "sacrifice",
+    "势力变化": "faction_shift",
+    "家人存活": "family_survival",
+    "其他": "other",
+}
+
 
 def _text(value: Any, limit: int = 500) -> str:
     return str(value or "").strip()[:limit]
@@ -33,11 +76,20 @@ def _first(data: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _normalize_payoff_type(value: Any) -> str:
+    raw = _text(value)
+    if not raw:
+        return ""
+    if raw in PAYOFF_TYPES:
+        return raw
+    return PAYOFF_TYPE_ALIASES.get(raw, "other")
+
+
 def normalize_payoff_contract(value: Any, *, chapter_number: int | None = None) -> dict[str, Any]:
     """Normalize provider/outline aliases into one stable contract."""
     data = value if isinstance(value, dict) else {}
     raw_type = _first(data, "payoff_type", "type", "kind")
-    payoff_type = raw_type if raw_type in PAYOFF_TYPES else ("other" if raw_type else "")
+    payoff_type = _normalize_payoff_type(raw_type)
     return {
         "schema_version": str(data.get("schema_version") or PAYOFF_SCHEMA_VERSION),
         "chapter_number": int(data.get("chapter_number") or chapter_number or 0),

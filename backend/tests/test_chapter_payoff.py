@@ -1,6 +1,7 @@
 from app.services.chapter_payoff import (
     build_payoff_contract,
     evaluate_payoff_schedule,
+    normalize_payoff_contract,
     validate_payoff_contract,
     validate_payoff_evidence,
 )
@@ -53,6 +54,17 @@ def test_payoff_evidence_must_be_locatable_in_actual_text():
 
     assert good["passed"] is True
     assert bad["passed"] is False
+
+
+def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
+    contract = normalize_payoff_contract({"chapter_number": 1, "payoff_type": "身份反转"})
+    assert contract["payoff_type"] == "status_reversal"
+
+    contract = normalize_payoff_contract({"chapter_number": 1, "type": "突破"})
+    assert contract["payoff_type"] == "breakthrough"
+
+    contract = normalize_payoff_contract({"chapter_number": 1, "kind": "资源获取"})
+    assert contract["payoff_type"] == "resource_gain"
 
 
 def test_low_payoff_schedule_is_a_soft_reader_gate_not_a_word_count_gate():
