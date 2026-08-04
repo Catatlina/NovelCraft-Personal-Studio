@@ -421,9 +421,10 @@ def test_batch_confidence_observation_reaches_prose_gate_without_waiving_blocker
     assert result["allowed"] is True
     assert result["policy_override"] == "batch_quality_observation"
     assert result["confidence_floor"] == BATCH_AUTOGENERATION_CONFIDENCE_FLOOR
+    assert result["confidence_warning"]
 
 
-def test_batch_confidence_below_floor_still_waits_for_review():
+def test_batch_confidence_below_valid_floor_still_waits_for_review():
     import asyncio
 
     from app.v7.director.story_director import StoryDirector
@@ -434,7 +435,7 @@ def test_batch_confidence_below_floor_still_waits_for_review():
                 "allowed": False,
                 "level": "auto",
                 "threshold": 0.70,
-                "blocked_reason": "confidence 0.50 below threshold 0.70",
+                "blocked_reason": "confidence 0.04 below threshold 0.70",
             }
 
     class Brain:
@@ -449,7 +450,7 @@ def test_batch_confidence_below_floor_still_waits_for_review():
         director._decide(
             7,
             {
-                "confidence": 0.50,
+                "confidence": 0.04,
                 "plot_success": True,
                 "context_ready": False,
                 "blockers": [],

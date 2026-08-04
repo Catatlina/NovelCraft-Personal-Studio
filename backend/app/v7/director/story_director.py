@@ -57,13 +57,15 @@ AGENT_LOOP_STEPS: tuple[str, ...] = (
 )
 
 # A long-run is a controlled quality-observation mode. It must not bypass
-# structural blockers or the post-generation prose gate, but a plot engine
-# confidence score in the 0.55--0.70 band is common when a novel is still
-# bootstrapping its state. Blocking every such slot before any prose exists
-# makes a 20-chapter diagnostic measure the permission model instead of the
-# writing quality. The floor is deliberately explicit and only applies when
-# the caller supplied a persisted batch id.
-BATCH_AUTOGENERATION_CONFIDENCE_FLOOR = 0.55
+# structural blockers or the post-generation prose gate. Confidence is a
+# planning signal, not a second prose-quality gate: when the plot assessment
+# succeeds and reports no blocker, a low-but-valid score must be retained as a
+# warning and allowed to reach the generation contract. Otherwise a 20-chapter
+# run can stop before producing any prose simply because the planner is unsure
+# about a warming story state. The floor is the minimum valid confidence value
+# emitted by PlotEngine, and only applies when the caller supplied a persisted
+# batch id. Explicit approve/forbidden permissions still block below.
+BATCH_AUTOGENERATION_CONFIDENCE_FLOOR = 0.05
 
 
 def _format_quality_failure(item: dict[str, Any]) -> str:
@@ -650,6 +652,12 @@ class StoryDirector:
                 "blocked_reason": None,
                 "policy_override": "batch_quality_observation",
                 "confidence_floor": BATCH_AUTOGENERATION_CONFIDENCE_FLOOR,
+                "confidence_warning": (
+                    f"planning confidence {assessment.get('confidence'):.2f} is below "
+                    f"the normal threshold {gate['threshold']:.2f}; prose quality gates remain required"
+                    if float(assessment.get("confidence") or 0.0) < float(gate["threshold"])
+                    else None
+                ),
             }
 
         # `decision` is a short verb column (varchar 50) — the human-readable
@@ -689,6 +697,11 @@ class StoryDirector:
                             "batch quality-observation mode is recorded; confidence "
                             f"floor is {BATCH_AUTOGENERATION_CONFIDENCE_FLOOR:.2f} and "
                             "post-generation review remains strict"
+                            + (
+                                f"; warning: {gate['confidence_warning']}"
+                                if gate.get("confidence_warning")
+                                else ""
+                            )
                         )
                     )
                 )
@@ -709,6 +722,7 @@ class StoryDirector:
                 "gaps": assessment["gaps"],
                 "policy_override": gate.get("policy_override"),
                 "confidence_floor": gate.get("confidence_floor"),
+                "confidence_warning": gate.get("confidence_warning"),
             },
         )
         return {**gate, "decision_id": decision["id"]}
