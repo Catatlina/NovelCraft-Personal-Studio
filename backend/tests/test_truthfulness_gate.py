@@ -66,3 +66,21 @@ def generate_article(project_id, topic):
     )
 
     assert module.analyze_file(good) == []
+
+
+def test_truthfulness_gate_accepts_allowlisted_deterministic_quality_helpers():
+    module = _gate_module()
+
+    for relative_path, function_name in (
+        ("backend/app/services/content_policy.py", "analyze_content_policy"),
+        ("backend/app/services/pov_quality.py", "analyze_third_person_narrative"),
+        ("backend/app/v7/integration/v6_bridge.py", "persist_review_hold_v7_draft"),
+    ):
+        path = ROOT / relative_path
+        findings = module.analyze_file(path)
+        assert not [
+            finding
+            for finding in findings
+            if finding.code == "ai-gateway-required"
+            and finding.message.startswith(f"{function_name} looks like")
+        ]

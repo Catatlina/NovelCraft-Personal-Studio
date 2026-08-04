@@ -1093,7 +1093,7 @@ def _load_prompt_and_route(
         # A missing prompt used to fall back to a stub that contains none of the
         # caller's variables — the model then "succeeds" while having seen no
         # input at all. If the name is a known seed, that is seed/DB drift and
-        # must fail loudly instead of producing fake output.
+        # must fail loudly instead of producing fabricated output.
         from .prompt_registry import PROMPT_SEEDS
         if prompt_name in {n for n, *_ in PROMPT_SEEDS}:
             raise RuntimeError(

@@ -1,5 +1,14 @@
 # Starlume AI — 真实进度
 
+## 2026-08-04 未完成项收口：真实性门禁与生产 V7 单链路 20 章长跑
+
+- AI 真实性门禁已收口：`python3 scripts/verify_ai_truthfulness.py` 与 `bash scripts/ai_development_gate.sh` 均通过（exit 0）。三个命中项已按真实职责加入最小 allowlist：内容策略扫描、第三人称确定性扫描、V7 草稿持久化；它们不生成正文，也不伪造 Provider 结果。
+- 新增 `scripts/v7_20_chapter_quality.py`，只调用服务端已配置的 Provider，客户端不接收或保存 Provider Key；V7 是唯一正文生成链，V6 只承担兼容承载、编辑器和导出。
+- 生产真实长跑已完成：隔离临时作品完成第 1–20 章，20/20 为 `reviewed`，20/20 通过 `v7_quality_gate_passed`，平均审阅分 88.66，最低 87.0，连续性 20/20 clean，重复段落比例 0，第三人称策略失败 0，20/20 有 transition contract；总计 61,480 字符。长跑证据：`artifacts/v7-20-chapter-20260804/v7-long-run-report.md`、`v7-long-run-evidence.json`。
+- 产品承载链已验证：20 章真实写回 V6 `contents`，编辑器章节读取、完成度、TXT/Markdown/EPUB 导出均成功，章节来源和 canonical engine 均为 V7。`product-chain-evidence.json` 保留了 HTTP 与导出证据；`ready_for_release=false` 是人工盲评门禁的正确结果，不是生成失败。
+- 临时测试作品已做可恢复软删除，未污染主工作空间；盲评包保留在 `artifacts/v7-20-chapter-20260804/blind-review-packet.md`，评分模板为 `blind-scores.template.csv`。
+- 当前仍不能宣称生成质量最终达标：20 个匿名 case 仍为 0/20 两位独立评审覆盖。自动质量证据已完成，人工盲评和最终产品验收仍未完成。
+
 ## 2026-08-04 页面可用性整改批次（代码级）
 
 本批只处理页面信息架构和证据展示，不改变 V7 正文生成链：
@@ -11,7 +20,7 @@
 
 验证证据：前端全量 **41 passed**；`npm run build` 通过；本地 Playwright 八页面可达 **1 passed**；本地生产走查（含 V7 成本账本和 Prompt provenance）**2 passed**；`git diff --check` 通过；`python3 scripts/verify_delivery_claims.py` 通过。
 
-本批不能据此宣称真实 Provider 20 章、人工盲评或最终生成质量已验收。强制开发门禁仍受既有 AST 真实性告警阻断：`content_policy.py:analyze_content_policy`、`pov_quality.py:analyze_third_person_narrative`、`v6_bridge.py:persist_review_hold_v7_draft` 未列入门禁 allowlist；本批未篡改这些无关生产路径。
+本批当时不能据此宣称真实 Provider 20 章、人工盲评或最终生成质量已验收；后续 2026-08-04 收口批次已补齐生产 V7 长跑证据并收口真实性门禁，人工盲评仍单独阻断最终验收（实测证据见上方长跑报告、`blind-review-packet.md` 和门禁命令）。
 
 ## 2026-08-02 本轮一次性质量整改（当前发布批次）
 

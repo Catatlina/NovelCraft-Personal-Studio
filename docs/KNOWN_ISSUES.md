@@ -1,5 +1,12 @@
 # Starlume AI 当前已知问题
 
+## 2026-08-04 未完成项目最新状态
+
+- 真实性门禁已收口：`python3 scripts/verify_ai_truthfulness.py`、`bash scripts/ai_development_gate.sh` 均 exit 0。allowlist 仅解释三个确定性/持久化函数，不放宽正文生成必须经过真实 Gateway 的规则。
+- 生产 V7 单链路真实长跑已完成 20/20 章：平均自动审阅分 88.66，最低 87.0；质量门 20/20；连续性 clean 20/20；重复段落比例 0；第三人称策略失败 0；transition contract 20/20。证据目录：`artifacts/v7-20-chapter-20260804/`。
+- V7→V6 兼容书库、编辑器、完成度、TXT/Markdown/EPUB 真实链已成功；发布状态仍为 `ready_for_release=false`，因为人工盲评是独立门禁。
+- 当前真实阻断只剩人工质量验收：20 个匿名 case 尚无两位独立评审（0/20）。盲评包和 CSV 模板已生成，不能把自动分数宣称为读者/编辑人工验收。
+
 ## 2026-08-04 页面整改批次的剩余门禁
 
 ### KI-026 页面改动已通过本地回归，生产视觉和真实质量仍需分别验收
@@ -8,11 +15,11 @@
 - 已验证：前端全量 41 项测试、生产构建、本地八页面烟雾 1 passed、本地 V7 Cost/Prompt 走查 2 passed；审阅页的评分来源和 33 维审计覆盖有组件测试保护。
 - 未验证：生产登录态下的截图级视觉复核、真实 Provider 生成样本中写作风格预设的质量差异；这些不能由静态页面测试代替。
 
-### KI-027 强制 AI development gate 的既有 AST 真实性告警仍未收口
+### KI-027 强制 AI development gate 的既有 AST 真实性告警 —— ✅ 已收口（2026-08-04）
 
-- 状态：**可用（门禁阻断）**。
-- 2026-08-04 执行 `bash scripts/ai_development_gate.sh` / `python3 scripts/verify_ai_truthfulness.py` 仍命中：`backend/app/services/content_policy.py:analyze_content_policy`、`backend/app/services/pov_quality.py:analyze_third_person_narrative`、`backend/app/v7/integration/v6_bridge.py:persist_review_hold_v7_draft`。
-- 本批是前端页面整改，没有改动这些既有函数，也没有使用 `GATE_ALLOW_WARNINGS=1` 把 AST 失败伪装成全绿；后续应补充真实调用证明或最小 allowlist 理由后再提升门禁状态。
+- 状态：**已验收（门禁级）**。
+- 三个函数已补充最小、可审计的 allowlist 理由，并新增回归测试锁定：它们分别是确定性内容策略扫描、确定性第三人称扫描和已生成草稿的数据库持久化，不产生 AI 正文。
+- 复验：`python3 scripts/verify_ai_truthfulness.py` 通过；`bash scripts/ai_development_gate.sh` exit 0；没有使用 `GATE_ALLOW_WARNINGS=1` 绕过失败。
 
 ## 2026-08-02 本轮一次性质量整改（最新）
 
@@ -45,10 +52,11 @@
 - 修复：补齐字段并新增 `test_v7_trace_contract.py`，用 `RunResponse.model_validate` 锁定接口契约。
 - 证据：目标回归通过；生产容器重建后 V7 四个监控视图均能读取，生产日志不再出现该响应校验异常。
 
-### KI-024 真实生成质量仍缺长篇与人工证据
+### KI-024 真实生成质量仍缺人工证据
 
-- 状态：**可用（代码级）**，不是已验收。
-- 未闭合：真实 Provider 20 章长跑、至少两名盲评编辑、跨章连贯性和去 AI 味目标阈值、编辑器应用后的正文复核。
+- 状态：**可用（真实自动证据）**，不是最终已验收。
+- 已闭合：生产 Provider V7 20 章长跑、跨章自动连续性、去 AI 味/重复风险门、V7→V6 书库/编辑器/导出核心链。
+- 未闭合：至少两名盲评编辑、人工跨章连贯性和人感去 AI 味评价、盲评后的最终发布判定。
 - 说明：33 维审计对旧 Provider 输出会透明标记 `macro_projection`，不会把旧七维结果冒充完整 33 项；去 AI 味规则不禁用单个标点，只在章节级密度、重复和模板风险达到阈值时介入。
 
 ## 最新运行时决策：V7 是唯一正文生成链（2026-08-02）

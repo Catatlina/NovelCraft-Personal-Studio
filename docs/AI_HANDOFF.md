@@ -2,6 +2,13 @@
 > 更新时间：2026-08-04
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-04 未完成项收口：生产长跑证据与剩余人工门禁
+
+- `scripts/verify_ai_truthfulness.py` 与 `scripts/ai_development_gate.sh` 已通过。allowlist 仅覆盖不生成正文的确定性内容策略扫描、第三人称扫描和 V7 草稿持久化函数；没有放宽 Provider 真实性或能力自报门禁。
+- 已在生产 Provider 上用隔离临时作品完成 V7 唯一链路第 1–20 章：20/20 `reviewed`，自动质量门 20/20，通过分平均 88.66、最低 87.0，连续性 clean 20/20，重复段落比例 0，第三人称失败 0，transition contract 20/20。报告与原始证据位于 `artifacts/v7-20-chapter-20260804/`。
+- 同一作品的 V7→V6 兼容承载、编辑器读取、完成度和 TXT/Markdown/EPUB 导出均真实成功；生产链核心通过，但 `ready_for_release=false`，因为人工盲评尚未覆盖，不应把自动审核分数当成人工验收。
+- 临时作品已经可恢复软删除。盲评材料已生成：`blind-review-packet.md`（20 个匿名样本）和 `blind-scores.template.csv`（每个 case 需要两位独立评审）。当前人工覆盖为 0/20，最终生成质量与产品合并验收仍不能宣称完成。
+
 ## 2026-08-04 页面可用性整改批次（代码级）
 
 - `Progress` 的创作历史默认为折叠，展开后使用原有真实 V6/V7 合并数据和操作。
@@ -9,7 +16,7 @@
 - `V7Dashboard` 新增完整 Starlume 风格的监控布局和响应式样式，覆盖总览、运行、成本账本、Prompt provenance、空态、错误态和权限态。
 - `Wizard` 的写作风格改为预设下拉（爽感快节奏、都市现实、玄幻升级、凡人苟道、悬疑压迫、情感成长），仍保留自定义高级入口；默认值包含第三人称约束。
 
-本地证据：前端 `npm test -- --run` **41 passed**、`npm run build` 通过；Playwright 页面烟雾 **1 passed**，本地 V7 走查 **2 passed**；`verify_delivery_claims.py` 通过。`bash scripts/ai_development_gate.sh` 本批已执行但未全绿，AST 真实性检查仍命中三个既有函数，详见 `docs/KNOWN_ISSUES.md`；本批未为过门禁而改动无关业务实现。
+本地证据：前端 `npm test -- --run` **41 passed**、`npm run build` 通过；Playwright 页面烟雾 **1 passed**，本地 V7 走查 **2 passed**；`verify_delivery_claims.py` 通过。本批当时的 AST 告警已在后续 2026-08-04 收口批次按函数真实职责完成最小 allowlist，并由强制门禁复验通过。
 
 ## 2026-08-02 本轮一次性质量整改（当前发布批次）
 

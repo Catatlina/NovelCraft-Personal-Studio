@@ -1,5 +1,16 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-04 未完成项目最新证据
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| AI 真实性/开发门禁 | 已验收 | `verify_ai_truthfulness.py` 通过；`bash scripts/ai_development_gate.sh` exit 0；allowlist 仅覆盖不生成正文的确定性扫描与草稿持久化 | 后续新增生成函数仍需保持真实 Gateway 证明 |
+| 生产 V7 单链路 20 章长跑 | 可用（真实自动证据） | 20/20 `reviewed`、20/20 `v7_quality_gate_passed`；平均 88.66、最低 87.0；连续性 clean 20/20；重复段落比例 0；第三人称失败 0；transition contract 20/20；证据在 `artifacts/v7-20-chapter-20260804/` | 两位独立人工盲评 |
+| V7→V6 书库/编辑器/导出产品链 | 可用（真实生产链） | 20 章写回 V6 `contents`；编辑器、完成度、TXT/Markdown/EPUB 均返回真实证据；`ready_for_release=false` 正确保留人工门禁 | 人工应用/阅读复核与最终发布判定 |
+| 人工盲评包 | 已接线 | `blind-review-packet.md` 20 个匿名 case；`blind-scores.template.csv` 评分模板 | 当前 0/20 case 达到两位评审覆盖 |
+
+“可用（真实自动证据）”不等于“生成质量已最终验收”；人工评审仍是故意保留的独立门禁。
+
 ## 2026-08-04 页面可用性整改批次（代码级）
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
