@@ -55,6 +55,15 @@ AGENT_LOOP_STEPS: tuple[str, ...] = (
     "update",
 )
 
+# A long-run is a controlled quality-observation mode. It must not bypass
+# structural blockers or the post-generation prose gate, but a plot engine
+# confidence score in the 0.55--0.70 band is common when a novel is still
+# bootstrapping its state. Blocking every such slot before any prose exists
+# makes a 20-chapter diagnostic measure the permission model instead of the
+# writing quality. The floor is deliberately explicit and only applies when
+# the caller supplied a persisted batch id.
+BATCH_AUTOGENERATION_CONFIDENCE_FLOOR = 0.55
+
 
 def _format_quality_failure(item: dict[str, Any]) -> str:
     """Render a gate failure without assuming every value is numeric.
@@ -572,6 +581,15 @@ class StoryDirector:
             "chapter_plan", assessment["confidence"]
         )
 
+        confidence_block = (
+            not gate["allowed"]
+            and gate["level"] in {"auto", "notify"}
+            and str(gate.get("blocked_reason") or "").startswith("confidence ")
+        )
+        batch_observation_mode = bool(
+            getattr(self, "generation_metadata", {}).get("batch_id")
+        )
+
         # Do not strand a new novel before the first word is written merely
         # because a model conservatively scores an otherwise complete brief
         # below the generic confidence threshold.  This does not bypass an
@@ -579,9 +597,7 @@ class StoryDirector:
         # only lets a context-complete first chapter reach the independent
         # prose quality gate.
         if (
-            not gate["allowed"]
-            and gate["level"] in {"auto", "notify"}
-            and str(gate.get("blocked_reason") or "").startswith("confidence ")
+            confidence_block
             and chapter_number == 1
             and assessment.get("plot_success")
             and assessment.get("context_ready")
@@ -592,6 +608,29 @@ class StoryDirector:
                 "allowed": True,
                 "blocked_reason": None,
                 "policy_override": "first_chapter_context_complete",
+            }
+
+        # Ordered 20-chapter diagnostics need to observe the actual prose
+        # quality even while PlotEngine is still warming up its state. This
+        # exception is narrower than the first-chapter bootstrap rule: it is
+        # batch-only, requires a successful plot assessment and no structural
+        # blockers, and still sends the resulting prose through every V7
+        # generation/review/continuity gate. Explicit approve/forbidden
+        # permissions never enter this branch.
+        elif (
+            confidence_block
+            and batch_observation_mode
+            and assessment.get("plot_success")
+            and not (assessment.get("blockers") or [])
+            and float(assessment.get("confidence") or 0.0)
+            >= BATCH_AUTOGENERATION_CONFIDENCE_FLOOR
+        ):
+            gate = {
+                **gate,
+                "allowed": True,
+                "blocked_reason": None,
+                "policy_override": "batch_quality_observation",
+                "confidence_floor": BATCH_AUTOGENERATION_CONFIDENCE_FLOOR,
             }
 
         # `decision` is a short verb column (varchar 50) — the human-readable
@@ -623,8 +662,16 @@ class StoryDirector:
             decision_reason=(
                 (
                     f"Chapter {chapter_number} approved to reach the strict quality gate: "
-                    "first-chapter creative brief is complete; generic confidence "
-                    "override is recorded and does not waive post-generation review"
+                    + (
+                        "first-chapter creative brief is complete; generic confidence "
+                        "override is recorded and does not waive post-generation review"
+                        if gate.get("policy_override") == "first_chapter_context_complete"
+                        else (
+                            "batch quality-observation mode is recorded; confidence "
+                            f"floor is {BATCH_AUTOGENERATION_CONFIDENCE_FLOOR:.2f} and "
+                            "post-generation review remains strict"
+                        )
+                    )
                 )
                 if gate.get("policy_override")
                 else (
@@ -642,6 +689,7 @@ class StoryDirector:
                 "chapter_number": chapter_number,
                 "gaps": assessment["gaps"],
                 "policy_override": gate.get("policy_override"),
+                "confidence_floor": gate.get("confidence_floor"),
             },
         )
         return {**gate, "decision_id": decision["id"]}

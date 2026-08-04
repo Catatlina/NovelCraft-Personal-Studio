@@ -83,6 +83,24 @@ def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     contract = normalize_payoff_contract({"chapter_number": 1, "payoff_type": "身份反转"})
     assert contract["payoff_type"] == "status_reversal"
 
+
+def test_explicit_other_payoff_is_valid_when_reader_contract_is_complete():
+    profile = select_quality_profile(genre="都市")
+    contract = {
+        "chapter_number": 1,
+        "reader_promise": "主角必须在今晚做出选择",
+        "pressure": "错过窗口就会失去唯一机会",
+        "active_choice": "主角主动放弃安全方案，选择进入现场",
+        "payoff_type": "other",
+        "visible_result": "现场留下新的证据，原本的计划被迫改变",
+        "next_pressure": "对方已经知道他介入了这件事",
+    }
+
+    result = validate_payoff_contract(contract, profile=profile, required=True)
+
+    assert result["passed"] is True
+    assert result["missing"] == []
+
     contract = normalize_payoff_contract({
         "chapter_number": 2,
         "payoff_type": "other",

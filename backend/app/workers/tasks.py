@@ -2547,7 +2547,19 @@ def _run_canonical_v7_task(
             # the batch ``needs_review``; treating this truthful quality result
             # as a transport/task failure used to show a generic "batch
             # failed" and strand the generated text outside the library.
-            if result.get("v6_content_id") and result.get("status") in {
+            if result.get("status") == "pending_approval":
+                # No chapter row exists for a planning-only approval block.
+                # Do not mislabel it as a prose quality failure: the caller
+                # needs the actual permission reason to decide whether to
+                # approve/resume or fix the story brief.
+                _mark_batch_failed(
+                    batch_id,
+                    RuntimeError(
+                        "V7 planning approval required: "
+                        f"{result.get('blocked_reason') or 'chapter plan is awaiting approval'}"
+                    ),
+                )
+            elif result.get("v6_content_id") and result.get("status") in {
                 "completed",
                 "needs_review",
                 "needs_rewrite",
@@ -2564,7 +2576,7 @@ def _run_canonical_v7_task(
                 _mark_batch_failed(
                     batch_id,
                     RuntimeError(
-                        "canonical V7 quality gate did not accept the chapter"
+                        "canonical V7 returned no durable chapter result"
                     ),
                 )
         return result

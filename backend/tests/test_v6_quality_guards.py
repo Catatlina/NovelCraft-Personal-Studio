@@ -100,7 +100,33 @@ def test_deai_rewrite_keeps_source_when_provider_expands_outside_safe_range(monk
 
     assert result["final_text"] == source
     assert result["quality_gate"]["code"] == "changed_length_outside_safe_range"
+    assert result["quality_gate"]["rejection_code"] == "changed_length_outside_safe_range"
     assert result["quality_gate"]["passed"] is False
+    assert result["quality_gate"]["blocking_flags"] == ["uniform_cadence"]
+
+
+def test_deai_rewrite_accepts_clean_rule_fallback_after_oversized_candidate(monkeypatch):
+    source = "\n\n".join([
+        "风从窗缝里进来，吹动桌上的纸。",
+        "风从窗缝里进来，带着一点潮气。",
+        "风从窗缝里进来，灯影跟着晃了晃。",
+        "林岚收起钥匙，没有立刻说话。",
+        "陈姨站在门边，望着楼道尽头。",
+        "赵启明把文件压在掌下，等着回答。",
+        "雨水沿着玻璃往下淌，屋里没人出声。",
+    ])
+
+    def fake_complete(**_kwargs):
+        return {"text": source + "\n\n" + source}
+
+    monkeypatch.setattr("app.gateway.complete", fake_complete)
+
+    result = DeaiPipeline("project-1", "content-1", "第1章").run(source)
+
+    assert result["final_text"] == source
+    assert result["quality_gate"]["passed"] is True
+    assert result["quality_gate"]["mode"] == "deterministic_fallback"
+    assert result["quality_gate"]["code"] == "semantic_rewrite_unavailable"
 
 
 def test_fact_repair_requires_exact_anchor_and_never_invents_text():

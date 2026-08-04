@@ -104,6 +104,70 @@ def _heuristic_polish(text: str) -> str:
     return cleaned.strip() or text
 
 
+def _normalize_excess_dashes(text: str) -> tuple[str, int]:
+    """Preserve expressive dashes while reducing chapter-wide overuse."""
+    count = 0
+    text, n = re.subn(r"-{2,}", "——", text)
+    count += n
+    text, n = re.subn(r"\.{3,}", "……", text)
+    count += n
+    text, n = re.subn(r"。{2,}", "。", text)
+    count += n
+    text, n = re.subn(r"(——){2,}", "——", text)
+    count += n
+    compact_size = content_chars(text)
+    if compact_size < 600:
+        return text, count
+
+    dash_limit = max(3, int(compact_size / 1000 * 5))
+    seen = 0
+
+    def replace_excess(match: re.Match[str]) -> str:
+        nonlocal count, seen
+        seen += 1
+        if seen <= dash_limit:
+            return match.group(0)
+        count += 1
+        return "，"
+
+    return re.sub(r"——|—", replace_excess, text), count
+
+
+def _fallback_quality_gate(text: str, message: str) -> tuple[dict, dict]:
+    """Accept a rule-only fallback only when its measurable risks are clean."""
+    from app.v7.quality.deai_metrics import analyze_deai_patterns
+
+    metrics = analyze_deai_patterns(text)
+    hard_codes = {
+        "dash_density",
+        "uniform_cadence",
+        "repeated_paragraph_opening",
+        "duplicate_paragraph",
+        "ai_phrase",
+        "repeated_tic",
+    }
+    blocking = sorted({
+        str(flag.get("code"))
+        for flag in metrics.get("flags") or []
+        if isinstance(flag, dict)
+        and str(flag.get("code") or "") in hard_codes
+        and str(flag.get("severity") or "").lower() in {"medium", "high"}
+    })
+    risk_score = int(metrics.get("risk_score") or 0)
+    passed = not blocking and risk_score < 70
+    gate = {
+        "passed": passed,
+        "mode": "deterministic_fallback",
+        "code": "semantic_rewrite_unavailable" if passed else "rewrite_candidate_rejected",
+        "message": message,
+        "warning": message,
+        "risk_score": risk_score,
+    }
+    if blocking:
+        gate["blocking_flags"] = blocking
+    return gate, metrics
+
+
 class DeaiPipeline:
     """Seven-layer de-AI pipeline backed by the configured model gateway."""
 
@@ -225,7 +289,15 @@ class DeaiPipeline:
 
         # Layer 1: heuristic polish (词法级快速清洗)
         polished = _heuristic_polish(text)
+        polished, dash_changes = _normalize_excess_dashes(polished)
         layers.append({"name": "词汇去机器味", "note": "heuristic", "applied": True})
+        if dash_changes:
+            layers.append({
+                "name": "破折号密度修复",
+                "note": "只替换超出章节密度阈值的多余用法",
+                "applied": True,
+                "changes": dash_changes,
+            })
 
         # Layer 2: real AI rewrite with web-novel style prompt
         from app.gateway import OutputValidationError, complete
@@ -257,13 +329,28 @@ class DeaiPipeline:
             fallback_text = (
                 polished if heuristic_chars >= int(source_chars * 0.95) else text
             )
+            fallback_text, fallback_dash_changes = _normalize_excess_dashes(fallback_text)
+            if fallback_dash_changes:
+                layers.append({
+                    "name": "破折号密度修复",
+                    "note": "fallback",
+                    "applied": True,
+                    "changes": fallback_dash_changes,
+                })
+            safe_message = f"{message}；已保留规则清洗稿"
+            quality_gate, fallback_metrics = _fallback_quality_gate(
+                fallback_text,
+                safe_message,
+            )
+            if not quality_gate["passed"]:
+                quality_gate["code"] = code
             layers.append({
                 "name": "AI 网文风格重写",
                 "note": code,
                 "applied": False,
                 "source_chars": source_chars,
                 "candidate_chars": rewritten_chars,
-                "reason": message,
+                "reason": safe_message,
             })
             logger.warning("deai.rewrite candidate rejected: %s", message)
             return {
@@ -271,14 +358,14 @@ class DeaiPipeline:
                 "final_score": quick_deai_score(fallback_text),
                 "layers": layers,
                 "final_text": fallback_text,
+                "metrics": fallback_metrics,
                 "quality_gate": {
-                    "passed": False,
-                    "code": code,
-                    "message": message,
+                    **quality_gate,
                     "source_chars": source_chars,
                     "candidate_chars": rewritten_chars,
+                    "rejection_code": code,
                 },
-                "warnings": [message],
+                "warnings": [safe_message],
             }
 
         if rewritten_chars < int(source_chars * 0.8) or rewritten_chars > int(source_chars * 1.2):
@@ -293,8 +380,15 @@ class DeaiPipeline:
                 "deai.rewrite returned repeated full paragraphs: "
                 f"ratio={duplicate_stats.get('duplicate_ratio')}",
             )
-        polished = rewritten
+        polished, dash_changes = _normalize_excess_dashes(rewritten)
         layers.append({"name": "AI 网文风格重写", "note": "deai.rewrite", "applied": True})
+        if dash_changes:
+            layers.append({
+                "name": "破折号密度修复",
+                "note": "semantic candidate",
+                "applied": True,
+                "changes": dash_changes,
+            })
 
         # Layer 3: repair provider line-break loss without changing prose.
         # This is the same lossless contract used by the canonical V7

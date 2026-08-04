@@ -313,6 +313,90 @@ def test_first_chapter_structural_blocker_still_waits_for_review():
     assert "confidence" in result["blocked_reason"]
 
 
+def test_batch_confidence_observation_reaches_prose_gate_without_waiving_blockers():
+    import asyncio
+
+    from app.v7.director.story_director import (
+        BATCH_AUTOGENERATION_CONFIDENCE_FLOOR,
+        StoryDirector,
+    )
+
+    class Permission:
+        async def evaluate(self, _decision_type, _confidence):
+            return {
+                "allowed": False,
+                "level": "auto",
+                "threshold": 0.70,
+                "blocked_reason": "confidence 0.60 below threshold 0.70",
+            }
+
+    class Brain:
+        async def record_decision(self, *_args, **_kwargs):
+            return {"id": "decision-batch"}
+
+    director = object.__new__(StoryDirector)
+    director.generation_metadata = {"batch_id": "batch-1"}
+    director.permission_system = Permission()
+    director.brain = Brain()
+    result = asyncio.run(
+        director._decide(
+            7,
+            {
+                "confidence": 0.60,
+                "plot_success": True,
+                "context_ready": False,
+                "blockers": [],
+                "gaps": ["state is still warming up"],
+            },
+            run_id=uuid.uuid4(),
+        )
+    )
+
+    assert result["allowed"] is True
+    assert result["policy_override"] == "batch_quality_observation"
+    assert result["confidence_floor"] == BATCH_AUTOGENERATION_CONFIDENCE_FLOOR
+
+
+def test_batch_confidence_below_floor_still_waits_for_review():
+    import asyncio
+
+    from app.v7.director.story_director import StoryDirector
+
+    class Permission:
+        async def evaluate(self, _decision_type, _confidence):
+            return {
+                "allowed": False,
+                "level": "auto",
+                "threshold": 0.70,
+                "blocked_reason": "confidence 0.50 below threshold 0.70",
+            }
+
+    class Brain:
+        async def record_decision(self, *_args, **_kwargs):
+            return {"id": "decision-batch-low"}
+
+    director = object.__new__(StoryDirector)
+    director.generation_metadata = {"batch_id": "batch-1"}
+    director.permission_system = Permission()
+    director.brain = Brain()
+    result = asyncio.run(
+        director._decide(
+            7,
+            {
+                "confidence": 0.50,
+                "plot_success": True,
+                "context_ready": False,
+                "blockers": [],
+                "gaps": [],
+            },
+            run_id=uuid.uuid4(),
+        )
+    )
+
+    assert result["allowed"] is False
+    assert "confidence" in result["blocked_reason"]
+
+
 def test_quality_rework_feedback_formats_labeled_risk_failures():
     from app.v7.director.story_director import _format_quality_failure
 

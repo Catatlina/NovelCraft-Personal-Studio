@@ -567,9 +567,54 @@ class DeAIPipeline:
         "repeated_phrase",
         "repeated_tic",
     }
+    DETERMINISTIC_HARD_FLAGS = {
+        "dash_density",
+        "uniform_cadence",
+        "repeated_paragraph_opening",
+        "duplicate_paragraph",
+        "ai_phrase",
+        "repeated_tic",
+    }
 
     def __init__(self, gateway: "AIGateway | None" = None):
         self.gateway = gateway
+
+    @classmethod
+    def _deterministic_fallback_gate(
+        cls,
+        metrics: dict[str, Any],
+        message: str,
+    ) -> dict[str, Any]:
+        """Decide whether a safe rule-only result can stand in for semantic rewrite.
+
+        A malformed/oversized provider candidate is not itself proof that the
+        chapter is bad. The deterministic pass may already have removed the
+        actual high-risk patterns. Keep that distinction visible: a clean
+        fallback is accepted with a warning; a fallback that still contains a
+        hard signal remains blocked.
+        """
+        blocking_flags = [
+            str(flag.get("code"))
+            for flag in (metrics.get("flags") or [])
+            if isinstance(flag, dict)
+            and str(flag.get("code") or "") in cls.DETERMINISTIC_HARD_FLAGS
+            and str(flag.get("severity") or "").lower() in {"medium", "high"}
+        ]
+        risk_score = int(metrics.get("risk_score") or 0)
+        passed = not blocking_flags and risk_score < 70
+        gate = {
+            "passed": passed,
+            "mode": "deterministic_fallback",
+            "message": message,
+            "warning": message,
+            "risk_score": risk_score,
+        }
+        if passed:
+            gate["code"] = "semantic_rewrite_unavailable"
+        else:
+            gate["code"] = "rewrite_candidate_rejected"
+            gate["blocking_flags"] = sorted(set(blocking_flags))
+        return gate
 
     async def process(
         self,
@@ -707,6 +752,8 @@ class DeAIPipeline:
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
             f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=None, active_rules=active_rules)}\n\n"
             f"【原文】\n{text}\n\n"
+            "【长度约束】输出必须保留原文全部事件与细节，字符数尽量与原文一致，"
+            "不得扩写；与原文相比不得增加超过 10%，不得摘要或新增剧情。\n"
             "输出 JSON：{\"humanized_text\":\"完整正文\","
             "\"changes\":[\"改动说明\"],\"ai_patterns_removed\":[\"消除的痕迹\"]}"
         )
@@ -715,7 +762,7 @@ class DeAIPipeline:
             ai = await self.gateway.generate_json(
                 humanize_prompt,
                 system_prompt="你是严格的真人网文责任编辑，只输出合法 JSON。",
-                max_tokens=max(3500, int(chinese_word_count(text) * 1.4)),
+                max_tokens=max(2400, min(5200, int(chinese_word_count(text) * 1.18))),
                 temperature=0.45,
                 prompt_name="bootstrap.final_humanize",
                 prompt_version="1.0.5",
@@ -730,12 +777,17 @@ class DeAIPipeline:
                 type(exc).__name__,
             )
             after_metrics = analyze_deai_patterns(pre_humanized_text, profile=quality_profile)
-            after_metrics.setdefault("flags", []).append({
-                "code": "rewrite_candidate_rejected",
-                "severity": "high",
-                "message": "语义去 AI 改写返回了无效 JSON，保留规则清洗稿并进入质量重试",
-            })
-            after_metrics["risk_score"] = max(95, int(after_metrics.get("risk_score") or 0))
+            fallback_message = "语义去 AI 改写返回了无效 JSON，已保留规则清洗稿"
+            quality_gate = self._deterministic_fallback_gate(
+                after_metrics,
+                fallback_message,
+            )
+            if not quality_gate["passed"]:
+                after_metrics.setdefault("flags", []).append({
+                    "code": "rewrite_candidate_rejected",
+                    "severity": "high",
+                    "message": fallback_message,
+                })
             layers.append({
                 "layer": "semantic_final_humanize",
                 "changes": 0,
@@ -758,11 +810,7 @@ class DeAIPipeline:
                     "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
                     "duplicate_repair": dedup_evidence,
                 },
-                "quality_gate": {
-                    "passed": False,
-                    "code": "rewrite_candidate_rejected",
-                    "message": "语义去 AI 改写返回了无效 JSON，已保留规则清洗稿",
-                },
+                "quality_gate": quality_gate,
                 "usage": {},
             }
 
@@ -795,12 +843,16 @@ class DeAIPipeline:
             logger.warning("V7 final_humanize candidate rejected: %s", message)
             text = pre_humanized_text
             after_metrics = analyze_deai_patterns(text, profile=quality_profile)
-            after_metrics.setdefault("flags", []).append({
-                "code": "rewrite_candidate_rejected",
-                "severity": "high",
-                "message": message,
-            })
-            after_metrics["risk_score"] = max(95, int(after_metrics.get("risk_score") or 0))
+            quality_gate = self._deterministic_fallback_gate(
+                after_metrics,
+                message,
+            )
+            if not quality_gate["passed"]:
+                after_metrics.setdefault("flags", []).append({
+                    "code": "rewrite_candidate_rejected",
+                    "severity": "high",
+                    "message": message,
+                })
             layers.append({
                 "layer": "semantic_final_humanize",
                 "changes": 0,
@@ -823,13 +875,16 @@ class DeAIPipeline:
                     "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
                     "duplicate_repair": dedup_evidence,
                 },
-                "quality_gate": {
-                    "passed": False,
-                    "code": "rewrite_candidate_rejected",
-                    "message": message,
-                },
+                "quality_gate": quality_gate,
                 "usage": ai.get("usage") or {},
             }
+        text, punctuation_changes = self._layer_dashes(text)
+        if punctuation_changes:
+            layers.append({
+                "layer": "post_humanize_dash_density_repair",
+                "changes": punctuation_changes,
+                "applied": True,
+            })
         after_metrics = analyze_deai_patterns(text, profile=quality_profile)
         layers.append(
             {
@@ -879,6 +934,24 @@ class DeAIPipeline:
         count += n
         text, n = re.subn(r"(——){2,}", "——", text)
         count += n
+        # Keep punctuation expressive, but do not let a chapter become a
+        # repeated interruption template. Only chapters long enough to make a
+        # density signal meaningful are touched; the first natural dashes are
+        # preserved and only excess occurrences become commas.
+        compact_size = len(re.sub(r"\s+", "", text))
+        if compact_size >= 600:
+            dash_limit = max(3, int(compact_size / 1000 * 5))
+            seen = 0
+
+            def replace_excess(match: re.Match[str]) -> str:
+                nonlocal count, seen
+                seen += 1
+                if seen <= dash_limit:
+                    return match.group(0)
+                count += 1
+                return "，"
+
+            text = re.sub(r"——|—", replace_excess, text)
         return text, count
 
     PRONOUNS = "他她它我你"

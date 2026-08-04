@@ -159,7 +159,11 @@ def _infer_payoff_type(data: dict[str, Any]) -> str:
         return "breakthrough"
     if any(token in signal for token in ("资源获取", "资源获得", "获得资源", "拿到资源", "财富增长", "拿到钱")):
         return "resource_gain"
-    if any(token in signal for token in ("真相揭示", "信息揭示", "揭开真相", "发现线索", "信息优势")):
+    if any(token in signal for token in (
+        "真相揭示", "信息揭示", "揭开真相", "发现线索", "发现异常", "注意到",
+        "看见", "看到", "听见", "得知", "线索", "证据", "秘密", "异常",
+        "真相", "消息", "信息优势",
+    )):
         return "reveal"
     if any(token in signal for token in ("关系变化", "关系转变", "获得认可", "收服")):
         return "relationship_shift"
@@ -235,8 +239,21 @@ def validate_payoff_contract(
     missing = [key for key in hard_fields if not contract.get(key)]
     soft_missing = [key for key in ("cost", "witness_reaction") if not contract.get(key)]
     policy = (profile or {}).get("payoff_policy") or {}
+    raw_type = _first(
+        value if isinstance(value, dict) else {},
+        "payoff_type",
+        "type",
+        "kind",
+    )
+    explicit_other = raw_type.strip().lower() in {"other", "其他"}
     if required and int(contract.get("chapter_number") or 0) <= int(policy.get("early_chapters_need_payoff") or 0):
-        if contract.get("payoff_type") in {"", "other"}:
+        # ``other`` is a real enum value, not a word ban. Accept it when the
+        # provider explicitly selected it and the complete reader contract is
+        # present. Missing/unknown labels still fail, while the inference path
+        # above upgrades recognizable Chinese evidence.
+        if contract.get("payoff_type") == "" or (
+            contract.get("payoff_type") == "other" and not explicit_other
+        ):
             missing.append("payoff_type")
     issues = [f"爽点契约缺少 {key}" for key in missing]
     warnings = [f"爽点契约建议补充 {key}" for key in soft_missing]
@@ -312,7 +329,7 @@ def evaluate_payoff_schedule(
     issues: list[str] = []
     for item in chapters:
         contract = normalize_payoff_contract(item.get("payoff_contract") or item)
-        has_payoff = bool(contract.get("visible_result")) and contract.get("payoff_type") not in {"", "other"}
+        has_payoff = bool(contract.get("visible_result")) and contract.get("payoff_type") not in {""}
         streak = 0 if has_payoff else streak + 1
         if streak > max_streak:
             issues.append(f"第{contract.get('chapter_number') or '?'}章前后连续 {streak} 章缺少可见兑现")

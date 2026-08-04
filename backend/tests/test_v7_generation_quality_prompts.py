@@ -88,6 +88,32 @@ def test_deai_provider_invalid_json_becomes_auditable_quality_failure():
     )
 
 
+def test_deai_provider_invalid_json_uses_clean_fallback_when_risk_is_low():
+    text = "\n\n".join(
+        [
+            "风从窗缝里进来，吹动桌上的纸。",
+            "风从窗缝里进来，带着一点潮气。",
+            "风从窗缝里进来，灯影跟着晃了晃。",
+            "林岚收起钥匙，没有立刻说话。",
+            "陈姨站在门边，望着楼道尽头。",
+            "赵启明把文件压在掌下，等着回答。",
+            "雨水沿着玻璃往下淌，屋里没人出声。",
+        ]
+    )
+
+    class BrokenGateway:
+        async def generate_json(self, *_args, **_kwargs):
+            raise AIGatewayError("invalid provider JSON")
+
+    result = asyncio.run(DeAIPipeline(BrokenGateway()).process(text))
+
+    assert result["processed_text"]
+    assert result["semantic_humanize"] is False
+    assert result["quality_gate"]["passed"] is True
+    assert result["quality_gate"]["mode"] == "deterministic_fallback"
+    assert result["quality_gate"]["code"] == "semantic_rewrite_unavailable"
+
+
 def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
     paragraph_a = "沈夜把手按在门上，听见门内传来三下敲击，便停住了呼吸。" * 3
     paragraph_b = "林薇没有催他，只把短棍横在身前，目光落向院墙外的黑暗。" * 3
