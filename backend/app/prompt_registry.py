@@ -333,11 +333,13 @@ $selection
 
 【排版硬要求】必须用空行分隔每个段落（段落之间用换行隔开），每段 1-3 句话；严禁把全部内容写成一整段没有换行的文本。输出 JSON: {"text":"改写后的文本"}"""),
 
-    ("editor.continue", "3.0.0", "deepseek",
+    ("editor.continue", "3.1.0", "deepseek",
      """请根据上下文续写。严格遵循已有的人物性格、世界观设定和叙事风格。
 
 要求：$instruction
 前文：$selection
+
+""" + DEAI_IRON_RULES + """
 
 【排版硬要求】必须用空行分隔每个段落（段落之间用换行隔开），每段 1-3 句话；严禁把全部内容写成一整段没有换行的文本。输出 JSON: {"text":"续写文本"}"""),
 
@@ -362,6 +364,8 @@ $selection
 
 原文：
 $selection
+
+""" + DEAI_IRON_RULES + """
 
 输出格式：用空行分隔段落；每个段落 1-3 句话。输出 JSON: {"text":"去AI味后的文本"}"""),
 
@@ -644,16 +648,31 @@ $title_samples
 输出 JSON: {"name_map":{"中文名":"Localized Name"}}"""),
 
     # ── Editor: 扩写/缩写（v1 保留，仍被 /contents/{id}/ai 调用） ──
-    ("editor.expand", "3.0.0", "deepseek",
-     "请扩写以下文本，增加细节、场景和心理描写，保持人物与设定一致。\n$selection\n输出 JSON: {\"text\":\"扩写后的文本\"}"),
-    ("editor.condense", "3.0.0", "deepseek",
-     "请缩写以下文本，保留核心情节与关键信息，删除冗余。\n$selection\n输出 JSON: {\"text\":\"缩写后的文本\"}"),
+    ("editor.expand", "3.1.0", "deepseek",
+     "请扩写以下文本，增加细节、场景和心理描写，保持人物与设定一致。\n$selection\n"
+     + DEAI_IRON_RULES + "\n输出 JSON: {\"text\":\"扩写后的文本\"}"),
+    ("editor.condense", "3.1.0", "deepseek",
+     "请缩写以下文本，保留核心情节与关键信息，删除冗余。\n$selection\n"
+     + DEAI_IRON_RULES + "\n输出 JSON: {\"text\":\"缩写后的文本\"}"),
 
-    ("novel.polish", "3.0.0", "deepseek",
+    ("novel.continuation", "3.1.0", "deepseek",
+     """你是长篇网文续写编辑。根据前文继续写作，保持人物、世界观、时间线、物品状态和因果关系一致。
+
+前文：
+$text
+
+续写必须遵守下面的生成契约，并只输出续写正文，不要解释或总结。
+""" + DEAI_IRON_RULES + """
+
+输出 JSON: {"text":"续写后的正文"}"""),
+
+    ("novel.polish", "3.1.0", "deepseek",
      """你是资深网文润色编辑。请对以下文本进行润色：修正语病与错别字，优化句式节奏与画面感，增强代入感；保持原意、情节、人物、视角与篇幅基本不变，不得新增或删除情节。
 
 原文：
 $text
+
+""" + DEAI_IRON_RULES + """
 
 输出 JSON: {"text":"润色后的全文"}"""),
 

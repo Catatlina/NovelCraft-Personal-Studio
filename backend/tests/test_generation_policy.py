@@ -1,6 +1,7 @@
 from app.services.content_policy import analyze_content_policy, content_generation_contract
 from app.services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 from app.services.quality_profiles import compile_quality_directive, select_quality_profile
+from app.prompt_registry import PROMPT_SEEDS
 from app.v7.engines.plot_engine import PlotEngine
 from app.v7.integration.quality import evaluate_review
 
@@ -58,6 +59,16 @@ def test_pre_generation_plot_prompt_inherits_the_same_contract():
     assert "第三人称叙述硬约束" in prompt
     assert "完全架空的现代社会" in prompt
     assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in prompt
+
+
+def test_legacy_editor_and_continuation_seeds_keep_the_generation_contract():
+    seeds = {name: (version, template) for name, version, _model, template in PROMPT_SEEDS}
+
+    for name in ("editor.continue", "editor.deai", "novel.continuation", "novel.polish"):
+        version, template = seeds[name]
+        assert version >= "3.1.0"
+        assert "第三人称限知" in template
+        assert "TMD 只能作为脱敏替代" in template
 
 
 def test_urban_content_policy_rejects_known_real_entity_and_profanity_but_keeps_plant_grass():
