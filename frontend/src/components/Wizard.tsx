@@ -5,8 +5,8 @@ import { api, apiRaw, getApiKey } from "../lib/api";
 const GENRES = ["都市", "科幻", "玄幻", "仙侠", "悬疑", "历史", "游戏", "轻小说", "短篇", "其他"];
 const SUBGENRES: Record<string, string[]> = {
   都市: ["都市神豪", "都市商战", "都市重生", "都市异能", "都市高武", "都市脑洞", "都市系统"],
-  玄幻: ["传统升级流", "凡人流", "史诗玄幻", "宿命流", "设定流", "家族修仙", "系统流"],
-  仙侠: ["传统升级流", "凡人流", "史诗玄幻", "宿命流", "设定流", "家族修仙", "系统流"],
+  玄幻: ["传统升级流", "凡人流", "苟道流", "系统流", "长生流", "史诗玄幻", "宿命流", "设定流", "家族修仙"],
+  仙侠: ["传统升级流", "凡人流", "苟道流", "系统流", "长生流", "史诗玄幻", "宿命流", "设定流", "家族修仙"],
 };
 const WORD_PRESETS = [
   { value: 100000, label: "短篇", hint: "约 10 万字" },
@@ -24,6 +24,8 @@ export function Wizard({
   setPlatform,
   subgenre,
   setSubgenre,
+  stylePlugin,
+  setStylePlugin,
   style,
   setStyle,
   targetWords,
@@ -40,6 +42,8 @@ export function Wizard({
   setPlatform: (value: string) => void;
   subgenre: string;
   setSubgenre: (value: string) => void;
+  stylePlugin: string;
+  setStylePlugin: (value: string) => void;
   style: string;
   setStyle: (value: string) => void;
   targetWords: number;
@@ -65,6 +69,7 @@ export function Wizard({
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subgenreOptions = SUBGENRES[genre] || [];
+  const longLifeEligible = ["凡人流", "苟道流", "系统流", "长生流"].includes(subgenre);
 
   function handleImitFile(file: File | undefined) {
     if (!file) return;
@@ -198,7 +203,7 @@ export function Wizard({
               <span>小说题材</span>
               <select
                 value={genre}
-                onChange={event => { setGenre(event.target.value); setSubgenre(""); clearError("genre"); }}
+                onChange={event => { setGenre(event.target.value); setSubgenre(""); setStylePlugin(""); clearError("genre"); }}
                 aria-invalid={Boolean(errors.genre)}
               >
                 <option value="">选择题材</option>
@@ -215,11 +220,25 @@ export function Wizard({
             </label>
             <label className="wizard-field">
               <span>细分流派 <small>可选</small></span>
-              <select value={subgenre} onChange={event => setSubgenre(event.target.value)} aria-label="细分流派">
+              <select value={subgenre} onChange={event => {
+                const next = event.target.value;
+                setSubgenre(next);
+                if (!["凡人流", "苟道流", "系统流", "长生流"].includes(next)) setStylePlugin("");
+              }} aria-label="细分流派">
                 <option value="">自动匹配</option>
                 {subgenreOptions.map(item => <option key={item} value={item}>{item}</option>)}
               </select>
             </label>
+            {(genre === "玄幻" || genre === "仙侠") && (
+              <label className="wizard-field">
+                <span>风格插件 <small>可选</small></span>
+                <select value={stylePlugin} onChange={event => setStylePlugin(event.target.value)} aria-label="玄幻仙侠风格插件">
+                  <option value="">不叠加专用插件</option>
+                  <option value="xuanhuan_longlife" disabled={!longLifeEligible}>长生苟道（反差 / 种田 / 系统内化）</option>
+                </select>
+                <small>{longLifeEligible ? "只调整节奏、反差和系统呈现，不覆盖事实与世界规则。" : "先选择凡人流、苟道流、系统流或长生流，才可启用此插件。"}</small>
+              </label>
+            )}
             <label className="wizard-field">
               <span>写作风格</span>
               <input

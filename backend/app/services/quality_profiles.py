@@ -64,6 +64,10 @@ _SUBGENRE_ALIASES = {
     "凡人流": "xuanhuan_mortal",
     "苟道": "xuanhuan_mortal",
     "苟道流": "xuanhuan_mortal",
+    "长生": "xuanhuan_longlife",
+    "长生流": "xuanhuan_longlife",
+    "长生苟道": "xuanhuan_longlife",
+    "长生苟道流": "xuanhuan_longlife",
     "史诗": "xuanhuan_epic",
     "史诗玄幻": "xuanhuan_epic",
     "宿命": "xuanhuan_destiny",
@@ -74,6 +78,16 @@ _SUBGENRE_ALIASES = {
     "家族修仙": "xuanhuan_family",
     "系统流": "xuanhuan_system",
     "签到": "xuanhuan_system",
+}
+
+_STYLE_PLUGIN_ALIASES = {
+    "长生": "xuanhuan_longlife",
+    "长生流": "xuanhuan_longlife",
+    "长生苟道": "xuanhuan_longlife",
+    "长生苟道流": "xuanhuan_longlife",
+    "系统赋我长生": "xuanhuan_longlife",
+    "xuanhuan_longlife": "xuanhuan_longlife",
+    "xianxia_longlife": "xuanhuan_longlife",
 }
 
 
@@ -207,6 +221,75 @@ _SUBGENRE_PROFILES: dict[str, dict[str, Any]] = {
         "payoff_types": ["system_reward", "breakthrough", "resource_gain", "status_reversal"],
         "ledgers": ["任务/签到", "奖励与限制", "资源余额", "能力验证", "暴露风险"],
     },
+    "xuanhuan_longlife": {
+        "label": "长生流",
+        "opening_rules": [
+            "先用一个具体的生存、资源或身份问题落地长生设定，不先解释寿元规则全集",
+            "长生带来的优势必须同时制造时间、身份或关系上的新麻烦",
+        ],
+        "payoff_types": ["survival", "resource_gain", "hidden_strength", "status_reversal", "reveal"],
+        "ledgers": ["寿元/时间尺度", "身份与年代", "资源库存", "底牌暴露", "人情债"],
+        "style_rules": [
+            "时间跨度服务剧情和反差，不能用年数台账替代事件",
+            "主角的强大通过选择、细节和后果显露，不用旁白反复宣布无敌",
+        ],
+    },
+}
+
+
+# Optional, genre-scoped style plugin distilled from the user's long-life
+# template.  It is deliberately separate from the default xuanhuan profile:
+# a normal upgrade or epic story should not inherit its deadpan comedy,
+# internalized system and short-sentence targets by accident.
+_STYLE_PLUGINS: dict[str, dict[str, Any]] = {
+    "xuanhuan_longlife": {
+        "label": "长生苟道（反差/种田/系统内化）",
+        "compatible_genres": {"xuanhuan"},
+        "compatible_subgenres": {
+            "xuanhuan_mortal",
+            "xuanhuan_system",
+            "xuanhuan_longlife",
+        },
+        "directive": [
+            "这是可选的长生苟道风格层，只调整叙事节奏、反差和系统呈现，不覆盖本章事实、人物动机或世界规则。",
+            "读者爽感优先靠具体处境、选择后果和旁观者误判制造，不靠‘打脸/无敌/逆天’等词语堆砌。",
+        ],
+        "opening_rules": [
+            "首段用一个反差动作或反差判断立住声音：表面平淡/无奈，实际是占到便宜、躲过风险或另有打算；不能只写抽象感慨。",
+            "长生、系统或寿元规则先在事件后果中出现，首章不弹出完整规则说明。",
+        ],
+        "chapter_rules": [
+            "主角可以苟，但每章至少推进资源、信息、关系、身份或风险中的一项，苟不是停滞。",
+            "同一装腔翻车、种田日常或吐槽节拍再次出现时，必须更换失败原因、人物反应和具体细节，禁止逐段复刻。",
+            "系统奖励尽量内化成时间、资源或能力变化；只有改变选择时才展示提示，不连续弹出面板或数字播报。",
+        ],
+        "style_rules": [
+            "短句白描优先，句长有变化；让动作和对白承担信息，不用整段修炼感悟或旁白总结推进。",
+            "反差喜剧要落在人物行动和后果上，吐槽役可以稳定但每次反应要有变量；不要把角色写成只会重复口号的工具人。",
+            "跨时代、种田和资源积累要转化为可见场景，少报数字，多写时间改变了什么。",
+        ],
+        "anti_ai_rules": [
+            "不禁用任何标点；只防整章高密度破折号、连续重复句式、模板化收束和成片的工整排比。",
+            "降低空泛形容词、‘大道/机缘/逆天’式套话和修炼总结；用一个具体动作、物件或误会替代泛泛概括。",
+            "重复梗允许保留，但每轮必须有新变量；发现近似段落时优先重写变量和反应，不靠机械删句掩盖。",
+        ],
+        "attention_beat_rules": [
+            "每章用‘小问题解决/新麻烦出现/旁观者误判/底牌露出一角’等事件节点维持追读，不按固定字数硬塞笑点。",
+            "章末留下具体的资源、身份、关系或风险变化；不要用‘一切才刚刚开始’这类空钩子。",
+        ],
+        "ledgers": ["寿元/时间尺度", "身份与年代", "资源库存", "系统任务与限制", "底牌暴露", "人情债"],
+        "payoff_types": ["survival", "resource_gain", "hidden_strength", "system_reward", "status_reversal", "relationship_shift"],
+        # Soft acceptance targets, never a reason to force unnatural prose.
+        "soft_metrics": {
+            "mean_sentence_chars_target_max": 22,
+            "dialogue_ratio_target": [0.15, 0.20],
+            "rhetoric_density_per_1k_max": 4.0,
+            "filler_density_per_1k_max": 1.2,
+            "payoff_term_density_per_1k_max": 0.5,
+            "system_popup_density_per_1k_max": 0.1,
+        },
+        "provenance": ["系统赋我长生_写作模板"],
+    },
 }
 
 
@@ -248,6 +331,16 @@ def normalize_subgenre(value: Any, genre: str = "") -> str:
     return "xuanhuan_upgrade" if normalize_genre(genre) == "xuanhuan" else "urban"
 
 
+def normalize_style_plugin(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in _STYLE_PLUGIN_ALIASES:
+        return _STYLE_PLUGIN_ALIASES[raw]
+    for alias, key in _STYLE_PLUGIN_ALIASES.items():
+        if alias in raw:
+            return key
+    return ""
+
+
 def _unique(items: list[Any]) -> list[str]:
     result: list[str] = []
     for item in items:
@@ -262,6 +355,7 @@ def select_quality_profile(
     platform: Any = "",
     genre: Any = "",
     subgenre: Any = "",
+    style_plugin: Any = "",
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a deterministic merged platform + genre + subgenre profile."""
@@ -269,6 +363,21 @@ def select_quality_profile(
     platform_key = normalize_platform(overrides.get("platform") or platform)
     genre_key = normalize_genre(overrides.get("genre") or genre)
     subgenre_key = normalize_subgenre(overrides.get("subgenre") or subgenre, genre_key)
+    requested_plugin = overrides.get("style_plugin") or overrides.get("writing_plugin") or style_plugin
+    plugin_key = normalize_style_plugin(requested_plugin)
+    plugin_data = _STYLE_PLUGINS.get(plugin_key) if plugin_key else None
+    plugin_enabled = bool(
+        plugin_data
+        and genre_key in (plugin_data.get("compatible_genres") or set())
+        and subgenre_key in (plugin_data.get("compatible_subgenres") or set())
+    )
+    active_plugin = deepcopy(plugin_data) if plugin_enabled else {}
+    if requested_plugin and not plugin_data:
+        plugin_status = "unknown"
+    elif requested_plugin and not plugin_enabled:
+        plugin_status = "incompatible"
+    else:
+        plugin_status = "enabled" if plugin_enabled else "not_requested"
     platform_data = deepcopy(_PLATFORM_PROFILES.get(platform_key, _PLATFORM_PROFILES["fanqie"]))
     genre_data = deepcopy(_GENRE_PROFILES.get(genre_key, _GENRE_PROFILES["urban"]))
     subgenre_data = deepcopy(_SUBGENRE_PROFILES.get(subgenre_key, {}))
@@ -279,7 +388,18 @@ def select_quality_profile(
         "platform": platform_key,
         "genre": genre_key,
         "subgenre": subgenre_key,
-        "label": f"{platform_data.get('label')} / {subgenre_data.get('label') or genre_data.get('label')}",
+        "label": " / ".join(
+            item
+            for item in (
+                platform_data.get("label"),
+                subgenre_data.get("label") or genre_data.get("label"),
+                active_plugin.get("label"),
+            )
+            if item
+        ),
+        "style_plugin": plugin_key if plugin_enabled else "",
+        "style_plugin_status": plugin_status,
+        "style_plugin_label": active_plugin.get("label", ""),
         "reader_priority": platform_data.get("reader_priority", ""),
         "title_rules": _unique(platform_data.get("title_rules", []) + subgenre_data.get("title_rules", [])),
         "synopsis_rules": _unique(platform_data.get("synopsis_rules", [])),
@@ -287,24 +407,51 @@ def select_quality_profile(
             platform_data.get("opening_rules", [])
             + genre_data.get("opening_rules", [])
             + subgenre_data.get("opening_rules", [])
+            + active_plugin.get("opening_rules", [])
         ),
-        "chapter_rules": _unique(platform_data.get("chapter_rules", [])),
-        "style_rules": _unique(genre_data.get("style_rules", []) + subgenre_data.get("style_rules", [])),
-        "anti_ai_rules": _unique(genre_data.get("anti_ai_rules", [])),
+        "chapter_rules": _unique(platform_data.get("chapter_rules", []) + active_plugin.get("chapter_rules", [])),
+        "style_rules": _unique(
+            genre_data.get("style_rules", [])
+            + subgenre_data.get("style_rules", [])
+            + active_plugin.get("style_rules", [])
+        ),
+        "anti_ai_rules": _unique(genre_data.get("anti_ai_rules", []) + active_plugin.get("anti_ai_rules", [])),
         "attention_beat_rules": _unique(
             platform_data.get("attention_beat_rules", [])
             + subgenre_data.get("attention_beat_rules", [])
+            + active_plugin.get("attention_beat_rules", [])
         ),
         "dialogue_mode": subgenre_data.get("dialogue_mode") or genre_data.get("dialogue_mode", ""),
-        "ledgers": _unique(genre_data.get("ledgers", []) + subgenre_data.get("ledgers", [])),
-        "payoff_types": _unique(genre_data.get("payoff_types", []) + subgenre_data.get("payoff_types", [])),
+        "ledgers": _unique(
+            genre_data.get("ledgers", [])
+            + subgenre_data.get("ledgers", [])
+            + active_plugin.get("ledgers", [])
+        ),
+        "payoff_types": _unique(
+            genre_data.get("payoff_types", [])
+            + subgenre_data.get("payoff_types", [])
+            + active_plugin.get("payoff_types", [])
+        ),
+        "style_plugin_directive": _unique(active_plugin.get("directive", [])),
+        # Keep the bounded prompt focused on the plugin's highest-leverage
+        # controls.  The full merged lists remain available to later stages,
+        # while generation sees one opening rule, two variation rules and two
+        # anti-slop rules before the generic profile queue can crowd them out.
+        "style_plugin_rules": _unique(
+            list(active_plugin.get("directive", [])[:1])
+            + list(active_plugin.get("opening_rules", [])[:1])
+            + list(active_plugin.get("chapter_rules", [])[:2])
+            + list(active_plugin.get("anti_ai_rules", [])[:2])
+            + list(active_plugin.get("attention_beat_rules", [])[:1])
+        ),
+        "style_plugin_soft_metrics": deepcopy(active_plugin.get("soft_metrics") or {}),
         "payoff_policy": deepcopy(platform_data.get("payoff_policy", {})),
         # Product-wide narrative contract.  It is intentionally not an
         # author-style override: all current web-novel profiles use third
         # person in narration, while quoted character voice may still use
         # first person.
         "narrative_pov": THIRD_PERSON_NARRATIVE_POLICY,
-        "provenance": list(_SOURCE_PACKS),
+        "provenance": _unique(list(_SOURCE_PACKS) + active_plugin.get("provenance", [])),
     }
     # Project-level explicit settings are additive, never a replacement for
     # the built-in safety contract.
@@ -323,11 +470,16 @@ def select_quality_profile(
 
 def profile_from_context(context: dict[str, Any] | None) -> dict[str, Any]:
     context = context if isinstance(context, dict) else {}
-    raw = context.get("quality_profile")
+    raw = dict(context.get("quality_profile") or {}) if isinstance(context.get("quality_profile"), dict) else {}
+    if context.get("style_plugin") and not raw.get("style_plugin"):
+        raw["style_plugin"] = context.get("style_plugin")
+    if context.get("writing_plugin") and not raw.get("style_plugin"):
+        raw["style_plugin"] = context.get("writing_plugin")
     return select_quality_profile(
         platform=context.get("platform") or context.get("platform_key") or context.get("publish_platform"),
         genre=context.get("genre") or context.get("category") or context.get("main_category"),
         subgenre=context.get("subgenre") or context.get("sub_category") or context.get("theme"),
+        style_plugin=context.get("style_plugin") or context.get("writing_plugin"),
         overrides=raw if isinstance(raw, dict) else None,
     )
 
@@ -354,6 +506,12 @@ def compile_quality_directive(
     )
     if package_rules:
         lines.append("书名/简介包装：" + "；".join(package_rules) + "。")
+    plugin_rules = [str(item) for item in (profile.get("style_plugin_directive") or [])[:2] if str(item).strip()]
+    if plugin_rules:
+        lines.append("可选风格插件（已启用）：" + "；".join(plugin_rules) + "。")
+    plugin_focus = [str(item) for item in (profile.get("style_plugin_rules") or [])[:6] if str(item).strip()]
+    if plugin_focus:
+        lines.append("插件执行重点：" + "；".join(plugin_focus) + "。")
     if seq <= 3:
         lines.append("开篇阶段：本章必须尽快落到具体处境/冲突，完成可见反馈，并把下一章问题落到动作或发现。")
     for label, key, limit in (
@@ -368,6 +526,19 @@ def compile_quality_directive(
     attention_rules = [str(item) for item in (profile.get("attention_beat_rules") or [])[:2] if str(item).strip()]
     if attention_rules:
         lines.append("读者注意力基线（软规则）：「" + "；".join(attention_rules) + "」。")
+    soft_metrics = profile.get("style_plugin_soft_metrics") or {}
+    if soft_metrics:
+        dialogue_range = soft_metrics.get("dialogue_ratio_target") or []
+        dialogue_text = f"对白约{dialogue_range[0] * 100:.0f}%–{dialogue_range[1] * 100:.0f}%" if len(dialogue_range) == 2 else ""
+        metric_text = _unique([
+            f"均句长约不超过{soft_metrics['mean_sentence_chars_target_max']}字" if soft_metrics.get("mean_sentence_chars_target_max") else "",
+            dialogue_text,
+            f"修辞不超过{soft_metrics['rhetoric_density_per_1k_max']}/千字" if soft_metrics.get("rhetoric_density_per_1k_max") else "",
+            f"填充词不超过{soft_metrics['filler_density_per_1k_max']}/千字" if soft_metrics.get("filler_density_per_1k_max") else "",
+            "系统弹窗接近于零" if soft_metrics.get("system_popup_density_per_1k_max") is not None else "",
+        ])
+        if metric_text:
+            lines.append("风格指纹软目标（只作验收参考，不机械凑数）：" + "；".join(metric_text) + "。")
     learned_rules = [str(item).strip() for item in (active_rules or []) if str(item).strip()]
     if learned_rules:
         lines.append("来自已通过章节的学习规则（仅作定向提示，不覆盖事实和本章契约）：" + "；".join(learned_rules[:4]) + "。")
@@ -403,8 +574,12 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "platform": profile.get("platform"),
         "genre": profile.get("genre"),
         "subgenre": profile.get("subgenre"),
+        "style_plugin": profile.get("style_plugin", ""),
+        "style_plugin_status": profile.get("style_plugin_status", "not_requested"),
+        "style_plugin_label": profile.get("style_plugin_label", ""),
         "narrative_pov": profile.get("narrative_pov", THIRD_PERSON_NARRATIVE_POLICY),
         "payoff_policy": deepcopy(profile.get("payoff_policy") or {}),
         "ledgers": list(profile.get("ledgers") or []),
+        "style_plugin_soft_metrics": deepcopy(profile.get("style_plugin_soft_metrics") or {}),
         "provenance": list(profile.get("provenance") or []),
     }

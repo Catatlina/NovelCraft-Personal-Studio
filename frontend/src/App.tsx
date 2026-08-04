@@ -159,6 +159,7 @@ export default function App() {
   const [genre, setGenre] = useState("都市");
   const [platform, setPlatform] = useState("fanqie");
   const [subgenre, setSubgenre] = useState("");
+  const [stylePlugin, setStylePlugin] = useState("");
   const [style, setStyle] = useState("克制、悬疑、强画面感");
   const [targetWords, setTargetWords] = useState(800000);
   const [editorText, setEditorText] = useState("");
@@ -554,7 +555,7 @@ export default function App() {
     if (!project) return;
     setBusy(true); setError("");
     try {
-      const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, platform, subgenre, style, target_words: targetWords }) });
+      const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, platform, subgenre, style_plugin: stylePlugin, style, target_words: targetWords }) });
       setNovel(c);
       void cacheSet(currentNovelCacheKey, c);
       const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: JSON.stringify({ auto_confirm_title: false }) });
@@ -1110,7 +1111,7 @@ export default function App() {
           }}
         />
       )}
-      {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, platform, setPlatform, subgenre, setSubgenre, style, setStyle, targetWords, setTargetWords, busy, startBootstrap, projectId: project?.id }} />}
+      {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, platform, setPlatform, subgenre, setSubgenre, stylePlugin, setStylePlugin, style, setStyle, targetWords, setTargetWords, busy, startBootstrap, projectId: project?.id }} />}
       {tab === "progress" && <Progress
         run={run}
         novel={novel}
