@@ -3288,11 +3288,13 @@ def _recount_batch_progress(db, batch_id: str) -> dict | None:
         if ordinal > 0:
             by_ordinal[ordinal] = meta.get("quality_status") or row.get("status")
     generated = len(by_ordinal)
-    accepted = sum(status in {"accepted", "reviewed", "v7_quality_gate_passed"} for status in by_ordinal.values())
+    accepted = sum(status in {
+        "accepted", "reviewed", "v7_quality_gate_passed", "ai_review_passed",
+    } for status in by_ordinal.values())
     # A generated draft has not completed AI/manual review yet and must not
     # inflate reviewed/completed counters.
     needs_review = sum(status in {
-        "needs_review", "needs_rewrite", "pending_review", "ai_review_passed",
+        "needs_review", "needs_rewrite", "pending_review",
         "v7_quality_gate_failed", "v7_review_validation_failed",
     } for status in by_ordinal.values())
     reviewed = accepted + needs_review
