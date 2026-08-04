@@ -11,6 +11,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .content_policy import content_generation_contract
+from .pov_quality import THIRD_PERSON_NARRATIVE_POLICY, third_person_generation_contract
+
 
 QUALITY_PROFILE_SCHEMA_VERSION = "webnovel-quality-profile-v1"
 
@@ -296,6 +299,11 @@ def select_quality_profile(
         "ledgers": _unique(genre_data.get("ledgers", []) + subgenre_data.get("ledgers", [])),
         "payoff_types": _unique(genre_data.get("payoff_types", []) + subgenre_data.get("payoff_types", [])),
         "payoff_policy": deepcopy(platform_data.get("payoff_policy", {})),
+        # Product-wide narrative contract.  It is intentionally not an
+        # author-style override: all current web-novel profiles use third
+        # person in narration, while quoted character voice may still use
+        # first person.
+        "narrative_pov": THIRD_PERSON_NARRATIVE_POLICY,
         "provenance": list(_SOURCE_PACKS),
     }
     # Project-level explicit settings are additive, never a replacement for
@@ -338,6 +346,8 @@ def compile_quality_directive(
     lines = [
         f"质量策略 {profile.get('profile_id', QUALITY_PROFILE_SCHEMA_VERSION)}：以网络小说读者继续阅读为第一目标。",
         f"平台重点：{profile.get('reader_priority') or '冲突清楚、反馈具体、下一步明确'}。",
+        third_person_generation_contract(),
+        content_generation_contract(profile),
     ]
     package_rules = _unique(
         [*(profile.get("title_rules") or [])[:2], *(profile.get("synopsis_rules") or [])[:2]]
@@ -393,6 +403,7 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "platform": profile.get("platform"),
         "genre": profile.get("genre"),
         "subgenre": profile.get("subgenre"),
+        "narrative_pov": profile.get("narrative_pov", THIRD_PERSON_NARRATIVE_POLICY),
         "payoff_policy": deepcopy(profile.get("payoff_policy") or {}),
         "ledgers": list(profile.get("ledgers") or []),
         "provenance": list(profile.get("provenance") or []),

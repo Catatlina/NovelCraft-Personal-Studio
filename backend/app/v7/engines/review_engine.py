@@ -18,6 +18,8 @@ from ...services.reader_experience import (
     summarize_reader_experience,
 )
 from ...services.chapter_payoff import validate_payoff_contract, validate_payoff_evidence
+from ...services.content_policy import analyze_content_policy, content_generation_contract
+from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 from ...services.quality_profiles import quality_profile_metadata
 from ..quality.audit_dimensions import (
     AUDIT_DIMENSIONS,
@@ -111,6 +113,10 @@ class ReviewEngine(BaseEngine):
             "chapter_plan": input_data.get("chapter_plan") or {},
             "scene_plan": input_data.get("scene_plan") or {},
             "deai_metrics": input_data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
+            "pov_metrics": input_data.get("pov_metrics") or analyze_third_person_narrative(chapter_text),
+            "content_policy": input_data.get("content_policy") or analyze_content_policy(
+                chapter_text, input_data.get("quality_profile") or self.quality_profile or {}
+            ),
             "generation_quality": input_data.get("generation_quality") or {},
             "quality_profile": input_data.get("quality_profile") or self.quality_profile or {},
             "payoff_contract": input_data.get("payoff_contract") or {},
@@ -144,6 +150,8 @@ class ReviewEngine(BaseEngine):
                 "length_check",
                 "continuity_contract_check",
                 "deai_metrics_check",
+                "third_person_narrative_check",
+                "content_policy_check",
             ],
         }
         return EngineResult(
@@ -203,6 +211,8 @@ class ReviewEngine(BaseEngine):
                 "chapter_plan": data.get("chapter_plan") or {},
                 "scene_plan": data.get("scene_plan") or {},
                 "deai_metrics": data.get("deai_metrics") or {},
+                "pov_metrics": data.get("pov_metrics") or {},
+                "content_policy": data.get("content_policy") or {},
                 "quality_profile": data.get("quality_profile") or {},
                 "payoff_contract": data.get("payoff_contract") or {},
             },
@@ -216,6 +226,8 @@ class ReviewEngine(BaseEngine):
             f"【必须遵守的约束】\n{constraint_block}\n\n"
             f"【跨章连续性证据】\n{continuity_block}\n\n"
             f"【本章计划与确定性表达指标】\n{plan_block}\n\n"
+            f"{third_person_generation_contract()}\n"
+            f"{content_generation_contract(data.get('quality_profile') or {})}\n\n"
             f"【评分维度】\n{dimension_block}\n\n"
             f"【33个内部审计项】\n{audit_block}\n\n"
             f"【正文】\n{review_text}\n\n"
@@ -250,6 +262,9 @@ class ReviewEngine(BaseEngine):
             "如果某项确实不适用，也要给出 score，并在 evidence 说明不适用的理由。"
             "如果提供了本章爽点契约，必须从正文逐字摘取至少一条 payoff_evidence；"
             "anchor 必须能在正文中定位，不能用概括或虚构证据。"
+            "叙述视角必须是第三人称：引号、短信、书信和直接引用里的‘我’不计入，"
+            "其余叙述里的第一人称命中即判为严重问题；都市题材还必须使用完全架空的实体名称，"
+            "不能用现实城市、公司、平台或公众人物替代。"
             f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
             f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
             f"pacing/writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
@@ -258,11 +273,15 @@ class ReviewEngine(BaseEngine):
         try:
             ai = await self.ai_gateway.generate_json(
                 prompt,
-                system_prompt="你是严格的中文小说审稿编辑，只输出合法 JSON，不要客套。",
+                system_prompt=(
+                    "你是严格的中文小说审稿编辑，只输出合法 JSON，不要客套。"
+                    + third_person_generation_contract()
+                    + content_generation_contract(data.get("quality_profile") or {})
+                ),
                 max_tokens=5000,
                 temperature=0.2,
                 prompt_name="v7.review.33_dimension",
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
@@ -360,6 +379,10 @@ class ReviewEngine(BaseEngine):
             "strengths": raw.get("strengths") or [],
             "constraints_checked": len(constraints),
             "deai_metrics": data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
+            "pov_metrics": data.get("pov_metrics") or analyze_third_person_narrative(chapter_text),
+            "content_policy": data.get("content_policy") or analyze_content_policy(
+                chapter_text, data.get("quality_profile") or {}
+            ),
             "generation_quality": data.get("generation_quality") or {},
             "word_count": data.get("word_count", 0),
             "model": ai["usage"].get("model"),

@@ -20,6 +20,8 @@ from typing import Any
 from ..db import connect, decode, encode, new_id, row_to_dict
 from .. import gateway
 from ..repositories import loop_repos as repo
+from .content_policy import analyze_content_policy
+from .pov_quality import analyze_third_person_narrative
 
 # Repair is triggered below this average 7-dim score. Overridable so the repair
 # branch can be exercised against real text without faking a review result.
@@ -718,37 +720,71 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "length_ok": len(text) >= MIN_CHAPTER_CHARS,
     })
 
-    # 1c. POV hard gate (Defect: CH2 wrote 3rd-person "他" under a 1st-person
-    # setting, breaking continuity with CH1). The soft flag in _domain_logic_check
-    # is not enough, so force a single rewrite when the configured POV is violated.
-    if chapter_seq > 1:
-        _cfg = repo.get_book_config(project_id, novel_id)
-        _pov = ""
-        if _cfg:
-            _ai = decode(_cfg.get("author_intent"), {}) or {}
-            _pov = (_ai.get("protagonist") or {}).get("pov", "") if isinstance(_ai, dict) else ""
-        if "第一" in _pov and (text.count("我") == 0 or text.count("他") > text.count("我") * 2):
-            _rp = gateway.complete(
-                run_id=run_id, node_key="pov_fix", project_id=project_id,
-                task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
-                user_id=user_id,
-                variables={"context": context_text, "current_title": title,
-                           "current_body": text,
-                           "review_feedback": "严重违规：本书设定为第一人称，但本章误用第三人称“他”叙述。"
-                                             "必须严格用第一人称“我”重写全章，保持同一主角、场景与已发生情节，不得改变剧情。"},
+    # 1c. Product-wide narrative/content preflight.  The prompt contract is
+    # the primary control; this local check only decides whether the legacy
+    # compatibility path may spend another rewrite call and whether the final
+    # chapter can enter the normal quality loop.
+    _cfg = repo.get_book_config(project_id, novel_id)
+    _ai = decode(_cfg.get("author_intent"), {}) or {} if _cfg else {}
+    _profile = (_ai.get("quality_profile") or {}) if isinstance(_ai, dict) else {}
+    if not isinstance(_profile, dict):
+        _profile = {}
+    if isinstance(_ai, dict) and not _profile.get("genre"):
+        _profile["genre"] = _ai.get("genre") or _ai.get("category") or ""
+    pov_check = analyze_third_person_narrative(text)
+    content_check = analyze_content_policy(text, _profile)
+    if not pov_check["passed"] or not content_check["passed"]:
+        feedback_parts = []
+        if not pov_check["passed"]:
+            feedback_parts.append(
+                "叙述视角违规：必须改为第三人称限知。引号内对白/短信/书信中的‘我’可以保留，"
+                "引号外叙述不得出现‘我、我们、咱们、俺、吾、余’。"
             )
-            _rp_ch = _rp.get("chapter", {}) or {}
-            _rp_paras = _rp_ch.get("body", []) if isinstance(_rp_ch, dict) else []
-            _rp_text = "\n\n".join(_rp_paras) if _rp_paras else text
-            if len(_rp_text) >= MIN_CHAPTER_CHARS:
-                paragraphs, text = _rp_paras, _rp_text
-                title = _rp_ch.get("title") or title
-                _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
-                report["steps"].append({"step": "pov_fix", "applied": True,
-                                        "my": text.count("我"), "he": text.count("他")})
-            else:
-                report["steps"].append({"step": "pov_fix", "applied": False,
-                                        "reason": "rewrite too short"})
+        if not content_check["passed"]:
+            feedback_parts.append(
+                "内容安全/架空现实违规：删除脏话、敏感表达；都市题材将现实人名、地名、公司、平台、品牌和事件"
+                "全部改成原创虚构实体。普通词‘草’只有在明确植物语境下保留，脏话用干净替代表达。"
+            )
+        _rp = gateway.complete(
+            run_id=run_id, node_key="policy_fix", project_id=project_id,
+            task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
+            user_id=user_id,
+            variables={"context": context_text, "current_title": title,
+                       "current_body": text,
+                       "review_feedback": "严重违规，必须完整重写表达但保留已发生事件、人物关系、时间线和因果："
+                                         + "；".join(feedback_parts)},
+        )
+        _rp_ch = _rp.get("chapter", {}) or {}
+        _rp_paras = _rp_ch.get("body", []) if isinstance(_rp_ch, dict) else []
+        _rp_text = "\n\n".join(_rp_paras) if _rp_paras else text
+        if len(_rp_text) >= MIN_CHAPTER_CHARS:
+            paragraphs, text = _rp_paras, _rp_text
+            title = _rp_ch.get("title") or title
+            _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
+            pov_check = analyze_third_person_narrative(text)
+            content_check = analyze_content_policy(text, _profile)
+            report["steps"].append({
+                "step": "policy_fix", "applied": True,
+                "pov_passed": pov_check["passed"],
+                "content_policy_passed": content_check["passed"],
+            })
+        else:
+            report["steps"].append({"step": "policy_fix", "applied": False,
+                                    "reason": "rewrite too short"})
+    report["steps"].append({
+        "step": "generation_policy_preflight",
+        "pov": pov_check,
+        "content_policy": content_check,
+    })
+    if not pov_check["passed"]:
+        quality_blocked = True
+        quality_block_reasons.append("third_person_narrative_required")
+    if not content_check["passed"]:
+        quality_blocked = True
+        quality_block_reasons.extend(
+            str(item.get("code") or "content_policy_failed")
+            for item in content_check.get("failures") or []
+        )
 
     # 1d. continuity fact-lock guard (deterministic backstop for model priors that
     # ignore soft prompt rules). Active only when the novel opts in via

@@ -35,12 +35,14 @@ from ...services.text_quality import (
     normalize_and_validate_rewrite,
 )
 from ...services.chapter_payoff import build_payoff_contract, validate_payoff_contract
+from ...services.content_policy import analyze_content_policy, content_generation_contract
 from ...services.quality_profiles import (
     compile_quality_directive,
     quality_profile_metadata,
     select_quality_profile,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
+from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
 logger = logging.getLogger(__name__)
 
@@ -491,6 +493,7 @@ class SceneDirector:
             or (objectives[0] if objectives else ""),
             "beats": normalised,
             "pov_character": plot_brief.get("pov_character"),
+            "pov_policy": "third_person_narrative",
             "pacing": plot_brief.get("pacing_advice"),
             "conflict": plot_brief.get("tension_target"),
             "hook": plot_brief.get("hook"),
@@ -564,6 +567,7 @@ class SceneDirector:
             '  "beats": [{"name":"节拍名","purpose":"作用","content":"要写什么",'
             '"emotion":"情绪","target_words":800}],\n'
             '  "pov_character": "视角人物",\n'
+            '  "pov_policy": "third_person_narrative",\n'
             '  "pacing": "slow|medium|fast",\n'
             '  "conflict": "本章核心冲突",\n'
             '  "hook": "章末钩子",\n'
@@ -580,13 +584,21 @@ class SceneDirector:
         )
         result = await self.gateway.generate_json(
             prompt,
-            system_prompt="你是资深小说结构编辑，只输出严格合法的 JSON。",
+            system_prompt=(
+                "你是资深小说结构编辑，只输出严格合法的 JSON。"
+                + third_person_generation_contract()
+                + content_generation_contract(quality_profile)
+            ),
             max_tokens=2000,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.1.0",
+            prompt_version="1.2.0",
         )
         plan = result["data"]
+        # The planner can choose the focal character, never the product-wide
+        # narrative mode.  This prevents a learned/project POV field from
+        # silently re-enabling first-person prose.
+        plan["pov_policy"] = "third_person_narrative"
         plan["chapter_title"] = ensure_unique_chapter_title(
             plan.get("chapter_title") or f"第{chapter_number}章",
             previous_titles=previous_titles,
@@ -826,6 +838,8 @@ class DeAIPipeline:
             "用动作和细节承载情绪，不把情绪标签直接说满。原文自然的地方少改，"
             "不得摘要、缩写、新增剧情或机械删成电报句。标点不设禁用清单；"
             "保留有语义必要的破折号、省略号和分号，只处理整章高密度、连续重复或模板化使用。\n\n"
+            f"{third_person_generation_contract()}\n"
+            f"{content_generation_contract(quality_profile)}\n\n"
             f"【不可变事实】\n{source_facts or '（无额外事实）'}\n\n"
             f"【禁止改动】\n{forbidden_changes or '情节、人物、时间线、设定与对白信息'}\n\n"
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
@@ -841,11 +855,15 @@ class DeAIPipeline:
         try:
             ai = await self.gateway.generate_json(
                 humanize_prompt,
-                system_prompt="你是严格的真人网文责任编辑，只输出合法 JSON。",
+                system_prompt=(
+                    "你是严格的真人网文责任编辑，只输出合法 JSON。"
+                    + third_person_generation_contract()
+                    + content_generation_contract(quality_profile)
+                ),
                 max_tokens=max(2400, min(5200, int(chinese_word_count(text) * 1.18))),
                 temperature=0.45,
                 prompt_name="bootstrap.final_humanize",
-                prompt_version="1.0.5",
+                prompt_version="1.1.0",
             )
         except AIGatewayError as exc:
             # A malformed/truncated semantic rewrite is a quality failure, not
@@ -1758,14 +1776,32 @@ class GenerationEngine:
                     "避免总结性旁白与说教结尾、避免翻译腔。直接输出正文，不要标题、"
                     "不要任何解释或markdown标记。标点不设禁用清单，按人物语气和"
                     "场景功能使用；只避免整章高密度、连续重复的模板化符号。"
+                    + third_person_generation_contract()
+                    + content_generation_contract(self.quality_profile)
                 ),
                 max_tokens=generation_max_tokens,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
-                prompt_version="1.2.0",
+                prompt_version="1.3.0",
             )
             add_usage(step, first)
             text = first["text"].strip()
+            # Cheap local preflight before any continuation or semantic
+            # humanization call.  The generation prompt is the primary control;
+            # this check only prevents spending another Provider request on a
+            # draft that already violates the global writing contract.
+            raw_pov_metrics = analyze_third_person_narrative(text)
+            raw_content_policy = analyze_content_policy(text, self.quality_profile)
+            preflight_failures: list[dict[str, Any]] = []
+            if not raw_pov_metrics["passed"]:
+                preflight_failures.append({
+                    "code": "third_person_narrative_required",
+                    "severity": "high",
+                    "message": "生成初稿的叙述部分出现第一人称；对白/短信中的第一人称不计入。",
+                    "evidence": raw_pov_metrics,
+                })
+            if not raw_content_policy["passed"]:
+                preflight_failures.extend(raw_content_policy.get("failures") or [])
 
             continuations = 0
             continuation_failures: list[dict[str, Any]] = []
@@ -1774,6 +1810,8 @@ class GenerationEngine:
             # padding and duplicated paragraphs.
             continuation_limit = min(max(0, int(max_continuations)), 1)
             while (
+                not preflight_failures
+                and
                 chinese_word_count(text) < minimum_chapter_chars
                 and continuations < continuation_limit
             ):
@@ -1793,16 +1831,20 @@ class GenerationEngine:
                     ),
                 )
                 cont = await self.ai_gateway.generate(
-                    self._build_continuation_prompt(text, scene_plan, missing),
+                    self._build_continuation_prompt(
+                        text, scene_plan, missing, quality_profile=self.quality_profile
+                    ),
                     system_prompt=(
                         "你是一位专业中文网络小说作者，正在续写同一章的后半部分。"
                         "直接接着写正文，不要重复已有内容，不要写标题或说明。"
                         "保持自然分段和人物语气；标点按语义使用，不要批量堆叠同一符号。"
+                        + third_person_generation_contract()
+                        + content_generation_contract(self.quality_profile)
                     ),
                     max_tokens=continuation_max_tokens,
                     temperature=0.85,
                     prompt_name="v7.generation.continuation",
-                    prompt_version="1.2.0",
+                    prompt_version="1.3.0",
                 )
                 add_usage(step, cont)
                 candidate = text.rstrip() + "\n\n" + cont["text"].strip()
@@ -1846,38 +1888,65 @@ class GenerationEngine:
                 },
             )
 
-        # Step: de-AI pipeline (real transformations)
+        # Step: de-AI pipeline (real transformations).  If the raw draft
+        # already fails a generation-first contract, do not pay for semantic
+        # humanization; return the draft for one bounded generation rework.
         async with self.tracer.trace_step(
             "generation.deai_process",
             "deai_processing",
             input_summary="Run 7-layer de-AI pipeline",
         ) as step:
             context_layers = context.get("context_layers") or {}
-            deai_result = await self.deai_pipeline.process(
-                text,
-                source_facts=json.dumps(
-                    {
-                        "previous_transition_contract": context_layers.get(
-                            "previous_transition_contract"
-                        ),
-                        "previous_tail": context_layers.get("previous_tail"),
+            if preflight_failures:
+                before_metrics = analyze_deai_patterns(text, profile=self.quality_profile)
+                deai_result = {
+                    "processed_text": text,
+                    "layers_applied": [],
+                    "total_changes": 0,
+                    "semantic_humanize": False,
+                    "humanize_changes": [],
+                    "ai_patterns_removed": [],
+                    "metrics": {
+                        "before": before_metrics,
+                        "after": before_metrics,
+                        "pov": raw_pov_metrics,
+                        "content_policy": raw_content_policy,
                     },
-                    ensure_ascii=False,
-                ),
-                forbidden_changes=json.dumps(
-                    context_layers.get("constraints") or [], ensure_ascii=False
-                ),
-                style_profile=json.dumps(
-                    {
-                        **(context_layers.get("style_card") or {}),
-                        "active_rules": context_layers.get("active_rules") or [],
+                    "quality_gate": {
+                        "passed": True,
+                        "skipped": True,
+                        "reason": "generation_preflight_failed; semantic humanization skipped",
                     },
-                    ensure_ascii=False,
-                ),
-                quality_profile=self.quality_profile,
-                safe_deduplicate=True,
-                active_rules=context_layers.get("active_rules") or [],
-            )
+                    "usage": {},
+                }
+            else:
+                deai_result = await self.deai_pipeline.process(
+                    text,
+                    source_facts=json.dumps(
+                        {
+                            "previous_transition_contract": context_layers.get(
+                                "previous_transition_contract"
+                            ),
+                            "previous_tail": context_layers.get("previous_tail"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    forbidden_changes=json.dumps(
+                        context_layers.get("constraints") or [], ensure_ascii=False
+                    ),
+                    style_profile=json.dumps(
+                        {
+                            **(context_layers.get("style_card") or {}),
+                            "active_rules": context_layers.get("active_rules") or [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    quality_profile=self.quality_profile,
+                    safe_deduplicate=True,
+                    active_rules=context_layers.get("active_rules") or [],
+                )
+            deai_result.setdefault("metrics", {})["pov_preflight"] = raw_pov_metrics
+            deai_result.setdefault("metrics", {})["content_policy_preflight"] = raw_content_policy
             add_usage(step, deai_result.get("usage") or {})
             step.set_output(
                 f"{deai_result['total_changes']} edits across "
@@ -1887,7 +1956,7 @@ class GenerationEngine:
 
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
-        generation_failures = list(continuation_failures)
+        generation_failures = [*preflight_failures, *continuation_failures]
         if word_count < minimum_chapter_chars:
             generation_failures.append(
                 {
@@ -1921,6 +1990,24 @@ class GenerationEngine:
                     ),
                 }
             )
+        final_pov_metrics = analyze_third_person_narrative(final_text)
+        final_content_policy = analyze_content_policy(final_text, self.quality_profile)
+        if not final_pov_metrics["passed"] and not any(
+            item.get("code") == "third_person_narrative_required" for item in generation_failures
+        ):
+            generation_failures.append({
+                "code": "third_person_narrative_required",
+                "severity": "high",
+                "message": "最终正文的叙述部分出现第一人称；对白/短信中的第一人称不计入。",
+                "evidence": final_pov_metrics,
+            })
+        for policy_failure in final_content_policy.get("failures") or []:
+            if not any(
+                item.get("code") == policy_failure.get("code") for item in generation_failures
+            ):
+                generation_failures.append(policy_failure)
+        deai_result.setdefault("metrics", {})["after_pov"] = final_pov_metrics
+        deai_result.setdefault("metrics", {})["after_content_policy"] = final_content_policy
         raw_payoff_contract = scene_plan.get("payoff_contract")
         payoff_contract_required = plot_brief is not None
         payoff_contract = (
@@ -1955,6 +2042,8 @@ class GenerationEngine:
             "failures": generation_failures,
             "continuations": continuations,
             "continuation_limit": continuation_limit,
+            "pov_metrics": final_pov_metrics,
+            "content_policy": final_content_policy,
             "payoff_validation": payoff_validation,
             "quality_profile": quality_profile_metadata(self.quality_profile),
         }
@@ -1995,6 +2084,8 @@ class GenerationEngine:
             "scene_plan": scene_plan,
             "payoff_contract": payoff_contract,
             "payoff_validation": payoff_validation,
+            "pov_metrics": final_pov_metrics,
+            "content_policy": final_content_policy,
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "deai": {
                 "layers_applied": deai_result["layers_applied"],
@@ -2034,6 +2125,7 @@ class GenerationEngine:
             f"====================\n"
             f"现在写第 {chapter_number} 章：《{scene_plan.get('chapter_title')}》\n"
             f"视角人物：{scene_plan.get('pov_character', '主角')}\n"
+            "叙述模式：第三人称限知；对白/短信中的‘我’可以保留，叙述句中的‘我’不可以出现。\n"
             f"核心冲突：{scene_plan.get('conflict', '')}\n"
             f"节奏：{scene_plan.get('pacing', 'medium')}\n"
             f"读者承诺：{scene_plan.get('reader_promise', '')}\n"
@@ -2064,12 +2156,18 @@ class GenerationEngine:
 
     @staticmethod
     def _build_continuation_prompt(
-        text: str, scene_plan: dict[str, Any], missing: int
+        text: str,
+        scene_plan: dict[str, Any],
+        missing: int,
+        *,
+        quality_profile: dict[str, Any] | None = None,
     ) -> str:
         tail = text[-1600:]
         beats = scene_plan.get("beats") or []
         remaining = "、".join(b.get("name", "") for b in beats[-2:]) if beats else ""
         return (
+            f"{third_person_generation_contract()}\n"
+            f"{content_generation_contract(quality_profile)}\n\n"
             f"以下是本章已写好的结尾部分：\n\n{tail}\n\n"
             f"请只补足剩余节拍，目标补写约 {missing} 个汉字，"
             f"完成剩余节拍（{remaining}）并以钩子收束："

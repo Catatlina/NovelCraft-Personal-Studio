@@ -16,6 +16,8 @@ from ...services.reader_experience import (
 )
 from ...services.quality_risks import build_quality_repair_contract
 from ...services.chapter_payoff import validate_payoff_contract
+from ...services.content_policy import analyze_content_policy
+from ...services.pov_quality import analyze_third_person_narrative
 from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 
 QUALITY_PASS_SCORE = 85.0
@@ -54,6 +56,34 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
     dimensions = review_data.get("dimension_scores") or review_data.get("dimensions") or {}
     failures: list[dict[str, Any]] = []
     generation_quality = review_data.get("generation_quality") or {}
+    pov_metrics = (
+        review_data.get("pov_metrics")
+        or generation_quality.get("pov_metrics")
+        or analyze_third_person_narrative(review_data.get("chapter_text") or "")
+    )
+    if pov_metrics and pov_metrics.get("passed") is False:
+        failures.append({
+            "dimension": "third_person_narrative",
+            "actual": pov_metrics.get("first_person_count") or "detected",
+            "minimum": 0,
+            "reason": "叙述部分出现第一人称；对白/短信中的第一人称不计入",
+        })
+    content_policy = (
+        review_data.get("content_policy")
+        or generation_quality.get("content_policy")
+        or analyze_content_policy(
+            review_data.get("chapter_text") or "",
+            review_data.get("quality_profile") or {},
+        )
+    )
+    if content_policy and content_policy.get("passed") is False:
+        for policy_failure in content_policy.get("failures") or []:
+            failures.append({
+                "dimension": str(policy_failure.get("code") or "content_policy"),
+                "actual": "detected",
+                "minimum": "clean",
+                "reason": str(policy_failure.get("message") or "内容安全/架空现实层未通过"),
+            })
     if generation_quality.get("passed") is False:
         for failure in generation_quality.get("failures") or []:
             if not isinstance(failure, dict):

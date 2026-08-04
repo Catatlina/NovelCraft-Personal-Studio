@@ -769,6 +769,8 @@ class StoryDirector:
                 "chapter_plan": plan.get("plot_brief") or {},
                 "scene_plan": current.get("scene_plan") or {},
                 "deai_metrics": metrics.get("after") or metrics,
+                "pov_metrics": current.get("pov_metrics") or (current.get("generation_quality") or {}).get("pov_metrics") or {},
+                "content_policy": current.get("content_policy") or (current.get("generation_quality") or {}).get("content_policy") or {},
                 "generation_quality": current.get("generation_quality") or {},
                 "quality_profile": current.get("quality_profile") or quality_profile_metadata(self.quality_profile),
                 "payoff_contract": current.get("payoff_contract") or (plan.get("plot_brief") or {}).get("payoff_contract") or {},
@@ -969,6 +971,8 @@ class StoryDirector:
             "quality_gate": gate,
             "review_hold": review_hold,
             "review_validation": validation_failures,
+            "pov_metrics": review_data.get("pov_metrics") or generation.get("pov_metrics") or {},
+            "content_policy": review_data.get("content_policy") or generation.get("content_policy") or {},
             "payoff_contract": review_data.get("payoff_contract") or generation.get("payoff_contract") or {},
             "payoff_evidence": review_data.get("payoff_evidence") or [],
         }
