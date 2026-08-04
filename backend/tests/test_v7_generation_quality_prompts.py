@@ -20,6 +20,14 @@ def test_repeated_chapter_title_gets_an_existing_plot_event_suffix():
     assert title == "语音里的求救·走廊尽头的钟声再次响起"
     assert title != "语音里的求救"
 
+    compact = ensure_unique_chapter_title(
+        "语音里的求救",
+        previous_titles=["语音里的求救"],
+        chapter_number=24,
+        hints=["语音中传来一个陌生男人的声音"],
+    )
+    assert compact == "语音里的求救·一个陌生男人"
+
 
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     prompt = GenerationEngine._build_generation_prompt(

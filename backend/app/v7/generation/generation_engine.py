@@ -70,8 +70,12 @@ def _title_hint_fragment(value: Any) -> str:
     text = re.sub(r"^(?:本章|章末|钩子|结果)\s*[：:]?", "", text)
     text = re.split(r"[。！？；\n]", text, maxsplit=1)[0]
     text = re.sub(r"[“”\"'「」《》]", "", text)
+    text = re.sub(r"^(?:主角)?(?:发现|收到|看见|听见|进入|遭遇|面对)\s*", "", text)
+    text = re.sub(r"^(?:语音|消息|短信)(?:中|里)?(?:传来|出现|提示)\s*", "", text)
+    text = re.sub(r"(?:的)?(?:声音|消息|警告)$", "", text)
     text = text.strip(" ：:，,、—-")
-    return text[:12]
+    text = text[:12].rstrip("的了着在与和或从向")
+    return text.strip(" ：:，,、—-")
 
 
 def ensure_unique_chapter_title(
