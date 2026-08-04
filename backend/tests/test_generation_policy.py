@@ -31,6 +31,16 @@ def test_first_person_in_narrative_is_detected_before_deai_or_review():
     assert "我" in report["first_person_tokens"]
 
 
+def test_classical_first_person_marker_does_not_match_common_compounds():
+    clean = analyze_third_person_narrative("残余的力道还在脚底，余波沿着石阶散开，其余弟子退到墙边。")
+    first_person = analyze_third_person_narrative("余认为这笔账还没算完。")
+
+    assert clean["passed"] is True
+    assert clean["first_person_count"] == 0
+    assert first_person["passed"] is False
+    assert first_person["first_person_tokens"] == ["余"]
+
+
 def test_generation_directive_places_pov_and_urban_safety_before_writing():
     profile = select_quality_profile(genre="都市", subgenre="都市神豪")
     directive = compile_quality_directive(profile, chapter_number=1)
