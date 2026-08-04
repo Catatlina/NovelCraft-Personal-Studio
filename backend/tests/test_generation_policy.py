@@ -1,10 +1,13 @@
+import asyncio
+
 from app.services.content_policy import analyze_content_policy, content_generation_contract
 from app.services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 from app.services.quality_profiles import compile_quality_directive, select_quality_profile
 from app.prompt_registry import PROMPT_SEEDS
 from app.v7.engines.plot_engine import PlotEngine
 from app.v7.integration.quality import evaluate_review
-from app.v7.generation.generation_engine import DeAIPipeline
+from app.v7.generation.generation_engine import DeAIPipeline, GenerationEngine
+from app.v7.director.story_director import StoryDirector
 
 
 def test_first_person_is_allowed_only_inside_quoted_character_voice():
@@ -158,3 +161,73 @@ def test_quality_gate_rejects_pov_and_content_policy_even_with_high_scores():
     dimensions = {item["dimension"] for item in result["failures"]}
     assert "third_person_narrative" in dimensions
     assert "profanity_or_insult" in dimensions
+
+
+def test_rework_uses_local_repair_only_for_expression_level_failures():
+    assert StoryDirector._can_use_local_prose_repair({
+        "failures": [
+            {"dimension": "third_person_narrative"},
+            {"dimension": "ai_pattern_risk"},
+        ]
+    }) is True
+
+    assert StoryDirector._can_use_local_prose_repair({
+        "failures": [{"dimension": "pacing"}]
+    }) is False
+    assert StoryDirector._can_use_local_prose_repair({
+        "failures": [{"dimension": "overall_score"}]
+    }) is False
+
+
+def test_local_prose_repair_recomputes_quality_contract_without_regeneration():
+    class Deai:
+        async def process(self, text, **kwargs):
+            assert "必须保留" in kwargs["quality_retry_feedback"]
+            assert kwargs["safe_deduplicate"] is True
+            assert kwargs["force_semantic_rewrite"] is True
+            return {
+                "processed_text": text,
+                "layers_applied": [],
+                "total_changes": 0,
+                "semantic_humanize": False,
+                "humanize_changes": [],
+                "ai_patterns_removed": [],
+                "metrics": {"semantic_trigger_flags": []},
+                "quality_gate": {"passed": True, "mode": "deterministic_only"},
+                "usage": {"tokens_input": 0, "tokens_output": 0, "cost": 0.0},
+            }
+
+    text = "\n\n".join(
+        ["沈砚推开门，看见灯光落在桌面。" * 12 for _ in range(4)]
+    )
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.quality_profile = select_quality_profile(genre="玄幻", subgenre="凡人流")
+    engine.deai_pipeline = Deai()
+
+    result = asyncio.run(engine.repair_local_quality(
+        {
+            "text": text,
+            "target_word_count": 600,
+            "generation_quality": {
+                "minimum_chars": 600,
+                "maximum_chars": 1200,
+                "passed": False,
+                "failures": [{"code": "third_person_narrative_required"}],
+            },
+            "context": {
+                "previous_tail": "门外有脚步声。",
+                "previous_transition_contract": {"chapter_number": 1},
+                "constraints": [],
+                "style_card": {},
+                "active_rules": [],
+            },
+            "usage": {"tokens_input": 10, "tokens_output": 20, "cost": 0.1},
+        },
+        feedback="必须保留全部事件和段落。",
+    ))
+
+    assert result["generation_quality"]["passed"] is True
+    assert result["generation_quality"]["failures"] == []
+    assert result["pov_metrics"]["passed"] is True
+    assert result["word_count"] == len(text.replace("\n", ""))
+    assert result["usage"]["tokens_input"] == 10

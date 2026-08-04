@@ -25,6 +25,7 @@ from ..engines.memory_engine import MemoryEngine
 from ..engines.review_engine import ReviewEngine
 from ..engines.base import EngineResult
 from ..generation.generation_engine import (
+    AIGatewayError,
     CHAPTER_STATE_TYPE,
     GenerationEngine,
     chapter_state_key,
@@ -66,6 +67,24 @@ AGENT_LOOP_STEPS: tuple[str, ...] = (
 # emitted by PlotEngine, and only applies when the caller supplied a persisted
 # batch id. Explicit approve/forbidden permissions still block below.
 BATCH_AUTOGENERATION_CONFIDENCE_FLOOR = 0.05
+
+# These defects are safe to repair against the already generated chapter.
+# Anything involving story structure, score dimensions, payoff, continuity or
+# length must still take the full bounded rewrite path.
+LOCAL_PROSE_REPAIR_DIMENSIONS = frozenset({
+    "third_person_narrative",
+    "profanity_or_insult",
+    "sensitive_content",
+    "urban_real_world_entity",
+    "ai_pattern_risk",
+    "dash_density",
+    "uniform_cadence",
+    "repeated_paragraph_opening",
+    "duplicate_paragraph",
+    "repeated_tic",
+    "rewrite_candidate_rejected",
+    "deai_quality_gate_failed",
+})
 
 
 def _format_quality_failure(item: dict[str, Any]) -> str:
@@ -781,6 +800,20 @@ class StoryDirector:
 
     # ── step 5 is generation_engine.generate_chapter ────────────────────
 
+    @staticmethod
+    def _can_use_local_prose_repair(gate: dict[str, Any]) -> bool:
+        """Allow the fast path only when all failures are expression-local."""
+        failures = [
+            item for item in (gate.get("failures") or [])
+            if isinstance(item, dict)
+        ]
+        if not failures:
+            return False
+        return all(
+            str(item.get("dimension") or "") in LOCAL_PROSE_REPAIR_DIMENSIONS
+            for item in failures
+        )
+
     # ── step 6 ──────────────────────────────────────────────────────────
     async def _observe(
         self,
@@ -847,6 +880,7 @@ class StoryDirector:
             review_hold = True
         score = float(review_data.get("overall_score") or 0.0)
         rework_count = 0
+        force_full_rework = False
 
         # Rework is bounded, but the gate is not fail-open: after the retry
         # budget is exhausted the chapter remains needs_review and never enters
@@ -891,19 +925,42 @@ class StoryDirector:
                 status="completed",
                 decided_by="ai",
             )
-            generation = await self.generation_engine.generate_chapter(
-                chapter_number,
-                prompt=(plan.get("prompt") or "")
-                + "\n\n【严格重写任务】\n"
-                + f"上一稿未通过严格质量门禁（{score:.1f}分），必须修复：{feedback}\n"
-                + "下面是上一稿正文。请保留已经成立的人物、地点、时间线和因果事实，"
-                + "不要只做同义词替换；要重排场景动作、对白和信息揭示，使冲突真正推进，"
-                + "并让章末钩子落到具体动作/发现/选择上。\n"
-                + f"【上一稿正文】\n{generation.get('text', '')[:16000]}",
-                outline=plan.get("outline"),
-                target_word_count=plan["target_word_count"],
-                plot_brief=plan.get("plot_brief"),
+            gate_for_rework = evaluate_review(review_data)
+            use_local_repair = (
+                not force_full_rework
+                and self._can_use_local_prose_repair(gate_for_rework)
             )
+            if use_local_repair:
+                try:
+                    generation = await self.generation_engine.repair_local_quality(
+                        generation,
+                        feedback=feedback,
+                    )
+                    # If the focused repair does not pass, the next bounded
+                    # attempt must be a fresh scene rewrite rather than
+                    # repeatedly polishing the same failed text.
+                    force_full_rework = True
+                except AIGatewayError:
+                    # Preserve the old quality-preserving fallback: a
+                    # transport/schema failure in the shortcut never turns a
+                    # chapter into a false success.
+                    force_full_rework = True
+                    use_local_repair = False
+
+            if not use_local_repair:
+                generation = await self.generation_engine.generate_chapter(
+                    chapter_number,
+                    prompt=(plan.get("prompt") or "")
+                    + "\n\n【严格重写任务】\n"
+                    + f"上一稿未通过严格质量门禁（{score:.1f}分），必须修复：{feedback}\n"
+                    + "下面是上一稿正文。请保留已经成立的人物、地点、时间线和因果事实，"
+                    + "不要只做同义词替换；要重排场景动作、对白和信息揭示，使冲突真正推进，"
+                    + "并让章末钩子落到具体动作/发现/选择上。\n"
+                    + f"【上一稿正文】\n{generation.get('text', '')[:16000]}",
+                    outline=plan.get("outline"),
+                    target_word_count=plan["target_word_count"],
+                    plot_brief=plan.get("plot_brief"),
+                )
             review = await self.review_engine.run(review_input(generation))
             if not review.success:
                 raw = review.result.get("raw") if isinstance(review.result, dict) else {}

@@ -718,15 +718,20 @@ class DeAIPipeline:
         "?": "？",
         "!": "！",
     }
+    # Only medium/high signals justify a billable whole-chapter semantic
+    # rewrite.  Low-severity observations remain in the metrics and review
+    # report, but they are not proof that the prose needs a provider pass.
+    # In particular, a deliberate repeated phrase or a small amount of
+    # ellipsis is common in web fiction and should not erase the author's
+    # voice merely because a detector noticed it.
     SEMANTIC_REWRITE_FLAGS = {
         "dash_density",
-        "ellipsis_density",
         "uniform_cadence",
         "repeated_paragraph_opening",
         "ai_phrase",
-        "repeated_phrase",
         "repeated_tic",
     }
+    SEMANTIC_REWRITE_SEVERITIES = {"medium", "high"}
     DETERMINISTIC_HARD_FLAGS = {
         "dash_density",
         "uniform_cadence",
@@ -817,6 +822,7 @@ class DeAIPipeline:
         quality_profile: dict[str, Any] | None = None,
         safe_deduplicate: bool = False,
         active_rules: list[Any] | None = None,
+        force_semantic_rewrite: bool = False,
     ) -> dict[str, Any]:
         """Run rule pre-clean and semantic humanization.
 
@@ -880,8 +886,19 @@ class DeAIPipeline:
             for flag in rule_metrics.get("flags") or []
             if isinstance(flag, dict)
             and flag.get("code") in self.SEMANTIC_REWRITE_FLAGS
+            and str(flag.get("severity") or "").lower()
+            in self.SEMANTIC_REWRITE_SEVERITIES
         ]
-        if duplicate_flags or not semantic_flags:
+        semantic_trigger_flags = sorted(
+            {
+                str(flag.get("code"))
+                for flag in semantic_flags
+                if flag.get("code")
+            }
+        )
+        if force_semantic_rewrite and not duplicate_flags and not semantic_flags:
+            semantic_trigger_flags = ["forced_local_repair"]
+        if duplicate_flags or (not semantic_flags and not force_semantic_rewrite):
             quality_gate: dict[str, Any] = {
                 "passed": not duplicate_flags,
                 "mode": "deterministic_only",
@@ -920,6 +937,7 @@ class DeAIPipeline:
                     "after": rule_metrics,
                     "risk_delta": before_metrics["risk_score"] - rule_metrics["risk_score"],
                     "duplicate_repair": dedup_evidence,
+                    "semantic_trigger_flags": semantic_trigger_flags,
                 },
                 "quality_gate": quality_gate,
                 "usage": {},
@@ -1007,6 +1025,7 @@ class DeAIPipeline:
                     "after": after_metrics,
                     "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
                     "duplicate_repair": dedup_evidence,
+                    "semantic_trigger_flags": semantic_trigger_flags,
                 },
                 "quality_gate": quality_gate,
                 "usage": {},
@@ -1072,6 +1091,7 @@ class DeAIPipeline:
                     "after": after_metrics,
                     "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
                     "duplicate_repair": dedup_evidence,
+                    "semantic_trigger_flags": semantic_trigger_flags,
                 },
                 "quality_gate": quality_gate,
                 "usage": ai.get("usage") or {},
@@ -1189,6 +1209,7 @@ class DeAIPipeline:
                 "after": after_metrics,
                 "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
                 "duplicate_repair": dedup_evidence,
+                "semantic_trigger_flags": semantic_trigger_flags,
             },
             "quality_gate": opening_repair_gate,
             "usage": combined_usage,
@@ -2259,6 +2280,7 @@ class GenerationEngine:
                 ),
                 "constraints": context["context_layers"].get("constraints", []),
                 "style_card": context["context_layers"].get("style_card", {}),
+                "active_rules": context["context_layers"].get("active_rules", []),
             },
             "scene_plan": scene_plan,
             "payoff_contract": payoff_contract,
@@ -2274,6 +2296,124 @@ class GenerationEngine:
                 "ai_patterns_removed": deai_result.get("ai_patterns_removed", []),
                 "metrics": deai_result.get("metrics", {}),
                 "quality_gate": deai_result.get("quality_gate") or {"passed": True},
+            },
+            "usage": usage,
+        }
+
+    async def repair_local_quality(
+        self,
+        generation: dict[str, Any],
+        *,
+        feedback: str,
+    ) -> dict[str, Any]:
+        """Repair a prose-only defect without regenerating the whole scene.
+
+        StoryDirector uses this only when every failed gate is a local prose
+        contract (POV, content policy or deterministic de-AI signal).  The
+        Provider still has to return a lossless rewrite through
+        ``DeAIPipeline``; length, paragraph shape, POV, content policy and
+        the existing quality gate are recomputed before the repaired draft is
+        reviewed again.  Structural failures never enter this shortcut.
+        """
+        context = generation.get("context") or {}
+        style_card = context.get("style_card") or {}
+        active_rules = context.get("active_rules") or []
+        deai_result = await self.deai_pipeline.process(
+            generation.get("text") or "",
+            source_facts=json.dumps(
+                {
+                    "previous_transition_contract": context.get(
+                        "previous_transition_contract"
+                    ),
+                    "previous_tail": context.get("previous_tail"),
+                },
+                ensure_ascii=False,
+            ),
+            forbidden_changes=json.dumps(
+                context.get("constraints") or [], ensure_ascii=False
+            ),
+            quality_retry_feedback=feedback,
+            style_profile=json.dumps(
+                {**style_card, "active_rules": active_rules},
+                ensure_ascii=False,
+            ),
+            quality_profile=self.quality_profile,
+            safe_deduplicate=True,
+            active_rules=active_rules,
+            force_semantic_rewrite=True,
+        )
+
+        final_text = deai_result.get("processed_text") or generation.get("text") or ""
+        word_count = chinese_word_count(final_text)
+        previous_quality = generation.get("generation_quality") or {}
+        minimum_chars = int(previous_quality.get("minimum_chars") or 600)
+        maximum_chars = int(
+            previous_quality.get("maximum_chars")
+            or max(minimum_chars + 200, int(generation.get("target_word_count") or 3000) * 1.45)
+        )
+        failures: list[dict[str, Any]] = []
+        if word_count < minimum_chars:
+            failures.append({
+                "code": "chapter_too_short",
+                "severity": "high",
+                "message": f"修复后正文 {word_count} 字，低于最低阈值 {minimum_chars} 字",
+            })
+        if word_count > maximum_chars:
+            failures.append({
+                "code": "chapter_too_long",
+                "severity": "high",
+                "message": f"修复后正文 {word_count} 字，超过最大阈值 {maximum_chars} 字",
+            })
+        quality_gate = deai_result.get("quality_gate") or {}
+        if quality_gate.get("passed") is False:
+            failures.append({
+                "code": str(quality_gate.get("code") or "deai_quality_gate_failed"),
+                "severity": "high",
+                "message": str(quality_gate.get("message") or "去 AI 味修复未通过安全校验"),
+            })
+        pov_metrics = analyze_third_person_narrative(final_text)
+        content_policy = analyze_content_policy(final_text, self.quality_profile)
+        if not pov_metrics.get("passed"):
+            failures.append({
+                "code": "third_person_narrative_required",
+                "severity": "high",
+                "message": "修复后叙述部分仍出现第一人称；对白/短信中的第一人称不计入。",
+                "evidence": pov_metrics,
+            })
+        failures.extend(content_policy.get("failures") or [])
+
+        generation_quality = {
+            **previous_quality,
+            "schema_version": "generation-quality-v1",
+            "passed": not failures,
+            "minimum_chars": minimum_chars,
+            "maximum_chars": maximum_chars,
+            "failures": failures,
+            "pov_metrics": pov_metrics,
+            "content_policy": content_policy,
+        }
+        usage = dict(generation.get("usage") or {})
+        repair_usage = deai_result.get("usage") or {}
+        for key in ("tokens_input", "tokens_output", "cost"):
+            usage[key] = (usage.get(key) or 0) + (repair_usage.get(key) or 0)
+        usage["model"] = repair_usage.get("model") or usage.get("model")
+
+        return {
+            **generation,
+            "text": final_text,
+            "word_count": word_count,
+            "meets_target": word_count >= int(generation.get("target_word_count") or 0),
+            "generation_quality": generation_quality,
+            "pov_metrics": pov_metrics,
+            "content_policy": content_policy,
+            "deai": {
+                "layers_applied": deai_result.get("layers_applied") or [],
+                "total_changes": deai_result.get("total_changes") or 0,
+                "semantic_humanize": deai_result.get("semantic_humanize", False),
+                "humanize_changes": deai_result.get("humanize_changes") or [],
+                "ai_patterns_removed": deai_result.get("ai_patterns_removed") or [],
+                "metrics": deai_result.get("metrics") or {},
+                "quality_gate": quality_gate,
             },
             "usage": usage,
         }

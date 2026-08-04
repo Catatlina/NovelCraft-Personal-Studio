@@ -113,7 +113,7 @@ def test_deai_provider_invalid_json_becomes_auditable_quality_failure():
     )
 
 
-def test_deai_provider_invalid_json_uses_clean_fallback_when_risk_is_low():
+def test_deai_low_risk_repeated_phrase_keeps_auditable_rule_only_path():
     text = "\n\n".join(
         [
             "风从窗缝里进来，吹动桌上的纸。",
@@ -126,17 +126,59 @@ def test_deai_provider_invalid_json_uses_clean_fallback_when_risk_is_low():
         ]
     )
 
-    class BrokenGateway:
-        async def generate_json(self, *_args, **_kwargs):
-            raise AIGatewayError("invalid provider JSON")
+    class GatewayThatMustNotBeCalled:
+        def __init__(self):
+            self.calls = 0
 
-    result = asyncio.run(DeAIPipeline(BrokenGateway()).process(text))
+        async def generate_json(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("low-risk repeated phrase must not call Provider")
+
+    gateway = GatewayThatMustNotBeCalled()
+    result = asyncio.run(DeAIPipeline(gateway).process(text))
 
     assert result["processed_text"]
     assert result["semantic_humanize"] is False
     assert result["quality_gate"]["passed"] is True
-    assert result["quality_gate"]["mode"] == "deterministic_fallback"
-    assert result["quality_gate"]["code"] == "semantic_rewrite_unavailable"
+    assert result["quality_gate"]["mode"] == "deterministic_only"
+    assert result["metrics"]["semantic_trigger_flags"] == []
+    assert result["metrics"]["after"]["flags"] == [
+        {
+            "code": "repeated_phrase",
+            "severity": "low",
+            "message": "存在跨句重复短语，需要确认是否为刻意回环",
+        }
+    ]
+    assert gateway.calls == 0
+
+
+def test_deai_forced_local_repair_calls_provider_without_detector_flag():
+    text = "沈砚推开门，风从窗缝里进来，桌上的纸被吹得轻轻发响。" * 3
+
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, *_args, **_kwargs):
+            self.calls += 1
+            return {
+                "data": {
+                    "humanized_text": text,
+                    "changes": ["保留原文事实并修复表达层门禁"],
+                    "ai_patterns_removed": [],
+                },
+                "usage": {"tokens_input": 1, "tokens_output": 1, "cost": 0.0},
+            }
+
+    gateway = Gateway()
+    result = asyncio.run(DeAIPipeline(gateway).process(
+        text,
+        force_semantic_rewrite=True,
+    ))
+
+    assert result["semantic_humanize"] is True
+    assert result["metrics"]["semantic_trigger_flags"] == ["forced_local_repair"]
+    assert gateway.calls == 1
 
 
 def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
