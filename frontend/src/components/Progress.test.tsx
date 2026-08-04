@@ -70,6 +70,7 @@ describe("创作进度门禁", () => {
     );
 
     expect(screen.getByText("创作历史")).toBeTruthy();
+    fireEvent.click(screen.getByText("创作历史"));
     expect(screen.getByText("V7 正文链")).toBeTruthy();
     expect(screen.getByText("V6 工作流")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "打开记录" })[0]);
@@ -105,6 +106,7 @@ describe("创作进度门禁", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText("创作历史"));
     fireEvent.click(screen.getByRole("button", { name: /加载更多历史/ }));
     await waitFor(() => expect(onLoadMore).toHaveBeenCalledTimes(1));
   });

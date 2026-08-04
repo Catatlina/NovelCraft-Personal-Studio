@@ -1,5 +1,19 @@
 # Starlume AI 当前已知问题
 
+## 2026-08-04 页面整改批次的剩余门禁
+
+### KI-026 页面改动已通过本地回归，生产视觉和真实质量仍需分别验收
+
+- 状态：**可用（代码级）**。
+- 已验证：前端全量 41 项测试、生产构建、本地八页面烟雾 1 passed、本地 V7 Cost/Prompt 走查 2 passed；审阅页的评分来源和 33 维审计覆盖有组件测试保护。
+- 未验证：生产登录态下的截图级视觉复核、真实 Provider 生成样本中写作风格预设的质量差异；这些不能由静态页面测试代替。
+
+### KI-027 强制 AI development gate 的既有 AST 真实性告警仍未收口
+
+- 状态：**可用（门禁阻断）**。
+- 2026-08-04 执行 `bash scripts/ai_development_gate.sh` / `python3 scripts/verify_ai_truthfulness.py` 仍命中：`backend/app/services/content_policy.py:analyze_content_policy`、`backend/app/services/pov_quality.py:analyze_third_person_narrative`、`backend/app/v7/integration/v6_bridge.py:persist_review_hold_v7_draft`。
+- 本批是前端页面整改，没有改动这些既有函数，也没有使用 `GATE_ALLOW_WARNINGS=1` 把 AST 失败伪装成全绿；后续应补充真实调用证明或最小 allowlist 理由后再提升门禁状态。
+
 ## 2026-08-02 本轮一次性质量整改（最新）
 
 本轮已修复代码侧待修复项，重点是“生成质量先达标，编辑器只做最后兜底”：

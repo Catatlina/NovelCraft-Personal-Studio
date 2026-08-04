@@ -15,6 +15,16 @@ const WORD_PRESETS = [
   { value: 1500000, label: "超长篇", hint: "约 150 万字" },
 ];
 
+const CUSTOM_STYLE_VALUE = "__custom__";
+const STYLE_PRESETS = [
+  { value: "第三人称、克制、悬疑、强画面感", label: "悬疑压迫 · 强画面", hint: "线索递进，信息留白，章末留钩" },
+  { value: "第三人称、冲突前置、节奏明快、爽点密集、少解释", label: "网文爽感 · 快节奏", hint: "开局见冲突，行动推动情节" },
+  { value: "第三人称、对白自然、细节具体、冲突递进、少空泛评价", label: "都市现实 · 自然对白", hint: "用具体行动和对白承载信息" },
+  { value: "第三人称、升级目标清晰、战斗推进有代价、爽点密集、少空泛感叹", label: "玄幻升级 · 强推进", hint: "目标、阻碍、收益和代价清楚" },
+  { value: "第三人称、谨慎决策、资源账本清晰、反差爽点、节奏张弛", label: "凡人苟道 · 慢热反差", hint: "谨慎积累，关键处爆发" },
+  { value: "第三人称、人物行动驱动情绪、对白自然、少总结、重视关系变化", label: "情感成长 · 强代入", hint: "情绪落在选择和后果上" },
+];
+
 export function Wizard({
   idea,
   setIdea,
@@ -70,6 +80,10 @@ export function Wizard({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subgenreOptions = SUBGENRES[genre] || [];
   const longLifeEligible = ["凡人流", "苟道流", "系统流", "长生流"].includes(subgenre);
+  const [customStyleMode, setCustomStyleMode] = useState(() => Boolean(style.trim() && !STYLE_PRESETS.some(item => item.value === style)));
+  const selectedStylePreset = customStyleMode
+    ? CUSTOM_STYLE_VALUE
+    : (STYLE_PRESETS.some(item => item.value === style) ? style : STYLE_PRESETS[0].value);
 
   function handleImitFile(file: File | undefined) {
     if (!file) return;
@@ -143,7 +157,7 @@ export function Wizard({
     const nextErrors: Record<string, string> = {};
     if (idea.trim().length < 4) nextErrors.idea = "请至少用 4 个字描述你的故事";
     if (!genre.trim()) nextErrors.genre = "请选择小说题材";
-    if (!style.trim()) nextErrors.style = "请描述希望保持的写作风格";
+    if (customStyleMode && !style.trim()) nextErrors.style = "请填写自定义写作风格，或改选一个预设";
     if (targetWords < 10000) nextErrors.targetWords = "目标字数不能少于 10,000";
     if (targetWords > 3000000) nextErrors.targetWords = "目标字数不能超过 300 万";
     setErrors(nextErrors);
@@ -240,14 +254,37 @@ export function Wizard({
               </label>
             )}
             <label className="wizard-field">
-              <span>写作风格</span>
-              <input
-                value={style}
-                onChange={event => { setStyle(event.target.value); clearError("style"); }}
-                placeholder="例如：克制、悬疑、强画面感"
-                maxLength={300}
-                aria-invalid={Boolean(errors.style)}
-              />
+              <span>写作风格 <small>生成前约束</small></span>
+              <select
+                value={selectedStylePreset}
+                onChange={event => {
+                  const next = event.target.value;
+                  if (next === CUSTOM_STYLE_VALUE) {
+                    setCustomStyleMode(true);
+                    setStyle("");
+                  } else {
+                    setCustomStyleMode(false);
+                    setStyle(next);
+                  }
+                  clearError("style");
+                }}
+                aria-label="写作风格预设"
+              >
+                {STYLE_PRESETS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+                <option value={CUSTOM_STYLE_VALUE}>自定义风格（高级）</option>
+              </select>
+              {customStyleMode ? (
+                <input
+                  value={style}
+                  onChange={event => { setStyle(event.target.value); clearError("style"); }}
+                  placeholder="例如：冷峻、短句、少比喻、强冲突"
+                  maxLength={300}
+                  aria-label="自定义写作风格"
+                  aria-invalid={Boolean(errors.style)}
+                />
+              ) : (
+                <small>{STYLE_PRESETS.find(item => item.value === selectedStylePreset)?.hint || "会写入生成约束，影响节奏、对白和叙述表达。"}</small>
+              )}
               {errors.style && <small className="field-error">{errors.style}</small>}
             </label>
           </div>

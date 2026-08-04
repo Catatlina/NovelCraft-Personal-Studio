@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Circle,
   Clock3,
+  ChevronDown,
   Loader2,
   RefreshCw,
   Sparkles,
@@ -170,14 +171,17 @@ function GenerationHistoryPanel({
   }
 
   return (
-    <section className="generation-history starlume-card" aria-label="创作历史">
-      <div className="generation-history-head">
+    <details className="generation-history starlume-card">
+      <summary className="generation-history-head">
         <div>
           <p className="eyebrow">RUN HISTORY</p>
           <h3>创作历史</h3>
         </div>
-        <span>{total > 0 ? `共 ${total} 条` : ""}</span>
-      </div>
+        <div className="generation-history-summary">
+          <span>{total > 0 ? `共 ${total} 条` : "暂无记录"}</span>
+          <span className="generation-history-toggle">查看记录 <ChevronDown size={16} /></span>
+        </div>
+      </summary>
 
       {loading && (
         <div className="generation-history-message"><Loader2 className="spin" size={17} /> 正在加载历史记录…</div>
@@ -229,7 +233,7 @@ function GenerationHistoryPanel({
           )}
         </div>
       )}
-    </section>
+    </details>
   );
 }
 

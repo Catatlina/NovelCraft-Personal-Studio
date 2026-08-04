@@ -1,5 +1,18 @@
 # Starlume AI — 真实进度
 
+## 2026-08-04 页面可用性整改批次（代码级）
+
+本批只处理页面信息架构和证据展示，不改变 V7 正文生成链：
+
+- 创作历史改为默认折叠，展开后仍保留 V6/V7 合并列表、打开记录和加载更多。
+- 审阅与一致性读取 V7 `overall_score`、七维 `dimension_scores`、33 维 `audit_report` 和连续性结果；综合分优先使用真实 `overall_score`，缺失时才按已有证据折算，并在页面明确标注来源，不补造默认高分。
+- 33 维审计按情节、人物、世界/连续性、读者体验、文风/去 AI 味分组展示；模型逐项评分、七维折算和未评分状态分开显示。
+- V7 质量与运行监控补齐当前 Starlume 卡片、指标、运行列表、事件、账本、Prompt 版本和移动端布局；创作向导的写作风格改为网文预设下拉，高级用户仍可选择自定义，默认约束强化第三人称。
+
+验证证据：前端全量 **41 passed**；`npm run build` 通过；本地 Playwright 八页面可达 **1 passed**；本地生产走查（含 V7 成本账本和 Prompt provenance）**2 passed**；`git diff --check` 通过；`python3 scripts/verify_delivery_claims.py` 通过。
+
+本批不能据此宣称真实 Provider 20 章、人工盲评或最终生成质量已验收。强制开发门禁仍受既有 AST 真实性告警阻断：`content_policy.py:analyze_content_policy`、`pov_quality.py:analyze_third_person_narrative`、`v6_bridge.py:persist_review_hold_v7_draft` 未列入门禁 allowlist；本批未篡改这些无关生产路径。
+
 ## 2026-08-02 本轮一次性质量整改（当前发布批次）
 
 本轮针对真实浏览器走查发现的“正文生成失败但显示已完成、最终人文化丢段、编辑器 AI 操作无反馈、跨章质量不足、破折号密集和审阅信息难读”等问题完成代码整改。生成阶段现在优先执行质量控制，编辑器只保留预览、确认和最后局部兜底。

@@ -160,7 +160,7 @@ export default function App() {
   const [platform, setPlatform] = useState("fanqie");
   const [subgenre, setSubgenre] = useState("");
   const [stylePlugin, setStylePlugin] = useState("");
-  const [style, setStyle] = useState("克制、悬疑、强画面感");
+  const [style, setStyle] = useState("第三人称、克制、悬疑、强画面感");
   const [targetWords, setTargetWords] = useState(800000);
   const [editorText, setEditorText] = useState("");
   const [selection, setSelection] = useState("");

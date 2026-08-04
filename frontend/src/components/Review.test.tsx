@@ -74,4 +74,45 @@ describe("审阅修复预览门禁", () => {
     expect(String(mocks.api.mock.calls[1][0])).toContain("/repair-apply");
     expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ status: "needs_review" }));
   });
+
+  it("读取 V7 综合评分与 33 维审计证据，并区分模型评分和兼容折算", () => {
+    render(
+      <Review
+        chapter={chapter}
+        review={{
+          overall_score: 82,
+          dimension_scores: { consistency: 90, pacing: 74 },
+          audit_report: {
+            count: 33,
+            scored_count: 2,
+            llm_scored_count: 1,
+            coverage: 1 / 33,
+            complete: false,
+            source: "macro_projection",
+            items: {
+              conflict: { key: "conflict", group: "plot", label: "核心冲突", score: 88, source: "llm", evidence: "角色被迫做出选择" },
+              causality: { key: "causality", group: "plot", label: "因果链", score: 74, source: "macro_projection" },
+            },
+          },
+          final_continuity_audit: { continuity: { status: "continuous", narrative_flow: "承接上一章结尾" } },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("82")).toBeTruthy();
+    expect(screen.getByText("来自 V7 审阅器返回的 overall_score。")).toBeTruthy();
+    expect(screen.getByText("2/33 项有分数")).toBeTruthy();
+    expect(screen.getByText("兼容")).toBeTruthy();
+    fireEvent.click(screen.getByText("情节与因果"));
+    expect(screen.getByText(/模型逐项审计/)).toBeTruthy();
+    expect(screen.getAllByText(/七维分数折算/).length).toBeGreaterThan(0);
+  });
+
+  it("没有模型分数时只按现有检查证据折算，不补造默认高分", () => {
+    render(<Review chapter={chapter} review={{ checks: { continuity: { status: "warning", issues: ["缺少桥接"] } } }} />);
+
+    expect(screen.getByText("70")).toBeTruthy();
+    expect(screen.getByText("按检查状态折算，非人工评分。")).toBeTruthy();
+    expect(screen.getByText("需留意")).toBeTruthy();
+  });
 });

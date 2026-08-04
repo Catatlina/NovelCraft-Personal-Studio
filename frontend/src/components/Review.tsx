@@ -5,21 +5,52 @@ import { ApiError, api } from "../lib/api";
 type ReviewPayload = {
   score?: number;
   self_score?: number;
+  overall_score?: number;
+  computed_score?: number;
   dimensions?: Record<string, number>;
+  dimension_scores?: Record<string, number>;
   issues?: unknown[];
   weaknesses?: unknown[];
   strengths?: unknown[];
   checks?: Record<string, { status?: string; issues?: unknown[] }>;
   overall_status?: string;
   warning_count?: number;
+  audit_report?: AuditReport;
+  reader_experience?: Record<string, number>;
   final_consistency_check?: {
     checks?: Record<string, { status?: string; issues?: unknown[] }>;
+    overall_score?: number;
+    dimension_scores?: Record<string, number>;
+    audit_report?: AuditReport;
     overall_status?: string;
     warning_count?: number;
   };
   final_continuity_audit?: {
     continuity?: { status?: string; gaps?: unknown[]; narrative_flow?: string };
   };
+};
+
+type AuditItem = {
+  key?: string;
+  group?: string;
+  label?: string;
+  score?: number | null;
+  evidence?: string;
+  repair?: string;
+  source?: string;
+  status?: string;
+  hard_gate?: boolean;
+};
+
+type AuditReport = {
+  count?: number;
+  scored_count?: number;
+  llm_scored_count?: number;
+  coverage?: number;
+  complete?: boolean;
+  source?: string;
+  groups?: Record<string, string[]>;
+  items?: Record<string, AuditItem>;
 };
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -33,6 +64,28 @@ const DIMENSION_LABELS: Record<string, string> = {
   plot: "情节",
   style: "文风",
   pacing: "节奏",
+  consistency: "设定一致性",
+  character_voice: "人物声音",
+  plot_logic: "情节逻辑",
+  writing_quality: "文字质量",
+  emotional_impact: "情感冲击",
+  constraint_compliance: "约束遵守",
+};
+
+const AUDIT_GROUP_LABELS: Record<string, string> = {
+  plot: "情节与因果",
+  character: "人物一致性",
+  world: "世界与连续性",
+  reader: "读者体验",
+  style: "文风与去 AI 味",
+};
+
+const AUDIT_SOURCE_LABELS: Record<string, string> = {
+  llm: "模型逐项审计",
+  macro_projection: "七维分数折算",
+  projected: "兼容折算",
+  scored: "已评分",
+  not_scored: "未评分",
 };
 
 function readableItem(item: unknown): string {
@@ -59,6 +112,31 @@ function statusLabel(status?: string) {
   if (status === "warning") return "需留意";
   if (status === "fail" || status === "broken") return "未通过";
   return "未检查";
+}
+
+function scoreValue(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+
+function average(values: number[]): number | null {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function statusScore(status?: string): number | null {
+  if (status === "pass" || status === "continuous" || status === "completed" || status === "succeeded") return 100;
+  if (status === "warning") return 70;
+  if (status === "fail" || status === "broken" || status === "failed") return 0;
+  return null;
+}
+
+function displayScore(value: number | null): string {
+  if (value === null) return "—";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function uniqueItems(items: string[]): string[] {
+  return Array.from(new Set(items));
 }
 
 export function Review({
@@ -89,18 +167,35 @@ export function Review({
   }>(null);
   const consistency = review.final_consistency_check || review;
   const checks = consistency.checks || {};
-  const dimensionScores = review.dimensions || Object.fromEntries(
-    Object.entries(checks).map(([key, check]) => [key, check.status === "pass" ? 90 : check.status === "warning" ? 65 : check.status === "fail" ? 35 : 0]),
-  );
-  const score = Number(review.score ?? review.self_score ?? 0);
-  const issues = [
+  const auditReport = review.audit_report || consistency.audit_report;
+  const auditItems = auditReport?.items || {};
+  const dimensionScores = review.dimension_scores || review.dimensions || consistency.dimension_scores || {};
+  const numericDimensionScores = Object.values(dimensionScores).map(scoreValue).filter((value): value is number => value !== null);
+  const auditScores = Object.values(auditItems).map(item => scoreValue(item.score)).filter((value): value is number => value !== null);
+  const checkScores = Object.values(checks).map(check => statusScore(check.status)).filter((value): value is number => value !== null);
+  const directScore = [review.overall_score, review.score, review.self_score, consistency.overall_score]
+    .map(scoreValue)
+    .find((value): value is number => value !== null) ?? null;
+  const score = directScore ?? average(numericDimensionScores) ?? average(auditScores) ?? average(checkScores);
+  const scoreSource = directScore !== null
+    ? "provider"
+    : numericDimensionScores.length
+      ? "dimension_scores"
+      : auditScores.length
+        ? (auditReport?.source === "macro_projection" ? "projected_audit" : "audit_report")
+        : checkScores.length ? "checks" : "none";
+  const scoreEvidence = directScore !== null
+    ? Math.max(numericDimensionScores.length, auditScores.length, Object.keys(checks).length)
+    : numericDimensionScores.length || auditScores.length || checkScores.length;
+  const issues = uniqueItems([
     ...cleanItems(review.issues),
     ...cleanItems(review.weaknesses),
     ...Object.values(checks).flatMap(check => cleanItems(check.issues)),
-  ];
+    ...cleanItems(review.final_continuity_audit?.continuity?.gaps),
+  ]);
   const strengths = cleanItems(review.strengths);
   const continuity = review.final_continuity_audit?.continuity;
-  const hasEvidence = score > 0 || Object.keys(checks).length > 0 || issues.length > 0 || Boolean(continuity);
+  const hasEvidence = score !== null || Object.keys(dimensionScores).length > 0 || Object.keys(auditItems).length > 0 || Object.keys(checks).length > 0 || issues.length > 0 || Boolean(continuity);
   const recommendation = chapter?.meta?.repair_recommendation as {
     action?: "repair_local" | "rewrite_chapter" | "replan_chapter";
     level?: string;
@@ -240,10 +335,15 @@ export function Review({
         <>
           <section className="review-summary-grid">
             <article className="review-score-card starlume-card">
-              <div className="review-score-ring" style={{ "--score": `${Math.max(0, Math.min(100, score)) * 3.6}deg` } as React.CSSProperties}>
-                <span><strong>{score || "—"}</strong><small>/ 100</small></span>
+              <div className="review-score-ring" style={{ "--score": `${(score ?? 0) * 3.6}deg` } as React.CSSProperties}>
+                <span><strong>{displayScore(score)}</strong><small>/ 100</small></span>
               </div>
-              <div><p className="eyebrow">综合质量</p><h3>{score >= 80 ? "基础质量达标" : score > 0 ? "仍需继续打磨" : "暂无综合评分"}</h3><p>评分来自真实自审与七维一致性结果。</p></div>
+              <div>
+                <p className="eyebrow">综合质量</p>
+                <h3>{score === null ? "暂无综合评分" : score >= 80 ? "基础质量达标" : "仍需继续打磨"}</h3>
+                <p>{scoreSource === "provider" ? "来自 V7 审阅器返回的 overall_score。" : scoreSource === "none" ? "审阅尚未返回可计算的评分证据。" : `按${scoreSource === "checks" ? "检查状态" : "现有审计证据"}折算，非人工评分。`}</p>
+                {scoreEvidence > 0 && <small className="review-evidence-note">已纳入 {scoreEvidence} 项证据</small>}
+              </div>
             </article>
             <article className="review-continuity-card starlume-card">
               <span className={`review-card-icon ${continuity?.status || "unchecked"}`}><Route size={20} /></span>
@@ -255,18 +355,58 @@ export function Review({
           </section>
 
           <section className="review-dimensions starlume-card">
-            <div className="section-heading"><div><p className="eyebrow">SEVEN DIMENSIONS</p><h3>一致性维度</h3></div><span>{Object.keys(dimensionScores).length} 项有证据</span></div>
+            <div className="section-heading"><div><p className="eyebrow">SEVEN DIMENSIONS</p><h3>核心质量维度</h3></div><span>{numericDimensionScores.length} 项有分数</span></div>
             <div className="dimension-grid">
               {Object.keys(dimensionScores).length ? Object.entries(dimensionScores).map(([key, value]) => {
-                const numeric = Number(value) || 0;
+                const numeric = scoreValue(value);
                 return (
                   <div className="dimension-row" key={key}>
-                    <div><strong>{DIMENSION_LABELS[key] || key}</strong><span>{numeric}</span></div>
-                    <div><span style={{ width: `${Math.max(0, Math.min(100, numeric))}%` }} /></div>
+                    <div><strong>{DIMENSION_LABELS[key] || key}</strong><span>{displayScore(numeric)}</span></div>
+                    <div><span style={{ width: `${numeric ?? 0}%` }} /></div>
                   </div>
                 );
               }) : <p className="muted-output">本次审阅未返回分维度分数。</p>}
             </div>
+          </section>
+
+          <section className="review-audit-card starlume-card">
+            <div className="section-heading">
+              <div><p className="eyebrow">33-DIMENSION EVIDENCE</p><h3>细项审计证据</h3></div>
+              <span>{auditReport ? `${auditReport.scored_count ?? auditScores.length}/${auditReport.count ?? 33} 项有分数` : `${Object.keys(checks).length} 项检查`}</span>
+            </div>
+            <div className="review-audit-summary">
+              <div><strong>{auditReport ? `${Math.round((auditReport.coverage ?? 0) * 100)}%` : "—"}</strong><span>模型逐项覆盖</span></div>
+              <div><strong>{auditReport?.complete ? "完整" : auditReport ? "兼容" : "未返回"}</strong><span>{auditReport?.source === "macro_projection" ? "部分由七维分数折算" : "审计契约状态"}</span></div>
+              <div><strong>{statusLabel(continuity?.status)}</strong><span>跨章连续性</span></div>
+            </div>
+            {Object.keys(auditItems).length > 0 ? (
+              <div className="review-audit-groups">
+                {Object.entries(
+                  Object.entries(auditItems).reduce<Record<string, AuditItem[]>>((groups, [, item]) => {
+                    const group = item.group || "other";
+                    (groups[group] ||= []).push(item);
+                    return groups;
+                  }, {}),
+                ).map(([group, items]) => (
+                  <details className="review-audit-group" key={group}>
+                    <summary><strong>{AUDIT_GROUP_LABELS[group] || group}</strong><span>{items.filter(item => scoreValue(item.score) !== null).length}/{items.length} 项有分数</span></summary>
+                    <div className="review-audit-items">
+                      {items.map((item, index) => {
+                        const numeric = scoreValue(item.score);
+                        return <div className="review-audit-item" key={`${item.key || item.label || group}-${index}`}>
+                          <div><strong>{item.label || item.key || "未命名审计"}</strong><span>{numeric === null ? "未评分" : displayScore(numeric)} · {AUDIT_SOURCE_LABELS[item.source || item.status || ""] || item.source || "未标来源"}</span></div>
+                          {item.evidence && <p>{item.evidence}</p>}
+                        </div>;
+                      })}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            ) : Object.keys(checks).length > 0 ? (
+              <div className="review-check-grid">
+                {Object.entries(checks).map(([key, check]) => <div className="review-check-row" key={key}><span className={`review-check-status ${check.status || ""}`}>{statusLabel(check.status)}</span><strong>{DIMENSION_LABELS[key] || key}</strong><small>{cleanItems(check.issues).length ? `${cleanItems(check.issues).length} 项问题` : "无附带问题"}</small></div>)}
+              </div>
+            ) : <p className="muted-output">本次审阅没有返回细项审计或检查证据，页面不会自行补造分数。</p>}
           </section>
 
           <section className="review-detail-grid">

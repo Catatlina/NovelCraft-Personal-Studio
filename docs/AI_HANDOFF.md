@@ -1,6 +1,15 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-02
+> 更新时间：2026-08-04
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
+
+## 2026-08-04 页面可用性整改批次（代码级）
+
+- `Progress` 的创作历史默认为折叠，展开后使用原有真实 V6/V7 合并数据和操作。
+- `Review` 现在消费 V7 `overall_score`、`dimension_scores`、`audit_report` 和连续性结果；分数缺失时只按现有检查证据折算，并显示“非人工评分/兼容折算”，33 维条目显示来源和证据。
+- `V7Dashboard` 新增完整 Starlume 风格的监控布局和响应式样式，覆盖总览、运行、成本账本、Prompt provenance、空态、错误态和权限态。
+- `Wizard` 的写作风格改为预设下拉（爽感快节奏、都市现实、玄幻升级、凡人苟道、悬疑压迫、情感成长），仍保留自定义高级入口；默认值包含第三人称约束。
+
+本地证据：前端 `npm test -- --run` **41 passed**、`npm run build` 通过；Playwright 页面烟雾 **1 passed**，本地 V7 走查 **2 passed**；`verify_delivery_claims.py` 通过。`bash scripts/ai_development_gate.sh` 本批已执行但未全绿，AST 真实性检查仍命中三个既有函数，详见 `docs/KNOWN_ISSUES.md`；本批未为过门禁而改动无关业务实现。
 
 ## 2026-08-02 本轮一次性质量整改（当前发布批次）
 
