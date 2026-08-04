@@ -55,6 +55,18 @@ def test_repeated_opening_risk_becomes_specific_humanize_guidance():
     }) == ""
 
 
+def test_quality_directive_requires_key_beats_to_be_shown_not_skipped():
+    profile = select_quality_profile(
+        genre="玄幻",
+        subgenre="凡人流",
+        style_plugin="xuanhuan_longlife",
+    )
+    directive = compile_quality_directive(profile, chapter_number=5)
+
+    assert "节拍表写明的过桥" in directive
+    assert "不能用一句旁白从准备跳到结果" in directive
+
+
 def test_generation_directive_places_pov_and_urban_safety_before_writing():
     profile = select_quality_profile(genre="都市", subgenre="都市神豪")
     directive = compile_quality_directive(profile, chapter_number=1)
