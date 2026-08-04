@@ -78,6 +78,30 @@ def test_payoff_evidence_must_be_locatable_in_actual_text():
     assert punctuation_only_difference["passed"] is True
     assert punctuation_only_difference["checked"][0]["match_mode"] == "punctuation_normalized"
 
+    # The final humanizer may change a connective while preserving the actual
+    # scene evidence. A long contiguous run from the final text is still
+    # verifiable; a short keyword overlap is not enough for this path.
+    rewritten = (
+        "我按下播放键。听筒里传来的声音，跟刚才那段语音不一样。"
+        "背景音里没有脚步声，没有金属摩擦，只有风声，很大的风声，"
+        "像是在一个空旷的地方录的。林峰的声音很轻，像是用最后一点力气说出来的："
+        "‘别进来。他们知道你会来。’"
+    )
+    rewritten_anchor = (
+        "我按下播放键。听筒里传来的声音，比刚才那段语音不一样。"
+        "背景音里没有脚步声，没有金属摩擦，只有风声，很大的风声，"
+        "像是在一个空旷的地方录的。林峰的声音很轻，像是用最后一点力气说出来的："
+        "“别进来。他们知道你会来。”"
+    )
+    rewritten_result = validate_payoff_evidence(
+        rewritten,
+        [{"type": "reveal", "anchor": rewritten_anchor, "result": "收到关键警告"}],
+        required=True,
+    )
+    assert rewritten_result["passed"] is True
+    assert rewritten_result["checked"][0]["match_mode"] == "fuzzy_contiguous"
+    assert rewritten_result["checked"][0]["anchor"] in rewritten
+
 
 def test_provider_facing_chinese_payoff_labels_map_to_canonical_types():
     contract = normalize_payoff_contract({"chapter_number": 1, "payoff_type": "身份反转"})

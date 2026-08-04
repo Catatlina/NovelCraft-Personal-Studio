@@ -58,6 +58,59 @@ def chapter_state_key(chapter_number: int) -> str:
     return f"chapter_{chapter_number:04d}"
 
 
+def _chapter_title_key(value: Any) -> str:
+    """Normalize a chapter title for duplicate detection."""
+    text = re.sub(r"第\s*\d+\s*章", "", str(value or ""))
+    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+
+
+def _title_hint_fragment(value: Any) -> str:
+    """Extract a short event-shaped title suffix from a plot hint."""
+    text = str(value or "").strip()
+    text = re.sub(r"^(?:本章|章末|钩子|结果)\s*[：:]?", "", text)
+    text = re.split(r"[。！？；\n]", text, maxsplit=1)[0]
+    text = re.sub(r"[“”\"'「」《》]", "", text)
+    text = text.strip(" ：:，,、—-")
+    return text[:12]
+
+
+def ensure_unique_chapter_title(
+    title: Any,
+    *,
+    previous_titles: list[Any] | None = None,
+    chapter_number: int = 0,
+    hints: list[Any] | None = None,
+) -> str:
+    """Keep provider chapter titles readable and unique within the novel.
+
+    The plot model remains responsible for creative naming. This guard only
+    intervenes when it repeats a recent title, using an already-planned event
+    or hook as a compact suffix; it never bans punctuation or a natural title
+    form globally.
+    """
+    base = str(title or "").strip() or f"第{chapter_number}章"
+    previous_keys = {
+        _chapter_title_key(item)
+        for item in (previous_titles or [])
+        if _chapter_title_key(item)
+    }
+    if _chapter_title_key(base) not in previous_keys:
+        return base[:40]
+
+    for hint in hints or []:
+        fragment = _title_hint_fragment(hint)
+        if len(_chapter_title_key(fragment)) < 2:
+            continue
+        candidate = f"{base}·{fragment}"
+        if _chapter_title_key(candidate) not in previous_keys:
+            return candidate[:40]
+
+    # Last-resort uniqueness is preferable to silently presenting several
+    # chapters under one label when a provider repeats an unhelpful title.
+    suffix = f"第{chapter_number}章" if chapter_number else "新线索"
+    return f"{base}·{suffix}"[:40]
+
+
 class AIGatewayError(RuntimeError):
     """Raised when the LLM call cannot be completed."""
 
@@ -248,6 +301,7 @@ class ContextAssembler:
             "rendered_chars": len(rendered),
             "truncated": truncated,
             "previous_chapters": [p.get("chapter_number") for p in previous],
+            "previous_titles": [p.get("title") for p in previous if p.get("title")],
         }
 
     @staticmethod
@@ -383,6 +437,7 @@ class SceneDirector:
         chapter_number: int,
         target_word_count: int,
         plot_brief: dict[str, Any] | None,
+        previous_titles: list[Any] | None = None,
     ) -> dict[str, Any] | None:
         """Turn a plot-engine brief into a beat sheet, or None if unusable."""
         if not plot_brief:
@@ -415,9 +470,19 @@ class SceneDirector:
                 b["target_words"] = max(200, int(b["target_words"] * factor))
 
         objectives = plot_brief.get("must_accomplish") or []
+        chapter_title = ensure_unique_chapter_title(
+            plot_brief.get("chapter_title_hint") or f"第{chapter_number}章",
+            previous_titles=previous_titles,
+            chapter_number=chapter_number,
+            hints=[
+                plot_brief.get("hook"),
+                (plot_brief.get("payoff_contract") or {}).get("visible_result"),
+                *[beat.get("name") for beat in normalised],
+            ],
+        )
         return {
             "chapter_number": chapter_number,
-            "chapter_title": plot_brief.get("chapter_title_hint") or f"第{chapter_number}章",
+            "chapter_title": chapter_title,
             "scene_goal": plot_brief.get("tension_target")
             or (objectives[0] if objectives else ""),
             "beats": normalised,
@@ -445,6 +510,7 @@ class SceneDirector:
         target_word_count: int = 3000,
         plot_brief: dict[str, Any] | None = None,
         quality_profile: dict[str, Any] | None = None,
+        previous_titles: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Produce a beat sheet. Returns dict including `_usage` for accounting.
 
@@ -452,7 +518,12 @@ class SceneDirector:
         plot engine's assessment pass, it is adopted directly instead of paying
         for a second planning call that could contradict the first.
         """
-        adopted = self._adopt_plot_brief(chapter_number, target_word_count, plot_brief)
+        adopted = self._adopt_plot_brief(
+            chapter_number,
+            target_word_count,
+            plot_brief,
+            previous_titles=previous_titles,
+        )
         if adopted is not None:
             return adopted
 
@@ -512,7 +583,12 @@ class SceneDirector:
             prompt_version="1.1.0",
         )
         plan = result["data"]
-        plan.setdefault("chapter_title", f"第{chapter_number}章")
+        plan["chapter_title"] = ensure_unique_chapter_title(
+            plan.get("chapter_title") or f"第{chapter_number}章",
+            previous_titles=previous_titles,
+            chapter_number=chapter_number,
+            hints=[plan.get("hook"), plan.get("scene_goal"), plan.get("conflict")],
+        )
         plan.setdefault("beats", [])
         plan["chapter_number"] = chapter_number
         plan["target_word_count"] = target_word_count
@@ -1652,6 +1728,7 @@ class GenerationEngine:
                 target_word_count=target_word_count,
                 plot_brief=plot_brief,
                 quality_profile=self.quality_profile,
+                previous_titles=context.get("previous_titles") or [],
             )
             add_usage(step, scene_plan.pop("_usage", {}))
             step.set_output(
@@ -1903,6 +1980,7 @@ class GenerationEngine:
             "context": {
                 "rendered_chars": context["rendered_chars"],
                 "previous_chapters": context["previous_chapters"],
+                "previous_titles": context.get("previous_titles") or [],
                 "previous_tail": context["context_layers"].get("previous_tail", ""),
                 "previous_transition_contract": context["context_layers"].get(
                     "previous_transition_contract", {}

@@ -1,7 +1,24 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from app.v7.generation.generation_engine import AIGatewayError, DeAIPipeline, GenerationEngine
+from app.v7.generation.generation_engine import (
+    AIGatewayError,
+    DeAIPipeline,
+    GenerationEngine,
+    ensure_unique_chapter_title,
+)
+
+
+def test_repeated_chapter_title_gets_an_existing_plot_event_suffix():
+    title = ensure_unique_chapter_title(
+        "语音里的求救",
+        previous_titles=["语音里的求救", "旧手机"],
+        chapter_number=22,
+        hints=["走廊尽头的钟声再次响起"],
+    )
+
+    assert title == "语音里的求救·走廊尽头的钟声再次响起"
+    assert title != "语音里的求救"
 
 
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():

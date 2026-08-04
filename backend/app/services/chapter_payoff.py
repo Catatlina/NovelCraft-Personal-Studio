@@ -9,6 +9,7 @@ store.
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 
@@ -87,6 +88,49 @@ def _text(value: Any, limit: int = 500) -> str:
 def _anchor_key(value: Any) -> str:
     """Compare evidence anchors without making punctuation a hard failure."""
     return re.sub(r"[\W_]+", "", str(value or ""), flags=re.UNICODE)
+
+
+def _anchor_key_with_spans(value: Any) -> tuple[str, list[tuple[int, int]]]:
+    """Return the normalized anchor key and its source-character spans.
+
+    Evidence is produced before/alongside the final humanization pass. A
+    semantic editor may change a few words while retaining a long, verbatim
+    run from the scene. Keeping spans lets the validator report the actual
+    text excerpt instead of accepting a reviewer paraphrase as if it were
+    quoted from the chapter.
+    """
+    raw = str(value or "")
+    chars: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for index, char in enumerate(raw):
+        if char == "_" or not char.isalnum():
+            continue
+        chars.append(char)
+        spans.append((index, index + 1))
+    return "".join(chars), spans
+
+
+def _resolve_fuzzy_anchor(text: str, anchor: str) -> str:
+    """Find a long contiguous excerpt when a safe rewrite changed wording.
+
+    This is intentionally conservative. It does not accept a bag-of-words
+    overlap: the shared portion must be contiguous, must be long enough to be
+    meaningful, and must cover a substantial part of the proposed anchor.
+    """
+    anchor_key, _ = _anchor_key_with_spans(anchor)
+    text_key, text_spans = _anchor_key_with_spans(text)
+    if not anchor_key or not text_key:
+        return ""
+
+    match = SequenceMatcher(None, anchor_key, text_key, autojunk=False).find_longest_match(
+        0, len(anchor_key), 0, len(text_key)
+    )
+    minimum = max(24, int(len(anchor_key) * 0.35))
+    if match.size < minimum:
+        return ""
+    start = text_spans[match.b]
+    end = text_spans[match.b + match.size - 1]
+    return text[start[0] : end[1]].strip()
 
 
 def _first(data: dict[str, Any], *keys: str) -> str:
@@ -290,17 +334,28 @@ def validate_payoff_evidence(
             and len(_anchor_key(anchor)) >= 6
             and _anchor_key(anchor) in _anchor_key(text)
         )
-        if not anchor or not (exact_match or normalized_match):
+        fuzzy_anchor = ""
+        if anchor and not (exact_match or normalized_match):
+            fuzzy_anchor = _resolve_fuzzy_anchor(str(text or ""), anchor)
+        if not anchor or not (exact_match or normalized_match or fuzzy_anchor):
             invalid.append(f"evidence[{index}] 缺少正文中可定位的原文锚点")
             continue
         if not result:
             invalid.append(f"evidence[{index}] 缺少可见结果")
             continue
+        resolved_anchor = fuzzy_anchor or anchor
         checked.append({
             "type": _text(item.get("type") or item.get("payoff_type")) or "other",
-            "anchor": anchor,
+            "anchor": resolved_anchor,
             "result": result,
-            "match_mode": "exact" if exact_match else "punctuation_normalized",
+            "source_anchor": anchor if fuzzy_anchor else None,
+            "match_mode": (
+                "exact"
+                if exact_match
+                else "punctuation_normalized"
+                if normalized_match
+                else "fuzzy_contiguous"
+            ),
         })
     # A provider may append a second illustrative evidence item whose anchor
     # is not verbatim, even though another item is exactly locatable.  Keep the
