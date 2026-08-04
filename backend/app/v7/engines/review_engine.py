@@ -294,6 +294,64 @@ class ReviewEngine(BaseEngine):
         self.record_usage(ai["usage"])
         raw = ai["data"]
 
+        # A malformed payoff_evidence field is a review-contract defect, not
+        # automatically a prose defect.  Ask the Provider for a bounded,
+        # evidence-only repair before putting the chapter on a review hold.
+        # The repair cannot change scores, audit items, or chapter text; it
+        # only accepts a replacement when an anchor is an exact/fuzzy match in
+        # the already-reviewed正文.
+        payoff_contract = data.get("payoff_contract") or {}
+        payoff_required = bool(data.get("quality_profile") and payoff_contract)
+        payoff_evidence_repair: dict[str, Any] = {}
+        if payoff_required:
+            initial_evidence = raw.get("payoff_evidence") or []
+            initial_validation = validate_payoff_evidence(
+                chapter_text,
+                initial_evidence,
+                required=True,
+            )
+            if not initial_validation.get("passed"):
+                payoff_evidence_repair = {
+                    "attempted": True,
+                    "initial_validation": initial_validation,
+                    "passed": False,
+                }
+                repair_prompt = (
+                    "上一次审稿的 payoff_evidence 字段无法通过逐字定位校验。"
+                    "不要重新评分，不要修改任何审计结论，只补齐这个字段。"
+                    "从下面正文中直接复制一段连续原文作为 anchor，至少 8 个字，"
+                    "anchor 必须能在正文中逐字搜索到；result 只描述这段原文已经发生的可见结果，"
+                    "不能写正文中没有发生的推测。只输出 JSON，不要解释。\n"
+                    f"【本章爽点契约】{json.dumps(payoff_contract, ensure_ascii=False)}\n"
+                    f"【正文】\n{review_text}\n"
+                    '{"payoff_evidence":[{"type":"兑现类型","anchor":"正文连续原句",'
+                    '"result":"可见结果","reaction":"人物或环境反应"}]}'
+                )
+                try:
+                    repair_ai = await self.ai_gateway.generate_json(
+                        repair_prompt,
+                        system_prompt="你是严格的中文小说审稿证据校对员，只输出合法 JSON，不重评正文。",
+                        max_tokens=800,
+                        temperature=0.0,
+                        prompt_name="v7.review.payoff_evidence_repair",
+                        prompt_version="1.0.0",
+                    )
+                    self.record_usage(repair_ai["usage"])
+                    repaired_evidence = (repair_ai.get("data") or {}).get("payoff_evidence") or []
+                    repaired_validation = validate_payoff_evidence(
+                        chapter_text,
+                        repaired_evidence,
+                        required=True,
+                    )
+                    payoff_evidence_repair.update({
+                        "passed": repaired_validation.get("passed") is True,
+                        "validation": repaired_validation,
+                    })
+                    if repaired_validation.get("passed") is True:
+                        raw = {**raw, "payoff_evidence": repaired_evidence}
+                except AIGatewayError as exc:
+                    payoff_evidence_repair["error"] = type(exc).__name__
+
         scores_raw = raw.get("dimension_scores") or {}
         dimension_scores: dict[str, int] = {}
         missing: list[str] = []
@@ -358,8 +416,6 @@ class ReviewEngine(BaseEngine):
             macro_scores=dimension_scores,
             reader_experience=reader_experience,
         )
-        payoff_contract = data.get("payoff_contract") or {}
-        payoff_required = bool(data.get("quality_profile") and payoff_contract)
         payoff_evidence = raw.get("payoff_evidence") or []
         payoff_evidence_validation = validate_payoff_evidence(
             chapter_text,
@@ -391,6 +447,7 @@ class ReviewEngine(BaseEngine):
             "payoff_contract": payoff_contract,
             "payoff_evidence": payoff_evidence,
             "payoff_evidence_validation": payoff_evidence_validation,
+            "payoff_evidence_repair": payoff_evidence_repair,
         }
 
         confidence = raw.get("confidence")

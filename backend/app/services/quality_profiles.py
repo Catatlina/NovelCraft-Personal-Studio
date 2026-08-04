@@ -261,6 +261,7 @@ _STYLE_PLUGINS: dict[str, dict[str, Any]] = {
         "chapter_rules": [
             "主角可以苟，但每章至少推进资源、信息、关系、身份或风险中的一项，苟不是停滞。",
             "节拍表写明的过桥、交易、对抗、修炼或揭示必须写成可见过程，不能用一句旁白从准备跳到结果；首次出现的设定要在动作、对白或代价中给出来源。",
+            "规则博弈或谈判必须写出一轮完整动作链：对手施压或展示代价，主角拿出已有物证/规则，对手被迫回应或让步，最后落到可见结果、代价或新压力；不能只写‘凭规则逼退对方’。本章爽点契约中的主动选择、结果和他人反应，至少各落在一处可定位的动作或对白上。",
             "同一装腔翻车、种田日常或吐槽节拍再次出现时，必须更换失败原因、人物反应和具体细节，禁止逐段复刻。",
             "系统奖励尽量内化成时间、资源或能力变化；只有改变选择时才展示提示，不连续弹出面板或数字播报。",
         ],
@@ -437,12 +438,13 @@ def select_quality_profile(
         "style_plugin_directive": _unique(active_plugin.get("directive", [])),
         # Keep the bounded prompt focused on the plugin's highest-leverage
         # controls.  The full merged lists remain available to later stages,
-        # while generation sees one opening rule, two variation rules and two
-        # anti-slop rules before the generic profile queue can crowd them out.
+        # while generation sees the opening rule, visible-beat rule, and the
+        # negotiation/payoff rule before the generic profile queue can crowd
+        # them out.
         "style_plugin_rules": _unique(
             list(active_plugin.get("directive", [])[:1])
             + list(active_plugin.get("opening_rules", [])[:1])
-            + list(active_plugin.get("chapter_rules", [])[:2])
+            + list(active_plugin.get("chapter_rules", [])[:3])
             + list(active_plugin.get("anti_ai_rules", [])[:2])
             + list(active_plugin.get("attention_beat_rules", [])[:1])
         ),
@@ -511,7 +513,7 @@ def compile_quality_directive(
     plugin_rules = [str(item) for item in (profile.get("style_plugin_directive") or [])[:2] if str(item).strip()]
     if plugin_rules:
         lines.append("可选风格插件（已启用）：" + "；".join(plugin_rules) + "。")
-    plugin_focus = [str(item) for item in (profile.get("style_plugin_rules") or [])[:6] if str(item).strip()]
+    plugin_focus = [str(item) for item in (profile.get("style_plugin_rules") or [])[:8] if str(item).strip()]
     if plugin_focus:
         lines.append("插件执行重点：" + "；".join(plugin_focus) + "。")
     if seq <= 3:

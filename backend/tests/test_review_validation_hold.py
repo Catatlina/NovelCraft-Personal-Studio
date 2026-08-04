@@ -59,3 +59,75 @@ def test_quality_gate_keeps_review_contract_failure_blocking():
 
     assert result["passed"] is False
     assert any(item["dimension"] == "payoff_evidence" for item in result["failures"])
+
+
+def test_execute_repairs_only_invalid_payoff_evidence(monkeypatch):
+    chapter_text = "沈砚抬手按住石门，石门当场退开，队伍里有人倒吸一口凉气。"
+
+    class FakeGateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, *_args, **_kwargs):
+            self.calls += 1
+            usage = {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"}
+            if self.calls == 1:
+                return {
+                    "data": {
+                        "dimension_scores": {key: 90 for key in REVIEW_DIMENSIONS},
+                        "overall_score": 90,
+                        "reader_experience": {
+                            "expectation": 90,
+                            "conflict": 90,
+                            "payoff": 90,
+                            "emotion_shift": 90,
+                            "worth_continuing": 90,
+                        },
+                        "audit_dimensions": {
+                            item.key: {"score": 90, "evidence": "evidence", "repair": "none"}
+                            for item in AUDIT_DIMENSIONS
+                        },
+                        "payoff_evidence": [{"type": "能力展示", "result": "石门退开"}],
+                    },
+                    "usage": usage,
+                }
+            return {
+                "data": {
+                    "payoff_evidence": [{
+                        "type": "能力展示",
+                        "anchor": "石门当场退开",
+                        "result": "石门退开，队伍获得通路",
+                        "reaction": "队伍震惊",
+                    }],
+                },
+                "usage": usage,
+            }
+
+    engine = object.__new__(ReviewEngine)
+    engine.ai_gateway = FakeGateway()
+    engine.record_usage = lambda usage: None
+    plan = EngineResult(success=True, result={
+        "chapter_number": 2,
+        "chapter_text": chapter_text,
+        "constraints_to_check": [],
+        "known_characters": [],
+        "known_plot": [],
+        "previous_chapter_tail": "",
+        "previous_transition_contract": {},
+        "chapter_plan": {},
+        "scene_plan": {},
+        "deai_metrics": {},
+        "pov_metrics": {},
+        "content_policy": {},
+        "generation_quality": {},
+        "quality_profile": {"profile_id": "test"},
+        "payoff_contract": {"visible_result": "石门退开"},
+    })
+
+    result = asyncio.run(engine.execute(plan))
+
+    assert result.success is True
+    assert result.result["payoff_evidence_repair"]["passed"] is True
+    assert result.result["payoff_evidence_validation"]["passed"] is True
+    assert result.result["payoff_evidence"][0]["anchor"] == "石门当场退开"
+    assert engine.ai_gateway.calls == 2
