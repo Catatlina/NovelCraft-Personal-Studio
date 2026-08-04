@@ -2650,7 +2650,13 @@ def _run_canonical_v7_task(
         release_lock(lock_key)
         release_ai_slot()
 
-@celery_app.task(bind=True, max_retries=4)
+# A canonical chapter can make five bounded Provider calls (plot, scene/text,
+# optional humanize, review, memory).  The previous worker-level soft limit
+# could terminate a slow but healthy chapter around eight minutes, after which
+# the batch was reported failed even though no quality decision had failed.
+# Keep the transport bounded, but give the complete V7 contract enough room to
+# finish and persist its ledger/state atomically.
+@celery_app.task(bind=True, max_retries=4, soft_time_limit=1200, time_limit=1500)
 @_isolated_request_context
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
                            api_key: str = "", api_url: str = "", model: str = "",

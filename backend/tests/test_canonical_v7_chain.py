@@ -192,6 +192,13 @@ def test_chapter_title_normalizer_removes_meta_summary_lead():
     assert "发现" not in title
 
 
+def test_canonical_task_allows_complete_slow_v7_chain():
+    from app.workers.tasks import gen_next_chapter_task
+
+    assert gen_next_chapter_task.soft_time_limit == 1200
+    assert gen_next_chapter_task.time_limit == 1500
+
+
 def test_canonical_bootstrap_keeps_quality_rejection_actionable(monkeypatch):
     from app.workers import tasks
 
