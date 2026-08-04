@@ -66,6 +66,7 @@ def test_longlife_style_plugin_is_explicit_and_scoped_to_matching_xuanhuan_subge
     assert "同一个两字人名作为段落开头尽量不超过全章约四分之一" in directive
     assert "段首承接要有变化" in directive
     assert "规则博弈或谈判必须写出一轮完整动作链" in directive
+    assert "同一动作或反应短语" in directive
 
 
 def test_longlife_style_plugin_does_not_leak_into_urban_profiles():

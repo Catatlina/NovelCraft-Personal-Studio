@@ -273,6 +273,7 @@ _STYLE_PLUGINS: dict[str, dict[str, Any]] = {
         "anti_ai_rules": [
             "不禁用任何标点；只防整章高密度破折号、连续重复句式、模板化收束和成片的工整排比。",
             "段首要有变化：同一个两字人名作为段落开头尽量不超过全章约四分之一；在不丢失第三人称限知的前提下，交替从动作、场景、物件、对白或他人反应起笔，也不要把人名全部粗暴替换成‘他/她’。",
+            "同一动作或反应短语（如‘没有说话’‘点了点头’）一章内不要反复充当默认承接；保留必要沉默，但改用视线、手部动作、停顿后的决定、声音变化或环境后果呈现，避免同一短语超过三次。",
             "降低空泛形容词、‘大道/机缘/逆天’式套话和修炼总结；用一个具体动作、物件或误会替代泛泛概括。",
             "重复梗允许保留，但每轮必须有新变量；发现近似段落时优先重写变量和反应，不靠机械删句掩盖。",
         ],
@@ -445,7 +446,7 @@ def select_quality_profile(
             list(active_plugin.get("directive", [])[:1])
             + list(active_plugin.get("opening_rules", [])[:1])
             + list(active_plugin.get("chapter_rules", [])[:3])
-            + list(active_plugin.get("anti_ai_rules", [])[:2])
+            + list(active_plugin.get("anti_ai_rules", [])[:3])
             + list(active_plugin.get("attention_beat_rules", [])[:1])
         ),
         "style_plugin_soft_metrics": deepcopy(active_plugin.get("soft_metrics") or {}),
@@ -513,7 +514,7 @@ def compile_quality_directive(
     plugin_rules = [str(item) for item in (profile.get("style_plugin_directive") or [])[:2] if str(item).strip()]
     if plugin_rules:
         lines.append("可选风格插件（已启用）：" + "；".join(plugin_rules) + "。")
-    plugin_focus = [str(item) for item in (profile.get("style_plugin_rules") or [])[:8] if str(item).strip()]
+    plugin_focus = [str(item) for item in (profile.get("style_plugin_rules") or [])[:9] if str(item).strip()]
     if plugin_focus:
         lines.append("插件执行重点：" + "；".join(plugin_focus) + "。")
     if seq <= 3:

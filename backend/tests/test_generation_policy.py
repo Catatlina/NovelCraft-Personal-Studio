@@ -55,6 +55,23 @@ def test_repeated_opening_risk_becomes_specific_humanize_guidance():
     }) == ""
 
 
+def test_repeated_action_tic_becomes_specific_humanize_guidance():
+    guidance = DeAIPipeline._tic_guidance({
+        "tic_metrics": {
+            "repeated": True,
+            "dominant": "没有说话",
+            "dominant_count": 4,
+        },
+    })
+
+    assert "没有说话" in guidance
+    assert "视线、手部动作、停顿后的决定" in guidance
+    assert "不得删掉事件" in guidance
+    assert DeAIPipeline._tic_guidance({
+        "tic_metrics": {"repeated": False, "dominant": "没有说话", "dominant_count": 4},
+    }) == ""
+
+
 def test_quality_directive_requires_key_beats_to_be_shown_not_skipped():
     profile = select_quality_profile(
         genre="玄幻",

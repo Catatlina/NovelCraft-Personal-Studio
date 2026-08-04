@@ -790,6 +790,22 @@ class DeAIPipeline:
             "将同一人名段首尽量降到全章约四分之一以内；不能删段，也不能把人名全部粗暴替换成‘他/她’。"
         )
 
+    @staticmethod
+    def _tic_guidance(metrics: dict[str, Any] | None) -> str:
+        """Turn repeated action/response tics into a bounded rewrite instruction."""
+        tic = (metrics or {}).get("tic_metrics") or {}
+        repeated = bool(tic.get("repeated"))
+        phrase = str(tic.get("dominant") or "").strip()
+        count = int(tic.get("dominant_count") or 0)
+        if not repeated or not phrase:
+            return ""
+        return (
+            "【动作短语去模板】检测到动作/反应短语"
+            f"‘{phrase}’出现约 {count} 次。保留必要的沉默或反应，"
+            "但至少改写其中一处为具体的视线、手部动作、停顿后的决定、声音变化或环境后果；"
+            "不得删掉事件，也不要把它机械替换成另一个单一口头禅。"
+        )
+
     async def process(
         self,
         text: str,
@@ -928,6 +944,7 @@ class DeAIPipeline:
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
             f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=None, active_rules=active_rules)}\n\n"
             f"{self._paragraph_opening_guidance(rule_metrics)}\n\n"
+            f"{self._tic_guidance(rule_metrics)}\n\n"
             f"【原文】\n{text}\n\n"
             "【长度约束】输出必须保留原文全部事件与细节，字符数尽量与原文一致，"
             "不得扩写；与原文相比不得增加超过 10%，不得摘要或新增剧情。\n"
