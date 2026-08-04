@@ -148,6 +148,35 @@ def test_provider_failure_is_retryable_but_missing_key_is_not():
     ) is False
 
 
+def test_cancelled_batch_slot_skips_provider_before_generation(monkeypatch):
+    from app.workers import tasks
+
+    class Cursor:
+        def fetchone(self):
+            return {"status": "cancelled", "cancel_requested": True}
+
+    class DB:
+        def execute(self, sql, params=()):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    cleared = []
+    monkeypatch.setattr(tasks, "connect", lambda: DB())
+    monkeypatch.setattr(
+        tasks,
+        "_clear_batch_current_ordinal",
+        lambda batch_id, ordinal: cleared.append((batch_id, ordinal)),
+    )
+
+    result = tasks._batch_slot_not_runnable("batch-cancelled", 3)
+
+    assert result["status"] == "cancelled"
+    assert result["reason"].endswith("Provider call skipped")
+    assert cleared == [("batch-cancelled", 3)]
+
+
 def test_canonical_bootstrap_keeps_quality_rejection_actionable(monkeypatch):
     from app.workers import tasks
 

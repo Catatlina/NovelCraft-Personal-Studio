@@ -2495,6 +2495,44 @@ def _summarize_and_store(db, chapter_id: str, body: list) -> None:
 # Chapter generation (M2 — unchanged from original)
 # ══════════════════════════════════════════════════════════════════════════
 
+def _batch_slot_not_runnable(batch_id: str, ordinal: int) -> dict[str, Any] | None:
+    """Return a terminal batch result before acquiring a Provider slot.
+
+    Celery can redeliver a message that was already queued when a batch was
+    cancelled or when a worker was restarted.  Checking only after generation
+    wastes API calls and can resurrect a cancelled slot.  This is intentionally
+    a fail-closed read: if the batch row cannot be read, the caller raises
+    before any Provider request is made.
+    """
+    if not batch_id:
+        return None
+    db = connect()
+    try:
+        batch = db.execute(
+            "SELECT status, cancel_requested FROM generation_batches WHERE id=%s",
+            (batch_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not batch:
+        return {
+            "status": "failed",
+            "batch_id": batch_id,
+            "ordinal": ordinal,
+            "reason": "batch not found; Provider call skipped",
+        }
+    status = str(batch.get("status") or "failed")
+    if bool(batch.get("cancel_requested")) or status not in {"pending", "running"}:
+        # Release a stale claim, but preserve the terminal status and history.
+        _clear_batch_current_ordinal(batch_id, ordinal)
+        return {
+            "status": "cancelled" if bool(batch.get("cancel_requested")) else status,
+            "batch_id": batch_id,
+            "ordinal": ordinal,
+            "reason": "batch is not active; Provider call skipped",
+        }
+    return None
+
 def _run_canonical_v7_task(
     task: Any,
     novel_id: str,
@@ -2515,6 +2553,9 @@ def _run_canonical_v7_task(
     from .lock import acquire_lock, release_lock
 
     api_key = resolve_byok_key(api_key_ref, api_key)
+    blocked = _batch_slot_not_runnable(batch_id, batch_ordinal)
+    if blocked is not None:
+        return blocked
     acquired = False
     for _ in range(6):
         if acquire_ai_slot(timeout=5):
