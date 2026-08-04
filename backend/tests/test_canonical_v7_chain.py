@@ -177,6 +177,21 @@ def test_cancelled_batch_slot_skips_provider_before_generation(monkeypatch):
     assert cleared == [("batch-cancelled", 3)]
 
 
+def test_chapter_title_normalizer_removes_meta_summary_lead():
+    from app.v7.generation.generation_engine import ensure_unique_chapter_title
+
+    title = ensure_unique_chapter_title(
+        "旧宅回声",
+        previous_titles=["旧宅回声"],
+        chapter_number=6,
+        hints=["主角在旧宅中发现一张旧照"],
+    )
+
+    assert title == "旧宅回声·一张旧照"
+    assert "主角" not in title
+    assert "发现" not in title
+
+
 def test_canonical_bootstrap_keeps_quality_rejection_actionable(monkeypatch):
     from app.workers import tasks
 

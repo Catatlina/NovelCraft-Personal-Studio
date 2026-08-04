@@ -94,7 +94,24 @@ def ensure_unique_chapter_title(
     or hook as a compact suffix; it never bans punctuation or a natural title
     form globally.
     """
-    base = str(title or "").strip() or f"第{chapter_number}章"
+    def clean_title(value: Any) -> str:
+        text = str(value or "").strip()
+        text = re.sub(r"^第\s*\d+\s*章\s*[：:、\s]*", "", text)
+        # Planning models sometimes return a sentence instead of a title:
+        # "主角在旧宅中发现一张旧照". Strip only the meta/action lead; do
+        # not ban natural punctuation or ordinary event wording.
+        text = re.sub(
+            r"^(?:本章|这一章|主角|人物|他|她)?"
+            r"(?:在[^，。！？：:]{0,20})?"
+            r"(?:发现|收到|看见|听见|进入|遭遇|面对|决定|开始)\s*",
+            "",
+            text,
+        )
+        text = re.sub(r"^(?:本章|这一章)(?:将|要)?\s*", "", text)
+        text = re.sub(r"[（(][^）)]{0,20}[）)]$", "", text).strip()
+        return text.strip(" ：:，,、—-")[:20]
+
+    base = clean_title(title) or f"第{chapter_number}章"
     previous_keys = {
         _chapter_title_key(item)
         for item in (previous_titles or [])
@@ -104,7 +121,7 @@ def ensure_unique_chapter_title(
         return base[:40]
 
     for hint in hints or []:
-        fragment = _title_hint_fragment(hint)
+        fragment = clean_title(_title_hint_fragment(hint))
         if len(_chapter_title_key(fragment)) < 2:
             continue
         candidate = f"{base}·{fragment}"
@@ -629,6 +646,9 @@ class SceneDirector:
             '  "confidence": 0.85\n'
             "}\n"
             "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数。"
+            "chapter_title 必须是 2-12 字的事件、物件、冲突或情绪短标题；"
+            "禁止写成剧情摘要、操作说明或元叙述，禁止出现‘第X章’、‘本章’、"
+            "‘主角在……发现……’、‘读者将……’等模板。"
         )
         result = await self.gateway.generate_json(
             prompt,

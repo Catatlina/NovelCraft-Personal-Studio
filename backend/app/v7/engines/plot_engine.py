@@ -308,7 +308,7 @@ class PlotEngine(BaseEngine):
 
 只输出如下 JSON：
 {{
-  "chapter_title": "本章标题（不超过 20 字）",
+  "chapter_title": "事件/意象短标题（2-12 字，不超过 20 字）",
   "must_accomplish": ["本章必须完成的事 1", "本章必须完成的事 2"],
   "tension_target": "本章张力目标的一句话描述",
   "pacing_advice": "节奏建议的一句话描述",
@@ -323,7 +323,11 @@ class PlotEngine(BaseEngine):
       "emotion": "情绪", "importance": 0.6}}
   ],
   "confidence": 0.0
-}}"""
+}}
+
+标题必须是读者会看到的短标题，不得写成剧情摘要或操作说明；禁止出现“第X章”、
+“本章”、“主角在……发现……”、“读者将……”等元叙述模板。若与上一章标题相近，
+改用本章具体事件、物件、冲突或情绪意象命名。"""
 
     # ── analyze mode ────────────────────────────────────────────────────
     async def _analyze_written_chapter(
