@@ -776,6 +776,20 @@ class DeAIPipeline:
             gate["blocking_flags"] = sorted(set(blocking_flags))
         return gate
 
+    @staticmethod
+    def _paragraph_opening_guidance(metrics: dict[str, Any] | None) -> str:
+        """Turn a repeated-opening signal into a concrete rewrite instruction."""
+        opening = (metrics or {}).get("repeated_paragraph_opening") or {}
+        ratio = float(opening.get("ratio") or 0.0)
+        if ratio < 0.30 or not opening.get("opening"):
+            return ""
+        return (
+            "【段首结构修复】检测到段落开头重复："
+            f"‘{opening.get('opening')}’约占 {ratio:.1%}。"
+            "定稿必须保留全部事件、人物和自然分段，把一部分段落改为从动作、环境、物件、对白或他人反应起笔，"
+            "将同一人名段首尽量降到全章约四分之一以内；不能删段，也不能把人名全部粗暴替换成‘他/她’。"
+        )
+
     async def process(
         self,
         text: str,
@@ -913,6 +927,7 @@ class DeAIPipeline:
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
             f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=None, active_rules=active_rules)}\n\n"
+            f"{self._paragraph_opening_guidance(rule_metrics)}\n\n"
             f"【原文】\n{text}\n\n"
             "【长度约束】输出必须保留原文全部事件与细节，字符数尽量与原文一致，"
             "不得扩写；与原文相比不得增加超过 10%，不得摘要或新增剧情。\n"
@@ -2217,7 +2232,7 @@ class GenerationEngine:
             "转折前给读者可见的动作、线索或异常，高潮后留下具体余波；"
             "人物只能使用自己已经获得的信息，能力、物品、时间和地点必须有来源；"
             "句式长短要有变化，避免连续段落用同一主语和同一收束方式；"
-            "不要让同一个两字人名机械占据大量段落开头，交替从动作、场景、物件、对白或他人反应起笔，"
+            "同一个两字人名作为段落开头尽量不超过全章约四分之一，交替从动作、场景、物件、对白或他人反应起笔，"
             "同时保持第三人称限知清晰，不能把人名全换成‘他/她’来制造另一种重复。"
             "章末必须把钩子落实为动作、发现或新的选择，不得用总结/说教代替；"
             "情绪要有起伏，避免每段都用同一种‘提出问题-解释-总结’结构；"

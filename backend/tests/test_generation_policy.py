@@ -4,6 +4,7 @@ from app.services.quality_profiles import compile_quality_directive, select_qual
 from app.prompt_registry import PROMPT_SEEDS
 from app.v7.engines.plot_engine import PlotEngine
 from app.v7.integration.quality import evaluate_review
+from app.v7.generation.generation_engine import DeAIPipeline
 
 
 def test_first_person_is_allowed_only_inside_quoted_character_voice():
@@ -39,6 +40,19 @@ def test_classical_first_person_marker_does_not_match_common_compounds():
     assert clean["first_person_count"] == 0
     assert first_person["passed"] is False
     assert first_person["first_person_tokens"] == ["余"]
+
+
+def test_repeated_opening_risk_becomes_specific_humanize_guidance():
+    guidance = DeAIPipeline._paragraph_opening_guidance({
+        "repeated_paragraph_opening": {"opening": "沈砚", "ratio": 0.3036},
+    })
+
+    assert "沈砚" in guidance
+    assert "四分之一以内" in guidance
+    assert "动作、环境、物件、对白或他人反应" in guidance
+    assert DeAIPipeline._paragraph_opening_guidance({
+        "repeated_paragraph_opening": {"opening": "沈砚", "ratio": 0.25},
+    }) == ""
 
 
 def test_generation_directive_places_pov_and_urban_safety_before_writing():
