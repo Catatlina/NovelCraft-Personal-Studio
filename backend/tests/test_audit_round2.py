@@ -204,7 +204,7 @@ def test_ai_edit_creates_version_branch(authed, monkeypatch):
     assert version is not None
 
 
-def test_ai_edit_returns_review_and_next_chapter_plan(authed, monkeypatch):
+def test_ai_edit_returns_review_without_blocking_on_next_chapter_plan(authed, monkeypatch):
     from app.db import connect, encode, new_id
 
     client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
@@ -225,8 +225,6 @@ def test_ai_edit_returns_review_and_next_chapter_plan(authed, monkeypatch):
         calls.append(kwargs["task_type"])
         if kwargs["task_type"] == "review_7dim":
             return {"score": 88, "issues": ["节奏可加强"]}
-        if kwargs["task_type"] == "plan_next_chapter":
-            return {"next_title": "第四章 回声", "goals": ["推进主线"], "conflicts": ["制造新阻力"], "warnings": []}
         return {"text": "重写后的章节正文"}
 
     import app.main as main_module
@@ -243,8 +241,8 @@ def test_ai_edit_returns_review_and_next_chapter_plan(authed, monkeypatch):
     data = response.json()["data"]
     assert data["text"] == "重写后的章节正文"
     assert data["review_7dim"]["score"] == 88
-    assert data["next_chapter_plan"]["next_title"] == "第四章 回声"
-    assert calls == ["editor_rewrite", "review_7dim", "plan_next_chapter"]
+    assert data["next_chapter_plan"] is None
+    assert calls == ["editor_rewrite", "review_7dim"]
 
 
 def test_reader_synopsis_is_generated_and_persisted_separately(authed, monkeypatch):

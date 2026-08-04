@@ -1644,7 +1644,15 @@ def ai_edit(
     # the canonical V7 writer.  The preview remains user-confirmed, but a
     # score in the low 80s or a material risk must trigger targeted rework.
     EDITOR_REVIEW_PASS = 85
-    MAX_EDITOR_RETRIES = 3
+    # Interactive editor actions must finish within the browser's operation
+    # window.  One quality repair pass is enough to keep the review gate
+    # meaningful while avoiding the old 4-generation/4-review worst case that
+    # made "按全部建议润色" appear broken in production.  Deployments that
+    # explicitly accept a slower editor may raise this to at most 3 retries.
+    try:
+        MAX_EDITOR_RETRIES = max(0, min(int(os.getenv("EDITOR_MAX_RETRIES", "1")), 3))
+    except (TypeError, ValueError):
+        MAX_EDITOR_RETRIES = 1
 
     if str(op) == "deai":
         from app.services.deai_pipeline import DeaiPipeline
@@ -1740,7 +1748,7 @@ def ai_edit(
                 if quality_gate["passed"]:
                     best = {"text": candidate_text, "review_7dim": review}
                     break
-                # 评分/字数不达标 → 用审查建议 + 去 AI 味要求重跑（最多 3 次）
+                # 评分/字数不达标 → 用审查建议 + 去 AI 味要求重跑（默认最多 1 次）
                 issues = repair_feedback(
                     quality_gate["quality_repair_contract"],
                     list(review.get("issues", [])),
@@ -1773,7 +1781,10 @@ def ai_edit(
             if count_content_chars(payload.selection) >= operation_min_chars:
                 output = {"text": _ensure_editor_paragraphs(payload.selection)}
 
-    # 附七维审查（deai 单遍在此补算）与续章规划
+    # 附七维审查（deai 单遍在此补算）。下一章规划属于实时审计/生成
+    # 链路的上下文，不是编辑器预览的必要数据；这里不再同步调用，避免
+    # “按全部建议润色”平白多等一次模型请求。编辑器收到的 review_7dim
+    # 已足够展示问题、评分和质量门禁，应用后实时审计会按需刷新规划。
     if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
         review_context = _chapter_review_context(content, output.get("text") or payload.selection)
         if output.get("review_7dim") is None:
@@ -1805,12 +1816,7 @@ def ai_edit(
         )
         output["review_7dim"]["quality_gate"] = final_gate
         output["review_7dim"]["quality_repair_contract"] = final_gate["quality_repair_contract"]
-        output["next_chapter_plan"] = complete(
-            run_id=None, node_key=None, project_id=content["project_id"],
-            task_type="plan_next_chapter", prompt_name="narrative.plan_next_chapter",
-            variables=review_context,
-            client_mutation_id=f"{payload.client_mutation_id}:next" if payload.client_mutation_id else None,
-        )
+        output["next_chapter_plan"] = None
     # C5-03: every AI edit leaves a version branch so the tree stays auditable.
     conn = connect()
     conn.execute(
