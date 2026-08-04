@@ -1,6 +1,7 @@
 from app.services.content_policy import analyze_content_policy, content_generation_contract
 from app.services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 from app.services.quality_profiles import compile_quality_directive, select_quality_profile
+from app.v7.engines.plot_engine import PlotEngine
 from app.v7.integration.quality import evaluate_review
 
 
@@ -40,6 +41,25 @@ def test_generation_directive_places_pov_and_urban_safety_before_writing():
     assert "第三人称限知" in third_person_generation_contract()
 
 
+def test_pre_generation_plot_prompt_inherits_the_same_contract():
+    engine = PlotEngine.__new__(PlotEngine)
+    engine.quality_profile = select_quality_profile(genre="都市", subgenre="都市神豪")
+
+    prompt = engine._build_assess_prompt(
+        chapter_number=1,
+        outline="陆砚接手一只停摆的机械表，发现表内藏着即将发生的商业陷阱线索。",
+        open_goals=[],
+        overdue_goals=[],
+        open_threads=[],
+        perception={"state_total": 0, "pending_review": 0},
+        previous_node=None,
+    )
+
+    assert "第三人称叙述硬约束" in prompt
+    assert "完全架空的现代社会" in prompt
+    assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in prompt
+
+
 def test_urban_content_policy_rejects_known_real_entity_and_profanity_but_keeps_plant_grass():
     profile = select_quality_profile(genre="都市")
 
@@ -74,4 +94,3 @@ def test_quality_gate_rejects_pov_and_content_policy_even_with_high_scores():
     dimensions = {item["dimension"] for item in result["failures"]}
     assert "third_person_narrative" in dimensions
     assert "profanity_or_insult" in dimensions
-

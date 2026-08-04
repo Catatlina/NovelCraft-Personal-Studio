@@ -166,7 +166,12 @@ class PlotEngine(BaseEngine):
                 max_tokens=2500,
                 temperature=0.3,
                 prompt_name="v7.plot.assess",
-                prompt_version="1.1.0",
+                # The assessment prompt now carries the same generation-first
+                # POV, fictional-world, and safe-language contract as the
+                # writer. Keep its provenance version distinct from the old
+                # planning prompt so production traces cannot silently mix
+                # pre-contract and post-contract decisions.
+                prompt_version="1.2.0",
             )
             ai_payload = ai["data"] or {}
             self.record_usage(ai["usage"])
