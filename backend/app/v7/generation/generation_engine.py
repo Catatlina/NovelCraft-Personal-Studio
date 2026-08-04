@@ -1067,13 +1067,92 @@ class DeAIPipeline:
                 "applied": True,
             })
         after_metrics = analyze_deai_patterns(text, profile=quality_profile)
+        combined_usage = dict(ai.get("usage") or {})
+        opening_repair_gate: dict[str, Any] = {"passed": True, "mode": "not_needed"}
+        opening_repair_usage: dict[str, Any] = {}
+        opening_risk = after_metrics.get("repeated_paragraph_opening") or {}
+        if float(opening_risk.get("ratio") or 0.0) >= 0.30:
+            opening_repair_prompt = (
+                "只修复下面正文的段落起笔重复，不改剧情。必须保留全部事件、人物、地点、时间、因果、对白、信息和段落数量；"
+                "不删段、不合并段、不新增剧情，不把整章改成摘要。"
+                f"当前约 {float(opening_risk.get('ratio') or 0.0):.1%} 的段落以‘{opening_risk.get('opening')}’开头，"
+                "请只改动部分段落的前几个字，让它们自然地从动作、环境、物件、对白或他人反应起笔，"
+                "目标是把同一人名段首降到全章约四分之一以内；不要把人名全部机械换成‘他/她’，保持第三人称限知清晰。"
+                "输出完整正文 JSON，不要输出解释。\n\n"
+                f"【正文】\n{text}"
+            )
+            try:
+                opening_ai = await self.gateway.generate_json(
+                    opening_repair_prompt,
+                    system_prompt=(
+                        "你是严格的中文网文段落编辑，只做局部起笔修复，只输出合法 JSON。"
+                        + third_person_generation_contract()
+                    ),
+                    max_tokens=max(1800, min(4800, int(chinese_word_count(text) * 1.08))),
+                    temperature=0.25,
+                    prompt_name="bootstrap.final_humanize_opening_repair",
+                    prompt_version="1.0.0",
+                )
+                opening_candidate = str((opening_ai.get("data") or {}).get("humanized_text") or "").strip()
+                opening_candidate, opening_shape = normalize_and_validate_rewrite(
+                    text,
+                    opening_candidate,
+                    minimum_chars=50,
+                )
+                opening_duplicates = duplicate_paragraph_stats(opening_candidate)
+                if float(opening_duplicates.get("duplicate_ratio") or 0.0) >= 0.01:
+                    raise ValueError("opening repair candidate contains repeated full paragraphs")
+                opening_after = analyze_deai_patterns(opening_candidate, profile=quality_profile)
+                opening_after_risk = opening_after.get("repeated_paragraph_opening") or {}
+                opening_repair_usage = opening_ai.get("usage") or {}
+                for key in ("tokens_input", "tokens_output", "cost"):
+                    primary = combined_usage.get(key) or 0
+                    extra = opening_repair_usage.get(key) or 0
+                    combined_usage[key] = primary + extra
+                combined_usage["model"] = opening_repair_usage.get("model") or combined_usage.get("model")
+                if float(opening_after_risk.get("ratio") or 0.0) >= 0.30:
+                    raise ValueError(
+                        "opening repair did not reduce repeated paragraph opening below the hard gate"
+                    )
+                text = opening_candidate
+                after_metrics = opening_after
+                opening_repair_gate = {
+                    "passed": True,
+                    "mode": "targeted",
+                    "before_ratio": opening_risk.get("ratio"),
+                    "after_ratio": opening_after_risk.get("ratio"),
+                    "shape": opening_shape,
+                }
+                layers.append({
+                    "layer": "targeted_paragraph_opening_repair",
+                    "changes": 1,
+                    "applied": True,
+                    "before_ratio": opening_risk.get("ratio"),
+                    "after_ratio": opening_after_risk.get("ratio"),
+                    "usage": opening_repair_usage,
+                })
+            except (AIGatewayError, ValueError) as exc:
+                opening_repair_gate = {
+                    "passed": False,
+                    "mode": "targeted",
+                    "code": "repeated_paragraph_opening",
+                    "message": str(exc),
+                    "before_ratio": opening_risk.get("ratio"),
+                }
+                layers.append({
+                    "layer": "targeted_paragraph_opening_repair",
+                    "changes": 0,
+                    "applied": False,
+                    "reason": str(exc),
+                    "usage": opening_repair_usage,
+                })
         layers.append(
             {
                 "layer": "semantic_final_humanize",
                 "changes": len(payload.get("changes") or []),
                 "patterns_removed": payload.get("ai_patterns_removed") or [],
                 "shape": shape,
-                "usage": ai.get("usage") or {},
+                "usage": combined_usage,
             }
         )
 
@@ -1094,8 +1173,8 @@ class DeAIPipeline:
                 "risk_delta": before_metrics["risk_score"] - after_metrics["risk_score"],
                 "duplicate_repair": dedup_evidence,
             },
-            "quality_gate": {"passed": True},
-            "usage": ai.get("usage") or {},
+            "quality_gate": opening_repair_gate,
+            "usage": combined_usage,
         }
 
     def _layer_cliches(self, text: str) -> tuple[str, int]:
