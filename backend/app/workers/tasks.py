@@ -26,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any
 
+from celery.exceptions import Retry
+
 from app.db import connect, encode, new_id, row_to_dict
 from app.gateway import (BudgetExceeded, OutputValidationError, ProviderError, complete,
                          validate_task_output, _request_api_key, _request_api_base_url, _request_model)
@@ -2548,6 +2550,21 @@ def _run_canonical_v7_task(
             # as a transport/task failure used to show a generic "batch
             # failed" and strand the generated text outside the library.
             if result.get("status") == "pending_approval":
+                if result.get("retryable_planning_failure"):
+                    retry_count = int(
+                        getattr(getattr(task, "request", None), "retries", 0) or 0
+                    )
+                    # Keep the slot claim in place while Celery retries the
+                    # same task.  The task is bounded by max_retries=4; after
+                    # exhaustion the generic exception path marks the batch
+                    # failed truthfully for manual resume.
+                    raise task.retry(
+                        exc=RuntimeError(
+                            "V7 planning/provider failure is transient; retrying "
+                            f"ordered batch slot {batch_ordinal}"
+                        ),
+                        countdown=min(60, 10 * (retry_count + 1)),
+                    )
                 # No chapter row exists for a planning-only approval block.
                 # Do not mislabel it as a prose quality failure: the caller
                 # needs the actual permission reason to decide whether to
@@ -2580,6 +2597,10 @@ def _run_canonical_v7_task(
                     ),
                 )
         return result
+    except Retry:
+        # Celery owns the retry lifecycle.  Do not mark the batch failed while
+        # the same claimed ordinal is waiting for its bounded retry.
+        raise
     except Exception as exc:
         if batch_id:
             _mark_batch_failed(batch_id, exc)

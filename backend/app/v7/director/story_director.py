@@ -29,6 +29,7 @@ from ..generation.generation_engine import (
     GenerationEngine,
     chapter_state_key,
     chinese_word_count,
+    is_retryable_provider_failure,
 )
 from ..repositories.decision import DecisionPermissionRepository
 from ..integration.quality import (
@@ -320,6 +321,18 @@ class StoryDirector:
                     "blocked_reason": decision["blocked_reason"],
                     "permission_level": decision["level"],
                     "decision_id": decision.get("decision_id"),
+                    # Planning/provider transport failures are operationally
+                    # retryable, not human approval requests.  Keep the
+                    # assessment evidence small but explicit so the worker
+                    # can retry the same ordered batch slot without guessing.
+                    "planning_assessment": {
+                        "plot_success": bool(assessment.get("plot_success")),
+                        "confidence": assessment.get("confidence"),
+                        "blockers": list(assessment.get("blockers") or []),
+                    },
+                    "retryable_planning_failure": bool(
+                        assessment.get("retryable_planning_failure")
+                    ),
                     "steps_executed": ["perceive", "assess", "decide"],
                 }
                 await self.tracer.complete_run(run_id, output_data=result)
@@ -538,8 +551,13 @@ class StoryDirector:
         # The gate must key off the assessment's own confidence, not the
         # confidence of the last phase (which only reflects state persistence).
         confidence = float(analyze_phase.get("confidence") or 0.0)
+        plot_failure_reason = plot_run.reason or ""
+        retryable_planning_failure = bool(
+            not plot_run.success
+            and is_retryable_provider_failure(plot_failure_reason)
+        )
         if not plot_run.success:
-            blockers.append(plot_run.reason or "plot engine pipeline failed")
+            blockers.append(plot_failure_reason or "plot engine pipeline failed")
             confidence = min(confidence, 0.4)
 
         return {
@@ -553,6 +571,7 @@ class StoryDirector:
             "payoff_contract": assessment_data.get("payoff_contract") or {},
             "gaps": gaps,
             "blockers": blockers,
+            "retryable_planning_failure": retryable_planning_failure,
             # A bootstrap first chapter is allowed to start when the writer
             # received a substantive creative brief.  The confidence number
             # still remains auditable; this is a narrowly scoped policy for

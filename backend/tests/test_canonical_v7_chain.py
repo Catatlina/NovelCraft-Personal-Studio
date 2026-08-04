@@ -133,6 +133,21 @@ def test_canonical_bootstrap_keeps_pending_approval_truthful(monkeypatch):
     assert workflow_update[1][2] == "waiting_human"
 
 
+def test_provider_failure_is_retryable_but_missing_key_is_not():
+    from app.v7.generation.generation_engine import is_retryable_provider_failure
+
+    assert is_retryable_provider_failure(
+        "plot assessment AI call failed: LLM call failed after 3 attempts: "
+        "Server error '503 Service Unavailable'"
+    ) is True
+    assert is_retryable_provider_failure(
+        "DEEPSEEK_API_KEY is not configured; refusing to fabricate output"
+    ) is False
+    assert is_retryable_provider_failure(
+        "provider succeeded but V7 cost accounting failed"
+    ) is False
+
+
 def test_canonical_bootstrap_keeps_quality_rejection_actionable(monkeypatch):
     from app.workers import tasks
 

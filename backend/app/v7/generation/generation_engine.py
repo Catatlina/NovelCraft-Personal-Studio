@@ -125,6 +125,54 @@ class BudgetAccountingError(AIGatewayError):
     """Raised when a successful provider call cannot be durably accounted for."""
 
 
+def is_retryable_provider_failure(error: Any) -> bool:
+    """Classify a provider failure that is safe to retry at the task layer.
+
+    This is deliberately narrower than ``AIGatewayError``.  Missing keys,
+    budget failures and ledger failures must stop immediately; a transient
+    5xx/rate-limit/transport failure may be retried by the bounded Celery
+    task.  Keeping the classification next to the gateway prevents the V7
+    director and worker from making different decisions about the same error.
+    """
+    text = str(error or "").strip().lower()
+    if not text:
+        return False
+
+    permanent_markers = (
+        "api key",
+        "not configured",
+        "refusing to fabricate",
+        "budget",
+        "cost accounting",
+        "accounting failed",
+        "ledger",
+    )
+    if any(marker in text for marker in permanent_markers):
+        return False
+
+    transient_markers = (
+        "server error",
+        "service unavailable",
+        "temporarily unavailable",
+        "rate limit",
+        "too many requests",
+        "timeout",
+        "timed out",
+        "connection reset",
+        "connection refused",
+        "connection error",
+        "502",
+        "503",
+        "504",
+        "429",
+        "llm call failed after",
+        "did not return parseable json",
+        "json unusable",
+        "usable confidence",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
 class ContextAssembler:
     """Assembles real generation context out of the Novel Brain."""
 
