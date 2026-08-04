@@ -270,6 +270,7 @@ _STYLE_PLUGINS: dict[str, dict[str, Any]] = {
         ],
         "anti_ai_rules": [
             "不禁用任何标点；只防整章高密度破折号、连续重复句式、模板化收束和成片的工整排比。",
+            "段首要有变化：不要让同一个两字人名机械占据大量段落开头；在不丢失第三人称限知的前提下，交替从动作、场景、物件、对白或他人反应起笔，也不要把人名全部粗暴替换成‘他/她’。",
             "降低空泛形容词、‘大道/机缘/逆天’式套话和修炼总结；用一个具体动作、物件或误会替代泛泛概括。",
             "重复梗允许保留，但每轮必须有新变量；发现近似段落时优先重写变量和反应，不靠机械删句掩盖。",
         ],
@@ -562,6 +563,10 @@ def compile_quality_directive(
         contract_text = "；".join(f"{label}={payoff_contract.get(key)}" for label, key in fields if payoff_contract.get(key))
         if contract_text:
             lines.append("本章爽点契约：" + contract_text + "。结果必须由角色行动造成，不能只在旁白里宣布。")
+    lines.append(
+        "段首承接要有变化：不要机械重复同一两字人名或同一动作起笔；可从动作、场景、物件、对白或他人反应切入，"
+        "但要保持第三人称限知清晰，不能用大量‘他/她’替换造成另一种模板感。"
+    )
     lines.append("标点不设禁用清单；只处理整章高密度、连续重复或模板化使用，保留自然对白和人物习惯。")
     return "\n".join(lines)[:5000]
 

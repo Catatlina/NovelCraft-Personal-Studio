@@ -63,6 +63,8 @@ def test_longlife_style_plugin_is_explicit_and_scoped_to_matching_xuanhuan_subge
     assert "可选风格插件（已启用）" in directive
     assert "不机械凑数" in directive
     assert "连续重复句式" in directive
+    assert "同一个两字人名机械占据大量段落开头" in directive
+    assert "段首承接要有变化" in directive
 
 
 def test_longlife_style_plugin_does_not_leak_into_urban_profiles():
