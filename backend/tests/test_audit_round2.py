@@ -247,6 +247,45 @@ def test_ai_edit_returns_review_and_next_chapter_plan(authed, monkeypatch):
     assert calls == ["editor_rewrite", "review_7dim", "plan_next_chapter"]
 
 
+def test_reader_synopsis_is_generated_and_persisted_separately(authed, monkeypatch):
+    from app.db import connect, decode, encode, new_id
+
+    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    content_id = new_id()
+    idea = "项目完整设定：旧城修理铺、失踪父亲、隐藏账本和三次交易，供系统规划长篇剧情。"
+    db = connect()
+    db.execute(
+        "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s,%s,'novel','旧城修理铺',%s,%s,'draft')",
+        (content_id, project_id, encode({"type": "doc", "content": []}),
+         encode({"idea": idea, "genre": "都市悬疑", "style": "第三人称、节奏明快"})),
+    )
+    db.commit()
+    db.close()
+
+    synopsis = "沈砚接手一间快要倒闭的修理铺，却从一只送来的旧表里发现父亲失踪前留下的线索。每修好一件旧物，他就离真相更近一步，也更接近那场会毁掉整座城市的交易。"
+    import app.main as main_module
+    monkeypatch.setattr(main_module, "complete", lambda **kwargs: {
+        "synopsis": synopsis,
+        "selling_points": ["旧物藏线索", "父亲失踪谜团"],
+    })
+
+    response = client.post(f"/api/v1/contents/{content_id}/synopsis", headers=headers)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["synopsis"] == synopsis
+    assert data["content"]["meta"]["idea"] == idea
+    assert data["content"]["meta"]["synopsis"] == synopsis
+    assert data["content"]["meta"]["synopsis"] != data["content"]["meta"]["idea"]
+
+    db = connect()
+    row = db.execute("SELECT meta FROM contents WHERE id=%s", (content_id,)).fetchone()
+    version = db.execute("SELECT label FROM versions WHERE entity_id=%s AND label='synopsis_generated'", (content_id,)).fetchone()
+    db.close()
+    persisted = decode(row["meta"], {}) if not isinstance(row["meta"], dict) else row["meta"]
+    assert persisted["synopsis"] == synopsis
+    assert version is not None
+
+
 # --- workflow executor: honest semantics ---------------------------------------
 
 def test_non_bootstrap_workflow_dispatches_with_nodes(authed):

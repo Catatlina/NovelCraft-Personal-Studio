@@ -578,6 +578,71 @@ def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends
     return ok(updated)
 
 
+@app.post("/api/v1/contents/{content_id}/synopsis")
+@limiter.limit("10/minute")
+def generate_reader_synopsis(
+    request: Request,
+    content_id: str,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Generate and persist storefront synopsis without changing the idea.
+
+    ``meta.idea`` is the author's source brief; ``meta.synopsis`` is reader-
+    facing copy.  Keeping this as an explicit operation lets older books be
+    repaired without silently spending Provider quota while browsing the
+    library.
+    """
+    conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
+    conn.close()
+    if content.get("type") != "novel":
+        raise HTTPException(status_code=400, detail="content is not a novel")
+    meta = content.get("meta") if isinstance(content.get("meta"), dict) else {}
+    idea = str(meta.get("idea") or "").strip()
+    if len(idea) < 4:
+        raise HTTPException(status_code=422, detail="作品没有可用于生成简介的创作灵感")
+    output = complete(
+        run_id=None,
+        node_key=None,
+        project_id=content["project_id"],
+        task_type="gen_synopsis",
+        prompt_name="bootstrap.gen_synopsis",
+        variables={
+            "selected_title": str(content.get("title") or "待命名作品"),
+            "genre": str(meta.get("genre") or meta.get("source_type") or "网文"),
+            "style": str(meta.get("style") or "第三人称、冲突前置、节奏明快"),
+            "idea": idea[:8000],
+            "quality_profile_directive": "简介独立于灵感和创作圣经，只写读者能看到的故事冲突、主角处境、行动目标与悬念。",
+        },
+        client_mutation_id=f"synopsis:{content_id}:{uuid.uuid4()}",
+    )
+    synopsis = str(output.get("synopsis") or "").strip()
+    planning_markers = ("小说灵感", "项目完整设定", "核心设定", "金手指", "爽点设计", "主角:", "主角：")
+    looks_like_planning_text = len(synopsis) > 220 and any(marker in synopsis for marker in planning_markers)
+    if len(synopsis) < 40 or len(synopsis) > 240 or synopsis == idea or looks_like_planning_text:
+        raise HTTPException(status_code=422, detail="AI 未返回合格的读者简介，请重试")
+    points = output.get("selling_points") if isinstance(output.get("selling_points"), list) else []
+    updated_meta = dict(meta)
+    updated_meta["synopsis"] = synopsis
+    updated_meta["selling_points"] = [str(item).strip() for item in points if str(item).strip()][:5]
+    updated_meta["synopsis_source"] = "standalone_ai"
+    conn = connect()
+    conn.execute(
+        """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id)
+           VALUES (%s, 'content', %s, 'synopsis_generated', %s, 'reader_synopsis', %s)""",
+        (new_id("ver"), content_id,
+         encode({"title": content.get("title"), "body": decode(content.get("body"), {}), "meta": meta}),
+         user["id"]),
+    )
+    conn.execute(
+        "UPDATE contents SET meta=%s, updated_at=now() WHERE id=%s",
+        (encode(updated_meta), content_id),
+    )
+    conn.commit()
+    updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id=%s", (content_id,)).fetchone()))
+    conn.close()
+    return ok({"content": updated, "synopsis": synopsis, "selling_points": updated_meta["selling_points"]})
+
+
 class BootstrapNovelRequest(BaseModel):
     class Config:
         extra = "allow"
@@ -1784,6 +1849,7 @@ def ai_chapter_review(
     review_context = _chapter_review_context(content, text)
     review_7dim = None
     next_chapter_plan = None
+    audit_error = ""
     try:
         review_7dim = complete(
             run_id=None, node_key=None, project_id=content["project_id"],
@@ -1798,7 +1864,11 @@ def ai_chapter_review(
             client_mutation_id=f"{payload.client_mutation_id}:next" if payload.client_mutation_id else None,
         )
     except Exception:
-        # Live audit must never break the editor; fall back to a null review.
+        # Live audit must never break the editor, but a silent null result makes
+        # the UI look as if there was no audit at all and prevents a retry.
+        # Return a stable user-facing status while keeping provider details out
+        # of the response.
+        audit_error = "实时审计暂不可用，请点击重新审计"
         review_7dim = review_7dim or None
         next_chapter_plan = next_chapter_plan or None
     if review_7dim is not None:
@@ -1817,6 +1887,7 @@ def ai_chapter_review(
         review_7dim["quality_gate"] = live_gate
         review_7dim["quality_repair_contract"] = live_gate["quality_repair_contract"]
     # C5-03-audit: record each distinct audit as a version branch (dedupe identical).
+    conn = None
     try:
         conn = connect()
         last = conn.execute(
@@ -1844,8 +1915,10 @@ def ai_chapter_review(
             )
             conn.commit()
     finally:
-        conn.close()
-    return ok({"review_7dim": review_7dim, "next_chapter_plan": next_chapter_plan})
+        if conn is not None:
+            conn.close()
+    return ok({"review_7dim": review_7dim, "next_chapter_plan": next_chapter_plan,
+               "audit_error": audit_error})
 
 
 def _chapter_review_context(content: dict, text: str) -> dict:

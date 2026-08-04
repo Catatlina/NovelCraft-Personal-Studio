@@ -926,6 +926,25 @@ LIBRARY_SORTS = {
 }
 
 
+def _reader_synopsis(meta: dict | None) -> str:
+    """Return only a reader-facing synopsis, never the raw creative input.
+
+    Older books did not persist a synopsis and the previous fallback exposed
+    ``idea`` as if it were storefront copy.  Some imported records also stored
+    the idea under ``synopsis``; detect that shape so the UI can ask for a real
+    synopsis instead of presenting planning notes to readers.
+    """
+    data = meta if isinstance(meta, dict) else {}
+    synopsis = str(data.get("synopsis") or "").strip()
+    idea = str(data.get("idea") or "").strip()
+    if not synopsis or (idea and synopsis == idea):
+        return ""
+    markers = ("小说灵感", "项目完整设定", "核心设定", "金手指", "主角：", "主角:", "爽点设计")
+    if len(synopsis) > 220 and any(marker in synopsis for marker in markers):
+        return ""
+    return synopsis
+
+
 @router.get("/library/books")
 @library_router.get("/books")
 def list_books(project_id: str, limit: int = 100, offset: int = 0,
@@ -944,7 +963,8 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
         params.append(status.strip())
     data = rows(db, """
         SELECT n.id,n.project_id,n.type,n.title,n.meta,n.status,n.created_at,n.updated_at,
-               COALESCE(NULLIF(n.meta->>'synopsis',''), NULLIF(n.meta->>'idea',''), '') AS synopsis,
+               COALESCE(NULLIF(n.meta->>'synopsis',''), '') AS synopsis,
+               COALESCE(NULLIF(n.meta->>'idea',''), '') AS idea,
                COALESCE(NULLIF(n.meta->>'genre',''), NULLIF(n.meta->>'source_type',''), '未分类') AS genre,
                latest.id AS latest_chapter_id,
                latest.title AS latest_chapter_title,
@@ -979,6 +999,14 @@ def list_books(project_id: str, limit: int = 100, offset: int = 0,
         ORDER BY """ + order_by + """
         LIMIT %s OFFSET %s
     """, (*params, min(limit, 200), max(offset, 0)))
+    for item in data:
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        item["synopsis"] = _reader_synopsis({
+            **meta,
+            "synopsis": item.get("synopsis") or meta.get("synopsis"),
+            "idea": item.get("idea") or meta.get("idea"),
+        })
+        item["idea"] = str(item.get("idea") or meta.get("idea") or "")
     db.close(); return ok(data)
 
 
@@ -1010,7 +1038,8 @@ def get_book_detail(book_id: str, user: dict = Depends(get_current_user)):
     )
     return ok({
         "book": dict(book),
-        "synopsis": meta.get("synopsis") or meta.get("idea") or "",
+        "synopsis": _reader_synopsis(meta),
+        "idea": meta.get("idea") or "",
         "genre": meta.get("genre") or meta.get("source_type") or "未分类",
         "outline": _resolve_book_outline(meta),
         "latest_chapter": latest,

@@ -2,43 +2,52 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { usePagination } from "../hooks/usePagination";
 import { Pagination, ConfirmDialog, Spinner, EmptyState } from "./ui";
-import { Search, BookOpen, ArrowLeft, Trash2 } from "lucide-react";
+import { Search, BookOpen, ArrowLeft, Trash2, Sparkles } from "lucide-react";
 
-type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
-type BookDetail = { book: Book; synopsis: string; genre: string; outline: unknown; latest_chapter?: any; chapters: any[]; total_words: number };
+type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; idea?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
+type BookDetail = { book: Book; synopsis: string; idea?: string; genre: string; outline: unknown; latest_chapter?: any; chapters: any[]; total_words: number };
 type Batch = { id: string; status: string; completed_count: number; requested_count: number; error?: string; blocker_code?: string; cancel_requested?: boolean; updated_at?: string };
 type Completion = { total_chapters: number; reviewed_chapters: number; total_words: number; average_review_score: number; generation_percent?: number | null; review_percent?: number; continuity_flagged?: number; continuity_unchecked?: number; needs_rewrite_chapters?: number; quality_warnings?: string[]; ready_for_release?: boolean; exportable: boolean };
 type ImportPreview = { seq: string; title: string; raw: string };
 type RewriteState = { status: "regenerating" | "pending_review" | "failed"; taskId?: string; message?: string };
 
 function bookIdea(book: Book): string {
-  return String(book.synopsis || book.meta?.idea || "").trim();
+  return String(book.idea || book.meta?.idea || "").trim();
+}
+
+function bookSynopsis(book: Book): string {
+  const synopsis = String(book.synopsis || book.meta?.synopsis || "").trim();
+  const idea = bookIdea(book);
+  if (!synopsis || (idea && synopsis === idea)) return "";
+  if (synopsis.length > 220 && /(小说灵感|项目完整设定|核心设定|金手指|爽点设计|主角[:：])/.test(synopsis)) return "";
+  return synopsis;
 }
 
 function BookIdeaPreview({ book }: { book: Book }) {
   const [expanded, setExpanded] = useState(false);
-  const text = bookIdea(book);
-  const isLong = text.length > 220 || text.split(/\r?\n/).length > 4;
+  const synopsis = bookSynopsis(book);
+  const idea = bookIdea(book);
+  const isLong = idea.length > 220 || idea.split(/\r?\n/).length > 4;
 
   return (
     <div className="book-library-idea-wrap">
       <div className="book-library-idea-label">
-        <span>{isLong ? "创作灵感" : "简介"}</span>
-        {text && <small>{text.length.toLocaleString()} 字</small>}
+        <span>简介</span>
+        {synopsis && <small>{synopsis.length.toLocaleString()} 字</small>}
       </div>
-      <p className={`book-library-idea${expanded ? " is-expanded" : ""}`}>
-        {text || "暂无简介"}
-      </p>
-      {isLong && (
-        <button
+      <p className="book-library-idea">{synopsis || "简介尚未生成"}</p>
+      {idea && <div className="book-library-inspiration">
+        <div className="book-library-idea-label"><span>创作灵感</span><small>{idea.length.toLocaleString()} 字</small></div>
+        <p className={`book-library-idea${expanded ? " is-expanded" : ""}`}>{idea}</p>
+        {isLong && <button
           type="button"
           className="book-library-toggle"
           aria-expanded={expanded}
           onClick={() => setExpanded(previous => !previous)}
         >
           {expanded ? "收起灵感" : "展开灵感"}
-        </button>
-      )}
+        </button>}
+      </div>}
     </div>
   );
 }
@@ -89,6 +98,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   const [importBookId, setImportBookId] = useState("");
   const [directoryText, setDirectoryText] = useState("");
   const [detail, setDetail] = useState<BookDetail | null>(null);
+  const [synopsisBusy, setSynopsisBusy] = useState(false);
   const [rejectingChapterId, setRejectingChapterId] = useState("");
   const [rejectReason, setRejectReason] = useState("");
   const [rewriteStates, setRewriteStates] = useState<Record<string, RewriteState>>(Object.create(null));
@@ -127,6 +137,23 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
       setNotice(`详情加载失败：${String(caught)}`);
     } finally {
       setBusy("");
+    }
+  };
+
+  const generateSynopsis = async () => {
+    if (!detail || synopsisBusy) return;
+    const book = detail.book;
+    setSynopsisBusy(true); setNotice("");
+    try {
+      const result = await api<{ content: Book; synopsis: string }>(`/api/v1/contents/${book.id}/synopsis`, { method: "POST" });
+      const updatedBook = { ...book, ...result.content, synopsis: result.synopsis, meta: result.content?.meta || book.meta };
+      setDetail(previous => previous ? { ...previous, book: updatedBook, synopsis: result.synopsis } : previous);
+      setBooks(previous => previous.map(item => item.id === book.id ? updatedBook : item));
+      setNotice("读者简介已生成，创作灵感仍保留在独立区域。");
+    } catch (caught) {
+      setNotice(`简介生成失败：${String(caught)}`);
+    } finally {
+      setSynopsisBusy(false);
     }
   };
 
@@ -338,7 +365,7 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
 
   // NC-LIB-002: Apply filters client-side
   const filtered = books.filter(b => {
-    if (search && !b.title.includes(search) && !(b.meta?.idea || "").includes(search)) return false;
+    if (search && !b.title.includes(search) && !(b.synopsis || "").includes(search) && !(b.meta?.idea || "").includes(search)) return false;
     if (statusFilter && b.status !== statusFilter) return false;
     return true;
   }).sort((a, b) => {
@@ -363,18 +390,31 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
           <h2>{book.title}</h2>
           <p className="muted">{detail.genre} · 创建于 {new Date(book.created_at).toLocaleString()} · {detail.total_words || 0} 字</p>
         </div>
-        <button className="btn-sm btn-primary" style={{ width: "auto" }} onClick={() => void onOpen(book.id)}><BookOpen size={14} />进入编辑</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn-sm" style={{ width: "auto" }} onClick={() => void generateSynopsis()} disabled={synopsisBusy}>
+              <Sparkles size={14} />{synopsisBusy ? "生成中…" : (detail.synopsis ? "重新生成简介" : "生成简介")}
+            </button>
+            <button className="btn-sm btn-primary" style={{ width: "auto" }} onClick={() => void onOpen(book.id)}><BookOpen size={14} />进入编辑</button>
+          </div>
       </div>
       <div className="book-detail-grid">
         <section>
           <h3>简介</h3>
-          <p>{detail.synopsis || "暂无简介"}</p>
+          <p>{detail.synopsis || "简介尚未生成。点击“生成简介”，为读者生成独立的作品介绍。"}</p>
         </section>
         <section>
           <h3>最新章节</h3>
           <p>{detail.latest_chapter?.title || "暂无章节"}</p>
         </section>
       </div>
+      {(detail.idea || book.meta?.idea) && <section>
+        <h3>创作灵感</h3>
+        <p className="muted">这是写作输入，不是对外简介。</p>
+        <details>
+          <summary style={{ cursor: "pointer" }}>查看创作灵感</summary>
+          <p className="outline-block">{detail.idea || book.meta?.idea}</p>
+        </details>
+      </section>}
       {(book.meta?.creative_bible || book.meta?.source_facts?.length) && <section>
         <h3>创作拆解</h3>
         {Array.isArray(book.meta?.source_facts) && book.meta.source_facts.length > 0 && <>

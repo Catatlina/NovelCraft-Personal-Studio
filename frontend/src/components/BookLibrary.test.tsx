@@ -19,7 +19,7 @@ beforeEach(() => {
         id: "book-1",
         title: "两界华夏",
         status: "draft",
-        meta: { idea: longIdea },
+        meta: { idea: longIdea, synopsis: "沈砚在一座即将停摆的旧城里接手一间无人问津的修理铺，却发现每一件送来的旧物都藏着一段未完的命运。为了查清父亲失踪的真相，他只能在修好城市之前，先找出藏在账本里的那个人。" },
         created_at: "2026-08-01T00:00:00Z",
         updated_at: "2026-08-01T00:00:00Z",
       }] as never;
@@ -44,6 +44,7 @@ describe("书库紧凑列表", () => {
     render(<BookLibrary projectId="project-1" onOpen={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByText(/两界华夏/)).toBeTruthy());
+    expect(screen.getByText(/沈砚在一座即将停摆的旧城里/)).toBeTruthy();
     const toggle = screen.getByRole("button", { name: "展开灵感" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByRole("button", { name: "查看详情" })).toBeTruthy();

@@ -51,6 +51,13 @@ describe("applyPendingAiEdit 落库契约（静态断言）", () => {
     return fs.readFileSync(p, "utf-8");
   }
 
+  function readEditorTsx(): string {
+    const fs = require("fs");
+    const path = require("path");
+    const p = path.resolve(__dirname, "../components/Editor.tsx");
+    return fs.readFileSync(p, "utf-8");
+  }
+
   it("App.tsx 中 apply 后立即 saveChapter(pendingAiEdit.nextText)", () => {
     const src = readAppTsx();
     expect(src).toContain("saveChapter(pendingAiEdit.nextText)");
@@ -59,5 +66,16 @@ describe("applyPendingAiEdit 落库契约（静态断言）", () => {
   it("saveChapter 支持 textOverride 参数", () => {
     const src = readAppTsx();
     expect(src).toMatch(/saveChapter\(textOverride\?: string\)/);
+  });
+
+  it("应用后同步章节目录缓存，切章不会回退到旧正文", () => {
+    const src = readAppTsx();
+    expect(src).toContain("setChapters(items => items.map(item => item.id === updated.id ? updated : item));");
+    expect(readEditorTsx()).toContain("应用到编辑器并保存");
+  });
+
+  it("从审阅页进入编辑器时保留当前审阅章节", () => {
+    const src = readAppTsx();
+    expect(src).toContain("const target = (chapterId && chs.find(item => item.id === chapterId)) || chs[chs.length - 1];");
   });
 });

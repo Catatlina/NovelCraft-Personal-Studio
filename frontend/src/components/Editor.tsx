@@ -32,7 +32,7 @@ const EDITOR_OPERATION_LABELS: Record<string, string> = {
   deai: "去 AI 味",
 };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter, nextChapterLoading }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, liveReviewError, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter, nextChapterLoading }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -43,6 +43,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   applyOfflineAiResult?: (id: string, text: string) => void;
   streamPreview?: string;
   editorAiReview?: { review?: any; next?: any } | null;
+  liveReviewError?: string;
   pendingAiEdit?: PendingAiEdit | null;
   applyPendingAiEdit?: () => Promise<void>;
   discardPendingAiEdit?: () => void;
@@ -209,10 +210,10 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             <label><span>原文</span><textarea readOnly value={pendingAiEdit.originalText || "（追加操作，无替换原文）"} /></label>
             <label><span>AI 建议</span><textarea readOnly value={pendingAiEdit.proposedText} /></label>
           </div>
-          <p>应用后只会更新当前草稿，自动保存时会创建可恢复版本；放弃则原文保持不变。</p>
+          <p>应用后会更新编辑器正文并立即保存，自动创建可恢复版本；放弃则原文保持不变。</p>
           <div className="ai-edit-preview-actions">
             <button type="button" onClick={discardPendingAiEdit}><X size={16} /> 放弃建议</button>
-            <button type="button" className="primary" onClick={() => void applyPendingAiEdit?.()}><Check size={16} /> 应用到草稿</button>
+            <button type="button" className="primary" onClick={() => void applyPendingAiEdit?.()}><Check size={16} /> 应用到编辑器并保存</button>
           </div>
         </section>
       ) : null}
@@ -389,6 +390,24 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("deai")}><RefreshCcw size={15} /><span><strong>去 AI 味</strong><small>{selection.trim() ? "处理已选文字" : "请先选择文字"}</small></span></button>
               <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => markLiked?.(selection.trim())}><Check size={15} /><span><strong>标记喜欢</strong><small>{selection.trim() ? "记录为偏好表达" : "请先选择文字"}</small></span></button>
             </div>
+
+            {liveReviewing && !editorAiReview?.review ? (
+              <div className="ai-msg" role="status">
+                <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite", marginRight: 8 }} />
+                实时审计中…审计完成后会在这里显示评分、问题和可执行建议。
+              </div>
+            ) : null}
+
+            {liveReviewError ? (
+              <div className="ai-msg" role="alert" style={{ borderColor: "var(--warning, #d97706)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span>{liveReviewError}</span>
+                  <button type="button" className="btn-sm btn-ghost" onClick={() => onRequestReview?.()} disabled={liveReviewing}>
+                    <RefreshCcw size={12} />重试审计
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {editorAiReview?.review ? (
               <div className="ai-msg">

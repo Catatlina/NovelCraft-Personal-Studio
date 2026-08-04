@@ -225,6 +225,10 @@ class _ExtractTimelineOutput(_LenientOutput):
 
 class _PlanIdeaOutput(_LenientOutput):
     idea_expanded: str = Field(min_length=20)
+    # Reader-facing synopsis is intentionally separate from the raw creative
+    # brief.  Older providers may omit it, so the bootstrap remains backward
+    # compatible while new prompts produce it as a first-class deliverable.
+    synopsis: str = Field(default="", max_length=500)
     core_hook: str = Field(min_length=5)
     target_audience: str = Field(min_length=2)
     title_candidates: list[str] = Field(min_length=3, max_length=10)

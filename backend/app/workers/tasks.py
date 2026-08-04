@@ -2029,6 +2029,9 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 m["quality_profile"] = quality_profile_metadata(selected_profile)
                 context["quality_profile"] = quality_profile_metadata(selected_profile)
                 m["creative_bible"] = creative_bible
+                synopsis = str(output.get("synopsis") or "").strip()
+                if synopsis:
+                    m["synopsis"] = synopsis
                 m["core_hook"] = output.get("core_hook", "")
                 m["target_audience"] = output.get("target_audience", "")
                 m["source_facts"] = output.get("source_facts", [])

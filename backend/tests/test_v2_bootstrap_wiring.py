@@ -87,6 +87,13 @@ def test_plan_idea_supplies_title_candidates_for_human_gate():
     assert "title_candidates" in model.model_fields
 
 
+def test_plan_idea_persists_a_separate_reader_synopsis_contract():
+    model = gateway.BOOTSTRAP_OUTPUT_MODELS["plan_idea"]
+    assert "synopsis" in model.model_fields
+    assert '"synopsis"' in OUTPUT_CONTRACTS["plan_idea"]
+    assert "独立简介" in dict((name, template) for name, _, _, template in PROMPT_SEEDS)["bootstrap.plan_idea"]
+
+
 def test_plan_fidelity_audit_requires_explicit_clean_verdict():
     model = gateway.BOOTSTRAP_OUTPUT_MODELS["audit_plan_fidelity"]
     assert {"passed", "score", "matched_requirements", "contradictions", "omissions"} <= set(model.model_fields)

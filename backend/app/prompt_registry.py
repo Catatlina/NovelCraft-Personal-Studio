@@ -103,8 +103,8 @@ PROMPT_SEEDS = [
 
 输出 JSON: {"title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》]}"""),
 
-    ("bootstrap.gen_synopsis", "3.2.0", "deepseek",
-     """你是资深网文编辑和市场营销专家。请根据以下设定生成一句话简介和 3-5 个核心卖点。
+    ("bootstrap.gen_synopsis", "3.3.0", "deepseek",
+     """你是资深网文编辑和市场营销专家。请根据以下设定生成一段给读者看的作品简介和 3-5 个核心卖点。
 
 书名：$selected_title
 题材：$genre
@@ -114,17 +114,18 @@ PROMPT_SEEDS = [
 平台/题材质量策略：$quality_profile_directive
 
 简介要求：
-1. 一句话能说清「谁 + 在什么世界 + 要做什么 + 为什么读者想看」
-2. 像真实爆款简介，有反差/悬念/具体钩子（参考：《我不是戏神》"神明的棋局里，一个病人成了变数"、《都重生了才告诉我全家是反派》"重生回来才发现最危险的人坐在饭桌上"）；禁止写"主角经历了一段成长"这类空泛总结
-3. 用具体动作/处境制造期待，不用"精彩""好看""令人深思"等空话
-4. 15-35 字，不啰嗦
+1. 80-180 字，写成自然的网文简介，而不是一句口号或策划案
+2. 说清「谁 + 在什么世界/处境 + 遇到什么核心冲突 + 他要怎么做 + 读者还想知道什么」
+3. 像真实榜单作品简介，有反差、具体事件、行动目标和章末悬念；不要只介绍世界观，也不要提前讲完结局
+4. 必须独立于“核心创意”原文：不能复制灵感、创作圣经、分点设定、写作指令，不得出现“本书/本文/作者将”等元话语
+5. 用具体动作/处境制造期待，避免空泛总结；不用"精彩""好看""令人深思"等空话
 
 卖点要求：
 1. 每个卖点对应一个读者付费动机（爽感/悬念/情感/新奇/共鸣）
 2. 具体可营销，不是「好看」「精彩」这类空话
 3. 用 oh-story 情绪矩阵：从爽感释放/逆袭打脸/悬疑解密/情感治愈/新奇探索/知识获取中选
 
-输出 JSON: {"synopsis":"一句话简介","selling_points":["卖点一","卖点二","卖点三"]}"""),
+输出 JSON: {"synopsis":"80-180字的独立读者简介","selling_points":["卖点一","卖点二","卖点三"]}"""),
 
     ("bootstrap.gen_worldview", "3.0.0", "deepseek",
      """你是世界观架构师。请为以下小说构建可连载百万字的世界观体系。
@@ -812,7 +813,7 @@ $instruction
      '生成 $platform 短视频脚本(≤$max_duration秒)。\n风格：$style\n内容：$body\n输出 JSON: {"hook_3s":"","scenes":[{"duration":5,"visual":"","audio":""}],"title":"","cta":""}'),
 
     # ═══ V2 四阶段 Bootstrap：规划阶段（7 节点，oh-story Phase 1-2 + harnessNovel 分层规划） ═══
-    ("bootstrap.plan_idea", "1.5.0", "deepseek",
+    ("bootstrap.plan_idea", "1.6.0", "deepseek",
      """你是资深网文策划（StoryArchitect）和长篇项目制片人。请先像专业创作顾问一样，把用户的原始需求整理成可供后续 AI 写作链路执行的"创作圣经"，再给出书名候选。
 
 灵感：$idea
@@ -828,8 +829,9 @@ $instruction
 1. idea_expanded：把灵感展开为 150-300 字的完整创意——谁、在什么世界、遇到什么变故、要达成什么、代价是什么；不得改变 source_facts
 2. core_hook：一句话核心卖点，读者为什么非看不可（爽感/悬念/情感/新奇中至少占一）
 3. target_audience：目标读者画像（年龄段+阅读偏好，不要写"所有人"）
-4. title_candidates：生成 3-10 个书名候选（默认 5 个），像真人在榜单发的书名。以人物状态、情绪、时代符号、反差/悬念为主要切入；题材词可以使用，但不得与年份、金手指、升级结果机械堆叠。至少提供两种不同取向：口语/情绪型与概念/反差型。可参考《我真没想重生啊》《1979黄金时代》的记忆点，但不能照抄结构。把《重生2010：我的AI笔记本》视为 SEO 式书名反例，谨慎使用「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」模板，6-14 字为主或按平台策略调整。如果有 suggested_title，只把它作为一个候选参考，不得直接替用户确认
-5. creative_bible：800-1800 字，必须把用户需求补强为长篇可执行设定，结构必须包含：
+4. synopsis：面向书库、详情页和读者的独立简介，80-180 字，必须说清“主角是谁、身处什么处境、核心冲突是什么、故事将如何推进”，要有具体事件和悬念；不得复制灵感、创作圣经、分点设定、写作指令或只罗列卖点，不得出现“本书/本文/作者将”等元话语
+5. title_candidates：生成 3-10 个书名候选（默认 5 个），像真人在榜单发的书名。以人物状态、情绪、时代符号、反差/悬念为主要切入；题材词可以使用，但不得与年份、金手指、升级结果机械堆叠。至少提供两种不同取向：口语/情绪型与概念/反差型。可参考《我真没想重生啊》《1979黄金时代》的记忆点，但不能照抄结构。把《重生2010：我的AI笔记本》视为 SEO 式书名反例，谨慎使用「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」模板，6-14 字为主或按平台策略调整。如果有 suggested_title，只把它作为一个候选参考，不得直接替用户确认
+6. creative_bible：800-1800 字，必须把用户需求补强为长篇可执行设定，结构必须包含：
    - 核心设定：主角身份、金手指/能力、时代背景、最大卖点
    - ⚠️ 主角名必须从创意中推导出独特的、有辨识度的名字。禁止使用以下高频默认名：陈默、林默、苏默、陆默、叶凡、萧炎、林风、张伟、李明。名字要能体现角色性格或背景（如程序员出身可带技术隐喻，小镇青年用接地气的名字），2-3字为主，避免过于中二或过于普通。
    - 开局节奏：前三章分别完成什么，尤其黄金三章的冲突、坦白、钩子
@@ -850,7 +852,7 @@ $instruction
 
 已有标题参考（可空）：$suggested_title
 
-输出 JSON: {"idea_expanded":"展开的创意","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}"""),
+输出 JSON: {"idea_expanded":"展开的创意","synopsis":"给读者看的独立简介","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}"""),
 
     ("bootstrap.audit_plan_fidelity", "1.0.0", "deepseek",
      """你是独立的需求验收员，不参与创作。逐项比较“用户原始需求”和“规划结果”，只判断规划是否忠实，不评价文笔和市场性。
@@ -1462,7 +1464,7 @@ $style_profile
 # ===== OUTPUT CONTRACTS (JSON Schema enforcement) =====
 OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_titles":           '{"title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"]}',
-    "gen_synopsis":         '{"synopsis":"一句话简介","selling_points":["卖点一","卖点二","卖点三"]}',
+    "gen_synopsis":         '{"synopsis":"80-180字的独立读者简介","selling_points":["卖点一","卖点二","卖点三"]}',
     "gen_worldview":        '{"worldview":{"name":"世界观名","rules":["规则一","规则二","规则三","规则四","规则五"]}}',
     "gen_characters":       '{"characters":[{"name":"姓名","role":"角色","personality":"性格","arc":"弧线","motivation":"驱动力","relationship":"关系"}]}',
     "gen_outline":          '{"core_concept":{"premise":"","golden_finger_rules":[],"world_background":""},"business_roadmap":[],"volume_outlines":[],"chapter_plan":[]}',
@@ -1495,7 +1497,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_volume":     '{"summary":"卷摘要"}',
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
-    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}',
+    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","synopsis":"给读者看的独立简介（80-180字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}',
     "audit_plan_fidelity":    '{"passed":false,"score":80,"matched_requirements":["匹配1","匹配2","匹配3"],"contradictions":["矛盾"],"omissions":["遗漏"]}',
     "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',

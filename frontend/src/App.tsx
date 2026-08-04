@@ -187,6 +187,7 @@ export default function App() {
   const [offlineAiResults, setOfflineAiResults] = useState<Array<{ id: string; text: string }>>([]);
   const [editorAiReview, setEditorAiReview] = useState<any>(null);
   const [liveReviewing, setLiveReviewing] = useState(false);
+  const [liveReviewError, setLiveReviewError] = useState("");
   const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -199,6 +200,8 @@ export default function App() {
   const streamPreviewRef = useRef(streamPreview);
   const lastReviewTextRef = useRef("");
   const reviewTimerRef = useRef<number | null>(null);
+  const reviewRequestKeyRef = useRef("");
+  const reviewRequestSeqRef = useRef(0);
   useEffect(() => { pendingAiEditRef.current = pendingAiEdit; }, [pendingAiEdit]);
   useEffect(() => { streamPreviewRef.current = streamPreview; }, [streamPreview]);
   const projectsCacheKey = `projects:${userEmail || "signed-out"}`;
@@ -495,8 +498,19 @@ export default function App() {
 
   function selectChapter(chapterId: string) {
     const selected = chapters.find(item => item.id === chapterId) ?? null;
+    if (reviewTimerRef.current) {
+      window.clearTimeout(reviewTimerRef.current);
+      reviewTimerRef.current = null;
+    }
+    reviewRequestSeqRef.current += 1;
+    reviewRequestKeyRef.current = "";
+    lastReviewTextRef.current = "";
     setChapter(selected);
     setEditorText(selected ? docToText(selected.body) : "");
+    setSelection("");
+    setPendingAiEdit(null);
+    setEditorAiReview(null);
+    setLiveReviewError("");
     setVersions([]);
     if (selected) void loadVersions(selected.id);
   }
@@ -649,6 +663,9 @@ export default function App() {
         return false;
       }
       setChapter(updated); await cacheDelete(`offline-content:${chapter.id}`); loadVersions(updated.id);
+      setChapters(items => items.map(item => item.id === updated.id ? updated : item));
+      lastReviewTextRef.current = "";
+      setLiveReviewError("");
       sendEditSignal(updated.id, prevText, nextText);
       return true;
     } catch (caught) {
@@ -763,24 +780,42 @@ export default function App() {
 
   // NC-LIVE-AUDIT: 实时审计——对当前章节文本打分并取回审阅问题，不修改正文。
   // 章节打开（editorText 变化）与打字停顿都会触发；AI 建议待确认/流式生成时暂停。
-  async function requestReview(chapterId: string, text: string) {
+  async function requestReview(chapterId: string, text: string, force = false) {
     const trimmed = text.trim();
     if (trimmed.length < 30) return;
     if (!navigator.onLine) return;
     if (pendingAiEditRef.current || streamPreviewRef.current) return;
-    if (trimmed === lastReviewTextRef.current) return;
-    lastReviewTextRef.current = trimmed;
+    if (!force && trimmed === lastReviewTextRef.current) return;
+    const requestKey = `${chapterId}:${trimmed}`;
+    if (reviewRequestKeyRef.current === requestKey) return;
+    reviewRequestKeyRef.current = requestKey;
+    const requestSeq = ++reviewRequestSeqRef.current;
     setLiveReviewing(true);
+    setLiveReviewError("");
     try {
-      const output = await api<{ review_7dim?: any; next_chapter_plan?: any }>(
+      const output = await api<{ review_7dim?: any; review?: any; next_chapter_plan?: any; audit_error?: string }>(
         `/api/v1/contents/${chapterId}/review`,
         { method: "POST", body: JSON.stringify({ selection: text, client_mutation_id: crypto.randomUUID() }) },
       );
-      setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
+      if (requestSeq !== reviewRequestSeqRef.current) return;
+      const review = output.review_7dim ?? output.review;
+      if (!review || typeof review !== "object" || Object.keys(review).length === 0) {
+        lastReviewTextRef.current = "";
+        setEditorAiReview(null);
+        setLiveReviewError(output.audit_error || "实时审计未返回有效结果，请点击重新审计");
+        return;
+      }
+      lastReviewTextRef.current = trimmed;
+      setEditorAiReview({ review, next: output.next_chapter_plan });
     } catch (caught) {
+      if (requestSeq !== reviewRequestSeqRef.current) return;
+      lastReviewTextRef.current = "";
+      setEditorAiReview(null);
+      setLiveReviewError(caught instanceof ApiError ? `实时审计失败：${caught.message}` : "实时审计失败，请点击重新审计");
       setOfflineNotice(caught instanceof ApiError ? `实时审计失败：${caught.message}` : "实时审计失败，请稍后重试");
     } finally {
-      setLiveReviewing(false);
+      if (reviewRequestKeyRef.current === requestKey) reviewRequestKeyRef.current = "";
+      if (requestSeq === reviewRequestSeqRef.current) setLiveReviewing(false);
     }
   }
 
@@ -796,6 +831,8 @@ export default function App() {
     }
     setError("");
     setPendingAiEdit(null);
+    setEditorAiReview(null);
+    setLiveReviewError("");
     const mutationId = crypto.randomUUID();
     const url = `/api/v1/contents/${chapter.id}/ai/${op}`;
     const body = {
@@ -998,6 +1035,8 @@ export default function App() {
         setOfflineQueueCount((await listMutations()).length);
       }
       setPendingAiEdit(null);
+      setLiveReviewError("");
+      lastReviewTextRef.current = "";
       setEditorResetNonce(n => n + 1);
       setOfflineNotice("AI 建议已应用到草稿，已创建可恢复版本");
     } catch (caught) {
@@ -1130,23 +1169,31 @@ export default function App() {
         if (!chapter) return;
         const merged = { ...chapter, ...updated, body: (updated.body as TipTapDoc | undefined) ?? chapter.body };
         setChapter(merged);
+        setChapters(items => items.map(item => item.id === merged.id ? merged : item));
         setEditorText(docToText(merged.body));
-      }} onOpenEditor={async () => {
+        setSelection("");
+        setPendingAiEdit(null);
+        setEditorAiReview(null);
+        setLiveReviewError("");
+        lastReviewTextRef.current = "";
+        setEditorResetNonce(value => value + 1);
+       }} onOpenEditor={async (chapterId?: string) => {
         // 加载最新章节到编辑器
         if (novel && project) {
           const items = await api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`);
           const chs = (items || []).filter(i => i.type === "chapter").sort((a: any, b: any) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
           setChapters(chs);
           if (chs.length > 0) {
-            setChapter(chs[chs.length - 1]); // 最新章节
-            setEditorText(docToText(chs[chs.length - 1].body));
+            const target = (chapterId && chs.find(item => item.id === chapterId)) || chs[chs.length - 1];
+            setChapter(target);
+            setEditorText(docToText(target.body));
           }
         }
         setTab("editor");
       }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorText); } }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}
