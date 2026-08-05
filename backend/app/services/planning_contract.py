@@ -14,7 +14,10 @@ from typing import Any
 _TOTAL_WORD_RE = re.compile(
     r"(?:目标总字数|总字数|全书总字数|目标篇幅|全书篇幅)"
     r"[^。；;\n]{0,28}?"
-    r"(\d[\d,，_]*)\s*(万)?\s*字"
+    # Providers commonly omit the trailing ``字`` in shorthand such as
+    # ``目标总字数150万``.  Accept it, otherwise a later ``每章2000字`` in
+    # the same sentence can be mistaken for the book total.
+    r"(\d[\d,，_]*)\s*(万)?(?:\s*字)?"
 )
 _WORD_RANGE_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*[-—至]\s*(\d+(?:\.\d+)?)\s*万字"

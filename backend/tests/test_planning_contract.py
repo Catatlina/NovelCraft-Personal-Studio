@@ -65,6 +65,17 @@ def test_longform_contract_rejects_route_beyond_target():
     assert any("不能超过" in item or "超过项目目标" in item for item in defects)
 
 
+def test_longform_parser_accepts_shorthand_total_without_trailing_character():
+    output = {
+        "creative_bible": _bible().replace(
+            "目标总字数：1500000字", "目标总字数150万；750章，每章2000字"
+        ),
+        "longform_contract": _longform_contract(),
+    }
+    defects = validate_longform_contract(output, idea="玄幻长篇", target_words=1_500_000)
+    assert not any("不一致的总字数" in item for item in defects)
+
+
 def test_simulator_contract_requires_terminal_future_and_harvest_choice():
     defects = validate_simulator_contract(
         {
