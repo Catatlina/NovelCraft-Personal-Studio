@@ -28,6 +28,13 @@ QUOTED_SPAN_PATTERN = re.compile(
     flags=re.S,
 )
 
+# A small set of fixed reciprocal idioms describes several characters looking
+# at one another; it is not narrator POV.  Keep this allowlist narrow rather
+# than weakening the general first-person detector.
+NON_NARRATIVE_FIRST_PERSON_PATTERN = re.compile(
+    r"你看看我\s*[，,、]\s*我看看你|你看我\s*[，,、]\s*我看你"
+)
+
 
 def _mask_quoted_spans(text: str) -> tuple[str, int]:
     """Return text with quoted spans blanked and the number of excluded chars."""
@@ -52,6 +59,10 @@ def analyze_third_person_narrative(text: Any, *, max_examples: int = 8) -> dict[
     """
     source = str(text or "")
     narrative, excluded_chars = _mask_quoted_spans(source)
+    narrative = NON_NARRATIVE_FIRST_PERSON_PATTERN.sub(
+        lambda match: re.sub(r"[^\n]", " ", match.group(0)),
+        narrative,
+    )
     matches = list(FIRST_PERSON_PATTERN.finditer(narrative))
     narrative_chars = len(re.sub(r"\s+", "", narrative))
     total_chars = len(re.sub(r"\s+", "", source))
@@ -75,7 +86,7 @@ def analyze_third_person_narrative(text: Any, *, max_examples: int = 8) -> dict[
             len(matches) / max(1, narrative_chars) * 1000,
             3,
         ),
-        "rule": "引号/书名号内的对白、短信、书信和直接引用允许第一人称；其余叙述不允许。",
+        "rule": "引号/书名号内的对白、短信、书信和直接引用允许第一人称；固定互视短语不视为第一人称叙事；其余叙述不允许。",
     }
 
 
