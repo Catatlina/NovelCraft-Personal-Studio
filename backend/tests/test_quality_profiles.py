@@ -92,3 +92,20 @@ def test_profile_context_carries_the_selected_plugin_into_runtime_metadata():
     metadata = quality_profile_metadata(profile)
     assert metadata["style_plugin"] == "xuanhuan_longlife"
     assert metadata["style_plugin_status"] == "enabled"
+
+
+def test_profile_context_explicit_subgenre_overrides_stale_snapshot():
+    profile = profile_from_context({
+        "platform": "fanqie",
+        "genre": "玄幻",
+        "subgenre": "长生流",
+        "style_plugin": "xuanhuan_longlife",
+        "quality_profile": {
+            "profile_id": "fanqie:xuanhuan:xuanhuan_upgrade",
+            "subgenre": "xuanhuan_upgrade",
+            "style_plugin": "",
+        },
+    })
+
+    assert profile["profile_id"] == "fanqie:xuanhuan:xuanhuan_longlife"
+    assert profile["style_plugin"] == "xuanhuan_longlife"

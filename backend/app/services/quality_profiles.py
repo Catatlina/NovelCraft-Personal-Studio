@@ -561,10 +561,13 @@ def select_quality_profile(
 def profile_from_context(context: dict[str, Any] | None) -> dict[str, Any]:
     context = context if isinstance(context, dict) else {}
     raw = dict(context.get("quality_profile") or {}) if isinstance(context.get("quality_profile"), dict) else {}
-    if context.get("style_plugin") and not raw.get("style_plugin"):
-        raw["style_plugin"] = context.get("style_plugin")
-    if context.get("writing_plugin") and not raw.get("style_plugin"):
-        raw["style_plugin"] = context.get("writing_plugin")
+    # Explicit project fields are authoritative. A stored profile is a compiled
+    # snapshot and may be stale after a plan rewrite; its old subgenre/profile
+    # id must not silently change the active writing strategy.
+    for key in ("platform", "genre", "subgenre", "style_plugin", "writing_plugin"):
+        value = context.get(key)
+        if value not in (None, ""):
+            raw[key] = value
     return select_quality_profile(
         platform=context.get("platform") or context.get("platform_key") or context.get("publish_platform"),
         genre=context.get("genre") or context.get("category") or context.get("main_category"),
