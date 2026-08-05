@@ -500,14 +500,14 @@ def list_contents(project_id: str = Query(...), parent_id: str | None = None,
     if parent_id is None:
         rows = conn.execute(
             """SELECT * FROM contents
-               WHERE project_id = %s AND parent_id IS NULL
+               WHERE project_id = %s AND is_deleted = FALSE AND parent_id IS NULL
                  AND type <> 'chapter'
                ORDER BY created_at DESC LIMIT %s OFFSET %s""",
             (project_id, limit, offset),
     ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM contents WHERE project_id = %s AND parent_id = %s ORDER BY created_at ASC LIMIT %s OFFSET %s",
+            "SELECT * FROM contents WHERE project_id = %s AND is_deleted = FALSE AND parent_id = %s ORDER BY created_at ASC LIMIT %s OFFSET %s",
             (project_id, parent_id, limit, offset),
         ).fetchall()
     items = [parse_content(dict(row)) for row in rows]

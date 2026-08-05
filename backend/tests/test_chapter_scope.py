@@ -176,6 +176,19 @@ def test_orphan_is_hidden_from_normal_root_library_but_remains_readable(scope_ca
     assert detail.json()["data"]["id"] == chapter_id
 
 
+def test_soft_deleted_novel_is_hidden_from_contents_list(scope_case):
+    client, headers, project_id, novel_id = scope_case
+
+    deleted = client.delete(f"/api/v1/novels/{novel_id}", headers=headers)
+    assert deleted.status_code == 200, deleted.text
+
+    root = client.get(
+        f"/api/v1/contents?project_id={project_id}", headers=headers
+    )
+    assert root.status_code == 200, root.text
+    assert novel_id not in {item["id"] for item in root.json()["data"]}
+
+
 def test_orphan_edit_and_live_review_stop_before_version_or_provider(scope_case, monkeypatch):
     client, headers, project_id, _novel_id = scope_case
     chapter_id = _insert_orphan(project_id)
