@@ -883,6 +883,23 @@ $instruction
 
 输出 JSON: {"idea_expanded":"展开的创意","synopsis":"给读者看的独立简介","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"],"longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"simulator_contract":{"enabled":false,"horizon":"","terminal_condition":"","branches":[],"observable_state":[],"harvestable_rewards":[],"selection_rules":[],"costs_and_risks":[],"reality_writeback":""}}"""),
 
+    ("bootstrap.repair_planning_contract", "1.0.0", "deepseek",
+     """你是长篇网文规划修复器。上一轮规划已经有部分内容，但没有通过硬契约。只修复结构化规划账本和创作圣经，不改变原始创意、主角身份、题材、核心冲突和用户目标。
+
+原始灵感：$idea
+项目目标总字数：$target_words（必须精确等于这个数字，不能写成其他数字）
+上一轮规划：$plan_output
+硬错误反馈：$repair_feedback
+是否包含模拟器：$requires_simulator
+
+请重新输出以下四个字段：
+1. creative_bible：目标字数达到 50 万字以上时至少 2400 个中文字符，必须包含黄金三章/开局节奏、能力边界/代价和风险、至少六阶段长篇路线、人物关系、篇幅与内容配比、持续校验清单。总字数只允许出现项目目标，阶段上限不能超过项目目标。
+2. longform_contract：target_words、volume_count、volume_word_targets（数组合计精确等于目标）、chapter_word_target、chapter_count、route_milestones（至少六项，最后 end_words 精确等于目标，任何 end_words 不得超过目标）。
+3. core_mechanic_contract：enabled、mechanic_type、reader_promise、trigger_and_loop、capability_loop、choice_surface、visible_payoff、limits_and_costs、failure_and_risks、state_writeback、plot_coupling、progression、anti_inflation。必须形成“触发→选择→行动→收益→代价→状态变化→新冲突”的闭环，不能让金手指替主角自动通关。
+4. simulator_contract：如果是否包含模拟器为 true，必须 enabled=true，并写明从当前推演到死亡/终局、至少两条分支、可观察状态、可选择回收的情报/机缘/修为/功法/资源/能力、选择与取舍、次数/寿元/资源/冷却/因果/失败/暴露等代价、现实回写、回收后的因果重算和主线护栏；否则 enabled=false。
+
+只输出 JSON：{"creative_bible":"完整创作圣经","longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"core_mechanic_contract":{"enabled":true,"mechanic_type":"机制类型","reader_promise":"读者承诺","trigger_and_loop":"触发→选择→行动→收益→代价→状态变化→新冲突","capability_loop":"能力循环","choice_surface":"选择与取舍","visible_payoff":"可见收益","limits_and_costs":"边界与代价","failure_and_risks":"失败与风险","state_writeback":"状态写回","plot_coupling":"主线耦合","progression":"成长升级","anti_inflation":"防止通胀"},"simulator_contract":{"enabled":true,"horizon":"从当前推演到死亡或终局","terminal_condition":"死亡/道消/寿终","branches":["保守路线","激进路线"],"observable_state":["修为/伤势/资源/关系/机缘/死亡原因"],"harvestable_rewards":["情报/机缘/修为/功法/资源/能力"],"selection_rules":"选择、组合、放弃或延迟收益，不能全拿","costs_and_risks":"次数、寿元、资源、冷却、因果、失败和暴露代价","reality_writeback":"执行回收后写回现实并改变后续冲突","causal_recalculation":"回收后重新推演因果分支","plot_guardrails":"收益不能跳过主线，必须带来代价或新问题"}}"""),
+
     ("bootstrap.audit_plan_fidelity", "1.0.0", "deepseek",
      """你是独立的需求验收员，不参与创作。逐项比较“用户原始需求”和“规划结果”，只判断规划是否忠实，不评价文笔和市场性。
 
@@ -1532,6 +1549,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
     "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","synopsis":"给读者看的独立简介（80-180字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"2400-4200字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"],"longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"simulator_contract":{"enabled":false,"horizon":"","terminal_condition":"","branches":[],"observable_state":[],"harvestable_rewards":[],"selection_rules":[],"costs_and_risks":[],"reality_writeback":""}}',
+    "repair_planning_contract": '{"creative_bible":"2400字以上的完整创作圣经","longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"core_mechanic_contract":{"enabled":true,"mechanic_type":"机制类型","reader_promise":"读者承诺","trigger_and_loop":"触发→选择→行动→收益→代价→状态变化→新冲突","capability_loop":"能力循环","choice_surface":"选择与取舍","visible_payoff":"可见收益","limits_and_costs":"边界与代价","failure_and_risks":"失败与风险","state_writeback":"状态写回","plot_coupling":"主线耦合","progression":"成长升级","anti_inflation":"防止通胀"},"simulator_contract":{"enabled":true,"horizon":"从当前推演到死亡或终局","terminal_condition":"死亡/道消/寿终","branches":["保守路线","激进路线"],"observable_state":["修为/伤势/资源/关系/机缘/死亡原因"],"harvestable_rewards":["情报/机缘/修为/功法/资源/能力"],"selection_rules":"选择、组合、放弃或延迟收益，不能全拿","costs_and_risks":"次数、寿元、资源、冷却、因果、失败和暴露代价","reality_writeback":"执行回收后写回现实并改变后续冲突","causal_recalculation":"回收后重新推演因果分支","plot_guardrails":"收益不能跳过主线，必须带来代价或新问题"}}',
     "audit_plan_fidelity":    '{"passed":false,"score":80,"matched_requirements":["匹配1","匹配2","匹配3"],"contradictions":["矛盾"],"omissions":["遗漏"]}',
     "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',

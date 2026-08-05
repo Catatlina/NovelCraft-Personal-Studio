@@ -1608,8 +1608,50 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         run_context.get("target_words"),
                     ) or _planning_contract_feedback(output, run_context)
                     if target_feedback:
-                        fidelity_feedback = [target_feedback]
-                        continue
+                        # Do not spend all fidelity attempts asking the same
+                        # long prompt to remember omitted ledgers.  Use a
+                        # focused repair call that returns only the creative
+                        # bible and structured contracts, then merge it into
+                        # the original plan before the independent audit.
+                        repair_output = complete(
+                            run_id=run_id,
+                            node_key=node_key,
+                            project_id=project_id,
+                            task_type="repair_planning_contract",
+                            prompt_name="bootstrap.repair_planning_contract",
+                            variables={
+                                **run_context,
+                                "plan_output": json.dumps(output, ensure_ascii=False),
+                                "repair_feedback": target_feedback,
+                                "requires_simulator": str(any(
+                                    marker in str(run_context.get("idea") or "")
+                                    for marker in ("模拟器", "人生模拟", "模拟未来", "推演未来")
+                                )).lower(),
+                            },
+                            client_mutation_id=(
+                                f"bootstrap:{run_id}:{node_key}:contract-repair:{fidelity_cycle}:{fidelity_attempt}"
+                            ),
+                        )
+                        repair_output = validate_task_output(
+                            "repair_planning_contract", repair_output
+                        )
+                        for repair_key in (
+                            "creative_bible",
+                            "longform_contract",
+                            "core_mechanic_contract",
+                            "simulator_contract",
+                        ):
+                            if repair_key in repair_output:
+                                output[repair_key] = repair_output[repair_key]
+                        target_feedback = _target_words_guard(
+                            output,
+                            run_context.get("target_words"),
+                        ) or _planning_contract_feedback(output, run_context)
+                        if not target_feedback:
+                            fidelity_feedback = []
+                        else:
+                            fidelity_feedback = [target_feedback]
+                            continue
                     audit = complete(
                         run_id=run_id,
                         node_key=node_key,
