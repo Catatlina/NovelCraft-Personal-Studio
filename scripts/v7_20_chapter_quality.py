@@ -122,6 +122,43 @@ def _chapter_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _result_status(result: Any) -> str:
+    """Read the director result status without treating HTTP 200 as success."""
+    if not isinstance(result, dict):
+        return "invalid_response"
+    return str(result.get("status") or result.get("output_status") or "unknown")
+
+
+def _result_summary(result: Any) -> dict[str, Any]:
+    """Keep checkpoint/report evidence small and free of generated prose."""
+    if not isinstance(result, dict):
+        return {"status": "invalid_response"}
+    quality = result.get("generation_quality")
+    failures = quality.get("failures") if isinstance(quality, dict) else []
+    return {
+        "status": _result_status(result),
+        "chapter_number": result.get("chapter_number"),
+        "run_id": result.get("run_id"),
+        "title": result.get("title"),
+        "review_score": result.get("review_score"),
+        "passed_review": result.get("passed_review"),
+        "quality_failures": [
+            {"code": item.get("code"), "message": item.get("message")}
+            for item in (failures or [])
+            if isinstance(item, dict)
+        ][:12],
+        "blocked_reason": result.get("blocked_reason"),
+        "retryable_planning_failure": result.get("retryable_planning_failure"),
+    }
+
+
+def _find_chapter(chapters: list[dict[str, Any]], chapter_number: int) -> dict[str, Any] | None:
+    return next(
+        (item for item in chapters if item["chapter_number"] == chapter_number),
+        None,
+    )
+
+
 def _manual_summary() -> dict[str, Any]:
     return {
         "status": "pending",
@@ -324,9 +361,10 @@ def main() -> int:
     generated_at = datetime.now(timezone.utc).isoformat()
     chapters: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    responses: list[dict[str, Any]] = []
     for chapter_number in range(args.start_chapter, args.chapters + 1):
         try:
-            _request(
+            result = _request(
                 args.api_base.replace("/api/v1", ""),
                 "POST",
                 f"/api/v7/director/{args.novel_id}/generate-chapter",
@@ -337,8 +375,15 @@ def main() -> int:
         except RuntimeError as exc:
             errors.append({"chapter_number": chapter_number, "error": str(exc)})
             print(f"[FAIL] chapter {chapter_number}: {exc}", flush=True)
+            break
         else:
-            print(f"[DONE] chapter {chapter_number}", flush=True)
+            summary = _result_summary(result)
+            responses.append(summary)
+            print(
+                f"[{summary['status'].upper()}] chapter {chapter_number}"
+                + (f": {summary['blocked_reason']}" if summary.get("blocked_reason") else ""),
+                flush=True,
+            )
 
         listing = _request(
             args.api_base,
@@ -349,10 +394,41 @@ def main() -> int:
         )
         rows = listing if isinstance(listing, list) else []
         chapters = sorted((_chapter_row(row) for row in rows), key=lambda item: item["chapter_number"])
+        persisted = _find_chapter(chapters, chapter_number)
+        response_status = _result_status(result)
+        if response_status != "completed":
+            errors.append({
+                "chapter_number": chapter_number,
+                "error": "director did not complete a quality-approved chapter",
+                "response": _result_summary(result),
+                "persisted_chapter": {
+                    "status": persisted.get("status"),
+                    "quality_status": persisted.get("quality_status"),
+                    "canonical_engine": persisted.get("canonical_engine"),
+                } if persisted else None,
+            })
+        elif not persisted or persisted.get("canonical_engine") != "v7":
+            errors.append({
+                "chapter_number": chapter_number,
+                "error": "director reported completed but no V7 chapter was found in the library",
+                "response": _result_summary(result),
+                "persisted_chapter": persisted,
+            })
         (output_dir / "checkpoint.json").write_text(
-            json.dumps({"chapter_number": chapter_number, "chapters": chapters, "errors": errors}, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(
+                {
+                    "chapter_number": chapter_number,
+                    "chapters": chapters,
+                    "responses": responses,
+                    "errors": errors,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ) + "\n",
             encoding="utf-8",
         )
+        if errors:
+            break
 
     _write_report(
         output_dir,

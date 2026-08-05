@@ -320,11 +320,15 @@ class PlotEngine(BaseEngine):
   "risks": ["风险 1", "风险 2"],
   "suggested_beats": [
     {{"name": "节拍名", "content": "这一节拍发生什么", "target_words": 600,
-      "emotion": "情绪", "importance": 0.6}}
+      "emotion": "情绪", "importance": 0.6,
+      "payoff_phase": "pressure|build|burst|feedback|aftershock"}}
   ],
   "confidence": 0.0
 }}
 
+每个 suggested_beats 必须显式标注 payoff_phase 或 payoff_phases，严格覆盖
+pressure、build、burst、feedback、aftershock 五个阶段；至少一个节拍必须是
+build，内容要有试探、准备、取舍或蓄力，不能把连续施压当作 build。
 标题必须是读者会看到的短标题，不得写成剧情摘要或操作说明；禁止出现“第X章”、
 “本章”、“主角在……发现……”、“读者将……”等元叙述模板。若与上一章标题相近，
 改用本章具体事件、物件、冲突或情绪意象命名。"""

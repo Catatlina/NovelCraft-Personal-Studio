@@ -532,6 +532,12 @@ class SceneDirector:
                 "content": str(beat.get("content") or "")[:600],
                 "emotion": beat.get("emotion"),
                 "target_words": int(beat.get("target_words") or 0),
+                # PlotEngine emits these labels as part of the commercial
+                # beat contract. Preserve them when adopting the brief;
+                # dropping them here made the downstream writer infer a
+                # different arc and could erase the build phase.
+                "payoff_phase": beat.get("payoff_phase"),
+                "payoff_phases": beat.get("payoff_phases"),
             })
 
         planned = sum(b["target_words"] for b in normalised)
@@ -635,7 +641,7 @@ class SceneDirector:
             '  "chapter_title": "本章标题",\n'
             '  "scene_goal": "本章要达成的叙事目的",\n'
             '  "beats": [{"name":"节拍名","purpose":"作用","content":"要写什么",'
-            '"emotion":"情绪","target_words":800}],\n'
+            '"emotion":"情绪","target_words":800,"payoff_phase":"pressure|build|burst|feedback|aftershock"}],\n'
             '  "pov_character": "视角人物",\n'
             '  "pov_policy": "third_person_narrative",\n'
             '  "pacing": "slow|medium|fast",\n'
@@ -653,8 +659,9 @@ class SceneDirector:
             '  "payoff_phases": ["pressure", "build", "burst", "feedback", "aftershock"],\n'
             '  "confidence": 0.85\n'
             "}\n"
-            "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数；每个 beat 增加 payoff_phase 或 payoff_phases，"
-            "覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段。"
+            "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数；每个 beat 必须增加 payoff_phase 或 payoff_phases，"
+            "严格覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段；"
+            "至少有一个 beat 明确写 build（压制后的试探、准备、取舍或蓄力），不能把连续的压力描述冒充 build。"
             "chapter_title 必须是 2-12 字的事件、物件、冲突或情绪短标题；"
             "禁止写成剧情摘要、操作说明或元叙述，禁止出现‘第X章’、‘本章’、"
             "‘主角在……发现……’、‘读者将……’等模板。"

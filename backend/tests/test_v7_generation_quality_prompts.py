@@ -5,6 +5,7 @@ from app.v7.generation.generation_engine import (
     AIGatewayError,
     DeAIPipeline,
     GenerationEngine,
+    SceneDirector,
     ensure_unique_chapter_title,
 )
 
@@ -55,6 +56,47 @@ def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     assert "章末必须把钩子落实" in prompt
     assert "压制→蓄力→爆发→反馈→余波" in prompt
     assert "反馈必须落到对手、组织、资源、规则或旁观者的可见变化" in prompt
+
+
+def test_plot_brief_preserves_payoff_phase_labels_for_the_writer():
+    plan = SceneDirector._adopt_plot_brief(
+        1,
+        3000,
+        {
+            "chapter_title_hint": "旧印初鸣",
+            "suggested_beats": [
+                {
+                    "name": "压境",
+                    "content": "敌人封住退路",
+                    "target_words": 600,
+                    "payoff_phase": "pressure",
+                },
+                {
+                    "name": "试印",
+                    "content": "主角试探旧印并承担代价",
+                    "target_words": 600,
+                    "payoff_phases": ["build"],
+                },
+                {
+                    "name": "反击",
+                    "content": "主角用已知规则反击",
+                    "target_words": 600,
+                    "payoff_phase": "burst",
+                },
+                {
+                    "name": "余波",
+                    "content": "对手退让，新的追兵出现",
+                    "target_words": 600,
+                    "payoff_phases": ["feedback", "aftershock"],
+                },
+            ],
+        },
+    )
+
+    assert plan is not None
+    assert plan["beats"][0]["payoff_phase"] == "pressure"
+    assert plan["beats"][1]["payoff_phases"] == ["build"]
+    assert plan["beats"][3]["payoff_phases"] == ["feedback", "aftershock"]
 
 
 def test_continuation_prompt_does_not_reset_chapter_context():
