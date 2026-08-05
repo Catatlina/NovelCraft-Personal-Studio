@@ -24,7 +24,12 @@ def authed():
     token = client.post("/api/v1/auth/register", json={"email": email, "password": "test1234"}).json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     project_id = client.get("/api/v1/projects", headers=headers).json()["data"][0]["id"]
-    return {"client": client, "headers": headers, "project_id": project_id}
+    novel_id = client.post(
+        f"/api/v1/projects/{project_id}/novels",
+        headers=headers,
+        json={"idea": "审计回归测试作品", "genre": "悬疑", "style": "紧凑", "target_words": 10000},
+    ).json()["data"]["id"]
+    return {"client": client, "headers": headers, "project_id": project_id, "novel_id": novel_id}
 
 
 # --- de-faked AI helpers: scores come from the gateway, never from len() ------
@@ -127,7 +132,7 @@ def test_hotspot_collector_has_no_silent_continue():
 def test_agents_status_aggregates_real_run_nodes(authed):
     from app.db import connect, encode, new_id
 
-    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    client, headers, project_id, novel_id = authed["client"], authed["headers"], authed["project_id"], authed["novel_id"]
     novel_id = client.post(f"/api/v1/projects/{project_id}/novels", headers=headers,
                            json={"idea": "agent 状态", "genre": "科幻", "style": "紧凑", "target_words": 10000}).json()["data"]["id"]
     db = connect()
@@ -152,7 +157,7 @@ def test_agents_status_aggregates_real_run_nodes(authed):
 def test_agents_status_does_not_report_stale_node_as_running(authed):
     from app.db import connect, encode, new_id
 
-    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    client, headers, project_id, novel_id = authed["client"], authed["headers"], authed["project_id"], authed["novel_id"]
     novel_id = client.post(f"/api/v1/projects/{project_id}/novels", headers=headers,
                            json={"idea": "过期 agent 状态", "genre": "科幻", "style": "紧凑", "target_words": 10000}).json()["data"]["id"]
     db = connect()
@@ -180,18 +185,30 @@ def test_agents_status_does_not_report_stale_node_as_running(authed):
 def test_ai_edit_creates_version_branch(authed, monkeypatch):
     from app.db import connect, encode, new_id
 
-    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    client, headers, project_id, novel_id = authed["client"], authed["headers"], authed["project_id"], authed["novel_id"]
     content_id = new_id()
     db = connect()
     db.execute(
-        "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s,%s,'chapter','编辑测试',%s,%s,'draft')",
-        (content_id, project_id, encode({"type": "doc", "content": [{"type": "paragraph", "text": "原文"}]}), encode({"seq": 1})),
+        "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s,%s,%s,'chapter','编辑测试',%s,%s,'draft')",
+        (content_id, project_id, novel_id, encode({"type": "doc", "content": [{"type": "paragraph", "text": "原文"}]}), encode({"seq": 1})),
     )
     db.commit()
     db.close()
 
     import app.main as main_module
-    monkeypatch.setattr(main_module, "complete", lambda **kwargs: {"text": "润色后的原文"})
+    monkeypatch.setattr(
+        main_module,
+        "_run_v7_editor",
+        lambda *args, **kwargs: {
+            "text": "润色后的原文",
+            "canonical_engine": "v7",
+            "editor_provenance": {"engine": "v7"},
+        },
+    )
+    monkeypatch.setattr(
+        "app.v7.review_service.review_chapter_v7_sync",
+        lambda *args, **kwargs: {"score": 90, "overall_score": 90, "issues": []},
+    )
     response = client.post(f"/api/v1/contents/{content_id}/ai/polish", headers=headers,
                            json={"selection": "原文", "instruction": "", "client_mutation_id": f"edit-{content_id}"})
     assert response.status_code == 200
@@ -207,12 +224,12 @@ def test_ai_edit_creates_version_branch(authed, monkeypatch):
 def test_ai_edit_returns_review_without_blocking_on_next_chapter_plan(authed, monkeypatch):
     from app.db import connect, encode, new_id
 
-    client, headers, project_id = authed["client"], authed["headers"], authed["project_id"]
+    client, headers, project_id, novel_id = authed["client"], authed["headers"], authed["project_id"], authed["novel_id"]
     content_id = new_id()
     db = connect()
     db.execute(
-        "INSERT INTO contents (id, project_id, type, title, body, meta, status) VALUES (%s,%s,'chapter','整章重写测试',%s,%s,'draft')",
-        (content_id, project_id,
+        "INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status) VALUES (%s,%s,%s,'chapter','整章重写测试',%s,%s,'draft')",
+        (content_id, project_id, novel_id,
          encode({"type": "doc", "content": [{"type": "paragraph", "text": "原文段落"}]}),
          encode({"seq": 3})),
     )
@@ -221,14 +238,21 @@ def test_ai_edit_returns_review_without_blocking_on_next_chapter_plan(authed, mo
 
     calls: list[str] = []
 
-    def fake_complete(**kwargs):
-        calls.append(kwargs["task_type"])
-        if kwargs["task_type"] == "review_7dim":
-            return {"score": 88, "issues": ["节奏可加强"]}
-        return {"text": "重写后的章节正文"}
+    def fake_v7_editor(*args, **kwargs):
+        calls.append("editor")
+        return {
+            "text": "重写后的章节正文",
+            "canonical_engine": "v7",
+            "editor_provenance": {"engine": "v7"},
+        }
+
+    def fake_v7_review(*args, **kwargs):
+        calls.append("review")
+        return {"score": 88, "overall_score": 88, "issues": ["节奏可加强"]}
 
     import app.main as main_module
-    monkeypatch.setattr(main_module, "complete", fake_complete)
+    monkeypatch.setattr(main_module, "_run_v7_editor", fake_v7_editor)
+    monkeypatch.setattr("app.v7.review_service.review_chapter_v7_sync", fake_v7_review)
     # 编辑器实时审阅现按七维审查+字数门禁循环；模拟真实长章节以走单次通过分支
     monkeypatch.setattr("app.services.text_metrics.count_content_chars", lambda text: 9999)
 
@@ -242,7 +266,7 @@ def test_ai_edit_returns_review_without_blocking_on_next_chapter_plan(authed, mo
     assert data["text"] == "重写后的章节正文"
     assert data["review_7dim"]["score"] == 88
     assert data["next_chapter_plan"] is None
-    assert calls == ["editor_rewrite", "review_7dim"]
+    assert calls == ["editor", "review"]
 
 
 def test_reader_synopsis_is_generated_and_persisted_separately(authed, monkeypatch):

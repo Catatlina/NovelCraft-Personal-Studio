@@ -98,7 +98,17 @@ _PLATFORM_PROFILES: dict[str, dict[str, Any]] = {
         "synopsis_rules": ["用处境/冲突→能力或机会→下一步悬念的三段压缩结构", "移动端首屏先说人和事，不先科普世界"],
         "opening_rules": ["前 300 字出现具体冲突、异常或强问题", "前三章分别完成身份锚定、核心能力/规则展示和第一次可见反馈"],
         "chapter_rules": ["每章必须有可见状态变化和章末钩子", "前期不允许连续两章只有铺垫而没有情绪或信息兑现"],
-        "payoff_policy": {"max_low_payoff_streak": 2, "early_chapters_need_payoff": 3, "hook_required": True},
+        "payoff_policy": {
+            "max_low_payoff_streak": 1,
+            "early_chapters_need_payoff": 3,
+            "hook_required": True,
+            "early_min_payoff_intensity": "medium",
+            "default_payoff_intensity": "small",
+            "feedback_required_types": [
+                "status_reversal", "money_or_resource", "opponent_reaction",
+                "career_progress", "industry_breakthrough", "system_reward",
+            ],
+        },
         "attention_beat_rules": ["前 300 字进入具体主题；章内用情绪/信息/行动节点维持追读，不按固定字数硬塞爽点"],
         "reader_priority": "即时冲突、情绪反馈、清晰的下一步期待",
     },
@@ -108,7 +118,17 @@ _PLATFORM_PROFILES: dict[str, dict[str, Any]] = {
         "synopsis_rules": ["用具体人物困境承载世界格局和长期悬念", "少剧透结果，多给可验证的成长方向"],
         "opening_rules": ["前三章完成主角、核心设定、第一轮小高潮", "重要爽点先铺垫再兑现，结果必须有代价或余波"],
         "chapter_rules": ["每章推进目标、状态或关系，并留下可追读问题", "小冲突递进到阶段高潮，不用每章重复同一种打脸"],
-        "payoff_policy": {"max_low_payoff_streak": 3, "early_chapters_need_payoff": 3, "hook_required": True},
+        "payoff_policy": {
+            "max_low_payoff_streak": 2,
+            "early_chapters_need_payoff": 3,
+            "hook_required": True,
+            "early_min_payoff_intensity": "medium",
+            "default_payoff_intensity": "small",
+            "feedback_required_types": [
+                "status_reversal", "money_or_resource", "opponent_reaction",
+                "career_progress", "industry_breakthrough", "system_reward",
+            ],
+        },
         "attention_beat_rules": ["前三章完成主角、核心设定和第一轮小高潮；爽点要有铺垫、依据、代价和余波"],
         "reader_priority": "设定可信、成长有代价、伏笔与长期回报",
     },
@@ -464,11 +484,23 @@ def select_quality_profile(
         if isinstance(overrides.get(key), list):
             merged[key] = _unique(merged[key] + overrides[key])
     if isinstance(overrides.get("payoff_policy"), dict):
-        merged["payoff_policy"].update({k: v for k, v in overrides["payoff_policy"].items() if k in {"max_low_payoff_streak", "early_chapters_need_payoff", "hook_required"}})
+        merged["payoff_policy"].update({
+            k: v
+            for k, v in overrides["payoff_policy"].items()
+            if k in {
+                "max_low_payoff_streak",
+                "early_chapters_need_payoff",
+                "hook_required",
+                "early_min_payoff_intensity",
+                "default_payoff_intensity",
+                "feedback_required_types",
+            }
+        })
     merged["attention_beat_policy"] = {
         "soft": True,
         "description": "以读者注意力节点为软基线，不按固定字数硬切段或硬塞爽点",
         "max_low_payoff_streak": merged["payoff_policy"].get("max_low_payoff_streak", 2),
+        "payoff_phases": ["pressure", "build", "burst", "feedback", "aftershock"],
     }
     return merged
 
@@ -531,6 +563,22 @@ def compile_quality_directive(
     attention_rules = [str(item) for item in (profile.get("attention_beat_rules") or [])[:2] if str(item).strip()]
     if attention_rules:
         lines.append("读者注意力基线（软规则）：「" + "；".join(attention_rules) + "」。")
+    payoff_policy = profile.get("payoff_policy") or {}
+    payoff_floor = str(
+        payoff_policy.get("early_min_payoff_intensity")
+        if seq <= int(payoff_policy.get("early_chapters_need_payoff") or 0)
+        else payoff_policy.get("default_payoff_intensity") or "small"
+    )
+    payoff_streak = int(payoff_policy.get("max_low_payoff_streak") or 1)
+    lines.append(
+        "爽点执行协议（生成前硬约束）：一章至少完成一处由主角主动选择造成的可见变化；"
+        f"当前阶段爽点强度不低于{payoff_floor}档，不能连续超过{payoff_streak}章只有铺垫没有兑现。"
+    )
+    lines.append(
+        "爽点五步法可压缩进4-6个节拍：压制（让读者感到损失/风险）→蓄力（给出选择、依据或底牌）"
+        "→爆发（行动造成明确结果）→反馈（对手、组织、资源、规则或旁观者发生可见变化）"
+        "→余波（代价、身份变化或新的压力）。反馈不得固定写成‘众人震惊’，但不能只在旁白里宣布爽。"
+    )
     soft_metrics = profile.get("style_plugin_soft_metrics") or {}
     if soft_metrics:
         dialogue_range = soft_metrics.get("dialogue_ratio_target") or []
@@ -561,12 +609,22 @@ def compile_quality_directive(
             ("压力", "pressure"),
             ("主动选择", "active_choice"),
             ("可见结果", "visible_result"),
+            ("可见反馈", "payoff_feedback"),
             ("代价/余波", "cost"),
             ("下一压力", "next_pressure"),
         )
         contract_text = "；".join(f"{label}={payoff_contract.get(key)}" for label, key in fields if payoff_contract.get(key))
         if contract_text:
             lines.append("本章爽点契约：" + contract_text + "。结果必须由角色行动造成，不能只在旁白里宣布。")
+        intensity = str(payoff_contract.get("payoff_intensity") or payoff_contract.get("level") or "")
+        arc = payoff_contract.get("payoff_arc") or payoff_contract.get("payoff_phases") or []
+        if intensity or arc:
+            lines.append(
+                "爽点档位/节拍："
+                + (f"强度={intensity}；" if intensity else "")
+                + ("结构=" + "→".join(str(item) for item in arc) if arc else "")
+                + "。"
+            )
     lines.append(
         "段首承接要有变化：同一两字人名作为段落开头尽量不超过全章约四分之一，不要机械重复同一动作起笔；可从动作、场景、物件、对白或他人反应切入，"
         "但要保持第三人称限知清晰，不能用大量‘他/她’替换造成另一种模板感。"

@@ -450,8 +450,10 @@ class StoryDirector:
                 "generation_quality": generation.get("generation_quality") or {},
                 "reader_experience": observation.get("reader_experience", {}),
                 "issues": observation.get("issues", []),
+                "strengths": observation.get("strengths", []),
                 "quality_gate": observation.get("quality_gate", {}),
                 "audit_report": observation.get("audit_report", {}),
+                "review_provenance": observation.get("review_provenance", {}),
                 "review_hold": observation.get("review_hold", False),
                 "review_validation": observation.get("review_validation", []),
                 "passed_review": observation["passed_review"],
@@ -464,6 +466,9 @@ class StoryDirector:
                 },
                 "transition_contract": update_result.get("transition_contract", {}),
                 "continuity": update_result.get("continuity", {}),
+                "final_continuity_audit": {
+                    "continuity": update_result.get("continuity", {}),
+                },
                 "rule_learning": update_result.get("rule_learning", []),
                 "v6_content": update_result.get("v6_content"),
                 "v6_content_id": (update_result.get("v6_content") or {}).get("content_id"),
@@ -1052,8 +1057,10 @@ class StoryDirector:
             "dimension_scores": review_data.get("dimension_scores", {}),
             "reader_experience": review_data.get("reader_experience", {}),
             "issues": review_data.get("issues", []),
+            "strengths": review_data.get("strengths", []),
             "constraint_violations": review_data.get("constraint_violations", []),
             "audit_report": review_data.get("audit_report", {}),
+            "review_provenance": review_data.get("provenance", {}),
             "blocking_violations": blocking,
             "passed_review": passed,
             "rework_count": rework_count,
@@ -1138,6 +1145,20 @@ class StoryDirector:
             ),
             state_conflicts=memory_data.get("conflicts") or [],
         )
+        continuity.update({
+            "status": "continuous" if continuity.get("passed") else "broken",
+            "checked": True,
+            "source": "v7.transition_contract",
+            "gaps": continuity.get("issues") or [],
+            "narrative_flow": (
+                "V7 转场契约已检查章节号、上一章承接、状态变化和下一章桥接。"
+                if continuity.get("passed")
+                else "V7 转场契约发现：" + "；".join(
+                    str(item.get("message") or "连续性缺口")
+                    for item in (continuity.get("issues") or [])[:5]
+                )
+            ),
+        })
         transition_contract["continuity"] = continuity
         if not continuity["passed"]:
             # This is an application hard gate.  A high model score cannot
@@ -1273,6 +1294,21 @@ class StoryDirector:
                 **self.generation_metadata,
                 "audit_report": observation.get("audit_report") or {},
                 "continuity": continuity,
+                "final_continuity_audit": {"continuity": continuity},
+                "review_provenance": observation.get("review_provenance") or {},
+                "canonical_review": {
+                    "canonical_engine": "v7",
+                    "overall_score": observation.get("review_score", 0),
+                    "dimension_scores": observation.get("dimension_scores") or {},
+                    "audit_report": observation.get("audit_report") or {},
+                    "reader_experience": observation.get("reader_experience") or {},
+                    "issues": observation.get("issues") or [],
+                    "strengths": observation.get("strengths") or [],
+                    "constraint_violations": observation.get("constraint_violations") or [],
+                    "provenance": observation.get("review_provenance") or {},
+                    "continuity": continuity,
+                    "final_continuity_audit": {"continuity": continuity},
+                },
                 "generation_quality": generation.get("generation_quality") or {},
                 "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
                 "payoff_contract": generation.get("payoff_contract") or {},

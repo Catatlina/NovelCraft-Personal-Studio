@@ -17,6 +17,20 @@ type ReviewPayload = {
   warning_count?: number;
   audit_report?: AuditReport;
   reader_experience?: Record<string, number>;
+  canonical_engine?: string;
+  continuity?: { status?: string; checked?: boolean; gaps?: unknown[]; narrative_flow?: string; source?: string; model_score?: number | null };
+  provenance?: {
+    engine?: string;
+    audit_source?: string;
+    prompt_name?: string;
+    prompt_version?: string;
+    provider?: string;
+    model?: string;
+    text_hash?: string;
+    cache_hit?: boolean;
+    source?: string;
+    scored_at?: string;
+  };
   final_consistency_check?: {
     checks?: Record<string, { status?: string; issues?: unknown[] }>;
     overall_score?: number;
@@ -145,6 +159,7 @@ export function Review({
   characters = [],
   timeline = [],
   arcs = [],
+  narrativeEvidence,
   onOpenEditor,
   onRepairApplied,
 }: {
@@ -153,6 +168,7 @@ export function Review({
   characters?: Array<{ id?: string; title?: string; name?: string; body?: string }>;
   timeline?: Array<{ event?: string; chapter_seq?: number }>;
   arcs?: Array<{ character?: string; stage?: string; goal?: string; status?: string }>;
+  narrativeEvidence?: { timeline_source?: string; arcs_source?: string };
   onOpenEditor?: (chapterId?: string) => void;
   onRepairApplied?: (updated: { body?: unknown; meta?: Record<string, unknown>; status?: string; updated_at?: string }) => void;
 }) {
@@ -187,14 +203,14 @@ export function Review({
   const scoreEvidence = directScore !== null
     ? Math.max(numericDimensionScores.length, auditScores.length, Object.keys(checks).length)
     : numericDimensionScores.length || auditScores.length || checkScores.length;
+  const continuity = review.final_continuity_audit?.continuity ?? review.continuity;
   const issues = uniqueItems([
     ...cleanItems(review.issues),
     ...cleanItems(review.weaknesses),
     ...Object.values(checks).flatMap(check => cleanItems(check.issues)),
-    ...cleanItems(review.final_continuity_audit?.continuity?.gaps),
+    ...cleanItems(continuity?.gaps),
   ]);
   const strengths = cleanItems(review.strengths);
-  const continuity = review.final_continuity_audit?.continuity;
   const hasEvidence = score !== null || Object.keys(dimensionScores).length > 0 || Object.keys(auditItems).length > 0 || Object.keys(checks).length > 0 || issues.length > 0 || Boolean(continuity);
   const recommendation = chapter?.meta?.repair_recommendation as {
     action?: "repair_local" | "rewrite_chapter" | "replan_chapter";
@@ -354,6 +370,23 @@ export function Review({
             </article>
           </section>
 
+          {review.provenance && (
+            <section className="review-provenance starlume-card">
+              <div className="section-heading">
+                <div><p className="eyebrow">AUDIT PROVENANCE</p><h3>本次评分来源</h3></div>
+                <span>{review.provenance.cache_hit ? "命中同正文缓存" : "实时 V7 审计"}</span>
+              </div>
+              <div className="review-provenance-grid">
+                <div><span>审核引擎</span><strong>{review.provenance.engine || review.canonical_engine || "v7"}</strong></div>
+                <div><span>实际模型</span><strong>{[review.provenance.provider, review.provenance.model].filter(Boolean).join(" · ") || "未返回"}</strong></div>
+                <div><span>Prompt</span><strong>{review.provenance.prompt_name || "未返回"}</strong></div>
+                <div><span>Prompt 版本</span><strong>{review.provenance.prompt_version || "未返回"}</strong></div>
+                <div><span>审计来源</span><strong>{review.provenance.audit_source || review.provenance.source || "未返回"}</strong></div>
+                <div><span>正文指纹</span><strong>{review.provenance.text_hash ? `${review.provenance.text_hash.slice(0, 12)}…` : "未返回"}</strong></div>
+              </div>
+            </section>
+          )}
+
           <section className="review-dimensions starlume-card">
             <div className="section-heading"><div><p className="eyebrow">SEVEN DIMENSIONS</p><h3>核心质量维度</h3></div><span>{numericDimensionScores.length} 项有分数</span></div>
             <div className="dimension-grid">
@@ -424,11 +457,11 @@ export function Review({
 
       <section className="narrative-grid">
         <article className="starlume-card narrative-card">
-          <div className="review-list-heading"><span><Route size={18} /></span><div><p className="eyebrow">TIMELINE</p><h3>故事时间线</h3></div></div>
+          <div className="review-list-heading"><span><Route size={18} /></span><div><p className="eyebrow">TIMELINE</p><h3>故事时间线</h3>{narrativeEvidence?.timeline_source && <small className="narrative-source">来源：{narrativeEvidence.timeline_source}</small>}</div></div>
           {timeline.length ? <div className="narrative-list">{timeline.map((item, index) => <div key={`${item.chapter_seq}-${index}`}><span>{item.chapter_seq ? `第 ${item.chapter_seq} 章` : "未标章节"}</span><p>{item.event || "未记录事件"}</p></div>)}</div> : <p className="muted-output">尚未从章节中提取时间线事件。</p>}
         </article>
         <article className="starlume-card narrative-card">
-          <div className="review-list-heading"><span><Users size={18} /></span><div><p className="eyebrow">CHARACTER ARCS</p><h3>人物弧线</h3></div></div>
+          <div className="review-list-heading"><span><Users size={18} /></span><div><p className="eyebrow">CHARACTER ARCS</p><h3>人物弧线</h3>{narrativeEvidence?.arcs_source && <small className="narrative-source">来源：{narrativeEvidence.arcs_source}</small>}</div></div>
           {arcs.length ? <div className="narrative-list">{arcs.map((item, index) => <div key={`${item.character}-${index}`}><span>{item.character || "未命名角色"} · {item.stage || "阶段未标"}</span><p>{item.goal || item.status || "暂无目标记录"}</p></div>)}</div> : characters.length ? <div className="narrative-list">{characters.map((item, index) => <div key={item.id || index}><span>{item.title || item.name || "未命名角色"}</span><p>{item.body || "人物资料已建立，弧线尚未提取。"}</p></div>)}</div> : <p className="muted-output">尚未建立人物弧线数据。</p>}
         </article>
       </section>

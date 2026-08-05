@@ -57,6 +57,10 @@ AI_WRAPPER_CALLS = {
     "generate_v7_chapter",
     "generate_v7_chapter_sync",
     "_generate_v7_chapter_worker",
+    # Canonical V7 review boundary: the async service constructs the V7
+    # ReviewEngine and its AIGateway, while these helpers only bridge into it.
+    "review_chapter_v7",
+    "review_chapter_v7_sync",
 }
 
 # Explicit non-AI/deterministic exceptions. These functions must not return
@@ -136,6 +140,14 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/v7/adapters/generation_adapter.py:generate": "V6 complete-backed compatibility adapter; prompt/model routing remains owned by V6",
     "backend/app/v7/adapters/generation_adapter.py:generate_with_retry": "compatibility retry wrapper over the V6 complete-backed adapter",
     "backend/app/v7/adapters/context_adapter.py:assemble_for_review": "V6 ContextAssembler compatibility wrapper; no generated output",
+    "backend/app/main.py:ai_chapter_review": "live-audit endpoint; delegates review to the canonical V7 review service",
+    "backend/app/v7/review_service.py:_decorate_review": "deterministic V7 review payload decoration and provenance assembly",
+    "backend/app/v7/review_service.py:_cached_review": "deterministic persisted-review cache lookup and decoration",
+    "backend/app/v7/review_service.py:_review_worker": "async resource-lifecycle bridge to review_chapter_v7",
+    "backend/app/v7/review_service.py:review_chapter_v7": "canonical V7 review service; constructs ReviewEngine and its real AIGateway",
+    "backend/app/v7/review_service.py:review_chapter_v7_sync": "synchronous compatibility bridge to the canonical V7 review service",
+    "backend/app/workers/tasks.py:_try_canonical_v7_review": "V6 contents compatibility boundary that delegates real chapters to V7",
+    "backend/app/services/agent_registry.py:_load_review_target": "deterministic review-target loader; provider call occurs in V7 review service",
 }
 
 

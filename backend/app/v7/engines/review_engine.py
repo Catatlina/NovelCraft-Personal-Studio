@@ -7,6 +7,7 @@ Dimensions: consistency / character_voice / pacing / plot_logic /
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
 from .base import BaseEngine, EngineCapability, EngineResult
@@ -442,6 +443,18 @@ class ReviewEngine(BaseEngine):
             "generation_quality": data.get("generation_quality") or {},
             "word_count": data.get("word_count", 0),
             "model": ai["usage"].get("model"),
+            "provenance": {
+                "engine": "v7",
+                "audit_source": "v7.review.33_dimension",
+                "prompt_name": "v7.review.33_dimension",
+                "prompt_version": "1.1.0",
+                # Test doubles and older adapters do not necessarily expose
+                # routing metadata.  Missing provenance must remain explicit;
+                # it must not turn a valid review contract into an engine error.
+                "provider": ai["usage"].get("provider") or getattr(self.ai_gateway, "provider", "unknown"),
+                "model": ai["usage"].get("model") or getattr(self.ai_gateway, "default_model", None),
+                "text_hash": hashlib.sha256(chapter_text.encode("utf-8")).hexdigest(),
+            },
             "reason": raw.get("reason", ""),
             "quality_profile": quality_profile_metadata(data.get("quality_profile") or {}) if data.get("quality_profile") else {},
             "payoff_contract": payoff_contract,

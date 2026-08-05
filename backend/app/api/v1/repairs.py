@@ -43,17 +43,27 @@ class RepairApplyRequest(BaseModel):
 def _load_chapter(chapter_id: str) -> dict[str, Any]:
     db = connect()
     row = db.execute(
-        """SELECT id, project_id, parent_id, title, body, meta, updated_at
+        """SELECT id, project_id, parent_id, title, body, meta, scope_status, updated_at
            FROM contents
            WHERE id=%s AND type='chapter' AND is_deleted=FALSE""",
         (chapter_id,),
     ).fetchone()
-    db.close()
     if not row:
+        db.close()
         raise HTTPException(status_code=404, detail="chapter not found")
     result = dict(row)
     result["body"] = decode(result.get("body"), {})
     result["meta"] = decode(result.get("meta"), {})
+    try:
+        from app.services.chapter_scope import ChapterScopeError, require_canonical_v7_chapter
+        require_canonical_v7_chapter(db, result, operation="repair_preview")
+    except ChapterScopeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, **exc.details},
+        ) from exc
+    finally:
+        db.close()
     return result
 
 
@@ -162,13 +172,23 @@ def apply_repair(
 
     db = connect()
     row = db.execute(
-        """SELECT body, meta, updated_at FROM contents
+        """SELECT id, project_id, parent_id, type, body, meta, scope_status, updated_at FROM contents
            WHERE id=%s AND type='chapter' AND is_deleted=FALSE FOR UPDATE""",
         (chapter_id,),
     ).fetchone()
     if not row:
         db.close()
         raise HTTPException(status_code=404, detail="chapter not found")
+    try:
+        from app.services.chapter_scope import ChapterScopeError, require_canonical_v7_chapter
+        require_canonical_v7_chapter(db, dict(row), operation="repair_apply")
+    except ChapterScopeError as exc:
+        db.rollback()
+        db.close()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, **exc.details},
+        ) from exc
     if row["updated_at"] != body.base_updated_at:
         db.rollback()
         db.close()

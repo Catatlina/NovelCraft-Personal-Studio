@@ -53,6 +53,8 @@ def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     assert "手仍按在门缝上" in prompt
     assert "每约 800-1200 字" in prompt
     assert "章末必须把钩子落实" in prompt
+    assert "压制→蓄力→爆发→反馈→余波" in prompt
+    assert "反馈必须落到对手、组织、资源、规则或旁观者的可见变化" in prompt
 
 
 def test_continuation_prompt_does_not_reset_chapter_context():

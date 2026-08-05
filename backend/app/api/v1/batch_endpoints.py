@@ -114,8 +114,8 @@ def import_chapters(novel_id: str, body: dict, user: dict = Depends(get_current_
                 f"{novel_id}:{identity}".encode("utf-8")
             ).hexdigest()
             db.execute("""INSERT INTO contents
-                          (id,project_id,parent_id,type,title,body,meta,status,owner_id,generation_key)
-                          VALUES (%s,%s,%s,'chapter',%s,%s,%s,'planned',%s,%s)""",
+                          (id,project_id,parent_id,type,title,body,meta,status,scope_status,owner_id,generation_key)
+                          VALUES (%s,%s,%s,'chapter',%s,%s,%s,'planned','canonical',%s,%s)""",
                        (chapter_id, novel["project_id"], novel_id, display_title,
                         encode({"type": "doc", "content": []}), encode(meta), user["id"], generation_key))
             ids.append(chapter_id)

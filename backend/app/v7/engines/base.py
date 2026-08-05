@@ -282,3 +282,63 @@ class BaseEngine(ABC):
         )
 
         return updated
+
+    async def run_read_only(self, input_data: dict[str, Any]) -> EngineResult:
+        """Run the same review pipeline without mutating engine state.
+
+        Interactive editor audits must use exactly the same analyze/plan/
+        execute/validate contract as generation-time review, but they must not
+        promote an unsaved editor draft into Novel Brain.  Keeping this method
+        on the shared base class prevents a second, weaker review implementation
+        from growing beside the canonical V7 engine.
+        """
+        engine_name = self.capability.engine_name
+        phases: dict[str, Any] = {}
+
+        def _capture(name: str, res: EngineResult) -> EngineResult:
+            phases[name] = {
+                "success": res.success,
+                "confidence": res.confidence,
+                "reason": res.reason,
+                "result": res.result,
+                "warnings": list(res.warnings or []),
+            }
+            res.metadata.setdefault("phases", phases)
+            res.metadata.setdefault("engine", engine_name)
+            res.metadata["usage"] = dict(self.total_usage)
+            return res
+
+        phases_to_run = (
+            ("analyze", self.analyze, "Analyze input for read-only review"),
+            ("plan", self.plan, "Plan read-only review"),
+            ("execute", self.execute, f"Execute read-only review for {engine_name}"),
+            ("validate", self.validate, "Validate read-only review"),
+        )
+        current: EngineResult | None = None
+        for phase_name, phase_fn, input_summary in phases_to_run:
+            async with self.tracer.trace_step(
+                f"{engine_name}.{phase_name}",
+                phase_name,
+                input_summary=input_summary,
+            ) as step:
+                self._step_ctx = step
+                if phase_name == "analyze":
+                    current = await phase_fn(input_data)  # type: ignore[arg-type]
+                else:
+                    current = await phase_fn(current)  # type: ignore[arg-type]
+                _capture(phase_name, current)
+                self._finish_step(current, current.reason or f"{phase_name} done")
+                self._step_ctx = None
+            if not current.success:
+                break
+
+        if current is None:
+            return EngineResult(
+                success=False,
+                reason="read-only engine pipeline produced no result",
+                confidence=0.0,
+                metadata={"engine": engine_name, "phases": phases},
+            )
+        current.metadata["read_only"] = True
+        current.metadata["usage"] = dict(self.total_usage)
+        return current

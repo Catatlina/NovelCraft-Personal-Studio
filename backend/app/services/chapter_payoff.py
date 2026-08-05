@@ -13,7 +13,52 @@ from difflib import SequenceMatcher
 from typing import Any
 
 
-PAYOFF_SCHEMA_VERSION = "chapter-payoff-contract-v1"
+PAYOFF_SCHEMA_VERSION = "chapter-payoff-contract-v2"
+PAYOFF_INTENSITY_LEVELS = ("small", "medium", "high", "peak")
+PAYOFF_INTENSITY_SCORES = {"small": 1, "medium": 2, "high": 3, "peak": 4}
+PAYOFF_INTENSITY_ALIASES = {
+    "小": "small",
+    "小爽": "small",
+    "中": "medium",
+    "中爽": "medium",
+    "正常": "medium",
+    "燃": "high",
+    "大爽": "high",
+    "高": "high",
+    "爆燃": "peak",
+    "超大": "peak",
+    "高潮": "peak",
+}
+PAYOFF_PHASES = ("pressure", "build", "burst", "feedback", "aftershock")
+PAYOFF_PHASE_ALIASES = {
+    "压制": "pressure",
+    "压力": "pressure",
+    "铺垫": "build",
+    "蓄力": "build",
+    "酝酿": "build",
+    "爆发": "burst",
+    "兑现": "burst",
+    "反击": "burst",
+    "反馈": "feedback",
+    "反应": "feedback",
+    "围观": "feedback",
+    "余波": "aftershock",
+    "代价": "aftershock",
+    "新压力": "aftershock",
+}
+PAYOFF_FEEDBACK_TYPES = {
+    "status_reversal",
+    "money_or_resource",
+    "opponent_reaction",
+    "breakthrough",
+    "combat_advantage",
+    "hidden_strength",
+    "rule_exploit",
+    "system_reward",
+    "ability_discovery",
+    "industry_breakthrough",
+    "career_progress",
+}
 PAYOFF_TYPES = {
     "status_reversal", "money_or_resource", "information_advantage", "relationship_shift",
     "career_progress", "industry_breakthrough", "opponent_reaction", "breakthrough",
@@ -141,6 +186,49 @@ def _first(data: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _normalize_payoff_intensity(value: Any, *, default: str = "small") -> str:
+    raw = _text(value).lower()
+    if raw in PAYOFF_INTENSITY_LEVELS:
+        return raw
+    return PAYOFF_INTENSITY_ALIASES.get(raw, default)
+
+
+def _normalize_payoff_phases(value: Any) -> list[str]:
+    values: list[Any]
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, str):
+        values = re.split(r"[,，、|>/→\s]+", value)
+    else:
+        values = []
+    phases: list[str] = []
+    for item in values:
+        raw = _text(item).lower()
+        phase = raw if raw in PAYOFF_PHASES else PAYOFF_PHASE_ALIASES.get(raw, "")
+        if phase and phase not in phases:
+            phases.append(phase)
+    return phases
+
+
+def _payoff_feedback(data: dict[str, Any]) -> str:
+    """Return observable feedback without requiring a crowd scene.
+
+    A payoff may land through a rival's reaction, a changed relationship, a
+    resource/state change, or a rule consequence.  The field keeps the
+    reader-facing requirement while avoiding a fixed "everyone is shocked"
+    template in every chapter.
+    """
+    return _first(
+        data,
+        "payoff_feedback",
+        "witness_reaction",
+        "reaction",
+        "external_reaction",
+        "external_consequence",
+        "aftermath",
+    )
+
+
 def _normalize_payoff_type(value: Any) -> str:
     raw = _text(value)
     if not raw:
@@ -229,6 +317,10 @@ def normalize_payoff_contract(value: Any, *, chapter_number: int | None = None) 
     payoff_type = _normalize_payoff_type(raw_type)
     if payoff_type in {"", "other"}:
         payoff_type = _infer_payoff_type(data) or payoff_type
+    feedback = _payoff_feedback(data)
+    intensity = _normalize_payoff_intensity(
+        _first(data, "payoff_intensity", "intensity", "level", "payoff_level")
+    )
     return {
         "schema_version": str(data.get("schema_version") or PAYOFF_SCHEMA_VERSION),
         "chapter_number": int(data.get("chapter_number") or chapter_number or 0),
@@ -237,9 +329,14 @@ def normalize_payoff_contract(value: Any, *, chapter_number: int | None = None) 
         "active_choice": _first(data, "active_choice", "choice", "decision", "action"),
         "payoff_type": payoff_type,
         "visible_result": _first(data, "visible_result", "result", "outcome", "payoff"),
-        "witness_reaction": _first(data, "witness_reaction", "reaction", "external_reaction"),
+        "witness_reaction": _first(data, "witness_reaction", "reaction", "external_reaction") or feedback,
+        "payoff_feedback": feedback,
         "cost": _first(data, "cost", "cost_or_risk", "price", "consequence"),
         "next_pressure": _first(data, "next_pressure", "hook", "next_hook", "new_pressure"),
+        "payoff_intensity": intensity,
+        "payoff_arc": _normalize_payoff_phases(
+            data.get("payoff_arc") or data.get("payoff_phases") or data.get("arc")
+        ),
         "setup_refs": [
             _text(item, 240)
             for item in (data.get("setup_refs") or data.get("foreshadow_refs") or [])
@@ -263,7 +360,80 @@ def build_payoff_contract(
     if not contract["payoff_type"]:
         genre = str((profile or {}).get("genre") or "")
         contract["payoff_type"] = "breakthrough" if genre == "xuanhuan" else "status_reversal"
+    if not _first(data, "payoff_intensity", "intensity", "level", "payoff_level"):
+        policy = (profile or {}).get("payoff_policy") or {}
+        early_limit = int(policy.get("early_chapters_need_payoff") or 0)
+        contract["payoff_intensity"] = (
+            str(policy.get("early_min_payoff_intensity") or "medium")
+            if int(chapter_number or 0) <= early_limit
+            else str(policy.get("default_payoff_intensity") or "small")
+        )
+        contract["intensity_source"] = "policy_floor"
+    if not contract.get("payoff_arc"):
+        # Existing plot briefs predate the five-phase field.  Carry their
+        # behavior forward with an explicit planning template; this does not
+        # claim that the prose already contains every phase.
+        contract["payoff_arc"] = list(PAYOFF_PHASES)
+        contract["arc_source"] = "policy_template"
     return contract
+
+
+def validate_payoff_beat_structure(beats: Any) -> dict[str, Any]:
+    """Validate the compressed five-phase payoff arc used by the writer.
+
+    Four beats are enough when one beat carries two phases.  The validator
+    therefore checks phase coverage, not a fixed number of beats.  Missing
+    phase labels are inferred only for legacy plans and are reported as such;
+    new plans are prompted to emit them explicitly.
+    """
+    items = [item for item in (beats or []) if isinstance(item, dict)]
+    covered: list[str] = []
+    inferred = False
+    evidence: list[dict[str, Any]] = []
+    for index, beat in enumerate(items):
+        raw_phases = beat.get("payoff_phases") or beat.get("payoff_phase") or beat.get("phase")
+        phases = _normalize_payoff_phases(raw_phases)
+        if not phases:
+            text = " ".join(_text(beat.get(key), 300) for key in ("name", "purpose", "content", "emotion"))
+            for phase, keywords in {
+                "pressure": ("压", "危", "风险", "阻碍", "逼"),
+                "build": ("铺", "蓄", "准备", "试探", "积"),
+                "burst": ("爆", "反击", "兑现", "击败", "突破", "拿下"),
+                "feedback": ("反应", "震", "态度", "围观", "承认", "让步"),
+                "aftershock": ("余波", "代价", "后果", "新压", "钩子"),
+            }.items():
+                if any(keyword in text for keyword in keywords):
+                    phases.append(phase)
+        if not phases and items:
+            # Legacy plans commonly have four beats without phase metadata.
+            # Positional inference keeps old plans readable but does not hide
+            # the fact in the returned evidence.
+            inferred = True
+            if len(items) == 4:
+                positional = (
+                    ("pressure",),
+                    ("build",),
+                    ("burst",),
+                    ("feedback", "aftershock"),
+                )
+            else:
+                positional = tuple((phase,) for phase in PAYOFF_PHASES)
+            phases = list(positional[min(index, len(positional) - 1)])
+        for phase in phases:
+            if phase not in covered:
+                covered.append(phase)
+        evidence.append({"beat_index": index, "phases": phases})
+    missing = [phase for phase in PAYOFF_PHASES if phase not in covered]
+    passed = bool(items) and not missing
+    return {
+        "schema_version": PAYOFF_SCHEMA_VERSION,
+        "passed": passed,
+        "required_phases": list(PAYOFF_PHASES),
+        "covered_phases": covered,
+        "missing_phases": missing,
+        "inferred": inferred,
+        "evidence": evidence,
+    }
 
 
 def validate_payoff_contract(
@@ -281,7 +451,7 @@ def validate_payoff_contract(
     contract = normalize_payoff_contract(value)
     hard_fields = ("reader_promise", "pressure", "active_choice", "visible_result", "next_pressure")
     missing = [key for key in hard_fields if not contract.get(key)]
-    soft_missing = [key for key in ("cost", "witness_reaction") if not contract.get(key)]
+    soft_missing = [key for key in ("cost", "payoff_feedback") if not contract.get(key)]
     policy = (profile or {}).get("payoff_policy") or {}
     raw_type = _first(
         value if isinstance(value, dict) else {},
@@ -301,6 +471,24 @@ def validate_payoff_contract(
             missing.append("payoff_type")
     issues = [f"爽点契约缺少 {key}" for key in missing]
     warnings = [f"爽点契约建议补充 {key}" for key in soft_missing]
+    intensity = contract.get("payoff_intensity") or "small"
+    intensity_score = PAYOFF_INTENSITY_SCORES.get(intensity, 1)
+    min_intensity = str(
+        policy.get("early_min_payoff_intensity")
+        if int(contract.get("chapter_number") or 0) <= int(policy.get("early_chapters_need_payoff") or 0)
+        else policy.get("default_payoff_intensity") or "small"
+    )
+    strength_issues: list[str] = []
+    if required and intensity_score < PAYOFF_INTENSITY_SCORES.get(min_intensity, 1):
+        strength_issues.append(f"爽点强度低于{min_intensity}档")
+    feedback_types = set(policy.get("feedback_required_types") or PAYOFF_FEEDBACK_TYPES)
+    if required and (
+        contract.get("payoff_type") in feedback_types
+        or intensity in {"high", "peak"}
+    ) and not contract.get("payoff_feedback"):
+        strength_issues.append("缺少可见反馈（可为对手/组织/资源/规则后果，不要求固定围观群众）")
+    if required and not contract.get("payoff_arc"):
+        strength_issues.append("未声明压制-蓄力-爆发-反馈-余波的爽点结构")
     return {
         "schema_version": PAYOFF_SCHEMA_VERSION,
         "passed": not missing if required else True,
@@ -308,6 +496,11 @@ def validate_payoff_contract(
         "missing": missing,
         "warnings": warnings,
         "issues": issues,
+        "strength_passed": not strength_issues,
+        "strength_issues": strength_issues,
+        "intensity": intensity,
+        "intensity_score": intensity_score,
+        "minimum_intensity": min_intensity,
         "contract": contract,
     }
 
@@ -384,7 +577,15 @@ def evaluate_payoff_schedule(
     issues: list[str] = []
     for item in chapters:
         contract = normalize_payoff_contract(item.get("payoff_contract") or item)
-        has_payoff = bool(contract.get("visible_result")) and contract.get("payoff_type") not in {""}
+        feedback_types = set(policy.get("feedback_required_types") or PAYOFF_FEEDBACK_TYPES)
+        has_payoff = (
+            bool(contract.get("visible_result"))
+            and contract.get("payoff_type") not in {""}
+            and (
+                bool(contract.get("payoff_feedback"))
+                or contract.get("payoff_type") not in feedback_types
+            )
+        )
         streak = 0 if has_payoff else streak + 1
         if streak > max_streak:
             issues.append(f"第{contract.get('chapter_number') or '?'}章前后连续 {streak} 章缺少可见兑现")

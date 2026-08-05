@@ -491,6 +491,65 @@ def test_public_writer_agent_requires_novel_id():
         raise AssertionError("writer agent must not reopen the legacy V6 path")
 
 
+def test_public_review_agents_share_the_canonical_v7_audit_contract(monkeypatch):
+    import uuid
+
+    from app.services import agent_registry
+
+    novel_id = str(uuid.uuid4())
+    content = {
+        "id": str(uuid.uuid4()),
+        "project_id": "project-1",
+        "parent_id": novel_id,
+        "type": "chapter",
+        "seq": 2,
+        "meta": {},
+        "body": "旧正文",
+    }
+    monkeypatch.setattr(
+        agent_registry,
+        "_load_review_target",
+        lambda project_id, variables: (content, "当前编辑器正文"),
+    )
+    captured = []
+
+    def fake_review(target, text, **kwargs):
+        captured.append((target, text, kwargs))
+        return {
+            "canonical_engine": "v7",
+            "overall_score": 91.0,
+            "dimension_scores": {"consistency": 91},
+            "audit_report": {"schema_version": "33d-v1", "count": 33, "items": {}},
+            "continuity": {"status": "continuous", "checked": True},
+            "provenance": {
+                "engine": "v7",
+                "prompt_name": "v7.review.33_dimension",
+                "prompt_version": "1.1.0",
+            },
+            "issues": [],
+        }
+
+    monkeypatch.setattr("app.v7.review_service.review_chapter_v7_sync", fake_review)
+    for agent_id in ("reviewer", "consistency-checker"):
+        result = agent_registry.execute_agent(
+            agent_id,
+            "project-1",
+            {"content_id": content["id"]},
+        )
+        assert result["status"] == "succeeded"
+        assert result["task_type"] == "v7_review_33_dimension"
+        assert result["output"]["canonical_engine"] == "v7"
+        assert result["output"]["score"] == 91.0
+        assert result["output"]["dimensions"] == {"consistency": 91}
+
+    assert [item[1] for item in captured] == ["当前编辑器正文", "当前编辑器正文"]
+    assert all(
+        item[2]["use_cache"] is False
+        and item[2]["model"] == ""
+        for item in captured
+    )
+
+
 def test_v6_is_only_used_as_compatibility_fact_source():
     from pathlib import Path
 

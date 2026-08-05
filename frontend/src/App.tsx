@@ -145,7 +145,11 @@ export default function App() {
   const [novel, setNovel] = useState<Content | null>(null);
   const [novels, setNovels] = useState<Content[]>([]);
   const [characters, setCharacters] = useState<any[]>([]);
-  const [narrative, setNarrative] = useState<{ timeline: any[]; arcs: any[] }>({ timeline: [], arcs: [] });
+  const [narrative, setNarrative] = useState<{
+    timeline: any[];
+    arcs: any[];
+    evidence?: Record<string, unknown>;
+  }>({ timeline: [], arcs: [] });
   const [chapter, setChapter] = useState<Content | null>(null);
   const [chapters, setChapters] = useState<Content[]>([]);
   const [run, setRun] = useState<Run | null>(null);
@@ -364,8 +368,8 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== "review" || !novel) { setNarrative({ timeline: [], arcs: [] }); return; }
-    api<{ timeline: any[]; arcs: any[] }>(`/api/v1/novels/${novel.id}/narrative`)
-      .then(data => setNarrative({ timeline: data.timeline || [], arcs: data.arcs || [] }))
+    api<{ timeline: any[]; arcs: any[]; evidence?: Record<string, unknown> }>(`/api/v1/novels/${novel.id}/narrative`)
+      .then(data => setNarrative({ timeline: data.timeline || [], arcs: data.arcs || [], evidence: data.evidence }))
       .catch(() => setNarrative({ timeline: [], arcs: [] }));
   }, [tab, novel?.id]);
 
@@ -798,7 +802,7 @@ export default function App() {
         { method: "POST", body: JSON.stringify({ selection: text, client_mutation_id: crypto.randomUUID() }) },
       );
       if (requestSeq !== reviewRequestSeqRef.current) return;
-      const review = output.review_7dim ?? output.review;
+      const review = output.review ?? output.review_7dim;
       if (!review || typeof review !== "object" || Object.keys(review).length === 0) {
         lastReviewTextRef.current = "";
         setEditorAiReview(null);
@@ -884,7 +888,7 @@ export default function App() {
       }
       try {
         const output = await withTimeout(
-          api<{ text: string; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) }),
+          api<{ text: string; review?: any; review_7dim?: any; next_chapter_plan?: any }>(url, { method: "POST", body: JSON.stringify(body) }),
           EDITOR_OPERATION_TIMEOUT_MS,
           "AI 操作等待超时，请检查模型服务后重试",
         );
@@ -895,7 +899,7 @@ export default function App() {
         }
         const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
         setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
-        setEditorAiReview({ review: output.review_7dim, next: output.next_chapter_plan });
+        setEditorAiReview({ review: output.review ?? output.review_7dim, next: output.next_chapter_plan });
         if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
       } catch (caught) {
         if (!(caught instanceof ApiError) || !isOfflineApiError(caught)) {
@@ -1068,14 +1072,33 @@ export default function App() {
     setChapter(r); setEditorText(docToText(r.body)); loadVersions(r.id);
   }
 
-  // V2 runs split quality data across self-review and consistency nodes; legacy runs used n8.
-  const review = ({
-    ...((chapter?.meta?.review_7dim as Record<string, unknown> | undefined) ?? {}),
+  // V7 chapter metadata is authoritative.  Do not merge the latest workflow
+  // run into a selected chapter: that made a different chapter's old nodes
+  // overwrite the selected V7 audit and produced empty/mismatched cards.
+  const chapterMeta = (chapter?.meta || {}) as Record<string, any>;
+  const persistedV7Review = (chapterMeta.canonical_review || {}) as Record<string, any>;
+  const isV7Chapter = chapterMeta.canonical_engine === "v7" || chapterMeta.source === "v7";
+  const legacyReview = ({
+    ...((chapterMeta.review_7dim as Record<string, unknown> | undefined) ?? {}),
     ...(run?.nodes.find(n => n.node_key === "n8")?.output ?? {}),
     ...(run?.nodes.find(n => n.node_key === "write_self_review")?.output ?? {}),
-    final_consistency_check: run?.nodes.find(n => n.node_key === "final_consistency_check")?.output ?? chapter?.meta?.final_consistency_check ?? chapter?.meta?.quality_gate,
-    final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output ?? chapter?.meta?.final_continuity_audit,
-  }) as any;
+    final_consistency_check: run?.nodes.find(n => n.node_key === "final_consistency_check")?.output ?? chapterMeta.final_consistency_check ?? chapterMeta.quality_gate,
+    final_continuity_audit: run?.nodes.find(n => n.node_key === "final_continuity_audit")?.output ?? chapterMeta.final_continuity_audit,
+  }) as Record<string, unknown>;
+  const review = (isV7Chapter ? {
+    ...persistedV7Review,
+    overall_score: persistedV7Review.overall_score ?? chapterMeta.review_score,
+    dimension_scores: persistedV7Review.dimension_scores ?? chapterMeta.dimension_scores,
+    audit_report: persistedV7Review.audit_report ?? chapterMeta.audit_report,
+    reader_experience: persistedV7Review.reader_experience ?? chapterMeta.reader_experience,
+    issues: persistedV7Review.issues ?? chapterMeta.review_issues,
+    continuity: persistedV7Review.continuity ?? chapterMeta.continuity,
+    final_continuity_audit: persistedV7Review.final_continuity_audit
+      ?? chapterMeta.final_continuity_audit
+      ?? (chapterMeta.continuity ? { continuity: chapterMeta.continuity } : undefined),
+    provenance: persistedV7Review.provenance ?? chapterMeta.review_provenance,
+    canonical_engine: "v7",
+  } : legacyReview) as any;
 
   const titles: Record<Tab, string> = { dashboard: "小说首页", overview: "数据概览", workspace: "小说首页", ranking: "扫榜选书", library: "我的书库", wizard: "创作向导", progress: "创作进度", review: "审阅与一致性", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "小说设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话", marketplace: "模块市场", v7: "V7 智能体" };
   const cmdActions = [
@@ -1165,7 +1188,7 @@ export default function App() {
         onRegenerateTitles={regenerateTitles}
         onNewRun={refreshRun}
       />}
-      {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} onRepairApplied={(updated) => {
+      {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} narrativeEvidence={narrative.evidence as { timeline_source?: string; arcs_source?: string } | undefined} onRepairApplied={(updated) => {
         if (!chapter) return;
         const merged = { ...chapter, ...updated, body: (updated.body as TipTapDoc | undefined) ?? chapter.body };
         setChapter(merged);

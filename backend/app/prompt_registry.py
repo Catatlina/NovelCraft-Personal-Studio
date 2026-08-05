@@ -1559,6 +1559,14 @@ def _stringify(value: Any) -> str:
 # User-origin fields that must always be scrubbed of prompt-injection patterns
 # before interpolation, regardless of value type (P2-7 / Q13).
 _USER_FIELD_TOKENS = ("idea", "selection", "instruction")
+_USER_FIELD_LIMITS = {
+    # Editor selection may be a complete chapter.  Keep the injection scrub,
+    # but do not silently cut a 3k--10k character chapter down to the generic
+    # 1500-character user-field limit before the model sees it.
+    "selection": 24000,
+    "instruction": 6000,
+    "idea": 6000,
+}
 _LONG_INTERNAL_CONTEXT_LIMITS = {
     "_chapter_body": 12000,
     "chapter_text": 12000,
@@ -1580,7 +1588,10 @@ def render_prompt(template: str, variables: dict[str, Any]) -> str:
     for key, value in variables.items():
         if any(token in str(key).lower() for token in _USER_FIELD_TOKENS):
             # Explicit, type-agnostic injection scrub for user-origin fields.
-            safe_values[key] = sanitize_untrusted(value)
+            safe_values[key] = sanitize_untrusted(
+                value,
+                limit=_USER_FIELD_LIMITS.get(str(key).lower(), 1500),
+            )
         elif key in _LONG_INTERNAL_CONTEXT_LIMITS:
             # These values are assembled from persisted, project-scoped novel
             # data. Keep injection filtering while allowing complete chapters

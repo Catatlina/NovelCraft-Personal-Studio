@@ -81,17 +81,26 @@ async def generate_chapter(
     product entrypoints now call the same runtime; V6 remains only the
     compatibility storage/editor/export boundary.
     """
-    result = await generate_v7_chapter(
-        novel_id,
-        context.project_id,
-        chapter_number=request.chapter_number,
-        prompt=request.prompt,
-        outline=request.outline,
-        user_id=str(context.user.get("id") or ""),
-        api_key=http_request.headers.get("X-Api-Key", ""),
-        api_url=http_request.headers.get("X-Api-Base-Url", ""),
-        model=http_request.headers.get("X-Model", ""),
-    )
+    try:
+        result = await generate_v7_chapter(
+            novel_id,
+            context.project_id,
+            chapter_number=request.chapter_number,
+            prompt=request.prompt,
+            outline=request.outline,
+            user_id=str(context.user.get("id") or ""),
+            api_key=http_request.headers.get("X-Api-Key", ""),
+            api_url=http_request.headers.get("X-Api-Base-Url", ""),
+            model=http_request.headers.get("X-Model", ""),
+        )
+    except ValueError as exc:
+        from ...services.chapter_scope import ChapterScopeError
+        if isinstance(exc, ChapterScopeError):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": exc.message, **exc.details},
+            ) from exc
+        raise HTTPException(status_code=400, detail="Invalid novel_id") from exc
     return result
 
 

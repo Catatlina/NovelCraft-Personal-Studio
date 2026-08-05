@@ -883,6 +883,12 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .review-empty h3 { font-size: 21px; }
 .review-empty p { max-width: 560px; margin-top: 9px; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
 .review-summary-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 18px; }
+.review-provenance { padding: 22px 25px; }
+.review-provenance .section-heading > span { color: var(--text-muted); font-size: 11px; }
+.review-provenance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.review-provenance-grid > div { min-width: 0; padding: 11px 13px; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 10px; }
+.review-provenance-grid span { display: block; color: var(--text-muted); font-size: 10px; }
+.review-provenance-grid strong { display: block; margin-top: 4px; overflow: hidden; color: var(--text-primary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .review-score-card { min-height: 220px; padding: 26px; display: flex; align-items: center; gap: 28px; }
 .review-score-card:hover, .review-continuity-card:hover, .review-dimensions:hover, .review-list-card:hover, .narrative-card:hover { transform: none; }
 .review-score-ring { width: 136px; height: 136px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: conic-gradient(var(--brand-500) var(--score), var(--bg-hover) 0); position: relative; }
@@ -944,6 +950,7 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .review-list-heading > span.pass { color: var(--success); background: var(--success-soft); }
 .review-list-heading .eyebrow { margin-bottom: 2px; font-size: 9px; }
 .review-list-heading h3 { font-size: 16px; }
+.narrative-source { display: block; margin-top: 3px; color: var(--text-muted); font-size: 10px; font-weight: 500; }
 .review-list-card ul { padding-left: 19px; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
 .review-list-card li + li { margin-top: 7px; }
 .narrative-card { min-height: 260px; }
@@ -1263,6 +1270,7 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
   .review-heading { align-items: flex-start; }
   .review-heading h2 { font-size: 34px; }
   .review-summary-grid, .review-detail-grid, .narrative-grid { grid-template-columns: 1fr; }
+  .review-provenance-grid { grid-template-columns: 1fr 1fr; }
   .review-score-card { min-height: 190px; padding: 22px; gap: 19px; }
   .review-score-ring { width: 108px; height: 108px; }
   .dimension-grid { grid-template-columns: 1fr; }

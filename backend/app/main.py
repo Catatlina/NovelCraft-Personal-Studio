@@ -62,6 +62,7 @@ from .api.v1.billing import router as billing_router
 from .engine import router as engine_router
 from .api.v1.skills import router as skills_router
 from .api.v1.agents import router as agents_router
+from .api.v1.chapter_scope import router as chapter_scope_router
 from .apps.novel.router import router as novel_app_router
 from .v7.api.router import router as v7_router
 from .core.logging_config import setup_logging, get_logger
@@ -115,6 +116,7 @@ app.include_router(billing_router)
 app.include_router(engine_router)
 app.include_router(skills_router)
 app.include_router(agents_router)
+app.include_router(chapter_scope_router)
 app.include_router(novel_app_router)
 app.include_router(v7_router)
 init_metrics(app)
@@ -341,6 +343,19 @@ def load_content_for_user(content_id: str, user: dict, roles: set[str] | None = 
     return conn, content
 
 
+def _require_v7_chapter_scope(conn: Any, content: dict[str, Any], operation: str) -> None:
+    """Reject unscoped chapter AI operations before quota/provider work."""
+    from .services.chapter_scope import ChapterScopeError, require_canonical_v7_chapter
+
+    try:
+        require_canonical_v7_chapter(conn, content, operation=operation)
+    except ChapterScopeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, **exc.details},
+        ) from exc
+
+
 def load_run_for_user(run_id: str, user: dict, roles: set[str] | None = None) -> tuple[Any, dict]:
     conn = connect()
     run = row_to_dict(conn.execute("SELECT * FROM workflow_runs WHERE id = %s", (run_id,)).fetchone())
@@ -483,7 +498,10 @@ def list_contents(project_id: str = Query(...), parent_id: str | None = None,
         raise HTTPException(status_code=403, detail="not a project member")
     if parent_id is None:
         rows = conn.execute(
-            "SELECT * FROM contents WHERE project_id = %s AND parent_id IS NULL ORDER BY created_at DESC LIMIT %s OFFSET %s",
+            """SELECT * FROM contents
+               WHERE project_id = %s AND parent_id IS NULL
+                 AND type <> 'chapter'
+               ORDER BY created_at DESC LIMIT %s OFFSET %s""",
             (project_id, limit, offset),
     ).fetchall()
     else:
@@ -506,6 +524,12 @@ def get_content(content_id: str, user: dict = Depends(get_current_user)) -> ApiR
 @app.put("/api/v1/contents/{content_id}")
 def update_content(content_id: str, payload: ContentUpdate, user: dict = Depends(get_current_user)) -> ApiResponse:
     conn, row = load_content_for_user(content_id, user, {"owner", "editor"})
+    try:
+        _require_v7_chapter_scope(conn, row, "content_update")
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
     row = conn.execute("SELECT * FROM contents WHERE id = %s FOR UPDATE", (content_id,)).fetchone()
     snapshot = {"title": row["title"], "body": decode(row["body"], {}), "meta": decode(row["meta"], {})}
     if payload.client_mutation_id:
@@ -705,6 +729,12 @@ async def manual_review_chapter(
     if chapter["type"] != "chapter":
         conn.close()
         raise HTTPException(status_code=400, detail="content is not a chapter")
+    try:
+        _require_v7_chapter_scope(conn, chapter, "manual_review")
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
     now_iso = datetime.now(timezone.utc).isoformat()
     if payload.decision == "approve":
         conn.execute(
@@ -1546,6 +1576,124 @@ def _editor_provenance(source: str, candidate: str) -> dict[str, Any]:
     }
 
 
+def _run_v7_editor(
+    content: dict[str, Any],
+    selection: str,
+    operation: str,
+    *,
+    instruction: str,
+    request: Request,
+    client_mutation_id: str | None,
+) -> dict[str, Any]:
+    """Call the canonical V7 editor for a real chapter row.
+
+    This is deliberately a small boundary so both the normal and SSE editor
+    endpoints share exactly one V7 generation contract.  V6 ``contents`` is
+    still written by the caller as a storage/version branch after this call;
+    it is never an AI fallback for a chapter attached to a novel.
+    """
+    from .v7.editor_service import edit_chapter_v7_sync
+
+    return edit_chapter_v7_sync(
+        content,
+        selection,
+        operation,
+        instruction=instruction,
+        api_key=request.headers.get("X-Api-Key", ""),
+        api_url=request.headers.get("X-Api-Base-Url", ""),
+        model=request.headers.get("X-Model", ""),
+        client_mutation_id=client_mutation_id,
+    )
+
+
+def _legacy_editor_compat_candidate(
+    content: dict[str, Any],
+    selection: str,
+    operation: str,
+    *,
+    instruction: str,
+    client_mutation_id: str | None,
+) -> dict[str, Any]:
+    """Keep malformed pre-V7 rows usable without weakening real chapters.
+
+    Old test/import rows can lack ``parent_id`` and therefore cannot provide a
+    V7 Novel Brain scope.  They are not product chapters.  This explicit seam
+    is the only editor generation compatibility path and is never selected for
+    a real chapter row.
+    """
+    task_op = "rewrite" if str(operation) == "rewrite_chapter" else str(operation)
+    return complete(
+        run_id=None,
+        node_key=None,
+        project_id=content["project_id"],
+        task_type=f"editor_{task_op}",
+        prompt_name=f"editor.{task_op}",
+        variables={
+            "selection": selection,
+            "instruction": instruction,
+            "chapter_title": content.get("title", ""),
+            "editing_contract": "只编辑提交的当前章节，保留人物、地点、物品、时间线和事件事实；不得换成另一篇故事。",
+        },
+        client_mutation_id=client_mutation_id,
+    )
+
+
+def _raise_v7_editor_http_error(exc: Exception) -> None:
+    """Convert a V7 editor failure into a safe, non-success API response."""
+    code = str(getattr(exc, "code", "V7_EDITOR_FAILED") or "V7_EDITOR_FAILED")
+    message = _v7_editor_public_message(exc, code)
+    raise HTTPException(
+        status_code=422 if code.startswith("EDITOR_") else 502,
+        detail={
+            "code": code,
+            "message": message,
+            "canonical_engine": "v7",
+            "version_written": False,
+        },
+    ) from exc
+
+
+def _v7_editor_public_message(exc: Exception, code: str) -> str:
+    """Keep provider/budget details out of both JSON and SSE editor responses."""
+    if code == "V7_EDITOR_BUDGET":
+        return public_message(exc, "V7 编辑额度已达上限，请稍后重试")
+    if code == "V7_EDITOR_PROVIDER_FAILED":
+        return public_message(exc, "V7 编辑服务暂时不可用，请稍后重试")
+    return public_message(exc, "V7 编辑失败，请稍后重试")
+
+
+def _load_ai_edit_replay(content_id: str, client_mutation_id: str | None) -> dict[str, Any] | None:
+    """Return a previously accepted editor result without spending Provider quota.
+
+    The version row is the product-level idempotency record.  V7's execution
+    ledger records provenance and cost, but deliberately does not store the
+    full prose payload; the V6-compatible version snapshot remains the right
+    replay source for the editor API.
+    """
+    if not client_mutation_id:
+        return None
+    conn = connect()
+    try:
+        row = conn.execute(
+            """SELECT snapshot FROM versions
+               WHERE entity_id=%s AND label='ai_edit' AND client_mutation_id=%s
+               ORDER BY created_at DESC LIMIT 1""",
+            (content_id, client_mutation_id),
+        ).fetchone()
+        if not row:
+            return None
+        snapshot = row.get("snapshot")
+        snapshot = snapshot if isinstance(snapshot, dict) else decode(snapshot, {})
+        output = snapshot.get("output") if isinstance(snapshot, dict) else None
+        if not isinstance(output, dict):
+            return None
+        replay = dict(output)
+        replay["mutation_replayed"] = True
+        return replay
+    finally:
+        conn.close()
+
+
 def _ensure_editor_paragraphs(text: Any) -> str:
     """保证编辑器 AI 文本带段落分隔（空行），避免应用后折叠成一大段。
 
@@ -1620,7 +1768,13 @@ def ai_edit(
     user: dict = Depends(get_current_user),
 ) -> ApiResponse:
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
-    conn.close()
+    try:
+        _require_v7_chapter_scope(conn, content, str(op))
+        replay = _load_ai_edit_replay(content_id, payload.client_mutation_id)
+        if replay is not None:
+            return ok(replay)
+    finally:
+        conn.close()
     # Plan gate: enforce the monthly word quota before any AI generation so
     # Free users cannot bypass the cap via the generic editor / continue path.
     from .core.billing import enforce_quota
@@ -1654,7 +1808,93 @@ def ai_edit(
     except (TypeError, ValueError):
         MAX_EDITOR_RETRIES = 1
 
-    if str(op) == "deai":
+    editor_review_error = ""
+
+    def _review_editor_candidate(candidate_text: str) -> dict[str, Any] | None:
+        """Use V7 for real chapter rows; keep malformed legacy rows compatible.
+
+        A provider/review outage must be visible to the editor and must not be
+        replaced by a fabricated score.  Rows without a parent novel are old
+        compatibility/test fixtures, so their injected legacy review adapter is
+        still allowed to return its own explicitly non-canonical payload.
+        """
+        nonlocal editor_review_error
+        from app.v7.review_service import review_chapter_v7_sync
+
+        try:
+            return review_chapter_v7_sync(
+                content,
+                candidate_text,
+                api_key=request.headers.get("X-Api-Key", ""),
+                api_url=request.headers.get("X-Api-Base-Url", ""),
+                model=request.headers.get("X-Model", ""),
+                use_cache=False,
+            )
+        except Exception as exc:
+            editor_review_error = "V7 审阅暂不可用，候选未获得质量分，请稍后重新审阅"
+            if content.get("parent_id"):
+                from .v7.editor_service import V7EditorError
+                raise V7EditorError(
+                    "V7_EDITOR_REVIEW_FAILED",
+                    "V7 审阅暂不可用，候选未写入版本，请稍后重试",
+                    details={"error_type": type(exc).__name__},
+                ) from exc
+            # Compatibility-only path for rows created before chapters were
+            # attached to a novel.  Do not label this result as V7.
+            legacy = complete(
+                run_id=None,
+                node_key=None,
+                project_id=content["project_id"],
+                task_type="review_7dim",
+                prompt_name="bootstrap.review_7dim",
+                variables={"body": candidate_text, "chapter_title": content.get("title", "")},
+            )
+            if isinstance(legacy, dict):
+                legacy.setdefault("canonical_engine", "v6_compat")
+                legacy.setdefault("audit_error", editor_review_error)
+                return legacy
+            return None
+
+    if str(op) == "deai" and content.get("parent_id"):
+        try:
+            v7_result = _run_v7_editor(
+                content,
+                payload.selection,
+                str(op),
+                instruction=payload.instruction,
+                request=request,
+                client_mutation_id=(
+                    f"{payload.client_mutation_id}:gen:0"
+                    if payload.client_mutation_id
+                    else None
+                ),
+            )
+        except Exception as exc:
+            _raise_v7_editor_http_error(exc)
+        candidate_text = _ensure_editor_paragraphs(v7_result.get("text") or "")
+        content_evidence = _editor_provenance(payload.selection, candidate_text)
+        if not content_evidence.get("passed"):
+            from .v7.editor_service import V7EditorError
+            _raise_v7_editor_http_error(
+                V7EditorError(
+                    "EDITOR_SOURCE_EVIDENCE_FAILED",
+                    "V7 编辑候选缺少当前章节内容证据，未写入版本",
+                )
+            )
+        output = {
+            "text": candidate_text,
+            "deai_quality_gate": v7_result.get("quality_gate") or {"passed": True},
+            "deai_warnings": [],
+            "editor_provenance": {
+                **(v7_result.get("editor_provenance") or {}),
+                "content_evidence": content_evidence,
+            },
+            "canonical_engine": "v7",
+            "usage": v7_result.get("usage") or {},
+        }
+    elif str(op) == "deai":
+        # Compatibility-only path for malformed pre-V7 rows.  Real chapter
+        # rows always take the branch above and never call the V6 pipeline.
         from app.services.deai_pipeline import DeaiPipeline
         pipeline = DeaiPipeline(
             project_id=content["project_id"],
@@ -1664,8 +1904,6 @@ def ai_edit(
         result = pipeline.run(payload.selection)
         deai_result = result
         candidate_text = _ensure_editor_paragraphs(result.get("final_text", payload.selection))
-        # 字数硬门禁：去 AI 味不得压缩篇幅。不足则带反馈重跑一次
-        # （deai.rewrite 已含篇幅硬要求，此兜底防模型不执行）。
         if count_content_chars(candidate_text) < operation_min_chars:
             result2 = pipeline.run(
                 payload.selection
@@ -1676,14 +1914,10 @@ def ai_edit(
             if count_content_chars(candidate2) > count_content_chars(candidate_text):
                 candidate_text = candidate2
                 deai_result = result2
-        # 最终兜底：重跑后仍不足 2000 → 宁可少改也不压缩剧情。
-        # 「去AI味」的目标是改表达，绝不是删内容；压缩原文属于破坏性操作。
         if count_content_chars(candidate_text) < operation_min_chars and source_chars >= operation_min_chars:
             candidate_text = _ensure_editor_paragraphs(payload.selection)
         provenance = _editor_provenance(payload.selection, candidate_text)
         if not provenance["passed"]:
-            # 去 AI 味也只能改当前章节；完全没有原章片段证据时宁可保留
-            # 原文，不把另一篇故事写进编辑器预览。
             candidate_text = _ensure_editor_paragraphs(payload.selection)
             deai_result.setdefault("warnings", []).append("候选与当前章节缺少内容证据，已保留原文")
         output = {
@@ -1691,6 +1925,7 @@ def ai_edit(
             "deai_quality_gate": deai_result.get("quality_gate") or {"passed": True},
             "deai_warnings": deai_result.get("warnings") or [],
             "editor_provenance": provenance,
+            "canonical_engine": "v6_compat",
         }
     else:
         instruction = payload.instruction
@@ -1698,28 +1933,42 @@ def ai_edit(
         best_score = -1.0
         last_candidate_text = payload.selection
         for attempt in range(MAX_EDITOR_RETRIES + 1):
-            gen = complete(
-                run_id=None, node_key=None, project_id=content["project_id"],
-                task_type=f"editor_{task_op}", prompt_name=f"editor.{task_op}",
-                variables={
-                    "selection": payload.selection,
-                    "instruction": instruction,
-                    "chapter_title": content.get("title", ""),
-                    "chapter_seq": (content.get("meta") or {}).get("seq", "") if isinstance(content.get("meta"), dict) else "",
-                    "editing_contract": "只编辑提交的当前章节，保留人物、地点、物品、时间线和事件事实；不得换成另一篇故事。",
-                },
-                client_mutation_id=(f"{payload.client_mutation_id}:gen:{attempt}" if payload.client_mutation_id else None),
+            mutation_id = (
+                f"{payload.client_mutation_id}:gen:{attempt}"
+                if payload.client_mutation_id
+                else None
             )
+            if content.get("parent_id"):
+                try:
+                    gen = _run_v7_editor(
+                        content,
+                        payload.selection,
+                        str(op),
+                        instruction=instruction,
+                        request=request,
+                        client_mutation_id=mutation_id,
+                    )
+                except Exception as exc:
+                    _raise_v7_editor_http_error(exc)
+            else:
+                gen = _legacy_editor_compat_candidate(
+                    content,
+                    payload.selection,
+                    str(op),
+                    instruction=instruction,
+                    client_mutation_id=mutation_id,
+                )
             candidate_text = _ensure_editor_paragraphs(gen.get("text") or payload.selection)
             last_candidate_text = candidate_text
             if str(op) in IMPROVE_OPS:
-                review = complete(
-                    run_id=None, node_key=None, project_id=content["project_id"],
-                    task_type="review_7dim", prompt_name="bootstrap.review_7dim",
-                    variables=_chapter_review_context(content, candidate_text),
-                    client_mutation_id=(f"{payload.client_mutation_id}:review:{attempt}" if payload.client_mutation_id else None),
-                )
-                score = float(review.get("score") or 0)
+                try:
+                    review = _review_editor_candidate(candidate_text)
+                except Exception as exc:
+                    _raise_v7_editor_http_error(exc)
+                if review is None:
+                    best = {"text": candidate_text, "review_7dim": None}
+                    break
+                score = float(review.get("overall_score") or review.get("score") or 0)
                 chars = count_content_chars(candidate_text)
                 provenance = _editor_provenance(payload.selection, candidate_text)
                 from app.services.quality_risks import (
@@ -1727,7 +1976,10 @@ def ai_edit(
                     repair_feedback,
                 )
                 review["deai_metrics"] = analyze_deai_patterns(candidate_text)
-                review["editor_provenance"] = provenance
+                review["editor_provenance"] = {
+                    **(gen.get("editor_provenance") or {}),
+                    "content_evidence": provenance,
+                }
                 if not provenance["passed"]:
                     instruction = (
                         "候选与原文缺少内容证据，必须重写当前原文而不是另起一篇故事；"
@@ -1744,9 +1996,21 @@ def ai_edit(
                 review["quality_repair_contract"] = quality_gate["quality_repair_contract"]
                 if score > best_score:
                     best_score = score
-                    best = {"text": candidate_text, "review_7dim": review}
+                    best = {
+                        "text": candidate_text,
+                        "review_7dim": review,
+                        "editor_provenance": review["editor_provenance"],
+                        "canonical_engine": gen.get("canonical_engine", "v6_compat"),
+                        "usage": gen.get("usage") or {},
+                    }
                 if quality_gate["passed"]:
-                    best = {"text": candidate_text, "review_7dim": review}
+                    best = {
+                        "text": candidate_text,
+                        "review_7dim": review,
+                        "editor_provenance": review["editor_provenance"],
+                        "canonical_engine": gen.get("canonical_engine", "v6_compat"),
+                        "usage": gen.get("usage") or {},
+                    }
                     break
                 # 评分/字数不达标 → 用审查建议 + 去 AI 味要求重跑（默认最多 1 次）
                 issues = repair_feedback(
@@ -1763,7 +2027,12 @@ def ai_edit(
                 instruction = "；".join(issues)
             else:
                 # continue 等非改善操作：单遍生成
-                best = {"text": candidate_text}
+                best = {
+                    "text": candidate_text,
+                    "editor_provenance": gen.get("editor_provenance") or {},
+                    "canonical_engine": gen.get("canonical_engine", "v6_compat"),
+                    "usage": gen.get("usage") or {},
+                }
                 break
         if str(op) in IMPROVE_OPS and best is None:
             raise HTTPException(
@@ -1779,6 +2048,18 @@ def ai_edit(
         # 润色的目的是改表达，压缩/删减情节属于破坏性操作，宁可少改。
         if str(op) in IMPROVE_OPS and count_content_chars(output.get("text") or "") < operation_min_chars:
             if count_content_chars(payload.selection) >= operation_min_chars:
+                if content.get("parent_id"):
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "EDITOR_LENGTH_OUTSIDE_SAFE_RANGE",
+                            "message": "V7 编辑候选篇幅不足，原文未写入版本",
+                            "candidate_chars": count_content_chars(output.get("text") or ""),
+                            "minimum_chars": operation_min_chars,
+                            "canonical_engine": "v7",
+                            "version_written": False,
+                        },
+                    )
                 output = {"text": _ensure_editor_paragraphs(payload.selection)}
 
     # 附七维审查（deai 单遍在此补算）。下一章规划属于实时审计/生成
@@ -1787,35 +2068,45 @@ def ai_edit(
     # 已足够展示问题、评分和质量门禁，应用后实时审计会按需刷新规划。
     if str(op) in {"polish", "rewrite", "rewrite_chapter", "deai"}:
         review_context = _chapter_review_context(content, output.get("text") or payload.selection)
+        if output.get("review_7dim") is None and not editor_review_error:
+            try:
+                output["review_7dim"] = _review_editor_candidate(
+                    output.get("text") or payload.selection
+                )
+            except Exception as exc:
+                _raise_v7_editor_http_error(exc)
         if output.get("review_7dim") is None:
-            output["review_7dim"] = complete(
-                run_id=None, node_key=None, project_id=content["project_id"],
-                task_type="review_7dim", prompt_name="bootstrap.review_7dim",
-                variables=review_context,
-                client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
+            # Honest degraded mode: text/version are returned, but the UI gets
+            # an explicit unavailable state and no score or “passed” badge.
+            output["audit_error"] = editor_review_error or "V7 审阅暂不可用，候选未获得质量分"
+            output["review"] = None
+            output["next_chapter_plan"] = None
+        else:
+            from app.services.quality_risks import evaluate_editor_review_gate
+            final_chars = count_content_chars(output.get("text") or payload.selection)
+            output["review_7dim"]["deai_metrics"] = analyze_deai_patterns(output.get("text") or payload.selection)
+            deai_gate = output.get("deai_quality_gate") or {}
+            if deai_gate.get("passed") is False:
+                output["review_7dim"].setdefault("issues", []).append({
+                    "dimension": "writing_quality",
+                    "type": "rewrite_candidate_rejected",
+                    "severity": "high",
+                    "description": str(
+                        deai_gate.get("message") or "去 AI 味候选未通过篇幅/重复安全校验"
+                    ),
+                    "suggestion": "保留原文并重新发起去 AI 味，不能把未验证结果标为完成",
+                })
+            final_gate = evaluate_editor_review_gate(
+                output["review_7dim"],
+                chars=final_chars,
+                minimum_chars=operation_min_chars,
+                minimum_score=EDITOR_REVIEW_PASS,
             )
-        from app.services.quality_risks import evaluate_editor_review_gate
-        final_chars = count_content_chars(output.get("text") or payload.selection)
-        output["review_7dim"]["deai_metrics"] = analyze_deai_patterns(output.get("text") or payload.selection)
-        deai_gate = output.get("deai_quality_gate") or {}
-        if deai_gate.get("passed") is False:
-            output["review_7dim"].setdefault("issues", []).append({
-                "dimension": "writing_quality",
-                "type": "rewrite_candidate_rejected",
-                "severity": "high",
-                "description": str(
-                    deai_gate.get("message") or "去 AI 味候选未通过篇幅/重复安全校验"
-                ),
-                "suggestion": "保留原文并重新发起去 AI 味，不能把未验证结果标为完成",
-            })
-        final_gate = evaluate_editor_review_gate(
-            output["review_7dim"],
-            chars=final_chars,
-            minimum_chars=operation_min_chars,
-            minimum_score=EDITOR_REVIEW_PASS,
-        )
-        output["review_7dim"]["quality_gate"] = final_gate
-        output["review_7dim"]["quality_repair_contract"] = final_gate["quality_repair_contract"]
+            output["review_7dim"]["quality_gate"] = final_gate
+            output["review_7dim"]["quality_repair_contract"] = final_gate["quality_repair_contract"]
+            output["review"] = output["review_7dim"]
+        if editor_review_error:
+            output.setdefault("audit_error", editor_review_error)
         output["next_chapter_plan"] = None
     # C5-03: every AI edit leaves a version branch so the tree stays auditable.
     conn = connect()
@@ -1848,26 +2139,25 @@ def ai_chapter_review(
     'ai_review' version branch so the audit trail stays traceable; identical
     consecutive results are deduped to avoid version-tree spam."""
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
-    conn.close()
+    try:
+        _require_v7_chapter_scope(conn, content, "live_review")
+    finally:
+        conn.close()
     text = (payload.selection or "").strip()
     if len(text) < 10:
         return ok({"review_7dim": None, "next_chapter_plan": None, "skipped": "too_short"})
-    review_context = _chapter_review_context(content, text)
     review_7dim = None
     next_chapter_plan = None
     audit_error = ""
     try:
-        review_7dim = complete(
-            run_id=None, node_key=None, project_id=content["project_id"],
-            task_type="review_7dim", prompt_name="bootstrap.review_7dim",
-            variables=review_context,
-            client_mutation_id=f"{payload.client_mutation_id}:review" if payload.client_mutation_id else None,
-        )
-        next_chapter_plan = complete(
-            run_id=None, node_key=None, project_id=content["project_id"],
-            task_type="plan_next_chapter", prompt_name="narrative.plan_next_chapter",
-            variables=review_context,
-            client_mutation_id=f"{payload.client_mutation_id}:next" if payload.client_mutation_id else None,
+        from app.v7.review_service import review_chapter_v7_sync
+        review_7dim = review_chapter_v7_sync(
+            content,
+            text,
+            api_key=request.headers.get("X-Api-Key", ""),
+            api_url=request.headers.get("X-Api-Base-Url", ""),
+            model=request.headers.get("X-Model", ""),
+            use_cache=True,
         )
     except Exception:
         # Live audit must never break the editor, but a silent null result makes
@@ -1892,7 +2182,8 @@ def ai_chapter_review(
         )
         review_7dim["quality_gate"] = live_gate
         review_7dim["quality_repair_contract"] = live_gate["quality_repair_contract"]
-    # C5-03-audit: record each distinct audit as a version branch (dedupe identical).
+    # C5-03-audit: record each distinct V7 audit as a version branch (dedupe by
+    # the reviewed text hash, not only by a rounded score/issues pair).
     conn = None
     try:
         conn = connect()
@@ -1906,8 +2197,7 @@ def ai_chapter_review(
             try:
                 snap = decode(last["snapshot"], {}) if not isinstance(last["snapshot"], dict) else last["snapshot"]
                 prev = snap.get("review", {}) if isinstance(snap, dict) else {}
-                if prev.get("score") == (review_7dim or {}).get("score") and \
-                        prev.get("issues") == (review_7dim or {}).get("issues"):
+                if prev.get("provenance", {}).get("text_hash") == (review_7dim or {}).get("provenance", {}).get("text_hash"):
                     same = True
             except Exception:
                 same = False
@@ -1923,7 +2213,7 @@ def ai_chapter_review(
     finally:
         if conn is not None:
             conn.close()
-    return ok({"review_7dim": review_7dim, "next_chapter_plan": next_chapter_plan,
+    return ok({"review": review_7dim, "review_7dim": review_7dim, "next_chapter_plan": next_chapter_plan,
                "audit_error": audit_error})
 
 
@@ -1963,15 +2253,105 @@ def ai_edit_stream(
 
     Frames: {"delta": str}* then {"done": true, "text": full}. Provider/budget
     failures are surfaced as explicit error frames."""
-    from .gateway import BudgetExceeded, ProviderError, complete_stream
-
     conn, content = load_content_for_user(content_id, user, {"owner", "editor"})
-    conn.close()
+    try:
+        _require_v7_chapter_scope(conn, content, str(op))
+    finally:
+        conn.close()
+    replay = _load_ai_edit_replay(content_id, payload.client_mutation_id)
+    if replay is not None:
+        def replay_event_source():
+            full_text = _ensure_editor_paragraphs(replay.get("text") or "")
+            for offset in range(0, len(full_text), 160):
+                yield sse_event({"delta": full_text[offset:offset + 160]})
+            done = {"done": True, "text": full_text}
+            # Preserve the historical SSE frame shape for malformed legacy
+            # rows.  Real V7 rows carry the richer replay/provenance fields.
+            if replay.get("canonical_engine") == "v7":
+                done.update({
+                    "mutation_replayed": True,
+                    "canonical_engine": "v7",
+                    "editor_provenance": replay.get("editor_provenance") or {},
+                })
+            yield sse_event(done)
+
+        return StreamingResponse(
+            replay_event_source(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     # Plan gate: enforce the monthly word quota before streaming AI generation.
     from .core.billing import enforce_quota
     enforce_quota(user["id"], None, "max_words_per_month")
     project_id = content["project_id"]
     task_op = "rewrite" if str(op) == "rewrite_chapter" else str(op)
+
+    if content.get("parent_id"):
+        def v7_event_source():
+            try:
+                result = _run_v7_editor(
+                    content,
+                    payload.selection,
+                    str(op),
+                    instruction=payload.instruction,
+                    request=request,
+                    client_mutation_id=payload.client_mutation_id,
+                )
+                full_text = _ensure_editor_paragraphs(result.get("text") or "")
+            except Exception as exc:
+                code = str(getattr(exc, "code", "V7_EDITOR_FAILED") or "V7_EDITOR_FAILED")
+                message = _v7_editor_public_message(exc, code)
+                yield sse_event({
+                    "error": message,
+                    "code": code,
+                    "canonical_engine": "v7",
+                    "version_written": False,
+                })
+                return
+
+            # The V7 provider call is buffered today because the shared async
+            # gateway owns the request/provenance transaction.  Keep the SSE
+            # contract for the browser while emitting deterministic chunks;
+            # this avoids a second provider path and guarantees the version is
+            # written only after the whole candidate passes validation.
+            for offset in range(0, len(full_text), 160):
+                yield sse_event({"delta": full_text[offset:offset + 160]})
+
+            version_conn = connect()
+            version_conn.execute(
+                """INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id, client_mutation_id)
+                   VALUES (%s, 'content', %s, 'ai_edit', %s, %s, %s, %s)
+                   ON CONFLICT (client_mutation_id) WHERE client_mutation_id IS NOT NULL DO NOTHING""",
+                (new_id("ver"), content_id,
+                 encode({
+                     "op": str(op),
+                     "selection": payload.selection[:2000],
+                     "instruction": payload.instruction[:500],
+                     "output": {
+                         **result,
+                         "text": full_text,
+                     },
+                 }),
+                 f"editor_{op}", user["id"], payload.client_mutation_id),
+            )
+            version_conn.commit()
+            version_conn.close()
+            yield sse_event({
+                "done": True,
+                "text": full_text,
+                "canonical_engine": "v7",
+                "editor_provenance": result.get("editor_provenance") or {},
+            })
+
+        return StreamingResponse(
+            v7_event_source(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # Compatibility-only streaming for malformed pre-V7 rows.  Real chapters
+    # return above and never enter the V6 streaming gateway.
+    from .gateway import BudgetExceeded, ProviderError, complete_stream
 
     def event_source():
         chunks: list[str] = []
@@ -2250,7 +2630,14 @@ def check_content_sensitive(content_id: str, user: dict = Depends(get_current_us
 
 @app.get("/api/v1/novels/{novel_id}/narrative")
 def get_novel_narrative(novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
-    """Timeline events and character arcs for the review panel — real tables, no fallbacks."""
+    """Return one V7-first narrative read model for the review panel.
+
+    Older novels may still have rows in ``timeline_events``/``arcs``.  New V7
+    chapters persist the same facts in ``v7_story_states`` and chapter
+    transition contracts, so the page must read both sources into one truthful
+    response instead of showing an empty card when the legacy projection is
+    absent.
+    """
     conn, novel = load_content_for_user(novel_id, user)
     timeline = [dict(r) for r in conn.execute(
         """SELECT te.event_text AS event, (c.meta->>'seq')::int AS chapter_seq
@@ -2263,8 +2650,128 @@ def get_novel_narrative(novel_id: str, user: dict = Depends(get_current_user)) -
            FROM arcs WHERE novel_id = %s ORDER BY character_name""",
         (novel_id,),
     ).fetchall()]
+
+    timeline_source = "legacy_timeline_events" if timeline else "none"
+    arcs_source = "legacy_arcs" if arcs else "none"
+
+    # Chapter metadata is the V6 product boundary for accepted V7 results. It
+    # is a real persisted summary/transition source, not a generated fallback.
+    v7_chapters = conn.execute(
+        """
+        SELECT title, body, meta, seq
+        FROM contents
+        WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+        ORDER BY COALESCE(seq, (meta->>'seq')::int, 0)
+        LIMIT 500
+        """,
+        (novel_id,),
+    ).fetchall()
+    if not timeline:
+        for row in v7_chapters:
+            metadata = decode(row.get("meta"), {}) or {}
+            if metadata.get("canonical_engine") != "v7" and metadata.get("source") != "v7":
+                continue
+            seq = int(row.get("seq") or metadata.get("seq") or 0)
+            contract = metadata.get("transition_contract") or {}
+            summary = (
+                metadata.get("chapter_summary")
+                or (contract.get("end_state") or {}).get("summary")
+                or row.get("title")
+            )
+            if seq and str(summary or "").strip():
+                timeline.append({"event": str(summary).strip(), "chapter_seq": seq})
+        if timeline:
+            timeline_source = "v7_chapter_metadata"
+
+    # V7 Novel Brain is the canonical state store.  Use it when the old
+    # extraction tables are empty, and keep the source visible to the UI.
+    v7_states: list[dict[str, Any]] = []
+    if not timeline or not arcs:
+        try:
+            v7_states = [dict(r) for r in conn.execute(
+                """
+                SELECT state_type, state_key, state_value, is_pending_review, updated_at
+                FROM v7_story_states
+                WHERE novel_id=%s AND is_active=TRUE
+                  AND state_type IN ('chapter', 'plot', 'character')
+                ORDER BY updated_at DESC
+                LIMIT 800
+                """,
+                (novel_id,),
+            ).fetchall()]
+        except Exception:
+            # Deployments that have not run V7 migrations may not have this
+            # table.  Existing V6 data remains usable; do not fabricate rows.
+            v7_states = []
+
+    if not timeline:
+        seen_events: set[tuple[int, str]] = set()
+        for row in v7_states:
+            if row.get("state_type") not in {"chapter", "plot"}:
+                continue
+            value = decode(row.get("state_value"), {}) or {}
+            seq = int(value.get("chapter_number") or 0)
+            if not seq:
+                match = re.search(r"(\d+)", str(row.get("state_key") or ""))
+                seq = int(match.group(1)) if match else 0
+            events = value.get("events") if isinstance(value.get("events"), list) else []
+            candidates = events or [{
+                "summary": value.get("summary")
+                or value.get("chapter_summary")
+                or (value.get("transition_contract") or {}).get("end_state", {}).get("summary")
+                or value.get("title")
+            }]
+            for event in candidates:
+                summary = str(event.get("summary") if isinstance(event, dict) else event or "").strip()
+                if not summary:
+                    continue
+                key = (seq, summary)
+                if key in seen_events:
+                    continue
+                seen_events.add(key)
+                timeline.append({"event": summary, "chapter_seq": seq})
+        if timeline:
+            timeline_source = "v7_story_states"
+
+    if not arcs:
+        grouped_arcs: dict[str, dict[str, Any]] = {}
+        for row in v7_states:
+            if row.get("state_type") != "character":
+                continue
+            value = decode(row.get("state_value"), {}) or {}
+            raw_key = str(row.get("state_key") or "").strip()
+            character = str(
+                value.get("character")
+                or value.get("name")
+                or value.get("title")
+                or raw_key.replace("v6:character:", "").split(".", 1)[0]
+            ).strip()
+            if not character:
+                continue
+            grouped_arcs[character] = {
+                "character": character,
+                "stage": value.get("stage") or value.get("arc_stage") or "已建立",
+                "goal": value.get("goal") or value.get("summary") or value.get("detail") or "人物状态已由 V7 真相状态记录",
+                "status": value.get("status") or ("pending_review" if row.get("is_pending_review") else "tracked"),
+            }
+        if grouped_arcs:
+            arcs = list(grouped_arcs.values())
+            arcs_source = "v7_story_states"
+
+    timeline.sort(key=lambda item: (int(item.get("chapter_seq") or 0), str(item.get("event") or "")))
+    arcs.sort(key=lambda item: str(item.get("character") or ""))
     conn.close()
-    return ok({"timeline": timeline, "arcs": arcs})
+    return ok({
+        "timeline": timeline[:200],
+        "arcs": arcs[:200],
+        "evidence": {
+            "engine": "v7",
+            "timeline_source": timeline_source,
+            "arcs_source": arcs_source,
+            "timeline_count": len(timeline),
+            "arcs_count": len(arcs),
+        },
+    })
 
 
 @app.get("/api/v1/stats/overview")

@@ -507,8 +507,8 @@ def _save_chapter_content(project_id: str, novel_id: str, chapter_seq: int,
         else:
             cid = new_id("content")
             conn.execute(
-                "INSERT INTO contents (id, project_id, parent_id, type, title, body, seq, status, created_at) "
-                "VALUES (%s, %s, %s, 'chapter', %s, %s, %s, 'draft', now())",
+                "INSERT INTO contents (id, project_id, parent_id, type, title, body, seq, status, scope_status, created_at) "
+                "VALUES (%s, %s, %s, 'chapter', %s, %s, %s, 'draft', 'canonical', now())",
                 (cid, project_id, novel_id, title, encode(_chapter_tiptap_body(paragraphs, text)), chapter_seq),
             )
         conn.commit()

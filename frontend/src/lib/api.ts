@@ -166,7 +166,10 @@ export async function apiStream(
       if (!line.startsWith("data:")) continue;
       let payload: any;
       try { payload = JSON.parse(line.slice(5).trim()); } catch { continue; }
-      if (payload.error) throw new ApiError(payload.code === "PENDING_BUDGET" ? 429 : 502, payload);
+      if (payload.error) {
+        const budgetCode = payload.code === "PENDING_BUDGET" || payload.code === "V7_EDITOR_BUDGET";
+        throw new ApiError(budgetCode ? 429 : 502, payload);
+      }
       if (payload.delta !== undefined && payload.delta !== null) onDelta(String(payload.delta));
       if (payload.done) {
         finalText = typeof payload.text === "string" ? payload.text : payload.text == null ? "" : String(payload.text);

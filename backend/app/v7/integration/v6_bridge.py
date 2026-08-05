@@ -251,7 +251,7 @@ def _persist_v7_chapter(
                 """
                 UPDATE contents
                 SET title=%s, body=%s, meta=%s, status=%s,
-                    generation_key=%s, seq=%s, updated_at=now()
+                    generation_key=%s, seq=%s, scope_status='canonical', updated_at=now()
                 WHERE id=%s
                 RETURNING id
                 """,
@@ -261,8 +261,8 @@ def _persist_v7_chapter(
             stored = conn.execute(
                 """
                 INSERT INTO contents
-                    (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq, created_at)
-                VALUES (%s,%s,%s,'chapter',%s,%s,%s,%s,%s,%s,now())
+                    (id, project_id, parent_id, type, title, body, meta, status, scope_status, generation_key, seq, created_at)
+                VALUES (%s,%s,%s,'chapter',%s,%s,%s,%s,'canonical',%s,%s,now())
                 ON CONFLICT (project_id, generation_key)
                     WHERE generation_key IS NOT NULL AND is_deleted=FALSE
                 DO UPDATE SET
@@ -271,6 +271,7 @@ def _persist_v7_chapter(
                     body=EXCLUDED.body,
                     meta=EXCLUDED.meta,
                     status=EXCLUDED.status,
+                    scope_status=EXCLUDED.scope_status,
                     seq=EXCLUDED.seq,
                     updated_at=now()
                 RETURNING id

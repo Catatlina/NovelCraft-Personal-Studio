@@ -17,6 +17,7 @@ import uuid
 from typing import Any
 
 import httpx
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..brain.novel_brain import NovelBrain
@@ -34,7 +35,11 @@ from ...services.text_quality import (
     duplicate_paragraph_stats,
     normalize_and_validate_rewrite,
 )
-from ...services.chapter_payoff import build_payoff_contract, validate_payoff_contract
+from ...services.chapter_payoff import (
+    build_payoff_contract,
+    validate_payoff_beat_structure,
+    validate_payoff_contract,
+)
 from ...services.content_policy import analyze_content_policy, content_generation_contract
 from ...services.quality_profiles import (
     compile_quality_directive,
@@ -641,11 +646,15 @@ class SceneDirector:
             '  "opening_anchor": "与上一章尾部衔接的具体动作/地点/未决问题",\n'
             '  "payoff_contract": {"reader_promise":"读者本章要等什么","pressure":"当前压力",'
             '"active_choice":"主角主动选择","payoff_type":"兑现类型",'
-            '"visible_result":"正文中必须出现的可见结果","witness_reaction":"他人反应",'
-            '"cost":"代价或余波","next_pressure":"章末新增压力","setup_refs":[]},\n'
+            '"visible_result":"正文中必须出现的可见结果","payoff_feedback":"对手/组织/资源/规则/旁观者的可见反馈",'
+            '"payoff_intensity":"small|medium|high|peak","payoff_arc":["pressure","build","burst","feedback","aftershock"],'
+            '"witness_reaction":"可选的具体他人反应","cost":"代价或余波",'
+            '"next_pressure":"章末新增压力","setup_refs":[]},\n'
+            '  "payoff_phases": ["pressure", "build", "burst", "feedback", "aftershock"],\n'
             '  "confidence": 0.85\n'
             "}\n"
-            "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数。"
+            "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数；每个 beat 增加 payoff_phase 或 payoff_phases，"
+            "覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段。"
             "chapter_title 必须是 2-12 字的事件、物件、冲突或情绪短标题；"
             "禁止写成剧情摘要、操作说明或元叙述，禁止出现‘第X章’、‘本章’、"
             "‘主角在……发现……’、‘读者将……’等模板。"
@@ -660,7 +669,7 @@ class SceneDirector:
             max_tokens=2000,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.2.0",
+            prompt_version="1.3.0",
         )
         plan = result["data"]
         # The planner can choose the focal character, never the product-wide
@@ -820,6 +829,7 @@ class DeAIPipeline:
         quality_retry_feedback: str = "",
         style_profile: str = "",
         quality_profile: dict[str, Any] | None = None,
+        payoff_contract: dict[str, Any] | None = None,
         safe_deduplicate: bool = False,
         active_rules: list[Any] | None = None,
         force_semantic_rewrite: bool = False,
@@ -960,7 +970,10 @@ class DeAIPipeline:
             f"【禁止改动】\n{forbidden_changes or '情节、人物、时间线、设定与对白信息'}\n\n"
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
-            f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=None, active_rules=active_rules)}\n\n"
+            f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=payoff_contract, active_rules=active_rules)}\n\n"
+            "【爽点保真】保留并强化本章已经写出的压制、主动选择、爆发结果、可见反馈和余波；"
+            "去 AI 味只改表达，不得把强反馈改成平铺直叙，不得删掉对手态度、资源变化、规则后果或新的压力；"
+            "不得为了制造爽点新增原文没有的事件。\n"
             f"{self._paragraph_opening_guidance(rule_metrics)}\n\n"
             f"{self._tic_guidance(rule_metrics)}\n\n"
             f"【原文】\n{text}\n\n"
@@ -981,7 +994,7 @@ class DeAIPipeline:
                 max_tokens=max(2400, min(5200, int(chinese_word_count(text) * 1.18))),
                 temperature=0.45,
                 prompt_name="bootstrap.final_humanize",
-                prompt_version="1.1.0",
+                prompt_version="1.2.0",
             )
         except AIGatewayError as exc:
             # A malformed/truncated semantic rewrite is a quality failure, not
@@ -1128,7 +1141,7 @@ class DeAIPipeline:
                     max_tokens=max(1800, min(4800, int(chinese_word_count(text) * 1.08))),
                     temperature=0.25,
                     prompt_name="bootstrap.final_humanize_opening_repair",
-                    prompt_version="1.0.0",
+                    prompt_version="1.1.0",
                 )
                 opening_candidate = str((opening_ai.get("data") or {}).get("humanized_text") or "").strip()
                 opening_candidate, opening_shape = normalize_and_validate_rewrite(
@@ -1388,15 +1401,84 @@ class AIGateway:
         self.novel_id = novel_id
         self.project_id = project_id
         provider_config = provider_config or {}
-        self.api_key = provider_config.get("api_key") or os.getenv("DEEPSEEK_API_KEY", "")
-        self.base_url = provider_config.get("base_url") or os.getenv(
-            "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
+        self.provider = provider_config.get("provider") or "deepseek"
+        self.api_key = provider_config.get("api_key") or os.getenv(
+            f"{self.provider.upper()}_API_KEY", ""
         )
+        self.base_url = provider_config.get("base_url") or self._default_base_url(self.provider)
         self.default_model = provider_config.get("model") or os.getenv(
-            "DEEPSEEK_MODEL", "deepseek-chat"
+            f"{self.provider.upper()}_MODEL", "deepseek-chat"
         )
         self.timeout = float(os.getenv("V7_AI_TIMEOUT", "180"))
         self.max_retries = int(os.getenv("V7_AI_MAX_RETRIES", "3"))
+        self._route_resolved = False
+
+    @staticmethod
+    def _default_base_url(provider: str) -> str:
+        return {
+            "deepseek": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+            "openai": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1"),
+            "claude": os.getenv("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
+            "gemini": os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com"),
+        }.get(provider, os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
+
+    @staticmethod
+    def _route_candidates(prompt_name: str | None) -> list[str]:
+        """Map V7 prompt names to the editable ``model_routes`` contract."""
+        prompt_name = str(prompt_name or "").strip()
+        aliases = {
+            "v7.review.": "review_7dim",
+            # The editor keeps the existing model-route task keys so deployed
+            # provider/model configuration remains reusable, but the call
+            # itself is owned by the V7 async gateway and is recorded under a
+            # V7 prompt name/provenance identity.
+            "v7.editor.polish": "editor_polish",
+            "v7.editor.rewrite": "editor_rewrite",
+            "v7.editor.continue": "editor_continue",
+            "v7.editor.deai": "editor_deai",
+            "v7.editor.expand": "editor_expand",
+            "v7.editor.condense": "editor_condense",
+            "v7.generation.chapter": "gen_next_chapter",
+            "v7.generation.continuation": "gen_next_chapter",
+            "v7.generation.scene_plan": "write_chapter_draft",
+            "v7.generation.final_humanize": "final_humanize",
+            "v7.generation.chapter_repair": "write_polish",
+            "v7.memory.": "extract_story_facts",
+            "v7.plot.": "generate_story_arc",
+        }
+        result = [prompt_name] if prompt_name else []
+        for prefix, task_type in aliases.items():
+            if prompt_name == prefix or prompt_name.startswith(prefix):
+                result.append(task_type)
+        return list(dict.fromkeys(result))
+
+    async def _resolve_model_route(self, prompt_name: str | None) -> None:
+        """Resolve the actual provider/model from ``model_routes`` once."""
+        if self._route_resolved or self.db is None or not hasattr(self.db, "execute"):
+            return
+        self._route_resolved = True
+        for task_type in self._route_candidates(prompt_name):
+            try:
+                result = await self.db.execute(
+                    sql_text(
+                        "SELECT provider, model, params FROM model_routes "
+                        "WHERE task_type = :task_type AND is_active = TRUE LIMIT 1"
+                    ),
+                    {"task_type": task_type},
+                )
+                route = result.mappings().first()
+            except Exception:
+                # A missing route table or a unit double must not fabricate a
+                # result.  The subsequent credential check remains fail-closed.
+                return
+            if not route:
+                continue
+            provider = str(route.get("provider") or self.provider)
+            self.provider = provider
+            self.default_model = str(route.get("model") or self.default_model)
+            self.api_key = self.api_key or os.getenv(f"{provider.upper()}_API_KEY", "")
+            self.base_url = self._default_base_url(provider)
+            return
 
     async def _assert_budget(self, prompt: str, max_tokens: int) -> None:
         """Block before the provider call when a hard V7 budget is exceeded."""
@@ -1486,6 +1568,7 @@ class AIGateway:
         )
         metadata = {
             "gateway_version": "v7",
+            "provider": str(result.get("provider") or self.provider),
             "runtime_managed_prompt": True,
             "rendered_prompt_hash": exact_hash,
             "json_mode": json_mode,
@@ -1537,7 +1620,7 @@ class AIGateway:
             prompt_version=effective_version,
             rendered_prompt=prompt,
             prompt_hash_value=exact_hash,
-            provider="deepseek",
+            provider=str(result.get("provider") or self.provider),
             model=str(result.get("model") or self.default_model),
             status="succeeded",
             prompt_tokens=int(result.get("tokens_input") or 0),
@@ -1575,6 +1658,7 @@ class AIGateway:
         exact_hash = prompt_hash(prompt, system_prompt=system_prompt, history=history)
         metadata = {
             "gateway_version": "v7",
+            "provider": self.provider,
             "runtime_managed_prompt": True,
             "rendered_prompt_hash": exact_hash,
             "json_mode": json_mode,
@@ -1625,7 +1709,7 @@ class AIGateway:
             prompt_version=effective_version,
             rendered_prompt=prompt,
             prompt_hash_value=exact_hash,
-            provider="deepseek",
+            provider=self.provider,
             model=model_name,
             status="failed",
             error=str(error)[:2000],
@@ -1650,11 +1734,13 @@ class AIGateway:
         prompt_name: str | None = None,
         prompt_version: str | None = None,
         client_mutation_id: str | None = None,
+        task_type: str | None = None,
     ) -> dict[str, Any]:
         """Call the LLM. Raises AIGatewayError after all retries fail."""
+        await self._resolve_model_route(task_type or prompt_name)
         if not self.api_key:
             raise AIGatewayError(
-                "DEEPSEEK_API_KEY is not configured; refusing to fabricate output"
+                f"{self.provider.upper()}_API_KEY is not configured; refusing to fabricate output"
             )
 
         await self._assert_budget(prompt, max_tokens)
@@ -1674,7 +1760,7 @@ class AIGateway:
                 # call can never exceed ``self.timeout`` wall-clock seconds.
                 async def _one_request() -> dict[str, Any]:
                     response = await UnifiedAIGateway(
-                        provider="deepseek",
+                        provider=self.provider,
                         api_key=self.api_key,
                         base_url=self.base_url,
                         model=model,
@@ -1711,6 +1797,7 @@ class AIGateway:
 
                 result_payload = {
                     "text": content,
+                    "provider": self.provider,
                     "model": model,
                     "tokens_input": tokens_input,
                     "tokens_output": tokens_output,
@@ -1782,9 +1869,16 @@ class AIGateway:
         prompt_name: str | None = None,
         prompt_version: str | None = None,
         client_mutation_id: str | None = None,
+        task_type: str | None = None,
     ) -> dict[str, Any]:
         """Generate and parse a JSON object. Returns {"data":..., "usage":...}."""
-        usage_total = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+        usage_total = {
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "cost": 0.0,
+            "model": None,
+            "provider": None,
+        }
         last_text = ""
         for attempt in range(2):
             result = await self.generate(
@@ -1800,11 +1894,13 @@ class AIGateway:
                 prompt_name=prompt_name,
                 prompt_version=prompt_version,
                 client_mutation_id=client_mutation_id,
+                task_type=task_type,
             )
             usage_total["tokens_input"] += result["tokens_input"]
             usage_total["tokens_output"] += result["tokens_output"]
             usage_total["cost"] += result["cost"]
             usage_total["model"] = result["model"]
+            usage_total["provider"] = result.get("provider")
             last_text = result["text"]
 
             data = self._parse_json(last_text)
@@ -1960,6 +2056,27 @@ class GenerationEngine:
                 confidence=float(scene_plan.get("confidence", 0.8) or 0.8),
             )
 
+        # The payoff contract is a generation input, not only a review field.
+        # Normalise it before the writer and humanizer see the chapter so a
+        # missing/weak plan cannot be hidden by a later prose score.
+        payoff_contract_required = True
+        payoff_contract = build_payoff_contract(
+            scene_plan.get("payoff_contract") or {},
+            chapter_number=chapter_number,
+            profile=self.quality_profile,
+        )
+        scene_plan["payoff_contract"] = payoff_contract
+        payoff_validation = validate_payoff_contract(
+            payoff_contract,
+            profile=self.quality_profile,
+            required=payoff_contract_required,
+        )
+        payoff_beat_validation = validate_payoff_beat_structure(
+            scene_plan.get("beats") or []
+        )
+        scene_plan["payoff_validation"] = payoff_validation
+        scene_plan["payoff_beat_validation"] = payoff_beat_validation
+
         # Step: AI generation (at most one quality-checked continuation)
         async with self.tracer.trace_step(
             "generation.ai_generate",
@@ -1982,7 +2099,7 @@ class GenerationEngine:
                 max_tokens=generation_max_tokens,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
-                prompt_version="1.3.0",
+                prompt_version="1.4.0",
             )
             add_usage(step, first)
             text = first["text"].strip()
@@ -2044,7 +2161,7 @@ class GenerationEngine:
                     max_tokens=continuation_max_tokens,
                     temperature=0.85,
                     prompt_name="v7.generation.continuation",
-                    prompt_version="1.3.0",
+                    prompt_version="1.4.0",
                 )
                 add_usage(step, cont)
                 candidate = text.rstrip() + "\n\n" + cont["text"].strip()
@@ -2142,6 +2259,7 @@ class GenerationEngine:
                         ensure_ascii=False,
                     ),
                     quality_profile=self.quality_profile,
+                    payoff_contract=payoff_contract,
                     safe_deduplicate=True,
                     active_rules=context_layers.get("active_rules") or [],
                 )
@@ -2208,31 +2326,25 @@ class GenerationEngine:
                 generation_failures.append(policy_failure)
         deai_result.setdefault("metrics", {})["after_pov"] = final_pov_metrics
         deai_result.setdefault("metrics", {})["after_content_policy"] = final_content_policy
-        raw_payoff_contract = scene_plan.get("payoff_contract")
-        payoff_contract_required = plot_brief is not None
-        payoff_contract = (
-            build_payoff_contract(
-                raw_payoff_contract or {},
-                chapter_number=chapter_number,
-                profile=self.quality_profile,
-            )
-            if payoff_contract_required
-            else {}
-        )
-        payoff_validation = (
-            validate_payoff_contract(
-                payoff_contract,
-                profile=self.quality_profile,
-                required=True,
-            )
-            if payoff_contract_required
-            else {"passed": True, "required": False, "missing": [], "warnings": []}
-        )
         if payoff_contract and not payoff_validation.get("passed"):
             generation_failures.append({
                 "code": "payoff_contract_missing",
                 "severity": "high",
                 "message": "本章爽点契约缺少必要字段：" + "、".join(payoff_validation.get("missing") or []),
+            })
+        if payoff_contract_required and not payoff_validation.get("strength_passed", True):
+            generation_failures.append({
+                "code": "payoff_strength_insufficient",
+                "severity": "high",
+                "message": "本章爽点强度或可见反馈不足：" + "；".join(payoff_validation.get("strength_issues") or []),
+                "evidence": payoff_validation,
+            })
+        if payoff_contract_required and not payoff_beat_validation.get("passed"):
+            generation_failures.append({
+                "code": "payoff_beat_structure_missing",
+                "severity": "high",
+                "message": "爽点节拍没有覆盖：" + "、".join(payoff_beat_validation.get("missing_phases") or []),
+                "evidence": payoff_beat_validation,
             })
         generation_quality = {
             "schema_version": "generation-quality-v1",
@@ -2245,6 +2357,7 @@ class GenerationEngine:
             "pov_metrics": final_pov_metrics,
             "content_policy": final_content_policy,
             "payoff_validation": payoff_validation,
+            "payoff_beat_validation": payoff_beat_validation,
             "quality_profile": quality_profile_metadata(self.quality_profile),
         }
 
@@ -2338,6 +2451,7 @@ class GenerationEngine:
                 ensure_ascii=False,
             ),
             quality_profile=self.quality_profile,
+            payoff_contract=generation.get("payoff_contract") or {},
             safe_deduplicate=True,
             active_rules=active_rules,
             force_semantic_rewrite=True,
@@ -2464,6 +2578,9 @@ class GenerationEngine:
             "节拍完整性是硬要求：节拍表列出的关键过桥、交易、对抗、修炼或设定揭示，必须在正文中写出可见的动作过程、阻碍和结果，"
             "不能从‘准备’直接跳到‘成功’，也不能只用一句‘事情顺利完成’带过；首次出现的能力、印记、规则或代价，"
             "要通过一个动作、对白、感官反应或具体后果交代来源，避免百科式解释。"
+            "爽点完整性是硬要求：按‘压制→蓄力→爆发→反馈→余波’推进，允许把相邻阶段合并但不能缺失；"
+            "爆发必须由主角的主动选择和已有依据造成，反馈必须落到对手、组织、资源、规则或旁观者的可见变化，"
+            "余波必须留下代价、身份变化或新的压力。不要把每章写成同一种打脸，不要用‘众人震惊’替代具体反应。"
             "正文质量要求：开头两段直接承接上一章的动作、地点或未决问题，不要重新讲背景；"
             "每个场景都要完成‘目标→阻碍→选择→代价/结果’，在篇幅允许时推进局部变化、"
             "信息揭示或情绪转折；可参考每约 800-1200 字出现一次局部变化，但只能作为节奏检查，"
@@ -2489,6 +2606,7 @@ class GenerationEngine:
         tail = text[-1600:]
         beats = scene_plan.get("beats") or []
         remaining = "、".join(b.get("name", "") for b in beats[-2:]) if beats else ""
+        payoff = scene_plan.get("payoff_contract") or {}
         return (
             f"{third_person_generation_contract()}\n"
             f"{content_generation_contract(quality_profile)}\n\n"
@@ -2496,6 +2614,8 @@ class GenerationEngine:
             f"请只补足剩余节拍，目标补写约 {missing} 个汉字，"
             f"完成剩余节拍（{remaining}）并以钩子收束："
             f"{scene_plan.get('hook', '')}。保持上一段的时间线、地点、人物状态和情绪，"
+            f"爽点余波与新压力必须落地（可见反馈：{payoff.get('payoff_feedback') or '未指定'}；"
+            f"下一压力：{payoff.get('next_pressure') or scene_plan.get('hook', '')}），"
             "如果节拍和钩子已经完成就立即停止，不要为了凑字数继续解释；"
             "不要重新开场、不要重复上文，不要写任何说明；补写段落也要变化起笔，"
             "不要机械重复同一人名或同一动作开头，也不要用大量‘他/她’替换。"

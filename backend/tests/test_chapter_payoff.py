@@ -2,6 +2,7 @@ from app.services.chapter_payoff import (
     build_payoff_contract,
     evaluate_payoff_schedule,
     normalize_payoff_contract,
+    validate_payoff_beat_structure,
     validate_payoff_contract,
     validate_payoff_evidence,
 )
@@ -184,4 +185,32 @@ def test_low_payoff_schedule_is_a_soft_reader_gate_not_a_word_count_gate():
 
     result = evaluate_payoff_schedule(chapters, profile=profile)
     assert result["passed"] is True
-    assert result["max_low_payoff_streak"] == 2
+    assert result["max_low_payoff_streak"] == 1
+
+
+def test_payoff_strength_requires_visible_feedback_for_public_high_payoffs():
+    profile = select_quality_profile(platform="番茄", genre="都市", subgenre="都市神豪")
+    contract = _contract(1)
+    contract.update({
+        "payoff_intensity": "high",
+        "payoff_arc": ["pressure", "build", "burst", "feedback", "aftershock"],
+        "witness_reaction": "",
+    })
+    contract.pop("payoff_feedback", None)
+    result = validate_payoff_contract(contract, profile=profile, required=True)
+
+    assert result["passed"] is True
+    assert result["strength_passed"] is False
+    assert any("可见反馈" in issue for issue in result["strength_issues"])
+
+
+def test_payoff_beat_structure_allows_four_beats_to_cover_five_phases():
+    result = validate_payoff_beat_structure([
+        {"name": "压制", "payoff_phases": ["pressure", "build"]},
+        {"name": "选择", "payoff_phase": "build"},
+        {"name": "爆发", "payoff_phase": "burst"},
+        {"name": "反馈与余波", "payoff_phases": ["feedback", "aftershock"]},
+    ])
+
+    assert result["passed"] is True
+    assert result["missing_phases"] == []

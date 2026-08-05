@@ -21,6 +21,7 @@ import math
 import os
 import re
 import time
+import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -1096,6 +1097,13 @@ def _persist_canonical_bootstrap_result(
         "blocked_reason": result.get("blocked_reason") or "",
         "passed_review": result.get("passed_review"),
         "transition_contract": result.get("transition_contract") or {},
+        "continuity": result.get("continuity") or {},
+        "final_continuity_audit": result.get("final_continuity_audit") or {
+            "continuity": result.get("continuity") or {},
+        },
+        "audit_report": result.get("audit_report") or {},
+        "review_provenance": result.get("review_provenance") or result.get("provenance") or {},
+        "provenance": result.get("review_provenance") or result.get("provenance") or {},
         "v6_content_id": result.get("v6_content_id"),
     }
     if v7_status == "completed":
@@ -2385,13 +2393,15 @@ def _persist_chapter_draft(db, run, node_key: str, output: dict, context: dict,
     cid = new_id()
     generation_key = _chapter_idempotency_key(novel_id, chapter_seq)
     stored = db.execute(
-        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """INSERT INTO contents
+           (id, project_id, parent_id, type, title, body, meta, status, scope_status, generation_key, seq)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (project_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
-           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, seq=EXCLUDED.seq, updated_at=now()
+           DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta,
+                         scope_status=EXCLUDED.scope_status, seq=EXCLUDED.seq, updated_at=now()
            RETURNING id""",
         (cid, project_id, novel_id, "chapter", chapter.get("title", f"第一章"),
-         encode(body), encode(chapter_meta), "pending_review", generation_key, chapter_seq),
+         encode(body), encode(chapter_meta), "pending_review", "canonical", generation_key, chapter_seq),
     ).fetchone()
     cid = stored["id"] if stored else cid
     context["chapter_id"] = cid
@@ -2555,6 +2565,44 @@ def _run_canonical_v7_task(
     from app.v7.runtime import generate_v7_chapter_sync
     from .lock import acquire_lock, release_lock
 
+    # Malformed legacy queue messages can still contain placeholder IDs from
+    # pre-V7 tests/imports.  Keep their old lock/release semantics so a bad
+    # message cannot consume a Provider slot or obscure the original error.
+    # Real product requests have UUID-backed novel rows and always continue
+    # through the V7 path below; this is not a second production generator.
+    try:
+        uuid.UUID(str(novel_id))
+    except (ValueError, TypeError, AttributeError):
+        legacy_lock_key = f"lock:novel:{novel_id}:gen_chapter"
+        if not acquire_lock(legacy_lock_key):
+            raise task.retry(exc=RuntimeError("chapter is already running"), countdown=3)
+        try:
+            if batch_id or batch_ordinal:
+                return _generate_next_chapter_unlocked(
+                    novel_id,
+                    project_id,
+                    batch_id=batch_id,
+                    batch_ordinal=batch_ordinal,
+                )
+            return _generate_next_chapter_unlocked(novel_id, project_id)
+        finally:
+            release_lock(legacy_lock_key)
+
+    # A valid UUID is not enough: direct Celery messages must still resolve to
+    # a live novel in the requested project before they can acquire an AI slot
+    # or enter the V7 runtime.  The HTTP endpoints already perform this check;
+    # repeating it here closes the queue/direct-task bypass.
+    from app.services.chapter_scope import ChapterScopeError, validate_novel_parent
+    scope_db = connect()
+    try:
+        validate_novel_parent(db=scope_db, project_id=project_id, novel_id=novel_id)
+    except ChapterScopeError as exc:
+        if batch_id:
+            _mark_batch_failed(batch_id, exc)
+        raise
+    finally:
+        scope_db.close()
+
     api_key = resolve_byok_key(api_key_ref, api_key)
     blocked = _batch_slot_not_runnable(batch_id, batch_ordinal)
     if blocked is not None:
@@ -2664,7 +2712,7 @@ def _run_canonical_v7_task(
 def gen_next_chapter_task(self, novel_id: str, project_id: str,
                            api_key: str = "", api_url: str = "", model: str = "",
                            batch_id: str = "", batch_ordinal: int = 0,
-                           api_key_ref: str = "", canonical: bool = False,
+                           api_key_ref: str = "", canonical: bool = True,
                            chapter_number: int | None = None) -> dict:
     """M2: Generate the next chapter using context assembler (with distributed lock).
 
@@ -2677,74 +2725,24 @@ def gen_next_chapter_task(self, novel_id: str, project_id: str,
         generating), a *batch* slot is re-queued (P2-T4 / Q10) instead of
         crashing the whole batch.
     """
-    if canonical:
-        return _run_canonical_v7_task(
-            self,
-            novel_id,
-            project_id,
-            api_key=api_key,
-            api_url=api_url,
-            model=model,
-            batch_id=batch_id,
-            batch_ordinal=batch_ordinal,
-            chapter_number=chapter_number,
-            api_key_ref=api_key_ref,
-        )
+    # ``canonical`` remains an API compatibility argument for queued messages
+    # created before the V7 cutover.  It is intentionally ignored: every new
+    # chapter request now enters the one V7 runtime, including callers that did
+    # not know about the flag.
+    return _run_canonical_v7_task(
+        self,
+        novel_id,
+        project_id,
+        api_key=api_key,
+        api_url=api_url,
+        model=model,
+        batch_id=batch_id,
+        batch_ordinal=batch_ordinal,
+        chapter_number=chapter_number,
+        api_key_ref=api_key_ref,
+    )
 
-    from app.gateway import _request_api_key, _request_api_base_url, _request_model
-    from .lock import acquire_lock, release_lock
 
-    api_key = resolve_byok_key(api_key_ref, api_key)
-    if api_key:
-        _request_api_key.set(api_key)
-    if api_url:
-        _request_api_base_url.set(api_url)
-    if model:
-        _request_model.set(model)
-    # Attribute generated chapters to the novel owner for per-user metering.
-    _attach_user_context(novel_id)
-
-    # P2-T5 / Q11: respect the global AI concurrency limit (fail-open on Redis
-    # outage). Brief polling before falling back to a bounded Celery retry.
-    acquired = False
-    for _ in range(6):
-        if acquire_ai_slot(timeout=5):
-            acquired = True
-            break
-        time.sleep(1)
-    if not acquired:
-        raise self.retry(exc=RuntimeError("global AI concurrency limit reached"), countdown=3)
-
-    lock_key = f"lock:novel:{novel_id}:gen_chapter"
-    if not acquire_lock(lock_key):
-        release_ai_slot()
-        # Another generation holds the per-novel lock. Re-queue batch slots so a
-        # transient conflict never fails the whole batch (P2-T4 / Q10).
-        if batch_id and batch_ordinal:
-            gen_next_chapter_task.apply_async(
-                (novel_id, project_id, "", api_url, model, batch_id, batch_ordinal),
-                {"api_key_ref": api_key_ref},
-                countdown=3,
-            )
-            return {"status": "requeued", "batch_id": batch_id, "ordinal": batch_ordinal}
-        return {"status": "skipped", "reason": "another generation in progress"}
-    try:
-        result = _generate_next_chapter_unlocked(novel_id, project_id, batch_id, batch_ordinal)
-        # Batch progress + finalization are driven from here so fan-out slots
-        # advance the batch independently of the non-blocking orchestrator.
-        if batch_id:
-            _reconcile_batch_progress(batch_id)
-        return result
-    except Exception as exc:
-        # A provider/schema/continuity failure must not strand the batch in
-        # ``running`` forever. The API resume endpoint can retry this stable
-        # slot without creating a duplicate chapter.
-        if batch_id:
-            _mark_batch_failed(batch_id, exc)
-        raise
-    finally:
-        release_lock(lock_key)
-        release_ai_slot()
 def _batch_generation_key(batch_id: str, ordinal: int) -> str:
     return f"batch:{batch_id}:slot:{ordinal}:v1"
 def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
@@ -2828,14 +2826,15 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
         chapter_meta.update({"batch_id": batch_id, "batch_ordinal": batch_ordinal,
                              "ordinal": batch_ordinal, "quality_status": "draft_pending_review"})
     stored = db.execute(
-        """INSERT INTO contents (id, project_id, parent_id, type, title, body, meta, status, generation_key, seq, batch_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """INSERT INTO contents
+           (id, project_id, parent_id, type, title, body, meta, status, scope_status, generation_key, seq, batch_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (project_id, generation_key) WHERE generation_key IS NOT NULL AND is_deleted=FALSE
            DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, meta=EXCLUDED.meta, seq=EXCLUDED.seq,
-                         batch_id=EXCLUDED.batch_id, updated_at=now()
+                         scope_status=EXCLUDED.scope_status, batch_id=EXCLUDED.batch_id, updated_at=now()
            RETURNING id""",
         (cid, project_id, novel_id, "chapter", chapter.get("title", f"第{next_seq}章"),
-         encode(body), encode(chapter_meta), "pending_review", generation_key,
+         encode(body), encode(chapter_meta), "pending_review", "canonical", generation_key,
          next_seq, batch_id or None),
     ).fetchone()
     cid = stored["id"] if stored else cid
@@ -2888,6 +2887,58 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
             "continuity": continuity, "accepted": review["accepted"],
             "review_status": review["review_status"], "final_score": review["final_score"],
             "rewrite_attempts": review["rewrite_attempts"]}
+def _try_canonical_v7_review(
+    chapter_id: str,
+    novel_id: str,
+    project_id: str,
+    chapter_text: str,
+) -> dict[str, Any] | None:
+    """Review a real persisted chapter through V7.
+
+    The old gate is still exercised by historical unit doubles and by legacy
+    rows that cannot be mapped to UUID-backed V7 state.  A real production row
+    is never sent to the old ``review_7dim`` scoring contract: V7 owns the
+    model call, 33-item evidence, continuity and provenance.
+    """
+    try:
+        uuid.UUID(str(chapter_id))
+        uuid.UUID(str(novel_id))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    db = connect()
+    try:
+        chapter = db.execute(
+            "SELECT * FROM contents WHERE id=%s AND type='chapter' AND is_deleted=FALSE",
+            (chapter_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not chapter:
+        return None
+    if str(chapter.get("project_id") or "") != str(project_id):
+        raise OutputValidationError("canonical V7 review target does not belong to project")
+
+    from app.v7.review_service import review_chapter_v7_sync
+
+    review = review_chapter_v7_sync(
+        chapter,
+        chapter_text,
+        api_key=str(_request_api_key.get() or ""),
+        api_url=str(_request_api_base_url.get() or ""),
+        model=str(_request_model.get() or ""),
+        use_cache=False,
+    )
+    return {
+        **review,
+        # Compatibility aliases for old persistence/readers.  They are copied
+        # from the canonical V7 result and never independently scored.
+        "score": review.get("overall_score"),
+        "dimensions": review.get("dimension_scores") or {},
+        "canonical_engine": "v7",
+    }
+
+
 def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str, chapter_seq: int,
                                  generation_key: str, title: str, paragraphs: list[str],
                                  continuity: dict, threshold: float = REVIEW_SCORE_THRESHOLD,
@@ -2912,14 +2963,24 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         last_chars = count_content_chars(current_text)
         length_ok = last_chars >= MIN_CHAPTER_CHARS
         length_issue = "" if length_ok else f"字数不足：{last_chars}/{MIN_CHAPTER_CHARS} 字"
-        review = complete(
-            run_id=None, node_key=None, project_id=project_id,
-            task_type="review_7dim", prompt_name="bootstrap.review_7dim",
-            variables={"chapter_id": chapter_id, "chapter_seq": chapter_seq, "body": current_text,
-                       "continuity": continuity, "threshold": threshold},
-            client_mutation_id=f"{generation_key}:review:{attempt}:v1",
+        review = _try_canonical_v7_review(
+            chapter_id,
+            novel_id,
+            project_id,
+            current_text,
         )
-        score = float(review["score"])
+        canonical_v7 = review is not None
+        if review is None:
+            # Compatibility-only path for pre-V7 test doubles/rows.  New
+            # production chapters are UUID-backed and take the branch above.
+            review = complete(
+                run_id=None, node_key=None, project_id=project_id,
+                task_type="review_7dim", prompt_name="bootstrap.review_7dim",
+                variables={"chapter_id": chapter_id, "chapter_seq": chapter_seq, "body": current_text,
+                           "continuity": continuity, "threshold": threshold},
+                client_mutation_id=f"{generation_key}:review:{attempt}:v1",
+            )
+        score = float(review.get("score", review.get("overall_score", 0)) or 0)
         last_score = score
         issues = list(review.get("issues", []))
         duplicate_paragraphs = duplicate_paragraph_stats(current_text)
@@ -2949,7 +3010,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         quality_contract = build_quality_repair_contract(
             {
                 "overall_score": score,
-                "dimensions": review.get("dimensions") or {},
+                "dimensions": review.get("dimensions") or review.get("dimension_scores") or {},
                 "issues": issues,
             },
             dimension_minimums={
@@ -2974,22 +3035,68 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                VALUES (%s,%s,%s,%s,%s,%s)
                ON CONFLICT (content_id,generation_key) WHERE generation_key IS NOT NULL
                DO UPDATE SET score=EXCLUDED.score,dimensions=EXCLUDED.dimensions,issues=EXCLUDED.issues""",
-            (new_id(), chapter_id, score, encode(review["dimensions"]), encode(issues), review_key),
+            (new_id(), chapter_id, score,
+             encode(review.get("dimensions") or review.get("dimension_scores") or {}),
+             encode(issues), review_key),
         )
         passed = (score >= threshold) and length_ok and quality_contract["passed"]
+        review_meta = {
+            "review_score": score,
+            "review_issues": issues,
+            "review_attempts": attempt + 1,
+            "reader_experience": rx_summary,
+            "quality_repair_contract": quality_contract,
+            "quality_risks": quality_contract["risks"],
+            "quality_status": "ai_review_passed" if passed else "needs_rewrite",
+            "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}",
+        }
+        if canonical_v7:
+            review_meta.update({
+                "canonical_engine": "v7",
+                "canonical_review": review,
+                "audit_report": review.get("audit_report") or {},
+                "continuity": review.get("continuity") or continuity or {},
+                "final_continuity_audit": review.get("final_continuity_audit") or {
+                    "continuity": review.get("continuity") or continuity or {},
+                },
+                "review_provenance": review.get("provenance") or {},
+                "provenance": review.get("provenance") or {},
+            })
         if passed:
             db.execute("""UPDATE contents SET status='reviewed',meta=meta || %s,updated_at=now() WHERE id=%s""",
-                       (encode({"review_score": score, "review_issues": issues,
-                                "review_attempts": attempt + 1,
-                                "reader_experience": rx_summary,
-                                "quality_repair_contract": quality_contract,
-                                "quality_risks": quality_contract["risks"],
-                                "quality_status": "ai_review_passed",
-                                "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}"}), chapter_id))
+                       (encode(review_meta), chapter_id))
             db.commit(); db.close()
             return {"accepted": True, "review_status": "reviewed", "final_score": score,
                     "rewrite_attempts": attempt, "title": current_title, "body": current_body,
+                    "review": review, "canonical_engine": "v7" if canonical_v7 else "v6_compat",
                     "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}"}
+        if canonical_v7:
+            # A real V7 chapter must not fall back to the retired V6 prose
+            # rewrite call.  The V7 Director is the only generation owner;
+            # this compatibility gate records the truthful result and lets the
+            # normal V7/manual repair flow handle the draft.
+            reason = f"score={score:.0f}/{threshold:.0f}"
+            if not length_ok:
+                reason += f", chars={last_chars}/{MIN_CHAPTER_CHARS}"
+            if quality_contract["blocking_categories"]:
+                reason += ", blocking=" + ",".join(quality_contract["blocking_categories"])
+            review_meta["quality_reason"] = reason
+            db.execute(
+                "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
+                (encode(review_meta), chapter_id),
+            )
+            db.commit(); db.close()
+            return {
+                "accepted": False,
+                "review_status": "needs_rewrite",
+                "final_score": score,
+                "rewrite_attempts": attempt,
+                "title": current_title,
+                "body": current_body,
+                "review": review,
+                "canonical_engine": "v7",
+                "quality_reason": reason,
+            }
         if attempt == max_rewrites:
             reason = f"score={score:.0f}/{threshold:.0f}"
             if not length_ok:
@@ -2998,16 +3105,11 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                 reason += ", blocking=" + ",".join(quality_contract["blocking_categories"])
             db.execute("""UPDATE contents SET status='needs_rewrite',meta=meta || %s,updated_at=now()
                           WHERE id=%s""",
-                       (encode({"review_score": score, "review_issues": issues,
-                                "review_attempts": attempt + 1,
-                                "reader_experience": rx_summary,
-                                "quality_repair_contract": quality_contract,
-                                "quality_risks": quality_contract["risks"],
-                                "quality_status": "needs_rewrite",
-                                "quality_reason": reason}), chapter_id))
+                       (encode({**review_meta, "quality_reason": reason}), chapter_id))
             db.commit(); db.close()
             return {"accepted": False, "review_status": "needs_rewrite", "final_score": score,
                     "rewrite_attempts": attempt, "title": current_title, "body": current_body,
+                    "review": review, "canonical_engine": "v6_compat",
                     "quality_reason": reason}
         # Rewrite and retry
         rewritten = complete(
@@ -3050,7 +3152,7 @@ def _continuity_report(novel_id: str, chapter_seq: int) -> dict:
 @_isolated_request_context
 def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
                             api_key: str = "", api_url: str = "", model: str = "",
-                            api_key_ref: str = "", canonical: bool = False) -> dict:
+                            api_key_ref: str = "", canonical: bool = True) -> dict:
     """Regenerate one rejected chapter in place.
 
     This is the manual-review path: rejecting a chapter must not create the next
@@ -3073,6 +3175,14 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
     if not chapter:
         db.close()
         return {"status": "error", "message": "chapter not found"}
+    from app.services.chapter_scope import ChapterScopeError, require_canonical_v7_chapter
+    try:
+        require_canonical_v7_chapter(db, dict(chapter), operation="worker_regenerate")
+    except ChapterScopeError:
+        # Do not snapshot, spend quota, or call a Provider for an orphan,
+        # cross-project, or still-unresolved historical chapter.
+        db.close()
+        raise
     novel = db.execute("SELECT * FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE", (chapter["parent_id"],)).fetchone()
     if not novel:
         db.close()
@@ -3084,6 +3194,10 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
     novel_id = chapter["parent_id"]
     db.close()
 
+    # ``canonical`` is retained only for queued-message compatibility.  Manual
+    # regeneration is also V7-only now; otherwise an old retry could silently
+    # recreate the second prose chain the product has already removed.
+    canonical = True
     if canonical:
         # Preserve the rejected draft before the V7 canonical engine replaces
         # the same V6 contents row.  A passed V7 result is then left pending

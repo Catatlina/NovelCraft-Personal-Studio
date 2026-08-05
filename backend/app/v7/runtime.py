@@ -264,6 +264,15 @@ async def generate_v7_chapter(
     batch_ordinal: int = 0,
 ) -> dict[str, Any]:
     """Run the only canonical prose generation path and return its evidence."""
+    # Keep the runtime safe even when called outside FastAPI/Celery (for
+    # example from a maintenance script).  The queue and HTTP layers perform
+    # the same check, but the V7 core must not trust either caller implicitly.
+    from ..services.chapter_scope import validate_novel_parent
+    scope_conn = connect()
+    try:
+        validate_novel_parent(db=scope_conn, project_id=project_id, novel_id=novel_id)
+    finally:
+        scope_conn.close()
     novel_uuid = uuid.UUID(str(novel_id))
     resolved_number = _resolve_chapter_number(
         novel_id,
