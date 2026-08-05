@@ -46,6 +46,8 @@ from app.services.quality_profiles import (
     quality_profile_metadata,
 )
 from app.services.planning_contract import (
+    mechanic_contract_guidance,
+    mechanic_families_for_idea,
     validate_longform_contract,
     validate_volume_plan_contract,
 )
@@ -646,7 +648,7 @@ def _planning_contract_feedback(output: dict[str, Any], context: dict[str, Any])
         return ""
     idea = str(context.get("idea") or "")
     simulator_required = any(
-        marker in idea for marker in ("模拟器", "人生模拟", "模拟未来", "推演未来")
+        family == "simulator" for family in mechanic_families_for_idea(idea)
     )
     repair = (
         f"本轮规划未通过硬契约，必须重做而不是解释：目标总字数严格为 {target_words} 字；"
@@ -654,7 +656,8 @@ def _planning_contract_feedback(output: dict[str, Any], context: dict[str, Any])
         "longform_contract 必须包含 target_words、volume_word_targets（合计精确闭合）、chapter_word_target、chapter_count、"
         "route_milestones（最后 end_words 精确等于目标）；"
         "core_mechanic_contract 必须完整包含 enabled、mechanic_type、reader_promise、trigger_and_loop、capability_loop、"
-        "choice_surface、visible_payoff、limits_and_costs、failure_and_risks、state_writeback、plot_coupling、progression、anti_inflation。"
+        "mechanic_specific_contract、choice_surface、visible_payoff、limits_and_costs、failure_and_risks、"
+        "state_writeback、plot_coupling、progression、anti_inflation，并落实对应的机制适配器。"
     )
     if simulator_required:
         repair += (
@@ -1590,6 +1593,9 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         "quality_profile_directive": quality_directive,
                         "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
                         "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
+                        "core_mechanic_guidance": mechanic_contract_guidance(
+                            str(run_context.get("idea") or "")
+                        ),
                     }
                     output = complete(
                         run_id=run_id,
@@ -1624,9 +1630,14 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                 "plan_output": json.dumps(output, ensure_ascii=False),
                                 "repair_feedback": target_feedback,
                                 "requires_simulator": str(any(
-                                    marker in str(run_context.get("idea") or "")
-                                    for marker in ("模拟器", "人生模拟", "模拟未来", "推演未来")
+                                    family == "simulator"
+                                    for family in mechanic_families_for_idea(
+                                        str(run_context.get("idea") or "")
+                                    )
                                 )).lower(),
+                                "core_mechanic_guidance": mechanic_contract_guidance(
+                                    str(run_context.get("idea") or "")
+                                ),
                             },
                             client_mutation_id=(
                                 f"bootstrap:{run_id}:{node_key}:contract-repair:{fidelity_cycle}:{fidelity_attempt}"
@@ -1643,6 +1654,43 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         ):
                             if repair_key in repair_output:
                                 output[repair_key] = repair_output[repair_key]
+                        # Keep the large creative bible on a separate, small
+                        # response path.  Providers frequently return the
+                        # structured ledgers correctly but truncate the prose
+                        # bible when both are requested in one response.  The
+                        # bible is expanded only when it is objectively below
+                        # the long-form floor; this is not a second rewrite of
+                        # an already valid plan.
+                        try:
+                            _target_for_bible = int(run_context.get("target_words") or 0)
+                        except (TypeError, ValueError):
+                            _target_for_bible = 0
+                        _bible_minimum = 2200 if _target_for_bible >= 1_000_000 else 1600
+                        _current_bible = str(output.get("creative_bible") or "")
+                        if (
+                            _target_for_bible >= 500_000
+                            and len(_current_bible.replace("\n", "")) < _bible_minimum
+                        ):
+                            bible_repair = complete(
+                                run_id=run_id,
+                                node_key=node_key,
+                                project_id=project_id,
+                                task_type="expand_creative_bible",
+                                prompt_name="bootstrap.expand_creative_bible",
+                                variables={
+                                    **run_context,
+                                    "creative_bible": _current_bible,
+                                    "repair_feedback": target_feedback,
+                                },
+                                client_mutation_id=(
+                                    f"bootstrap:{run_id}:{node_key}:bible-repair:"
+                                    f"{fidelity_cycle}:{fidelity_attempt}"
+                                ),
+                            )
+                            bible_repair = validate_task_output(
+                                "expand_creative_bible", bible_repair
+                            )
+                            output["creative_bible"] = bible_repair["creative_bible"]
                         target_feedback = _target_words_guard(
                             output,
                             run_context.get("target_words"),

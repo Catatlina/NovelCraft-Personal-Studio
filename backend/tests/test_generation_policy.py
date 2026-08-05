@@ -117,6 +117,22 @@ def test_pre_generation_plot_prompt_inherits_the_same_contract():
     assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in prompt
 
 
+def test_v7_runtime_adds_mechanic_specific_directive_for_non_simulator_cheats():
+    from app.v7.runtime import _generation_contract_prompt
+
+    prompt = _generation_contract_prompt({
+        "core_mechanic_contract": {
+            "enabled": True,
+            "mechanic_type": "rebirth",
+            "mechanic_specific_contract": "保留前世记忆，改写后产生蝴蝶效应",
+        },
+    })
+
+    assert "重生/回到过去" in prompt
+    assert "未来知识不是百科全书" in prompt
+    assert "主角选择/取舍" in prompt
+
+
 def test_legacy_editor_and_continuation_seeds_keep_the_generation_contract():
     seeds = {name: (version, template) for name, version, _model, template in PROMPT_SEEDS}
 

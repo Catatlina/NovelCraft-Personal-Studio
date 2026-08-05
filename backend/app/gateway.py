@@ -259,6 +259,10 @@ class _PlanningContractRepairOutput(_LenientOutput):
     simulator_contract: dict[str, Any] = Field(min_length=1)
 
 
+class _CreativeBibleRepairOutput(_LenientOutput):
+    creative_bible: str = Field(min_length=300)
+
+
 class _PlanFidelityAuditOutput(_LenientOutput):
     passed: bool
     score: float = Field(ge=0, le=100)
@@ -572,6 +576,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     # V2 four-stage bootstrap (18 agent nodes)
     "plan_idea": _PlanIdeaOutput,
     "repair_planning_contract": _PlanningContractRepairOutput,
+    "expand_creative_bible": _CreativeBibleRepairOutput,
     "audit_plan_fidelity": _PlanFidelityAuditOutput,
     "regenerate_titles": _RegenerateTitlesOutput,
     "plan_market_fit": _PlanMarketFitOutput,

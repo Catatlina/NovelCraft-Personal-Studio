@@ -1,4 +1,6 @@
 from app.services.planning_contract import (
+    mechanic_contract_guidance,
+    mechanic_families_for_idea,
     validate_core_mechanic_contract,
     validate_longform_contract,
     validate_simulator_contract,
@@ -21,6 +23,7 @@ def _core_mechanic_contract() -> dict:
         "plot_coupling": "推动主线冲突并制造新问题",
         "progression": "分阶段升级能力",
         "anti_inflation": "不能替主角通关，强收益带来新债务",
+        "mechanic_specific_contract": "模拟器每次展示终局分支，主角选择回收并承担因果偏移",
     }
 
 
@@ -87,6 +90,40 @@ def test_core_mechanic_contract_is_generic_and_reusable():
         required=True,
     )
     assert any("能力循环" in item for item in defects)
+
+
+def test_mechanic_adapters_cover_multiple_families_and_combinations():
+    assert mechanic_families_for_idea("重生后绑定系统，储物空间里还有灵泉") == [
+        "system", "rebirth", "space"
+    ]
+    guidance = mechanic_contract_guidance("重生后绑定系统，储物空间里还有灵泉")
+    assert "系统/签到/任务" in guidance
+    assert "重生/回到过去" in guidance
+    assert "空间/灵泉/储物" in guidance
+
+
+def test_plain_worldbuilding_space_does_not_trigger_a_cheat_adapter():
+    assert mechanic_families_for_idea("人类在深空建立殖民地，空间站之间爆发战争") == []
+
+
+def test_non_simulator_mechanic_requires_type_specific_rules_without_forcing_simulator():
+    contract = _core_mechanic_contract()
+    contract.update({
+        "mechanic_type": "rebirth",
+        "mechanic_specific_contract": "保留前世记忆，主动改写关键事件；蝴蝶效应会造成误差和暴露",
+        "capability_loop": "触发记忆→选择改写→行动布局→收益→代价→状态变化→新冲突",
+        "limits_and_costs": "未来信息会因改写产生误差，关键节点可能暴露并付出关系代价",
+    })
+    assert validate_core_mechanic_contract(contract, required=True) == []
+
+
+def test_unknown_named_cheat_falls_back_to_generic_adapter():
+    contract = _core_mechanic_contract()
+    contract.update({
+        "mechanic_type": "观测之眼",
+        "mechanic_specific_contract": "只能观测已发生的线索，使用后会暴露观察痕迹并引来追查",
+    })
+    assert validate_core_mechanic_contract(contract, required=True) == []
 
 
 def test_complete_longform_contract_is_accepted():

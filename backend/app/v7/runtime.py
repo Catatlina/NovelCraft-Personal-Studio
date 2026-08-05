@@ -14,6 +14,7 @@ from typing import Any
 
 from ..db import connect, decode
 from ..services.novel_export import extract_body_text
+from ..services.planning_contract import mechanic_runtime_directive
 from ..services.quality_profiles import profile_from_context, quality_profile_metadata
 from .brain.novel_brain import NovelBrain
 from .db import AsyncSessionLocal, async_engine
@@ -253,6 +254,9 @@ def _generation_contract_prompt(meta: dict[str, Any]) -> str:
             + "\n金手指剧情必须形成：触发→主角选择/取舍→具体行动→可见收益→代价或风险→人物/资源/关系状态变化→新的主线冲突；"
               "不能用面板播报替代事件，不能让金手指替主角自动通关。"
         )
+        adapter_directive = mechanic_runtime_directive(core_mechanic)
+        if adapter_directive:
+            blocks.append(adapter_directive)
     simulator = meta.get("simulator_contract")
     if isinstance(simulator, dict) and simulator.get("enabled") is True:
         blocks.append(
