@@ -11,6 +11,7 @@ def _core_mechanic_contract() -> dict:
         "enabled": True,
         "mechanic_type": "simulator",
         "reader_promise": "提前看见危险并用选择换取活路",
+        "trigger_and_loop": "触发→选择→行动→收益→代价→状态变化→新冲突",
         "capability_loop": "触发→选择→行动→可见收益→代价→状态变化→新问题",
         "choice_surface": "选择、取舍、放弃或承担风险",
         "visible_payoff": "事件和对手反应中的收益",

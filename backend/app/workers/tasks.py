@@ -642,7 +642,27 @@ def _planning_contract_feedback(output: dict[str, Any], context: dict[str, Any])
         idea=str(context.get("idea") or ""),
         target_words=target_words,
     )
-    return "；".join(defects[:12])
+    if not defects:
+        return ""
+    idea = str(context.get("idea") or "")
+    simulator_required = any(
+        marker in idea for marker in ("模拟器", "人生模拟", "模拟未来", "推演未来")
+    )
+    repair = (
+        f"本轮规划未通过硬契约，必须重做而不是解释：目标总字数严格为 {target_words} 字；"
+        "creative_bible 必须达到长篇最低字数并写出黄金三章、能力边界、六阶段路线、人物关系、篇幅账本和校验清单；"
+        "longform_contract 必须包含 target_words、volume_word_targets（合计精确闭合）、chapter_word_target、chapter_count、"
+        "route_milestones（最后 end_words 精确等于目标）；"
+        "core_mechanic_contract 必须完整包含 enabled、mechanic_type、reader_promise、trigger_and_loop、capability_loop、"
+        "choice_surface、visible_payoff、limits_and_costs、failure_and_risks、state_writeback、plot_coupling、progression、anti_inflation。"
+    )
+    if simulator_required:
+        repair += (
+            "simulator_contract 还必须包含 enabled、horizon、terminal_condition、branches（至少两条）、observable_state、"
+            "harvestable_rewards、selection_rules、costs_and_risks、reality_writeback、causal_recalculation、plot_guardrails；"
+            "必须写清推演到死亡/终局、选择回收收益、代价、回收后因果重算，不能只写短期预知。"
+        )
+    return repair + "硬错误摘要：" + "；".join(defects[:8])
 
 
 def _volume_plan_feedback(output: dict[str, Any], context: dict[str, Any]) -> str:

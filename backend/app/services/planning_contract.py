@@ -86,6 +86,7 @@ def validate_core_mechanic_contract(
     required_fields = {
         "mechanic_type": "机制类型",
         "reader_promise": "读者承诺",
+        "trigger_and_loop": "触发到新冲突的闭环",
         "capability_loop": "能力循环",
         "choice_surface": "主角选择面",
         "visible_payoff": "可见收益",
