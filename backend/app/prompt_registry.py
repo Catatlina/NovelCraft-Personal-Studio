@@ -813,7 +813,7 @@ $instruction
      '生成 $platform 短视频脚本(≤$max_duration秒)。\n风格：$style\n内容：$body\n输出 JSON: {"hook_3s":"","scenes":[{"duration":5,"visual":"","audio":""}],"title":"","cta":""}'),
 
     # ═══ V2 四阶段 Bootstrap：规划阶段（7 节点，oh-story Phase 1-2 + harnessNovel 分层规划） ═══
-    ("bootstrap.plan_idea", "1.8.0", "deepseek",
+    ("bootstrap.plan_idea", "1.9.0", "deepseek",
      """你是资深网文策划（StoryArchitect）和长篇项目制片人。请先像专业创作顾问一样，把用户的原始需求整理成可供后续 AI 写作链路执行的"创作圣经"，再给出书名候选。
 
 灵感：$idea
@@ -886,10 +886,11 @@ $core_mechanic_guidance
 必须同时输出 core_mechanic_contract；若为模拟器，再输出包含终局、分支、收益回收、因果重算和剧情护栏的 simulator_contract。字段缺失视为规划失败，不得用 creative_bible 中的一段散文替代结构化契约。
 
 core_mechanic_contract 的 mechanic_type 必须使用最接近的机制族（system/simulator/rebirth/space/panel/inheritance/time_loop/ability/commerce/other）；组合金手指另填 mechanic_families，并在 mechanic_specific_contract 中写清每个机制的独有规则。
+mechanic_specific_contract 不得省略：至少逐项说明本机制的触发、收益验证、边界/失败和升级方式；如果是组合机制，分别写出各机制的专属部分。
 
 输出 JSON: {"idea_expanded":"展开的创意","synopsis":"给读者看的独立简介","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"],"longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"simulator_contract":{"enabled":false,"horizon":"","terminal_condition":"","branches":[],"observable_state":[],"harvestable_rewards":[],"selection_rules":[],"costs_and_risks":[],"reality_writeback":""}}"""),
 
-    ("bootstrap.repair_planning_contract", "1.1.0", "deepseek",
+    ("bootstrap.repair_planning_contract", "1.2.0", "deepseek",
      """你是长篇网文规划修复器。上一轮规划已经有部分内容，但没有通过硬契约。只修复结构化规划账本和创作圣经，不改变原始创意、主角身份、题材、核心冲突和用户目标。
 
 原始灵感：$idea
@@ -906,6 +907,7 @@ core_mechanic_contract 的 mechanic_type 必须使用最接近的机制族（sys
 4. simulator_contract：如果是否包含模拟器为 true，必须 enabled=true，并写明从当前推演到死亡/终局、至少两条分支、可观察状态、可选择回收的情报/机缘/修为/功法/资源/能力、选择与取舍、次数/寿元/资源/冷却/因果/失败/暴露等代价、现实回写、回收后的因果重算和主线护栏；否则 enabled=false。
 
 输出前自检：mechanic_type 必须与原始灵感一致；若是组合机制填 mechanic_families；mechanic_specific_contract 必须逐项写出该机制独有的触发、验证、边界、失败和升级，不能只复述通用闭环。
+注意：mechanic_specific_contract 是必填字段，哪怕机制是人生模拟器也不能省略；至少写出“模拟如何触发、哪些收益需要验证、何时失败/暴露、能力如何升级”四项。
 
 只输出 JSON：{"creative_bible":"完整创作圣经","longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"core_mechanic_contract":{"enabled":true,"mechanic_type":"机制类型","reader_promise":"读者承诺","trigger_and_loop":"触发→选择→行动→收益→代价→状态变化→新冲突","capability_loop":"能力循环","choice_surface":"选择与取舍","visible_payoff":"可见收益","limits_and_costs":"边界与代价","failure_and_risks":"失败与风险","state_writeback":"状态写回","plot_coupling":"主线耦合","progression":"成长升级","anti_inflation":"防止通胀"},"simulator_contract":{"enabled":true,"horizon":"从当前推演到死亡或终局","terminal_condition":"死亡/道消/寿终","branches":["保守路线","激进路线"],"observable_state":["修为/伤势/资源/关系/机缘/死亡原因"],"harvestable_rewards":["情报/机缘/修为/功法/资源/能力"],"selection_rules":"选择、组合、放弃或延迟收益，不能全拿","costs_and_risks":"次数、寿元、资源、冷却、因果、失败和暴露代价","reality_writeback":"执行回收后写回现实并改变后续冲突","causal_recalculation":"回收后重新推演因果分支","plot_guardrails":"收益不能跳过主线，必须带来代价或新问题"}}"""),
 

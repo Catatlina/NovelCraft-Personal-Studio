@@ -270,7 +270,13 @@ def validate_core_mechanic_contract(
         if value in (None, "", [], {}):
             defects.append(f"core_mechanic_contract 缺少{label}（{field}）")
 
-    loop = str(contract.get("capability_loop", ""))
+    # The trigger chain and the capability-specific loop are complementary.
+    # Do not force the provider to repeat every phase verbatim in both fields;
+    # validate their combined evidence while still requiring a real loop.
+    loop = " ".join(
+        str(contract.get(field, ""))
+        for field in ("trigger_and_loop", "capability_loop")
+    )
     loop_markers = ("触发", "选择", "行动", "结果", "收益", "代价", "新问题", "冲突")
     if sum(marker in loop for marker in loop_markers) < 5:
         defects.append("能力循环必须写清触发、选择、行动、可见结果、代价和新问题")
@@ -374,7 +380,13 @@ def validate_simulator_contract(
     selection = str(contract.get("selection_rules", ""))
     if not any(marker in selection for marker in ("选择", "取舍", "组合", "放弃")):
         defects.append("收益选择规则必须允许选择、取舍、组合或放弃，不能默认全量领取")
-    if any(marker in selection for marker in ("全部带回", "无条件全拿", "全部获得")):
+    unconditional_take = ("全部带回", "无条件全拿", "全部获得")
+    negated = ("不能", "不得", "不可", "禁止", "不允许")
+    if any(
+        marker in selection
+        and not any(f"{prefix}{marker}" in selection for prefix in negated)
+        for marker in unconditional_take
+    ):
         defects.append("收益选择规则不能允许无条件全量带回，否则会直接破坏剧情张力")
 
     writeback = str(contract.get("reality_writeback", ""))

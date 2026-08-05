@@ -83,6 +83,24 @@ def test_simulator_contract_requires_terminal_future_and_harvest_choice():
     assert any("机缘、修为、功法" in item for item in defects)
 
 
+def test_simulator_contract_does_not_reject_a_negated_no_full_harvest_rule():
+    contract = {
+        "enabled": True,
+        "horizon": "从当前推演到死亡终局",
+        "terminal_condition": "死亡或寿终",
+        "branches": ["保守路线", "激进路线"],
+        "observable_state": ["修为", "资源", "死亡原因"],
+        "harvestable_rewards": ["机缘", "修为", "功法", "资源", "能力"],
+        "selection_rules": "主角可以选择、组合或放弃收益，不能无条件全拿",
+        "costs_and_risks": "次数、寿元、资源、冷却、因果和暴露代价",
+        "reality_writeback": "选择回收后写回现实并改变后续冲突",
+        "causal_recalculation": "回收后重新推演因果分支",
+        "plot_guardrails": "收益不能跳过主线，必须带来代价或新问题",
+    }
+    defects = validate_simulator_contract(contract, required=True)
+    assert not any("无条件全量带回" in item for item in defects)
+
+
 def test_core_mechanic_contract_is_generic_and_reusable():
     assert validate_core_mechanic_contract(_core_mechanic_contract(), required=True) == []
     defects = validate_core_mechanic_contract(

@@ -1671,26 +1671,33 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                             _target_for_bible >= 500_000
                             and len(_current_bible.replace("\n", "")) < _bible_minimum
                         ):
-                            bible_repair = complete(
-                                run_id=run_id,
-                                node_key=node_key,
-                                project_id=project_id,
-                                task_type="expand_creative_bible",
-                                prompt_name="bootstrap.expand_creative_bible",
-                                variables={
-                                    **run_context,
-                                    "creative_bible": _current_bible,
-                                    "repair_feedback": target_feedback,
-                                },
-                                client_mutation_id=(
-                                    f"bootstrap:{run_id}:{node_key}:bible-repair:"
-                                    f"{fidelity_cycle}:{fidelity_attempt}"
-                                ),
-                            )
-                            bible_repair = validate_task_output(
-                                "expand_creative_bible", bible_repair
-                            )
-                            output["creative_bible"] = bible_repair["creative_bible"]
+                            for _bible_attempt in range(1, 3):
+                                bible_repair = complete(
+                                    run_id=run_id,
+                                    node_key=node_key,
+                                    project_id=project_id,
+                                    task_type="expand_creative_bible",
+                                    prompt_name="bootstrap.expand_creative_bible",
+                                    variables={
+                                        **run_context,
+                                        "creative_bible": _current_bible,
+                                        "repair_feedback": (
+                                            f"{target_feedback}；上一次扩写约 {len(_current_bible.replace(chr(10), ''))} 字，"
+                                            f"本次至少扩写到 {_bible_minimum + 200} 字，不能只改标题或重复原句。"
+                                        ),
+                                    },
+                                    client_mutation_id=(
+                                        f"bootstrap:{run_id}:{node_key}:bible-repair:"
+                                        f"{fidelity_cycle}:{fidelity_attempt}:{_bible_attempt}"
+                                    ),
+                                )
+                                bible_repair = validate_task_output(
+                                    "expand_creative_bible", bible_repair
+                                )
+                                output["creative_bible"] = bible_repair["creative_bible"]
+                                _current_bible = str(output.get("creative_bible") or "")
+                                if len(_current_bible.replace("\n", "")) >= _bible_minimum:
+                                    break
                         target_feedback = _target_words_guard(
                             output,
                             run_context.get("target_words"),
