@@ -210,6 +210,24 @@ def test_memory_conflict_treats_resource_cost_against_goal_as_plot_pressure():
     assert conflicts[0]["severity"] == "medium"
 
 
+def test_memory_conflict_treats_simulator_rule_evolution_as_plot_pressure():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "模拟器规则",
+                "description": "模拟器警告因果偏移加剧，未来模拟不可预测，与之前模拟器规则冲突",
+                "severity": "high",
+                "conflict_type": "hard_fact",
+            }
+        ]
+    )
+
+    assert conflicts[0]["conflict_type"] == "plot_disruption"
+    assert conflicts[0]["resolution_status"] == "unresolved"
+    assert conflicts[0]["original_severity"] == "high"
+    assert conflicts[0]["severity"] == "medium"
+
+
 def test_memory_conflict_normalizes_legacy_unresolved_plot_type():
     conflicts = normalize_memory_conflicts(
         [

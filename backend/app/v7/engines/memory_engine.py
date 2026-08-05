@@ -120,6 +120,17 @@ _RESOURCE_PRESSURE_MARKERS = (
     "困境",
     "冲突",
 )
+_RULE_EVOLUTION_MARKERS = (
+    "因果偏移",
+    "因果承受上限",
+    "模拟器警告",
+    "未来模拟",
+    "不可预测",
+    "严重偏离",
+    "规则变化",
+    "规则改变",
+    "收益超出",
+)
 _HARD_CONFLICT_MARKERS = (
     "凭空",
     "再次出现",
@@ -199,6 +210,18 @@ def normalize_memory_conflicts(
             # inherit, not an impossible duplicate in the resource ledger.
             # Keep it as a plot-pressure evidence item.  Explicit hard-fact
             # markers above still take precedence for real contradictions.
+            conflict_type = "plot_disruption"
+        if (
+            conflict_type in {"", "hard_fact"}
+            and any(marker in description for marker in _RULE_EVOLUTION_MARKERS)
+            and not any(marker in description for marker in _HARD_CONFLICT_MARKERS)
+        ):
+            # A system warning such as causal drift making future simulations
+            # unpredictable is an intentional rule evolution caused by the
+            # protagonist's choice. It creates the next pressure point; it is
+            # not proof that a previously consumed resource or dead character
+            # has been restored. Reclassify even an LLM-provided hard_fact,
+            # while keeping explicit impossible-state markers fail-closed.
             conflict_type = "plot_disruption"
         item["conflict_type"] = conflict_type or "hard_fact"
         item["resolution_status"] = resolution_status or "unresolved"
@@ -335,7 +358,8 @@ class MemoryEngine(BaseEngine):
             "summary 不超过 30 字，detail 和 evidence 各不超过 60 字，chapter_summary 不超过 80 字；"
             "不要重复已知设定，不要输出额外字段、Markdown 或解释。"
             "人物的表面意图与真实意图不同，且正文已经揭示时，标记为 strategic_reveal/resolved，"
-            "不要把它当作硬设定冲突；计划被事件打断、被迫改线或对手制造新阻力属于 plot_disruption，"
+            "不要把它当作硬设定冲突；计划被事件打断、被迫改线、对手制造新阻力，或金手指因因果偏移出现新的限制，属于 plot_disruption，"
+            "例如‘因果偏移加剧、未来模拟不可预测’是规则演化，不是事实矛盾；"
             "即使仍未解决也不要标记为 high；只有时间线、资源、人物已知信息或未解决事实矛盾才标记为 high。"
         )
 
@@ -346,7 +370,7 @@ class MemoryEngine(BaseEngine):
                 max_tokens=1800,
                 temperature=0.2,
                 prompt_name="v7.memory.extract",
-                prompt_version="1.4.0",
+                prompt_version="1.5.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
