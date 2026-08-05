@@ -92,6 +92,34 @@ _PLOT_PRESSURE_CONSEQUENCE_MARKERS = (
     "后果",
     "代价",
 )
+_RESOURCE_COST_MARKERS = (
+    "寿元",
+    "寿命",
+    "余量",
+    "仅剩",
+    "只剩",
+    "削减",
+    "减少",
+    "损失",
+    "消耗",
+    "付出",
+    "代价",
+    "资源",
+)
+_RESOURCE_PRESSURE_MARKERS = (
+    "目标",
+    "长期",
+    "生存",
+    "活下去",
+    "不足",
+    "有限",
+    "威胁",
+    "风险",
+    "压力",
+    "危机",
+    "困境",
+    "冲突",
+)
 _HARD_CONFLICT_MARKERS = (
     "凭空",
     "再次出现",
@@ -159,6 +187,18 @@ def normalize_memory_conflicts(
             # A choice creates a new threat, cost, deadline, or risk. This is
             # precisely the open pressure that should bridge into the next
             # chapter, not a contradiction in the truth ledger.
+            conflict_type = "plot_disruption"
+        if (
+            not conflict_type
+            and any(marker in description for marker in _RESOURCE_COST_MARKERS)
+            and any(marker in description for marker in _RESOURCE_PRESSURE_MARKERS)
+            and not any(marker in description for marker in _HARD_CONFLICT_MARKERS)
+        ):
+            # A stated cost such as "寿元只剩四十七年，长期生存目标受到
+            # 威胁" is an intentional consequence that the next chapter must
+            # inherit, not an impossible duplicate in the resource ledger.
+            # Keep it as a plot-pressure evidence item.  Explicit hard-fact
+            # markers above still take precedence for real contradictions.
             conflict_type = "plot_disruption"
         item["conflict_type"] = conflict_type or "hard_fact"
         item["resolution_status"] = resolution_status or "unresolved"

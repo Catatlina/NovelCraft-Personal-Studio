@@ -193,6 +193,23 @@ def test_memory_conflict_recognizes_untyped_open_pressure_as_plot_evidence():
     assert conflicts[0]["severity"] == "medium"
 
 
+def test_memory_conflict_treats_resource_cost_against_goal_as_plot_pressure():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "主角寿元",
+                "description": "寿元仅剩四十七年，与长期生存目标冲突",
+                "severity": "high",
+            }
+        ]
+    )
+
+    assert conflicts[0]["conflict_type"] == "plot_disruption"
+    assert conflicts[0]["resolution_status"] == "unresolved"
+    assert conflicts[0]["original_severity"] == "high"
+    assert conflicts[0]["severity"] == "medium"
+
+
 def test_memory_conflict_normalizes_legacy_unresolved_plot_type():
     conflicts = normalize_memory_conflicts(
         [
