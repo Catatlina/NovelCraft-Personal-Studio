@@ -447,6 +447,11 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                       .join("、") || "存在未解决的质量问题"}。修复后请重新审计，不能只靠平均分通过。
                   </div>
                 ) : null}
+                {editorAiReview.review.issue_evidence?.suppressed > 0 ? (
+                  <div style={{ marginBottom: 10, color: "var(--text-muted, #8b8b93)", fontSize: 12 }}>
+                    已隐藏 {editorAiReview.review.issue_evidence.suppressed} 条缺少正文定位证据的泛化建议；只保留能在当前正文中找到依据的问题。
+                  </div>
+                ) : null}
                 {editorAiReview.review.issues?.length ? (
                   <>
                     <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>

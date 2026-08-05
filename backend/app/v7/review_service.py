@@ -29,7 +29,7 @@ from .trace.tracer import ExecutionTracer
 
 CANONICAL_REVIEW_ENGINE = "v7"
 CANONICAL_REVIEW_PROMPT = "v7.review.33_dimension"
-CANONICAL_REVIEW_PROMPT_VERSION = "1.1.0"
+CANONICAL_REVIEW_PROMPT_VERSION = "1.2.0"
 
 
 def text_hash(text: str) -> str:
@@ -39,6 +39,27 @@ def text_hash(text: str) -> str:
 def _meta(value: Any) -> dict[str, Any]:
     result = decode(value, {}) if not isinstance(value, dict) else value
     return result if isinstance(result, dict) else {}
+
+
+def _review_provenance_matches(provenance: Any, chapter_text: str) -> bool:
+    """Return whether a stored review is the snapshot for this audit input.
+
+    The text hash is the primary identity.  Prompt fields are checked when
+    present so a deliberate audit-contract upgrade invalidates old scores;
+    old records without those fields remain readable for compatibility.
+    """
+    provenance = provenance if isinstance(provenance, dict) else {}
+    if provenance.get("text_hash") != text_hash(chapter_text):
+        return False
+    for key, expected in (
+        ("audit_source", CANONICAL_REVIEW_PROMPT),
+        ("prompt_name", CANONICAL_REVIEW_PROMPT),
+        ("prompt_version", CANONICAL_REVIEW_PROMPT_VERSION),
+    ):
+        actual = provenance.get(key)
+        if actual and str(actual) != expected:
+            return False
+    return True
 
 
 def _chapter_number(content: dict[str, Any]) -> int:
@@ -208,6 +229,7 @@ def _provenance(
     cache_hit: bool,
     source: str,
 ) -> dict[str, Any]:
+    existing = review.get("provenance") if isinstance(review.get("provenance"), dict) else {}
     return {
         "engine": CANONICAL_REVIEW_ENGINE,
         "audit_source": CANONICAL_REVIEW_PROMPT,
@@ -218,7 +240,13 @@ def _provenance(
         "text_hash": text_hash(chapter_text),
         "cache_hit": cache_hit,
         "source": source,
-        "scored_at": datetime.now(timezone.utc).isoformat(),
+        # A cache hit is the same audit snapshot, not a new score. Preserve
+        # its original timestamp so the UI does not imply a re-score.
+        "scored_at": (
+            existing.get("scored_at")
+            if cache_hit and existing.get("scored_at")
+            else datetime.now(timezone.utc).isoformat()
+        ),
     }
 
 
@@ -283,7 +311,7 @@ def _cached_review(
     provenance = current_meta.get("review_provenance")
     if not isinstance(review, dict) or not isinstance(provenance, dict):
         return None
-    if provenance.get("text_hash") != text_hash(chapter_text):
+    if not _review_provenance_matches(provenance, chapter_text):
         return None
     return _decorate_review(
         review,
@@ -295,6 +323,55 @@ def _cached_review(
         cache_hit=True,
         source="persisted_v7_review",
     )
+
+
+def _cached_version_review(
+    *,
+    content_id: str,
+    context: dict[str, Any],
+    current_meta: dict[str, Any],
+    chapter_text: str,
+) -> dict[str, Any] | None:
+    """Read the latest matching live-audit snapshot from the version ledger."""
+    if not content_id:
+        return None
+    conn = None
+    try:
+        conn = connect()
+        rows = conn.execute(
+            """
+            SELECT snapshot
+            FROM versions
+            WHERE entity_type='content' AND entity_id=%s AND label='ai_review'
+            ORDER BY created_at DESC
+            LIMIT 32
+            """,
+            (content_id,),
+        ).fetchall()
+    except Exception:
+        # Cache lookup must never make an otherwise healthy audit unavailable.
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+    for row in rows:
+        snapshot = _meta(row.get("snapshot"))
+        review = snapshot.get("review") if isinstance(snapshot.get("review"), dict) else None
+        provenance = review.get("provenance") if isinstance(review, dict) else None
+        if not review or not _review_provenance_matches(provenance, chapter_text):
+            continue
+        return _decorate_review(
+            review,
+            context=context,
+            current_meta=current_meta,
+            chapter_text=chapter_text,
+            provider=str((provenance or {}).get("provider") or "deepseek"),
+            model=(provenance or {}).get("model"),
+            cache_hit=True,
+            source="persisted_v7_live_review",
+        )
+    return None
 
 
 async def review_chapter_v7(
@@ -311,6 +388,14 @@ async def review_chapter_v7(
     context, current_meta = _chapter_context(content, chapter_text)
     if use_cache:
         cached = _cached_review(
+            context=context,
+            current_meta=current_meta,
+            chapter_text=chapter_text,
+        )
+        if cached is not None:
+            return cached
+        cached = _cached_version_review(
+            content_id=str(content.get("id") or ""),
             context=context,
             current_meta=current_meta,
             chapter_text=chapter_text,

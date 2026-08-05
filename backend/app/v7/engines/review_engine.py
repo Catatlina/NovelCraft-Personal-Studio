@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -54,6 +55,87 @@ DIMENSION_LABELS: dict[str, str] = {
     "constraint_compliance": "约束遵守（是否违反必须遵守的约束）",
 }
 
+_UNSAFE_CHARACTER_SUGGESTION_MARKERS = (
+    "增加口头禅",
+    "添加口头禅",
+    "加入口头禅",
+    "补充口头禅",
+    "增加方言",
+    "添加方言",
+    "新增背景",
+    "补充背景设定",
+    "增加人物设定",
+    "添加人物设定",
+    "改变性格设定",
+)
+
+
+def _compact_issue_text(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip())
+
+
+def _issue_excerpt(issue: dict[str, Any], chapter_text: str) -> str:
+    """Find an exact source excerpt, including quoted text in descriptions."""
+    candidates = [
+        str(issue.get("excerpt") or "").strip(),
+        str(issue.get("anchor") or "").strip(),
+    ]
+    description = str(issue.get("description") or issue.get("issue") or "")
+    candidates.extend(
+        match.strip()
+        for match in re.findall(r"[“『「\"‘']([^”』」\"’']{2,80})[”』」\"’']", description)
+    )
+    compact_chapter = _compact_issue_text(chapter_text)
+    for candidate in candidates:
+        if len(candidate) < 2:
+            continue
+        if candidate in chapter_text or _compact_issue_text(candidate) in compact_chapter:
+            return candidate
+    return ""
+
+
+def normalize_review_issues(
+    issues: Any,
+    chapter_text: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep only source-grounded issues and suppress invented advice.
+
+    The reviewer may still be uncertain, but the editor must never present a
+    suggestion that cannot point to the submitted正文. Character voice edits
+    are local wording edits; they cannot silently invent a catchphrase,
+    dialect, biography, or personality trait.
+    """
+    verified: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    for raw in issues or []:
+        if not isinstance(raw, dict):
+            suppressed.append({
+                "description": str(raw),
+                "evidence_status": "unverified",
+                "evidence_reason": "审阅结果不是结构化问题，无法定位正文证据",
+            })
+            continue
+        item = dict(raw)
+        excerpt = _issue_excerpt(item, chapter_text)
+        if not excerpt:
+            item.update({
+                "evidence_status": "unverified",
+                "evidence_reason": "未提供可在当前正文中定位的连续原文片段",
+            })
+            suppressed.append(item)
+            continue
+        item["excerpt"] = excerpt
+        item["evidence_status"] = "verified"
+        suggestion = str(item.get("suggestion") or "")
+        if any(marker in suggestion for marker in _UNSAFE_CHARACTER_SUGGESTION_MARKERS):
+            item["suggestion"] = (
+                "只基于这段已有对白、动作和潜台词做局部改写，"
+                "不要新增口头禅、方言、背景或人物设定。"
+            )
+            item["suggestion_status"] = "bounded_local_rewrite"
+        verified.append(item)
+    return verified, suppressed
+
 
 class ReviewEngine(BaseEngine):
     """Reviews chapters with a real LLM call across 7 dimensions."""
@@ -73,7 +155,7 @@ class ReviewEngine(BaseEngine):
         return EngineCapability(
             engine_name="review_engine",
             engine_type="review",
-            version="1.1.0",
+            version="1.2.0",
             description="7 macro scores plus a 33-dimension evidence audit for quality and continuity",
             input_types=["chapter_text", "scene_text", "full_text"],
             output_types=["review_report", "issues", "score"],
@@ -264,6 +346,11 @@ class ReviewEngine(BaseEngine):
             "如果存在逻辑问题，指出触发→依据→选择→阻碍→代价→结果哪一环断了；"
             "如果存在 AI 腔，指出具体套话、同构句、解释腔或过度工整段落，并给出替代表达方向。"
             "中高严重度的问题不得只写‘可加强’，必须写清位置和修复动作。"
+            "每条 issues 必须提供 excerpt：从正文连续复制至少 8 个字，且可逐字搜索定位；"
+            "若没有可靠原文证据就不要输出该问题。不要因为单个‘像是’、破折号或常用词出现就机械判定 AI 腔，"
+            "只有在连续堆叠、明显削弱表达或形成同构模板时才指出。"
+            "不得建议凭空增加口头禅、方言、背景、人物性格或新设定；人物声音问题只能改写现有对白的措辞、节奏、动作和潜台词，"
+            "除非设定/正文已有证据支持新增特征。"
             "33个审计项必须全部出现；每项都要给 score、evidence、repair。"
             "如果某项确实不适用，也要给出 score，并在 evidence 说明不适用的理由。"
             "如果提供了本章爽点契约，必须从正文逐字摘取至少一条 payoff_evidence；"
@@ -285,9 +372,9 @@ class ReviewEngine(BaseEngine):
                     + content_generation_contract(data.get("quality_profile") or {})
                 ),
                 max_tokens=5000,
-                temperature=0.2,
+                temperature=0.0,
                 prompt_name="v7.review.33_dimension",
-                prompt_version="1.1.0",
+                prompt_version="1.2.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
@@ -428,6 +515,10 @@ class ReviewEngine(BaseEngine):
             payoff_evidence,
             required=payoff_required,
         )
+        verified_issues, suppressed_issues = normalize_review_issues(
+            raw.get("issues") or [],
+            chapter_text,
+        )
         review_result = {
             "canonical_engine": "v7",
             "chapter_number": data.get("chapter_number"),
@@ -437,7 +528,14 @@ class ReviewEngine(BaseEngine):
             "audit_report": audit_report,
             "reader_experience": reader_experience,
             "reader_experience_summary": summarize_reader_experience(reader_experience),
-            "issues": raw.get("issues") or [],
+            "issues": verified_issues,
+            "unverified_issues": suppressed_issues,
+            "issue_evidence": {
+                "schema_version": "review-issue-evidence-v1",
+                "total": len(verified_issues) + len(suppressed_issues),
+                "verified": len(verified_issues),
+                "suppressed": len(suppressed_issues),
+            },
             "constraint_violations": violations,
             "strengths": raw.get("strengths") or [],
             "constraints_checked": len(constraints),
@@ -453,7 +551,7 @@ class ReviewEngine(BaseEngine):
                 "engine": "v7",
                 "audit_source": "v7.review.33_dimension",
                 "prompt_name": "v7.review.33_dimension",
-                "prompt_version": "1.1.0",
+                "prompt_version": "1.2.0",
                 # Test doubles and older adapters do not necessarily expose
                 # routing metadata.  Missing provenance must remain explicit;
                 # it must not turn a valid review contract into an engine error.
