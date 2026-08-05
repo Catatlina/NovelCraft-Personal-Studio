@@ -100,6 +100,49 @@ def test_memory_conflict_recognizes_identity_and_setting_reveals():
     assert all(item["severity"] == "medium" for item in conflicts)
 
 
+def test_memory_conflict_downgrades_an_interrupted_plan_to_plot_evidence():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "闭关计划",
+                "description": "周衡计划闭关避劫，但林逸提前挑战，导致计划受挫。",
+                "severity": "high",
+            }
+        ]
+    )
+
+    assert conflicts[0]["conflict_type"] == "plot_disruption"
+    assert conflicts[0]["resolution_status"] == "resolved"
+    assert conflicts[0]["original_severity"] == "high"
+    assert conflicts[0]["severity"] == "medium"
+
+
+def test_continuity_does_not_block_resolved_plot_disruption():
+    result = validate_transition_contract(
+        {
+            "schema_version": "v2",
+            "chapter_number": 1,
+            "end_state": {"last_tail": "挑战", "summary": "计划被打断"},
+            "next_chapter_bridge": "挑战",
+            "state_delta": {},
+            "open_threads": [],
+        },
+        chapter_number=1,
+        state_conflicts=[
+            {
+                "key": "闭关计划",
+                "description": "计划被提前挑战打断",
+                "severity": "high",
+                "conflict_type": "plot_disruption",
+                "resolution_status": "resolved",
+            }
+        ],
+    )
+
+    assert result["passed"] is True
+    assert result["issues"] == []
+
+
 def test_continuity_does_not_block_resolved_strategic_reveal():
     result = validate_transition_contract(
         {

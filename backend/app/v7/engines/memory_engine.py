@@ -44,6 +44,27 @@ _STRATEGIC_REVEAL_MARKERS = (
     "一字之差",
 )
 
+_PLOT_DISRUPTION_PLAN_MARKERS = (
+    "计划",
+    "打算",
+    "原定",
+    "准备",
+)
+_PLOT_DISRUPTION_EVENT_MARKERS = (
+    "受挫",
+    "落空",
+    "被迫",
+    "打断",
+    "提前",
+    "意外",
+    "未能",
+    "失败",
+    "挑战",
+    "来袭",
+    "阻止",
+    "改线",
+)
+
 
 def normalize_memory_conflicts(
     conflicts: list[Any] | None,
@@ -72,11 +93,22 @@ def normalize_memory_conflicts(
             conflict_type = "strategic_reveal"
         if not resolution_status and conflict_type == "strategic_reveal":
             resolution_status = "resolved"
+        # A planned action being interrupted by an event is a normal plot
+        # turn, not a contradiction in the durable truth state.  Keep it in
+        # evidence so the next chapter can inherit the changed goal, but do
+        # not let a model's generic ``high`` label block the chapter.
+        if (
+            not conflict_type
+            and any(marker in description for marker in _PLOT_DISRUPTION_PLAN_MARKERS)
+            and any(marker in description for marker in _PLOT_DISRUPTION_EVENT_MARKERS)
+        ):
+            conflict_type = "plot_disruption"
+            resolution_status = "resolved"
         item["conflict_type"] = conflict_type or "hard_fact"
         item["resolution_status"] = resolution_status or "unresolved"
         item["original_severity"] = str(item.get("severity") or "medium").lower()
         if (
-            item["conflict_type"] == "strategic_reveal"
+            item["conflict_type"] in {"strategic_reveal", "plot_disruption"}
             and item["resolution_status"] == "resolved"
         ):
             item["severity"] = "medium"
@@ -192,7 +224,7 @@ class MemoryEngine(BaseEngine):
             '  "foreshadowing": [{"key":"伏笔短标识","summary":"...","detail":"...",'
             '"confidence":0.6,"evidence":"..."}],\n'
             '  "conflicts": [{"key":"冲突的已知设定","description":"如何冲突的",'
-            '"severity":"low|medium|high","conflict_type":"hard_fact|timeline|resource|knowledge|strategic_reveal|unresolved_plot",'
+            '"severity":"low|medium|high","conflict_type":"hard_fact|timeline|resource|knowledge|strategic_reveal|plot_disruption|unresolved_plot",'
             '"resolution_status":"resolved|unresolved","evidence":"正文中解决冲突的依据"}],\n'
             '  "chapter_summary": "本章 100 字以内梗概"\n'
             "}\n"
@@ -202,7 +234,8 @@ class MemoryEngine(BaseEngine):
             "summary 不超过 30 字，detail 和 evidence 各不超过 60 字，chapter_summary 不超过 80 字；"
             "不要重复已知设定，不要输出额外字段、Markdown 或解释。"
             "人物的表面意图与真实意图不同，且正文已经揭示时，标记为 strategic_reveal/resolved，"
-            "不要把它当作硬设定冲突；只有时间线、资源、人物已知信息或未解决事实矛盾才标记为 high。"
+            "不要把它当作硬设定冲突；计划被事件打断、被迫改线属于 plot_disruption/resolved，"
+            "也不要阻断；只有时间线、资源、人物已知信息或未解决事实矛盾才标记为 high。"
         )
 
         try:
@@ -212,7 +245,7 @@ class MemoryEngine(BaseEngine):
                 max_tokens=1800,
                 temperature=0.2,
                 prompt_name="v7.memory.extract",
-                prompt_version="1.2.0",
+                prompt_version="1.3.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
