@@ -19,9 +19,13 @@ from ..services.novel_export import extract_body_text
 from ..services.quality_profiles import quality_profile_metadata
 from .brain.novel_brain import NovelBrain
 from .db import AsyncSessionLocal, async_engine
-from .engines.review_engine import ReviewEngine
+from .engines.review_engine import REVIEW_PROMPT_VERSION, ReviewEngine
 from .events.event_bus import EventBus
 from .quality.continuity import validate_transition_contract
+from .quality.novel_reviewer_reference import (
+    build_editorial_review_view,
+    novel_reviewer_reference_metadata,
+)
 from .quality.review_evidence import validate_review_evidence
 from .runtime import _load_quality_profile, seed_v6_context
 from .trace.tracer import ExecutionTracer
@@ -29,7 +33,7 @@ from .trace.tracer import ExecutionTracer
 
 CANONICAL_REVIEW_ENGINE = "v7"
 CANONICAL_REVIEW_PROMPT = "v7.review.33_dimension"
-CANONICAL_REVIEW_PROMPT_VERSION = "1.2.0"
+CANONICAL_REVIEW_PROMPT_VERSION = REVIEW_PROMPT_VERSION
 
 
 def text_hash(text: str) -> str:
@@ -287,6 +291,8 @@ def _decorate_review(
             source=source,
         ),
     })
+    result["review_reference"] = novel_reviewer_reference_metadata()
+    result["editorial_review"] = build_editorial_review_view(result)
     evidence = validate_review_evidence(result, require_continuity=True)
     result["review_evidence"] = evidence
     if evidence.get("passed") is not True:

@@ -124,6 +124,13 @@ KNOWLEDGE_SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
         "runtime_targets": ["pre_generation_contract", "quality_gate", "learning"],
     },
     {
+        "id": "novel_reviewer_reference_20260805",
+        "label": "novel-reviewer 全维度审查与 AI 味候选词库",
+        "layer": "reference",
+        "origin": "user-provided-review-skill",
+        "runtime_targets": ["review_engine", "deai_metrics", "editorial_view"],
+    },
+    {
         "id": "webnovel_quality_packs_20260805",
         "label": "都市/玄幻/平台适配/作者蒸馏质量包",
         "layer": "methodology",

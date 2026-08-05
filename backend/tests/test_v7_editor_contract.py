@@ -56,7 +56,7 @@ def test_v7_editor_prompt_has_canonical_identity_and_story_context():
     )
 
     assert compiled["prompt_name"] == "v7.editor.rewrite"
-    assert compiled["prompt_version"] == "1.0.0"
+    assert compiled["prompt_version"] == "1.1.0"
     assert compiled["source_prompt_name"] == "editor.rewrite"
     assert "第三人称限知" in compiled["prompt"]
     assert "完全架空" in compiled["prompt"]
@@ -140,7 +140,7 @@ def test_real_chapter_editor_does_not_call_legacy_complete(authed, monkeypatch):
             "editor_provenance": {
                 "engine": "v7",
                 "prompt_name": "v7.editor.polish",
-                "prompt_version": "1.0.0",
+                "prompt_version": "1.1.0",
             },
             "quality_gate": {"passed": True},
             "usage": {"provider": "test", "model": "test-model"},

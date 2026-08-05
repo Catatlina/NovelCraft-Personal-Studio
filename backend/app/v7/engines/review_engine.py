@@ -30,6 +30,11 @@ from ..quality.audit_dimensions import (
     normalize_audit_report,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
+from ..quality.novel_reviewer_reference import (
+    build_editorial_review_view,
+    novel_reviewer_reference_metadata,
+    analyze_novel_reviewer_lexicon,
+)
 from ..quality.review_evidence import (
     build_review_evidence,
     validate_review_evidence,
@@ -44,6 +49,8 @@ REVIEW_DIMENSIONS: tuple[str, ...] = (
     "emotional_impact",
     "constraint_compliance",
 )
+
+REVIEW_PROMPT_VERSION = "1.4.0"
 
 DIMENSION_LABELS: dict[str, str] = {
     "consistency": "设定一致性（与已确立的人物/世界/情节状态是否冲突）",
@@ -155,7 +162,7 @@ class ReviewEngine(BaseEngine):
         return EngineCapability(
             engine_name="review_engine",
             engine_type="review",
-            version="1.2.0",
+            version=REVIEW_PROMPT_VERSION,
             description="7 macro scores plus a 33-dimension evidence audit for quality and continuity",
             input_types=["chapter_text", "scene_text", "full_text"],
             output_types=["review_report", "issues", "score"],
@@ -175,6 +182,19 @@ class ReviewEngine(BaseEngine):
         constraints = await self.brain.constraints.list_constraints(limit=50)
         character_states = await self.brain.state.list_states("character", limit=20)
         plot_states = await self.brain.state.list_states("plot", limit=20)
+
+        quality_profile = input_data.get("quality_profile") or self.quality_profile or {}
+        supplied_deai_metrics = input_data.get("deai_metrics")
+        if isinstance(supplied_deai_metrics, dict) and supplied_deai_metrics:
+            deai_metrics = dict(supplied_deai_metrics)
+            # Recompute only the absorbed candidate layer for old persisted
+            # metrics.  Existing deterministic gate metrics remain untouched.
+            deai_metrics["novel_reviewer_lexicon"] = analyze_novel_reviewer_lexicon(
+                chapter_text,
+                profile=quality_profile,
+            )
+        else:
+            deai_metrics = analyze_deai_patterns(chapter_text, profile=quality_profile)
 
         analysis = {
             "chapter_number": input_data.get("chapter_number"),
@@ -200,13 +220,13 @@ class ReviewEngine(BaseEngine):
             "previous_transition_contract": input_data.get("previous_transition_contract") or {},
             "chapter_plan": input_data.get("chapter_plan") or {},
             "scene_plan": input_data.get("scene_plan") or {},
-            "deai_metrics": input_data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
+            "deai_metrics": deai_metrics,
             "pov_metrics": input_data.get("pov_metrics") or analyze_third_person_narrative(chapter_text),
             "content_policy": input_data.get("content_policy") or analyze_content_policy(
-                chapter_text, input_data.get("quality_profile") or self.quality_profile or {}
+                chapter_text, quality_profile
             ),
             "generation_quality": input_data.get("generation_quality") or {},
-            "quality_profile": input_data.get("quality_profile") or self.quality_profile or {},
+            "quality_profile": quality_profile,
             "payoff_contract": input_data.get("payoff_contract") or {},
             "chapter_text": chapter_text,
         }
@@ -306,6 +326,10 @@ class ReviewEngine(BaseEngine):
             },
             ensure_ascii=False,
         )
+        lexicon_block = json.dumps(
+            (data.get("deai_metrics") or {}).get("novel_reviewer_lexicon") or {},
+            ensure_ascii=False,
+        )
 
         prompt = (
             "请对下面这章小说正文做专业审稿，先给 7 个宏观维度打分，"
@@ -314,6 +338,7 @@ class ReviewEngine(BaseEngine):
             f"【必须遵守的约束】\n{constraint_block}\n\n"
             f"【跨章连续性证据】\n{continuity_block}\n\n"
             f"【本章计划与确定性表达指标】\n{plan_block}\n\n"
+            f"【novel-reviewer AI味候选信号（仅供复核，不是门禁）】\n{lexicon_block}\n\n"
             f"{third_person_generation_contract()}\n"
             f"{content_generation_contract(data.get('quality_profile') or {})}\n\n"
             f"【评分维度】\n{dimension_block}\n\n"
@@ -345,6 +370,8 @@ class ReviewEngine(BaseEngine):
             "问题必须具体落到可改的证据：如果存在节奏/铺垫问题，指出转折前缺少的动作、线索或高潮后的余波；"
             "如果存在逻辑问题，指出触发→依据→选择→阻碍→代价→结果哪一环断了；"
             "如果存在 AI 腔，指出具体套话、同构句、解释腔或过度工整段落，并给出替代表达方向。"
+            "novel-reviewer 候选词库只能帮助定位可能的堆叠，单个词、单个标点或题材正常术语不构成问题；"
+            "系统流、模拟器、面板等题材中的系统词默认按设定表达处理，除非正文确实形成机械模板。"
             "中高严重度的问题不得只写‘可加强’，必须写清位置和修复动作。"
             "每条 issues 必须提供 excerpt：从正文连续复制至少 8 个字，且可逐字搜索定位；"
             "若没有可靠原文证据就不要输出该问题。不要因为单个‘像是’、破折号或常用词出现就机械判定 AI 腔，"
@@ -374,7 +401,7 @@ class ReviewEngine(BaseEngine):
                 max_tokens=5000,
                 temperature=0.0,
                 prompt_name="v7.review.33_dimension",
-                prompt_version="1.2.0",
+                prompt_version=REVIEW_PROMPT_VERSION,
             )
         except AIGatewayError as exc:
             return EngineResult(
@@ -539,7 +566,10 @@ class ReviewEngine(BaseEngine):
             "constraint_violations": violations,
             "strengths": raw.get("strengths") or [],
             "constraints_checked": len(constraints),
-            "deai_metrics": data.get("deai_metrics") or analyze_deai_patterns(chapter_text),
+            "deai_metrics": data.get("deai_metrics") or analyze_deai_patterns(
+                chapter_text,
+                profile=data.get("quality_profile") or {},
+            ),
             "pov_metrics": data.get("pov_metrics") or analyze_third_person_narrative(chapter_text),
             "content_policy": data.get("content_policy") or analyze_content_policy(
                 chapter_text, data.get("quality_profile") or {}
@@ -551,7 +581,7 @@ class ReviewEngine(BaseEngine):
                 "engine": "v7",
                 "audit_source": "v7.review.33_dimension",
                 "prompt_name": "v7.review.33_dimension",
-                "prompt_version": "1.2.0",
+                "prompt_version": REVIEW_PROMPT_VERSION,
                 # Test doubles and older adapters do not necessarily expose
                 # routing metadata.  Missing provenance must remain explicit;
                 # it must not turn a valid review contract into an engine error.
@@ -567,6 +597,8 @@ class ReviewEngine(BaseEngine):
             "payoff_evidence_validation": payoff_evidence_validation,
             "payoff_evidence_repair": payoff_evidence_repair,
         }
+        review_result["review_reference"] = novel_reviewer_reference_metadata()
+        review_result["editorial_review"] = build_editorial_review_view(review_result)
         review_result["review_evidence"] = build_review_evidence(
             review_result,
             require_continuity=False,

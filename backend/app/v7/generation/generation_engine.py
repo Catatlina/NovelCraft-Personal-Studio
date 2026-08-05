@@ -50,6 +50,7 @@ from ...services.quality_profiles import (
     select_quality_profile,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
+from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
 from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
 logger = logging.getLogger(__name__)
@@ -1151,6 +1152,7 @@ class DeAIPipeline:
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
             f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=payoff_contract, active_rules=active_rules)}\n\n"
+            f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
             "【爽点保护锚点】以下内容必须保留其事实、因果和读者可见性；可以调整措辞，不能删除、弱化成抽象总结或改成原文没有的事件：\n"
             f"{protected_payoff_block}\n\n"
             "【爽点保真】保留并强化本章已经写出的压制、主动选择、爆发结果、可见反馈和余波；"
@@ -1176,7 +1178,7 @@ class DeAIPipeline:
                 max_tokens=max(2400, min(5200, int(chinese_word_count(text) * 1.18))),
                 temperature=0.45,
                 prompt_name="bootstrap.final_humanize",
-                prompt_version="1.2.0",
+                prompt_version="1.3.0",
             )
         except AIGatewayError as exc:
             # A malformed/truncated semantic rewrite is a quality failure, not
@@ -2320,7 +2322,7 @@ class GenerationEngine:
                 max_tokens=generation_max_tokens,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
-                prompt_version="1.4.0",
+                prompt_version="1.5.0",
             )
             add_usage(step, first)
             text = first["text"].strip()
@@ -2382,7 +2384,7 @@ class GenerationEngine:
                     max_tokens=continuation_max_tokens,
                     temperature=0.85,
                     prompt_name="v7.generation.continuation",
-                    prompt_version="1.4.0",
+                    prompt_version="1.5.0",
                 )
                 add_usage(step, cont)
                 candidate = text.rstrip() + "\n\n" + cont["text"].strip()
@@ -2796,8 +2798,9 @@ class GenerationEngine:
         target_word_count: int,
     ) -> str:
         beats = scene_plan.get("beats") or []
+        quality_profile = getattr(self, "quality_profile", None) or select_quality_profile()
         quality_directive = compile_quality_directive(
-            getattr(self, "quality_profile", None) or select_quality_profile(),
+            quality_profile,
             chapter_number=chapter_number,
             chapter_function=scene_plan,
             payoff_contract=scene_plan.get("payoff_contract") or None,
@@ -2822,6 +2825,7 @@ class GenerationEngine:
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
             f"【网文质量策略】\n{quality_directive}\n\n"
+            f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
             f"【本章爽点契约】\n{json.dumps(scene_plan.get('payoff_contract') or {}, ensure_ascii=False)}\n\n"
             "【连续性硬门禁】上一章结尾、交接契约和本章第一场必须处于同一"
             "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"

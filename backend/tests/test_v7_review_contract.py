@@ -78,10 +78,10 @@ def test_review_provenance_rejects_an_old_prompt_version_for_same_text():
 
     text = "同一段正文"
     assert _review_provenance_matches(
-        {"text_hash": text_hash(text), "prompt_version": "1.2.0"}, text
+        {"text_hash": text_hash(text), "prompt_version": "1.4.0"}, text
     ) is True
     assert _review_provenance_matches(
-        {"text_hash": text_hash(text), "prompt_version": "1.1.0"}, text
+        {"text_hash": text_hash(text), "prompt_version": "1.2.0"}, text
     ) is False
 
 

@@ -58,6 +58,7 @@ from .api.v1.complete_api import router as complete_router
 from .api.v1.ranking import library_router, router as ranking_router
 from .api.v1.fusion import router as fusion_router
 from .api.v1.deai import router as deai_router
+from .api.v1.quality import router as quality_router
 from .api.v1.billing import router as billing_router
 from .engine import router as engine_router
 from .api.v1.skills import router as skills_router
@@ -112,6 +113,7 @@ app.include_router(complete_router)
 app.include_router(ranking_router)
 app.include_router(fusion_router, prefix="/api/v1")
 app.include_router(deai_router)
+app.include_router(quality_router)
 app.include_router(billing_router)
 app.include_router(engine_router)
 app.include_router(skills_router)

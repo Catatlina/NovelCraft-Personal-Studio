@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useState } from "react";
-import { BarChart3, Check, Database, Eye, EyeOff, KeyRound, Lock, Save, Upload } from "lucide-react";
+import { BarChart3, Check, ChevronDown, Database, Eye, EyeOff, KeyRound, Lock, Plus, RotateCcw, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import {
   api,
   getApiKey,
@@ -12,8 +12,24 @@ import {
 import { Badge } from "../components/ui";
 import { version as appVersion } from "../../package.json";
 
-type SettingsTab = "ai" | "data" | "account";
+type SettingsTab = "ai" | "quality" | "data" | "account";
 type Stats = { ai_calls: number; contents: number; db_size: string };
+type LexiconPhrase = { phrase: string; enabled: boolean; note: string };
+type LexiconCategory = { key: string; label: string; description: string; enabled: boolean; phrases: LexiconPhrase[] };
+type AiFlavorLexicon = {
+  schema_version: string;
+  version: number;
+  mode: "advisory";
+  hard_gate: false;
+  source?: string;
+  setting_key?: string;
+  editable?: boolean;
+  category_count?: number;
+  phrase_count?: number;
+  enabled_phrase_count?: number;
+  usage_note?: string;
+  categories: LexiconCategory[];
+};
 
 export function Settings({ projectId = "" }: { projectId?: string }) {
   const [tab, setTab] = useState<SettingsTab>("ai");
@@ -28,6 +44,12 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [lexicon, setLexicon] = useState<AiFlavorLexicon | null>(null);
+  const [lexiconLoading, setLexiconLoading] = useState(false);
+  const [lexiconError, setLexiconError] = useState("");
+  const [lexiconDirty, setLexiconDirty] = useState(false);
+  const [expandedLexiconCategories, setExpandedLexiconCategories] = useState<Record<string, boolean>>({});
+  const [newLexiconPhrase, setNewLexiconPhrase] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (tab !== "data") return;
@@ -36,6 +58,110 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
       .then(setStats)
       .catch(caught => setStatsError(caught instanceof Error ? caught.message : String(caught)));
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== "quality") return;
+    let cancelled = false;
+    setLexiconLoading(true);
+    setLexiconError("");
+    api<AiFlavorLexicon>("/api/v1/quality/ai-flavor-lexicon")
+      .then(result => {
+        if (cancelled) return;
+        setLexicon(result);
+        setLexiconDirty(false);
+      })
+      .catch(caught => {
+        if (!cancelled) setLexiconError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => {
+        if (!cancelled) setLexiconLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [tab]);
+
+  function updateLexiconCategory(key: string, patch: Partial<LexiconCategory>) {
+    setLexicon(current => current ? {
+      ...current,
+      categories: current.categories.map(category => category.key === key ? { ...category, ...patch } : category),
+    } : current);
+    setLexiconDirty(true);
+  }
+
+  function updateLexiconPhrase(categoryKey: string, phraseIndex: number, patch: Partial<LexiconPhrase>) {
+    setLexicon(current => current ? {
+      ...current,
+      categories: current.categories.map(category => category.key !== categoryKey ? category : {
+        ...category,
+        phrases: category.phrases.map((phrase, index) => index === phraseIndex ? { ...phrase, ...patch } : phrase),
+      }),
+    } : current);
+    setLexiconDirty(true);
+  }
+
+  function addLexiconPhrase(categoryKey: string) {
+    const phrase = (newLexiconPhrase[categoryKey] || "").trim();
+    if (!phrase) return;
+    setLexicon(current => current ? {
+      ...current,
+      categories: current.categories.map(category => category.key !== categoryKey ? category : {
+        ...category,
+        phrases: [...category.phrases, { phrase, enabled: true, note: "自定义候选信号" }],
+      }),
+    } : current);
+    setNewLexiconPhrase(current => ({ ...current, [categoryKey]: "" }));
+    setLexiconDirty(true);
+  }
+
+  function removeLexiconPhrase(categoryKey: string, phraseIndex: number) {
+    setLexicon(current => current ? {
+      ...current,
+      categories: current.categories.map(category => category.key !== categoryKey ? category : {
+        ...category,
+        phrases: category.phrases.filter((_, index) => index !== phraseIndex),
+      }),
+    } : current);
+    setLexiconDirty(true);
+  }
+
+  async function saveLexicon() {
+    if (!lexicon) return;
+    setBusy("lexicon");
+    setNotice(null);
+    try {
+      const saved = await api<AiFlavorLexicon>("/api/v1/quality/ai-flavor-lexicon", {
+        method: "PUT",
+        body: JSON.stringify({
+          schema_version: lexicon.schema_version,
+          version: lexicon.version,
+          mode: "advisory",
+          hard_gate: false,
+          categories: lexicon.categories,
+        }),
+      });
+      setLexicon(saved);
+      setLexiconDirty(false);
+      setNotice({ kind: "success", text: "AI 味词库已保存，后续生成与审阅会读取新配置。" });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `词库保存失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function resetLexicon() {
+    setBusy("lexicon-reset");
+    setNotice(null);
+    try {
+      const restored = await api<AiFlavorLexicon>("/api/v1/quality/ai-flavor-lexicon/reset", { method: "POST" });
+      setLexicon(restored);
+      setLexiconDirty(false);
+      setNotice({ kind: "success", text: "AI 味词库已恢复为内置版本。" });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `恢复失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setBusy("");
+    }
+  }
 
   function saveAiConfig() {
     setApiKey(apiKey.trim());
@@ -118,6 +244,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="小说设置分类">
           <button type="button" className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}><KeyRound size={18} /><span>AI 连接</span></button>
+          <button type="button" className={tab === "quality" ? "active" : ""} onClick={() => setTab("quality")}><SlidersHorizontal size={18} /><span>质量规则</span></button>
           <button type="button" className={tab === "data" ? "active" : ""} onClick={() => setTab("data")}><Database size={18} /><span>创作数据</span></button>
           <button type="button" className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><Lock size={18} /><span>账号安全</span></button>
         </nav>
@@ -142,6 +269,74 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                 <div><strong>{apiKey ? "当前会话已配置个人 Key" : "当前会话未配置个人 Key"}</strong><p>未配置时会使用服务器全局 Provider；如果两处都未配置，创作向导会明确阻止启动。</p></div>
               </div>
               <button type="button" className="settings-save" disabled={!configDirty} onClick={saveAiConfig}><Save size={17} /> {configDirty ? "保存 AI 配置" : "配置已保存"}</button>
+            </section>
+          )}
+
+          {tab === "quality" && (
+            <section className="settings-section quality-section">
+              <div>
+                <p className="eyebrow">QUALITY RULES</p>
+                <h3>AI 味词库</h3>
+                <p>把审阅中反复出现的表达沉淀成可编辑的候选信号，服务生成前约束和生成后取证。</p>
+              </div>
+
+              {lexiconLoading && <div className="settings-data-loading"><span className="spinner" /> 正在读取词库配置…</div>}
+              {lexiconError && <div className="settings-data-error">读取词库失败：{lexiconError}</div>}
+              {lexicon && !lexiconLoading && (
+                <>
+                  <div className="lexicon-toolbar">
+                    <div className="lexicon-summary">
+                      <span><strong>{lexicon.enabled_phrase_count ?? 0}</strong> 个启用信号</span>
+                      <span><strong>{lexicon.category_count ?? lexicon.categories.length}</strong> 个分类</span>
+                      <span>v{lexicon.version} · {lexicon.source === "database" ? "已保存配置" : "内置默认"}</span>
+                    </div>
+                    <div className="lexicon-actions">
+                      <button type="button" className="settings-secondary" disabled={!lexiconDirty || Boolean(busy)} onClick={() => void resetLexicon()}><RotateCcw size={16} /> 恢复内置</button>
+                      <button type="button" className="settings-save" disabled={!lexiconDirty || busy === "lexicon"} onClick={() => void saveLexicon()}><Save size={16} /> {busy === "lexicon" ? "保存中…" : "保存词库"}</button>
+                    </div>
+                  </div>
+                  <div className="settings-callout lexicon-callout">
+                    <SlidersHorizontal size={18} />
+                    <div><strong>候选信号，不是禁词表</strong><p>{lexicon.usage_note || "单个词、标点或题材正常术语不会单独触发门禁；只有密度、重复和语境共同成立时才进入复核。"}</p></div>
+                  </div>
+                  <div className="lexicon-category-list">
+                    {lexicon.categories.map(category => {
+                      const expanded = Boolean(expandedLexiconCategories[category.key]);
+                      return (
+                        <article className={`lexicon-category ${category.enabled ? "" : "is-disabled"}`} key={category.key}>
+                          <div className="lexicon-category-head">
+                            <label className="lexicon-enable"><input type="checkbox" checked={category.enabled} onChange={event => updateLexiconCategory(category.key, { enabled: event.target.checked })} /><span>启用</span></label>
+                            <div className="lexicon-category-meta">
+                              <input aria-label={`${category.label} 分类名称`} value={category.label} onChange={event => updateLexiconCategory(category.key, { label: event.target.value })} />
+                              <small>{category.phrases.length} 条候选 · {category.description}</small>
+                            </div>
+                            <button type="button" className="icon-button" aria-label={expanded ? `收起${category.label}` : `展开${category.label}`} aria-expanded={expanded} onClick={() => setExpandedLexiconCategories(current => ({ ...current, [category.key]: !expanded }))}><ChevronDown size={18} className={expanded ? "is-rotated" : ""} /></button>
+                          </div>
+                          {expanded && (
+                            <div className="lexicon-category-body">
+                              <label className="settings-field"><span>分类说明</span><input value={category.description} onChange={event => updateLexiconCategory(category.key, { description: event.target.value })} /></label>
+                              <div className="lexicon-phrases" aria-label={`${category.label} 词条`}>
+                                {category.phrases.map((item, index) => (
+                                  <div className="lexicon-phrase-row" key={`${category.key}-${index}-${item.phrase}`}>
+                                    <label className="lexicon-phrase-enabled"><input type="checkbox" checked={item.enabled} onChange={event => updateLexiconPhrase(category.key, index, { enabled: event.target.checked })} /><span>用</span></label>
+                                    <input aria-label={`编辑${category.label}词条`} value={item.phrase} onChange={event => updateLexiconPhrase(category.key, index, { phrase: event.target.value })} />
+                                    <input aria-label={`编辑${item.phrase}说明`} placeholder="使用说明（可选）" value={item.note} onChange={event => updateLexiconPhrase(category.key, index, { note: event.target.value })} />
+                                    <button type="button" className="icon-button danger" aria-label={`删除${item.phrase}`} onClick={() => removeLexiconPhrase(category.key, index)}><Trash2 size={16} /></button>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="lexicon-add-row">
+                                <input aria-label={`为${category.label}添加词条`} placeholder="添加候选表达" value={newLexiconPhrase[category.key] || ""} onChange={event => setNewLexiconPhrase(current => ({ ...current, [category.key]: event.target.value }))} onKeyDown={event => { if (event.key === "Enter") addLexiconPhrase(category.key); }} />
+                                <button type="button" className="settings-secondary" onClick={() => addLexiconPhrase(category.key)}><Plus size={16} /> 添加</button>
+                              </div>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </section>
           )}
 

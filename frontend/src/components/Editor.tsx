@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { RichEditor } from "./RichEditor";
+import { EditorAiChat } from "./EditorAiChat";
 import { PacingCurve } from "./PacingCurve";
 import { SceneBoard } from "./SceneBoard";
 import { Pagination } from "./ui";
@@ -48,7 +49,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
-  saveChapter: () => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string) => void;
+  saveChapter: () => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string, targetText?: string) => void;
   versions: Version[]; restoreVersion: (id: string) => void;
   offlineNotice?: string; offlineQueueCount?: number;
   offlineAiResults?: Array<{ id: string; text: string }>;
@@ -383,25 +384,31 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </nav>
         </div>
 
-        {/* RIGHT: AI Assistant */}
+        {/* RIGHT: AI editing conversation */}
         <div className="ed-aside" style={{ display: "flex", flexDirection: "column" }}>
           <div className="card-title" style={{ marginBottom: 12 }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
               <rect x="3" y="11" width="18" height="10" rx="2"/>
               <circle cx="12" cy="5" r="2"/>
             </svg>
-            AI 写作助手
+            AI 修改会话
           </div>
 
-          <div style={{ flex: 1, overflowY: "auto", marginBottom: 8 }}>
-            <p className="editor-ai-help">选中正文后可润色、改写或去 AI 味；续写与整章重写可直接运行。所有结果都会先进入预览，不会直接覆盖正文。右侧为实时审阅，章节打开即自动审计，随文字更新持续审计。</p>
-            <div className="editor-ai-tools">
-              <button type="button" disabled={editorAiLoading} onClick={() => runEditorOp("continue")}><Bot size={15} /><span><strong>续写本章</strong><small>沿当前正文继续</small></span></button>
-              <button type="button" disabled={editorAiLoading} onClick={() => runEditorOp("rewrite_chapter")}><RefreshCcw size={15} /><span><strong>整章重写</strong><small>保留核心剧情</small></span></button>
-              <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("polish")}><Wand2 size={15} /><span><strong>润色选区</strong><small>{selection.trim() ? `${selection.length} 字已选择` : "请先选择文字"}</small></span></button>
-              <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("deai")}><RefreshCcw size={15} /><span><strong>去 AI 味</strong><small>{selection.trim() ? "处理已选文字" : "请先选择文字"}</small></span></button>
-              <button type="button" disabled={editorAiLoading || !selection.trim()} onClick={() => markLiked?.(selection.trim())}><Check size={15} /><span><strong>标记喜欢</strong><small>{selection.trim() ? "记录为偏好表达" : "请先选择文字"}</small></span></button>
-            </div>
+          <EditorAiChat
+            chapterId={chapter.id}
+            selection={selection}
+            busy={editorAiLoading}
+            suggestions={(editorAiReview?.review?.issues || []).map(readableIssue).filter(Boolean)}
+            onRequestEdit={(instruction, targetText) => {
+              if (targetText) {
+                runEditorOp("rewrite", instruction, targetText);
+              } else {
+                runEditorOp("rewrite_chapter", instruction);
+              }
+            }}
+          />
+
+          <div className="editor-ai-review-feed">
 
             {liveReviewing && !editorAiReview?.review ? (
               <div className="ai-msg" role="status">
@@ -454,17 +461,9 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                 ) : null}
                 {editorAiReview.review.issues?.length ? (
                   <>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                      <button type="button" className="btn-sm btn-primary" disabled={editorAiLoading} onClick={() => runEditorOp("polish", editorAiReview.review.issues.map(readableIssue).join("\n"))}>按全部建议润色</button>
-                      <button type="button" className="btn-sm btn-primary" disabled={editorAiLoading} onClick={() => runEditorOp("rewrite", editorAiReview.review.issues.map(readableIssue).join("\n"))}>按全部建议改写</button>
-                    </div>
                     {editorAiReview.review.issues.map((issue: unknown, index: number) => (
                       <div key={`${readableIssue(issue)}-${index}`} style={{ marginBottom: 8 }}>
                         <div>• {readableIssue(issue)}</div>
-                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                          <button type="button" className="btn-sm btn-ghost" disabled={editorAiLoading} onClick={() => runEditorOp("polish", readableIssue(issue))}>按此建议润色</button>
-                          <button type="button" className="btn-sm btn-ghost" disabled={editorAiLoading} onClick={() => runEditorOp("rewrite", readableIssue(issue))}>按此建议改写</button>
-                        </div>
                       </div>
                     ))}
                   </>

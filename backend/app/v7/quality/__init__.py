@@ -7,6 +7,17 @@ from .audit_dimensions import (
 )
 from .continuity import build_state_delta, validate_transition_contract
 from .deai_metrics import analyze_deai_patterns
+from .novel_reviewer_reference import (
+    build_editorial_review_view,
+    analyze_novel_reviewer_lexicon,
+    default_ai_flavor_lexicon,
+    invalidate_ai_flavor_lexicon_cache,
+    load_ai_flavor_lexicon,
+    normalize_ai_flavor_lexicon,
+    novel_reviewer_reference_metadata,
+    render_ai_flavor_guidance,
+    store_ai_flavor_lexicon,
+)
 from .failure_patterns import (
     FAILURE_PATTERN_SCHEMA_VERSION,
     failure_pattern_metadata,
@@ -33,6 +44,15 @@ __all__ = [
     "build_state_delta",
     "validate_transition_contract",
     "analyze_deai_patterns",
+    "analyze_novel_reviewer_lexicon",
+    "build_editorial_review_view",
+    "default_ai_flavor_lexicon",
+    "invalidate_ai_flavor_lexicon_cache",
+    "load_ai_flavor_lexicon",
+    "normalize_ai_flavor_lexicon",
+    "novel_reviewer_reference_metadata",
+    "render_ai_flavor_guidance",
+    "store_ai_flavor_lexicon",
     "FAILURE_PATTERN_SCHEMA_VERSION",
     "failure_pattern_metadata",
     "generation_constraints",

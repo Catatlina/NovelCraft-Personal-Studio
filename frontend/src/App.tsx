@@ -841,10 +841,12 @@ export default function App() {
     }
   }
 
-  async function runEditorOp(op: string, instructionOverride?: string) {
+  async function runEditorOp(op: string, instructionOverride?: string, targetTextOverride?: string) {
     if (!chapter) return;
     const sourceText = editorTextRef.current;
-    const selectedText = op === "rewrite_chapter" || instructionOverride
+    const selectedText = targetTextOverride !== undefined
+      ? targetTextOverride
+      : op === "rewrite_chapter" || instructionOverride
       ? sourceText
       : selection || (op === "continue" ? sourceText : "");
     if (!selectedText.trim()) {

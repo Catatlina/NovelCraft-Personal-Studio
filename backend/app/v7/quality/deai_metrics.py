@@ -12,6 +12,7 @@ from statistics import mean, pstdev
 from typing import Any
 
 from ...services.text_quality import duplicate_paragraph_stats
+from .novel_reviewer_reference import analyze_novel_reviewer_lexicon
 
 
 _SENTENCE_RE = re.compile(r"[^。！？!?\n]+[。！？!?]?")
@@ -145,6 +146,7 @@ def analyze_deai_patterns(
             "repeated_paragraph_opening": {"opening": "", "count": 0, "ratio": 0.0},
             "tic_metrics": {"hits": 0, "density_per_1000": 0.0, "breakdown": {}, "dominant": "", "dominant_count": 0, "repeated": False},
             "duplicate_paragraphs": duplicate_paragraph_stats(""),
+            "novel_reviewer_lexicon": analyze_novel_reviewer_lexicon("", profile=profile),
         }
 
     compact = re.sub(r"\s+", "", text)
@@ -161,6 +163,7 @@ def analyze_deai_patterns(
     repeated_opening = _repeated_paragraph_opening(text)
     tic_metrics = _tic_metrics(text, profile)
     duplicate_paragraphs = duplicate_paragraph_stats(text)
+    novel_reviewer_lexicon = analyze_novel_reviewer_lexicon(text, profile=profile)
     dash_density = dash_count / size * 1000
     ellipsis_density = ellipsis_count / size * 1000
 
@@ -237,4 +240,5 @@ def analyze_deai_patterns(
         "repeated_paragraph_opening": repeated_opening,
         "tic_metrics": tic_metrics,
         "duplicate_paragraphs": duplicate_paragraphs,
+        "novel_reviewer_lexicon": novel_reviewer_lexicon,
     }
