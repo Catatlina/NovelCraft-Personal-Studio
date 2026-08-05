@@ -79,6 +79,27 @@ def test_memory_conflict_normalizes_resolved_strategic_reveal_without_erasing_ev
     assert conflicts[0]["severity"] == "medium"
 
 
+def test_memory_conflict_recognizes_identity_and_setting_reveals():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "灯中人身份",
+                "description": "季无咎真名纪无咎，与灯中声音一字之差，现揭示为同一人",
+                "severity": "high",
+            },
+            {
+                "key": "命灯用途",
+                "description": "已知命灯用于献祭，现揭示为封印天渊裂口",
+                "severity": "high",
+            },
+        ]
+    )
+
+    assert all(item["conflict_type"] == "strategic_reveal" for item in conflicts)
+    assert all(item["resolution_status"] == "resolved" for item in conflicts)
+    assert all(item["severity"] == "medium" for item in conflicts)
+
+
 def test_continuity_does_not_block_resolved_strategic_reveal():
     result = validate_transition_contract(
         {
