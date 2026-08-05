@@ -369,6 +369,36 @@ def build_payoff_contract(
             or contract.get("chapter_type")
             or "normal"
         ).strip().lower()
+    # A provider/legacy plot brief may explicitly repeat a payoff type even
+    # when the active strategy has exhausted that type's rotation window.
+    # Repair the contract before prose generation starts.  This keeps the
+    # rule a generation-time constraint and avoids spending a full chapter
+    # generation only to reject an otherwise valid draft after the fact.
+    if contract.get("payoff_type") and recent_types:
+        profile = profile if isinstance(profile, dict) else {}
+        variety = validate_payoff_variety(
+            contract["payoff_type"],
+            recent_types,
+            profile=profile,
+        )
+        alternatives = list(variety.get("alternatives") or [])
+        recent_tail = {
+            str(item).strip()
+            for item in (recent_types or [])[-int(variety.get("window") or 3):]
+            if str(item).strip()
+        }
+        replacement = next(
+            (item for item in alternatives if item not in recent_tail),
+            alternatives[0] if alternatives else "",
+        )
+        if not variety.get("passed") and replacement:
+            original_type = contract["payoff_type"]
+            contract["payoff_type"] = replacement
+            contract["payoff_type_source"] = "strategy_rotation_repair"
+            contract["payoff_type_repaired_from"] = original_type
+            contract["payoff_type_repair_reason"] = (
+                f"{original_type} 已连续占满 {variety.get('window')} 章轮换窗口"
+            )
     if not contract["payoff_type"]:
         profile = profile if isinstance(profile, dict) else {}
         contract["payoff_type"] = choose_payoff_type(

@@ -72,6 +72,33 @@ def test_missing_payoff_type_uses_strategy_rotation_and_metadata():
     assert validate_payoff_contract(contract, profile=profile, required=True)["passed"] is True
 
 
+def test_explicit_repeated_payoff_type_is_repaired_before_generation():
+    profile = select_quality_profile(platform="番茄", genre="都市", subgenre="都市神豪")
+    contract = build_payoff_contract(
+        {
+            "chapter_number": 8,
+            "reader_promise": "主角拿回主动权",
+            "pressure": "对手已经完成封锁",
+            "active_choice": "主角主动切断旧渠道并启动备用方案",
+            "payoff_type": "status_reversal",
+            "visible_result": "对手的封锁出现缺口",
+            "payoff_feedback": "客户转而支持主角",
+            "next_pressure": "对手开始追查备用方案来源",
+        },
+        chapter_number=8,
+        profile=profile,
+        recent_types=["status_reversal", "status_reversal", "status_reversal"],
+    )
+    assert contract["payoff_type"] != "status_reversal"
+    assert contract["payoff_type_source"] == "strategy_rotation_repair"
+    assert contract["payoff_type_repaired_from"] == "status_reversal"
+    assert validate_payoff_variety(
+        contract["payoff_type"],
+        ["status_reversal", "status_reversal", "status_reversal"],
+        profile=profile,
+    )["passed"] is True
+
+
 def test_directive_exposes_strategy_and_report_failures_without_punctuation_ban():
     profile = select_quality_profile(platform="番茄", genre="玄幻", subgenre="传统升级流")
     directive = compile_quality_directive(profile, chapter_number=2)

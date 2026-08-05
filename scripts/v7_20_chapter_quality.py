@@ -268,8 +268,16 @@ def _write_report(
     target: int,
     chapters: list[dict[str, Any]],
     errors: list[dict[str, Any]],
+    start_chapter: int,
+    requested_chapter_numbers: list[int],
+    completed_chapter_numbers: list[int],
 ) -> None:
     metrics = _metrics(chapters)
+    run_observed_numbers = [
+        number
+        for number in requested_chapter_numbers
+        if number in {item["chapter_number"] for item in chapters}
+    ]
     evidence = {
         "schema_version": 1,
         "generated_at": generated_at,
@@ -278,6 +286,13 @@ def _write_report(
         "novel_id": novel_id,
         "target_chapters": target,
         "metrics": metrics,
+        "run": {
+            "start_chapter": start_chapter,
+            "requested_chapters": requested_chapter_numbers,
+            "observed_chapters": run_observed_numbers,
+            "completed_chapters": completed_chapter_numbers,
+            "completed_count": len(completed_chapter_numbers),
+        },
         "errors": errors,
         "manual_review": _manual_summary(),
         "acceptance_status": "pending_manual_review" if len(chapters) >= target and not errors else "failed",
@@ -296,6 +311,8 @@ def _write_report(
         f"- 引擎：`v7`（产品唯一正文生成链）",
         f"- Project：`{project_id}`",
         f"- Novel：`{novel_id}`",
+        f"- 本轮请求章节：{requested_chapter_numbers[0]}–{requested_chapter_numbers[-1]}",
+        f"- 本轮已完成：{len(completed_chapter_numbers)}/{len(requested_chapter_numbers)}",
         f"- 目标/实际章节：{target} / {len(chapters)}",
         f"- 已审核/待复核/待返工：{metrics['reviewed_chapters']} / {metrics['needs_review_chapters']} / {metrics['needs_rewrite_chapters']}",
         f"- 审核分平均/最低：{metrics['average_review_score']} / {metrics['minimum_review_score']}",
@@ -372,6 +389,10 @@ def main() -> int:
     chapters: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     responses: list[dict[str, Any]] = []
+    requested_chapter_numbers = list(range(args.start_chapter, args.chapters + 1))
+    completed_chapter_numbers: list[int] = []
+    baseline_chapter_numbers = set(range(1, args.start_chapter))
+    reported_chapters: list[dict[str, Any]] = []
     for chapter_number in range(args.start_chapter, args.chapters + 1):
         try:
             result = _request(
@@ -409,6 +430,17 @@ def main() -> int:
         )
         persisted = _find_chapter(chapters, chapter_number)
         response_status = _result_status(result)
+        if response_status == "completed":
+            completed_chapter_numbers.append(chapter_number)
+        # Reports must contain the prior-story baseline plus chapters actually
+        # observed in this run.  Do not count untouched future rows already in
+        # the library as if this run generated them.
+        included_numbers = baseline_chapter_numbers | set(completed_chapter_numbers)
+        if response_status != "completed":
+            included_numbers.add(chapter_number)
+        reported_chapters = [
+            item for item in chapters if item["chapter_number"] in included_numbers
+        ]
         if response_status != "completed":
             errors.append({
                 "chapter_number": chapter_number,
@@ -432,6 +464,8 @@ def main() -> int:
                 {
                     "chapter_number": chapter_number,
                     "chapters": chapters,
+                    "reported_chapters": reported_chapters,
+                    "completed_chapter_numbers": completed_chapter_numbers,
                     "responses": responses,
                     "errors": errors,
                 },
@@ -449,11 +483,14 @@ def main() -> int:
         project_id=args.project_id,
         novel_id=args.novel_id,
         target=args.chapters,
-        chapters=chapters,
+        chapters=reported_chapters,
         errors=errors,
+        start_chapter=args.start_chapter,
+        requested_chapter_numbers=requested_chapter_numbers,
+        completed_chapter_numbers=completed_chapter_numbers,
     )
-    print(json.dumps(_metrics(chapters), ensure_ascii=False, indent=2))
-    return 0 if len(chapters) >= args.chapters and not errors else 2
+    print(json.dumps(_metrics(reported_chapters), ensure_ascii=False, indent=2))
+    return 0 if len(reported_chapters) >= args.chapters and not errors else 2
 
 
 if __name__ == "__main__":
