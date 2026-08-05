@@ -2,6 +2,13 @@
 > 更新时间：2026-08-05
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 当前部署快照（2026-08-05）
+
+- 生产已部署 `d1253f2`（前一运行时提交 `db12d47` 已包含在内），`nc_legacy_chapter_scope` 迁移成功；部署前备份为 `backups/pre-deploy-20260805-135112.sql.gz`（129MB）。
+- 生产 smoke（前端、healthz、主账号登录、项目列表）通过；主账号只展示 `jxianyang@gmail.com 的工作室`。主工作室 `canonical=73`、`unresolved=0`，章节归属 dry-run `scanned=0`，没有待人工绑定的生产孤儿章节。
+- 书库列表已补 `p.is_deleted=FALSE`，已删除的历史测试空间不会重新出现。爽点契约 v2 已在生成前执行，去 AI 味改写受同一契约保护。
+- 不要把本批自动质量规则当作最终读者验收：新 Prompt 版本尚未重新跑一轮 20 章 Provider 长跑，人工盲评仍需两位独立评审。
+
 ## 2026-08-05 历史章节归属治理
 
 - 已应用迁移 `nc_legacy_chapter_scope`。它为 `contents` 增加 `scope_status`，并新增 `legacy_chapter_resolutions`；只增加治理元数据，不删除正文、版本、工作流或主工作空间记录。
