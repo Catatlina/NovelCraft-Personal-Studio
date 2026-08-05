@@ -38,7 +38,7 @@ from ...services.text_quality import (
 )
 from ...services.chapter_payoff import (
     build_payoff_contract,
-    validate_payoff_beat_structure,
+    repair_payoff_beat_structure,
     validate_payoff_contract,
     validate_payoff_variety,
     score_payoff_contract,
@@ -2166,12 +2166,13 @@ class GenerationEngine:
             scene_plan.get("recent_payoff_types") or [],
             profile=self.quality_profile,
         )
-        payoff_beat_validation = validate_payoff_beat_structure(
-            scene_plan.get("beats") or []
-        )
+        payoff_beat_repair = repair_payoff_beat_structure(scene_plan.get("beats") or [])
+        scene_plan["beats"] = payoff_beat_repair["beats"]
+        payoff_beat_validation = payoff_beat_repair["after"]
         scene_plan["payoff_validation"] = payoff_validation
         scene_plan["payoff_variety"] = payoff_variety
         scene_plan["payoff_beat_validation"] = payoff_beat_validation
+        scene_plan["payoff_beat_repair"] = payoff_beat_repair
 
         # Step: AI generation (at most one quality-checked continuation)
         async with self.tracer.trace_step(
@@ -2479,6 +2480,7 @@ class GenerationEngine:
             "content_policy": final_content_policy,
             "payoff_validation": payoff_validation,
             "payoff_beat_validation": payoff_beat_validation,
+            "payoff_beat_repair": payoff_beat_repair,
             "payoff_variety": payoff_variety,
             "payoff_score": payoff_score,
             "chapter_mirror": mirror_stats,

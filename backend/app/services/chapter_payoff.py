@@ -484,6 +484,78 @@ def validate_payoff_beat_structure(beats: Any) -> dict[str, Any]:
     }
 
 
+def repair_payoff_beat_structure(beats: Any) -> dict[str, Any]:
+    """Repair missing payoff phases before prose generation.
+
+    Providers occasionally return a plausible beat sheet while omitting the
+    explicit aftershock/new-pressure phase. Treating that omission only as a
+    post-generation failure wastes a full prose request and makes the prompt
+    contract weaker than the quality gate. Add the missing phase to the final
+    feedback beat when possible; otherwise append a structural instruction.
+    The repair is deterministic, included in the returned plan, and revalidated.
+    """
+    items = [dict(item) for item in (beats or []) if isinstance(item, dict)]
+    before = validate_payoff_beat_structure(items)
+    if before.get("passed"):
+        return {
+            "beats": items,
+            "repaired": False,
+            "repaired_phases": [],
+            "before": before,
+            "after": before,
+        }
+
+    repaired_phases: list[str] = []
+    missing = list(before.get("missing_phases") or [])
+    phase_copy = {
+        "pressure": ("压力落地", "让当前风险在场景中逼近，不能只写背景说明。"),
+        "build": ("蓄力与选择", "写出主角依据已有信息做出具体选择，并承担准备或代价。"),
+        "burst": ("结果兑现", "把本章核心行动写成可见结果，而不是用旁白跳过。"),
+        "feedback": ("外部反馈", "让对手、组织、资源、规则或旁观者出现可观察变化。"),
+        "aftershock": ("余波与新压", "写出结果立刻造成的后果、代价或新压力，并把章末钩子落到动作上。"),
+    }
+
+    # The final beat normally owns feedback; attaching the aftershock there
+    # preserves the outline's pacing and avoids manufacturing a sixth beat.
+    if items and "aftershock" in missing:
+        last = items[-1]
+        existing = _normalize_payoff_phases(
+            last.get("payoff_phases") or last.get("payoff_phase") or last.get("phase")
+        )
+        if existing:
+            last["payoff_phases"] = list(dict.fromkeys(existing + ["aftershock"]))
+            last.pop("payoff_phase", None)
+            last["name"] = f"{_text(last.get('name') or '结果反馈', 80)}与余波"
+            purpose = _text(last.get("purpose") or last.get("content"), 300)
+            last["purpose"] = f"{purpose}；{phase_copy['aftershock'][1]}"
+            repaired_phases.append("aftershock")
+            missing.remove("aftershock")
+
+    # Any other missing phase, or a plan with no usable beats, receives one
+    # explicit structural instruction. This is prompt repair, not invented plot.
+    for phase in missing:
+        name, purpose = phase_copy.get(phase, (phase, "补足本阶段的可见行动与后果。"))
+        items.append({
+            "name": name,
+            "purpose": purpose,
+            "content": purpose,
+            "emotion": "推进",
+            "target_words": 300,
+            "payoff_phases": [phase],
+            "source": "pre_generation_payoff_repair",
+        })
+        repaired_phases.append(phase)
+
+    after = validate_payoff_beat_structure(items)
+    return {
+        "beats": items,
+        "repaired": bool(repaired_phases),
+        "repaired_phases": repaired_phases,
+        "before": before,
+        "after": after,
+    }
+
+
 def validate_payoff_contract(
     value: Any,
     *,

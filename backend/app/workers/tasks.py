@@ -2033,7 +2033,20 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (_novel_id,)).fetchone()
             if meta_row:
                 m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
-                selected_profile = profile_from_context(context)
+                # User-selected genre/subgenre/platform/plugin are authoritative
+                # generation inputs. A planning model may describe the story in
+                # different words, but it must not silently downgrade an enabled
+                # style plugin (for example long-life -> generic upgrade).
+                authoritative_context = dict(context)
+                for _key in ("genre", "subgenre", "platform", "style", "style_plugin", "writing_plugin"):
+                    if m.get(_key) not in (None, ""):
+                        authoritative_context[_key] = m.get(_key)
+                if isinstance(m.get("quality_profile"), dict):
+                    authoritative_context["quality_profile"] = m["quality_profile"]
+                selected_profile = profile_from_context(authoritative_context)
+                for _key in ("genre", "subgenre", "platform", "style", "style_plugin"):
+                    if m.get(_key) not in (None, ""):
+                        context[_key] = m.get(_key)
                 m["quality_profile"] = quality_profile_metadata(selected_profile)
                 context["quality_profile"] = quality_profile_metadata(selected_profile)
                 m["creative_bible"] = creative_bible

@@ -2,6 +2,7 @@ from app.services.chapter_payoff import (
     build_payoff_contract,
     evaluate_payoff_schedule,
     normalize_payoff_contract,
+    repair_payoff_beat_structure,
     validate_payoff_beat_structure,
     validate_payoff_contract,
     validate_payoff_evidence,
@@ -214,3 +215,17 @@ def test_payoff_beat_structure_allows_four_beats_to_cover_five_phases():
 
     assert result["passed"] is True
     assert result["missing_phases"] == []
+
+
+def test_payoff_beat_structure_repairs_missing_aftershock_before_generation():
+    result = repair_payoff_beat_structure([
+        {"name": "压力", "payoff_phase": "pressure"},
+        {"name": "选择", "payoff_phase": "build"},
+        {"name": "兑现", "payoff_phase": "burst"},
+        {"name": "反馈", "payoff_phase": "feedback"},
+    ])
+
+    assert result["repaired"] is True
+    assert result["repaired_phases"] == ["aftershock"]
+    assert result["after"]["passed"] is True
+    assert result["beats"][-1]["payoff_phases"] == ["feedback", "aftershock"]
