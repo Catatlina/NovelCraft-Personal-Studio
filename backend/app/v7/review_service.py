@@ -225,6 +225,11 @@ def _decorate_review(
     source: str,
 ) -> dict[str, Any]:
     result = dict(review)
+    # V7's canonical name is ``overall_score``.  Keep ``score`` as a
+    # read-only compatibility alias for the editor and older integrations so
+    # a valid review never renders as an unscored review.
+    if result.get("score") is None and result.get("overall_score") is not None:
+        result["score"] = result["overall_score"]
     continuity = _continuity_evidence(
         result,
         context=context,

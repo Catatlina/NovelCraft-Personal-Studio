@@ -24,6 +24,18 @@ function readableIssue(value: unknown): string {
     .join("；");
 }
 
+/** V7 is canonical; ``score`` remains a compatibility alias for old payloads. */
+export function formatLiveReviewScore(review: Record<string, unknown> | null | undefined): string {
+  if (!review) return "--";
+  for (const candidate of [review.overall_score, review.score, review.review_score, review.self_score]) {
+    const numeric = typeof candidate === "number" ? candidate : Number(candidate);
+    if (Number.isFinite(numeric)) {
+      return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(1);
+    }
+  }
+  return "--";
+}
+
 const EDITOR_OPERATION_LABELS: Record<string, string> = {
   continue: "续写",
   polish: "润色",
@@ -421,7 +433,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                     )}
                   </strong>
                   <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span className="badge">评分：{editorAiReview.review.score ?? "--"}</span>
+                    <span className="badge">评分：{formatLiveReviewScore(editorAiReview.review)}</span>
                     <button type="button" className="btn-sm btn-ghost" onClick={() => onRequestReview?.()} disabled={liveReviewing}>
                       <RefreshCcw size={12} />重新审计
                     </button>

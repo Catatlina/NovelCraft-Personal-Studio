@@ -51,6 +51,7 @@ def test_cached_v7_review_keeps_the_same_score_and_provenance():
 
     assert cached is not None
     assert cached["overall_score"] == 90.0
+    assert cached["score"] == 90.0
     assert cached["canonical_engine"] == "v7"
     assert cached["provenance"]["model"] == "route-model"
     assert cached["provenance"]["cache_hit"] is True

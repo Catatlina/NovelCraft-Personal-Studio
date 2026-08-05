@@ -784,7 +784,7 @@ export default function App() {
 
   // NC-LIVE-AUDIT: 实时审计——对当前章节文本打分并取回审阅问题，不修改正文。
   // 章节打开（editorText 变化）与打字停顿都会触发；AI 建议待确认/流式生成时暂停。
-  async function requestReview(chapterId: string, text: string, force = false) {
+  async function requestReview(chapterId: string, text: string, force = false, attempt = 0) {
     const trimmed = text.trim();
     if (trimmed.length < 30) return;
     if (!navigator.onLine) return;
@@ -813,6 +813,24 @@ export default function App() {
       setEditorAiReview({ review, next: output.next_chapter_plan });
     } catch (caught) {
       if (requestSeq !== reviewRequestSeqRef.current) return;
+      // Provider warm-up, connection reuse and a just-restarted API can fail
+      // once when a chapter is opened.  Automatic opening must not turn that
+      // transient failure into a manual-only state.  Retry exactly once; the
+      // second failure remains visible and actionable.
+      if (attempt === 0) {
+        setLiveReviewError("实时审阅正在启动，稍后自动重试…");
+        window.setTimeout(() => {
+          if (
+            requestSeq === reviewRequestSeqRef.current
+            && editorTextRef.current.trim() === trimmed
+            && !pendingAiEditRef.current
+            && !streamPreviewRef.current
+          ) {
+            void requestReview(chapterId, trimmed, true, 1);
+          }
+        }, 1200);
+        return;
+      }
       lastReviewTextRef.current = "";
       setEditorAiReview(null);
       setLiveReviewError(caught instanceof ApiError ? `实时审计失败：${caught.message}` : "实时审计失败，请点击重新审计");
