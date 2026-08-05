@@ -45,6 +45,10 @@ from app.services.quality_profiles import (
     profile_from_context,
     quality_profile_metadata,
 )
+from app.services.planning_contract import (
+    validate_longform_contract,
+    validate_volume_plan_contract,
+)
 
 from .celery_app import celery_app
 
@@ -623,6 +627,33 @@ def _target_words_guard(output: dict, target_words: Any) -> str:
         if re.search(rf"{re.escape(wan)}万", compact):
             return ""
     return f"原始需求目标总字数为 {target} 字，creative_bible 必须明确写出该目标，不能改成其他总字数"
+
+
+def _planning_contract_feedback(output: dict[str, Any], context: dict[str, Any]) -> str:
+    """Return deterministic planning defects for the provider retry loop."""
+    try:
+        target_words = int(context.get("target_words") or 0)
+    except (TypeError, ValueError):
+        target_words = 0
+    if target_words <= 0:
+        return ""
+    defects = validate_longform_contract(
+        output,
+        idea=str(context.get("idea") or ""),
+        target_words=target_words,
+    )
+    return "；".join(defects[:12])
+
+
+def _volume_plan_feedback(output: dict[str, Any], context: dict[str, Any]) -> str:
+    """Validate volume word targets before downstream arcs/outlines consume them."""
+    try:
+        target_words = int(context.get("target_words") or 0)
+    except (TypeError, ValueError):
+        target_words = 0
+    if target_words <= 0:
+        return ""
+    return "；".join(validate_volume_plan_contract(output, target_words=target_words)[:12])
 
 
 def _reflow_polish_paragraphs(before_text: str, output: dict) -> dict:
@@ -1555,7 +1586,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     target_feedback = _target_words_guard(
                         output,
                         run_context.get("target_words"),
-                    )
+                    ) or _planning_contract_feedback(output, run_context)
                     if target_feedback:
                         fidelity_feedback = [target_feedback]
                         continue
@@ -1578,7 +1609,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                     contradictions = [str(item).strip() for item in audit.get("contradictions", []) if str(item).strip()]
                     omissions = [str(item).strip() for item in audit.get("omissions", []) if str(item).strip()]
                     # 审计模型常把"建议修改/未明确但仍符合/新增细节"误归类为矛盾，过滤掉
-                    _SUGGESTION_MARKERS = ("符合", "未明确提及", "未指定", "新增", "建议明确", "占比", "未违反", "未强制")
+                    _SUGGESTION_MARKERS = ("符合", "未明确提及", "未指定", "新增", "建议明确", "未违反", "未强制")
                     real_contradictions = [
                         c for c in contradictions
                         if not any(m in c for m in _SUGGESTION_MARKERS)
@@ -1601,7 +1632,12 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                 quality_feedback = ""
                 quality_attempts = (
                     3
-                    if task_type in {"write_chapter_draft", "write_polish", "final_humanize"}
+                    if task_type in {
+                        "write_chapter_draft",
+                        "write_polish",
+                        "final_humanize",
+                        "blueprint_volume_plan",
+                    }
                     else 1
                 )
                 for quality_attempt in range(1, quality_attempts + 1):
@@ -1660,6 +1696,8 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                             str(run_context.get("_chapter_body") or ""),
                             output,
                         )
+                    elif task_type == "blueprint_volume_plan":
+                        quality_feedback = _volume_plan_feedback(output, run_context)
                     else:
                         break
                     if not quality_feedback:
@@ -1805,6 +1843,14 @@ def _enrich_blueprint_context(context: dict, novel_id: str) -> dict:
         _vp = _m.get("volume_plan")
         if _vp:
             enriched["_volume_plan"] = json.dumps(_vp, ensure_ascii=False)[:2000]
+        if _m.get("longform_contract"):
+            enriched["longform_contract"] = json.dumps(
+                _m.get("longform_contract"), ensure_ascii=False
+            )[:4000]
+        if _m.get("simulator_contract"):
+            enriched["simulator_contract"] = json.dumps(
+                _m.get("simulator_contract"), ensure_ascii=False
+            )[:5000]
     return enriched
 def _enrich_finalization_context(context: dict, novel_id: str) -> dict:
     """Enrich context for finalization with full chapter body + entity states."""
@@ -2059,6 +2105,15 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 m["design_additions"] = output.get("design_additions", [])
                 m["forbidden_changes"] = output.get("forbidden_changes", [])
                 m["planning_module"] = "creative_bible_v2"
+                # Store the numeric long-form ledger and any core fictional
+                # mechanic as first-class metadata.  The prose runtime reads
+                # these on every chapter, so later generations cannot silently
+                # fall back to a shorter route or a weaker simulator rule.
+                if isinstance(output.get("longform_contract"), dict):
+                    m["longform_contract"] = output["longform_contract"]
+                if isinstance(output.get("simulator_contract"), dict):
+                    m["simulator_contract"] = output["simulator_contract"]
+                m["planning_contract_version"] = "v2"
                 # V3 Novel DNA (§3): store as structured novel metadata merged
                 # with the creative bible, and carry it + forbidden_deviations
                 # into run context so the Writer injects the red lines.
@@ -2150,6 +2205,10 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             m = meta_row["meta"] if isinstance(meta_row["meta"], dict) else {}
             m["volume_plan"] = output.get("volumes", output.get("volume_plan", []))
             m["chapter_tree"] = output.get("chapter_tree", [])
+            if "total_word_target" in output:
+                m["volume_plan_total_word_target"] = output.get("total_word_target")
+            if isinstance(output.get("volume_word_targets"), list):
+                m["volume_word_targets"] = output.get("volume_word_targets")
             db.execute("UPDATE contents SET meta = %s, updated_at = now() WHERE id = %s", (encode(m), _novel_id))
     elif task_type == "blueprint_chapter_outline":
         meta_row = db.execute("SELECT meta FROM contents WHERE id = %s", (_novel_id,)).fetchone()

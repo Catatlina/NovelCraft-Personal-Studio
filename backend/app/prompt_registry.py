@@ -813,7 +813,7 @@ $instruction
      '生成 $platform 短视频脚本(≤$max_duration秒)。\n风格：$style\n内容：$body\n输出 JSON: {"hook_3s":"","scenes":[{"duration":5,"visual":"","audio":""}],"title":"","cta":""}'),
 
     # ═══ V2 四阶段 Bootstrap：规划阶段（7 节点，oh-story Phase 1-2 + harnessNovel 分层规划） ═══
-    ("bootstrap.plan_idea", "1.6.0", "deepseek",
+    ("bootstrap.plan_idea", "1.7.0", "deepseek",
      """你是资深网文策划（StoryArchitect）和长篇项目制片人。请先像专业创作顾问一样，把用户的原始需求整理成可供后续 AI 写作链路执行的"创作圣经"，再给出书名候选。
 
 灵感：$idea
@@ -831,13 +831,13 @@ $instruction
 3. target_audience：目标读者画像（年龄段+阅读偏好，不要写"所有人"）
 4. synopsis：面向书库、详情页和读者的独立简介，80-180 字，必须说清“主角是谁、身处什么处境、核心冲突是什么、故事将如何推进”，要有具体事件和悬念；不得复制灵感、创作圣经、分点设定、写作指令或只罗列卖点，不得出现“本书/本文/作者将”等元话语
 5. title_candidates：生成 3-10 个书名候选（默认 5 个），像真人在榜单发的书名。以人物状态、情绪、时代符号、反差/悬念为主要切入；题材词可以使用，但不得与年份、金手指、升级结果机械堆叠。至少提供两种不同取向：口语/情绪型与概念/反差型。可参考《我真没想重生啊》《1979黄金时代》的记忆点，但不能照抄结构。把《重生2010：我的AI笔记本》视为 SEO 式书名反例，谨慎使用「我的XX能XX」「XX之XX为王/称霸/无敌」「从XX开始」模板，6-14 字为主或按平台策略调整。如果有 suggested_title，只把它作为一个候选参考，不得直接替用户确认
-6. creative_bible：800-1800 字，必须把用户需求补强为长篇可执行设定，结构必须包含：
+6. creative_bible：长篇项目至少 2400-4200 字（目标低于 50 万字时至少 1200 字），必须把用户需求补强为可执行设定，不能只写宣传文案。结构必须包含：
    - 核心设定：主角身份、金手指/能力、时代背景、最大卖点
    - ⚠️ 主角名必须从创意中推导出独特的、有辨识度的名字。禁止使用以下高频默认名：陈默、林默、苏默、陆默、叶凡、萧炎、林风、张伟、李明。名字要能体现角色性格或背景（如程序员出身可带技术隐喻，小镇青年用接地气的名字），2-3字为主，避免过于中二或过于普通。
    - 开局节奏：前三章分别完成什么，尤其黄金三章的冲突、坦白、钩子
    - 能力边界：金手指能做什么、不能做什么、代价和风险
-   - 长篇路线：至少 6 个阶段，每阶段的目标、产业/力量升级、主要矛盾
-   - 篇幅与内容配比：必须明确写出“目标总字数：$target_words 字”，并按这个数字反推卷数、每卷字数、主线/生活/感情/商业/科技等内容占比，合计必须为 100%，避免中后期失控；不得出现与用户目标不同的总字数
+   - 长篇路线：至少 6 个阶段，每阶段写清章节区间、阶段字数上限、目标、力量/资源升级、主要矛盾和阶段高潮；阶段累计不得超过目标总字数
+   - 篇幅与内容配比：必须明确写出“目标总字数：$target_words 字”，并按这个数字反推卷数、每卷字数、章节字数和主线/日常/感情/战斗等内容占比，合计必须为 100%；严禁出现另一个总字数或超出目标的阶段范围
    - 人物关系：主角与家人/伙伴/对手的真实张力，禁止工具人
    - 叙事风格与禁忌：哪些内容要突出，哪些套路/漏洞要避免
    - 持续校验清单：时间线、资金/能力来源、现实逻辑、蝴蝶效应/设定边界
@@ -849,10 +849,24 @@ $instruction
    - story_promise：故事承诺，一句话回答“读者为什么追”
    - forbidden_deviations：禁止偏离的结构化列表，如“禁止圣母”“禁止无理由暴富”（与 forbidden_changes 不同：此处是 DNA 级的题材/人设红线）
    注意：forbidden_deviations 中提到的红线，绝不能在 commercial_positioning / story_promise 里出现矛盾（如写“卖点=重生穿越”却禁止“穿越”）。
+10. 【长篇闭合账本】额外输出 longform_contract：
+   - target_words：必须是数字 $target_words
+   - volume_count：整书卷数；volume_word_targets：每卷字数数组，合计必须精确等于 $target_words
+   - chapter_word_target：单章目标字数；chapter_count：预计总章数
+   - route_milestones：至少 6 个里程碑，每项含 label、start_words、end_words、goal，最后一项 end_words 必须等于 $target_words，任何 end_words 不得超过 $target_words
+11. 【核心机制契约】如果原始需求包含“模拟器/人生模拟/模拟未来/推演未来”，必须额外输出 simulator_contract，且不能只写“知道自己何时会死”：
+   - enabled：true；horizon：从当前状态推演到死亡或终局
+   - terminal_condition：死亡/道消/寿终等终局判定；branches：分支展开和因果变化
+   - observable_state：每条未来分支可观察的修为、伤势、资源、关系、机缘和死亡原因
+   - harvestable_rewards：模拟中可获得并可供选择回收的机缘、修为、功法、资源或能力
+   - selection_rules：主角如何选择带回哪些收益，不能无条件全拿
+   - costs_and_risks：模拟次数、寿元、资源、因果偏移、失败或回收代价
+   - reality_writeback：选择回收后如何写回现实，以及现实如何改变后续模拟
+   如果原始需求不含模拟器，simulator_contract.enabled 必须为 false，并不得擅自新增模拟器设定。
 
 已有标题参考（可空）：$suggested_title
 
-输出 JSON: {"idea_expanded":"展开的创意","synopsis":"给读者看的独立简介","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}"""),
+输出 JSON: {"idea_expanded":"展开的创意","synopsis":"给读者看的独立简介","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"],"longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"simulator_contract":{"enabled":false,"horizon":"","terminal_condition":"","branches":[],"observable_state":[],"harvestable_rewards":[],"selection_rules":[],"costs_and_risks":[],"reality_writeback":""}}"""),
 
     ("bootstrap.audit_plan_fidelity", "1.0.0", "deepseek",
      """你是独立的需求验收员，不参与创作。逐项比较“用户原始需求”和“规划结果”，只判断规划是否忠实，不评价文笔和市场性。
@@ -870,8 +884,9 @@ $plan_output
 4. source_facts 必须覆盖所有显式硬约束；forbidden_changes 必须保护最容易漂移的职业、年龄、设备、开局事件、篇幅与内容主次
 5. 当前只审计“规划节点”。用户要求的分卷细纲、前 N 章细纲、章节正文、评分等下游产物，只需在 downstream_deliverables 中准确登记数量和标准；不得因为当前尚未实际生成这些下游内容而判遗漏
 6. creative_bible 只需建立可执行框架，不要求在当前节点展开每一卷/每一章的全部细节；具体细节由 downstream_deliverables 对应的蓝图和写作节点完成
-7. 任何当前规划范围内的矛盾或遗漏，passed 必须为 false，score 不得高于 89；只有零矛盾、零遗漏才可 passed=true 且 score=100
-8. contradictions 和 omissions 使用可直接交给策划 AI 修正的中文句子，必须引用原需求值和错误/缺失值
+7. 目标总字数、分卷字数、阶段区间和核心机制规则属于硬约束。若规划出现另一个总字数、任何超出目标的路线范围、分卷无法闭合，或模拟器遗漏“推演到死亡/终局+选择回收收益+现实回写”，passed 必须为 false
+8. 任何当前规划范围内的矛盾或遗漏，passed 必须为 false，score 不得高于 89；只有零矛盾、零遗漏才可 passed=true 且 score=100
+9. contradictions 和 omissions 使用可直接交给策划 AI 修正的中文句子，必须引用原需求值和错误/缺失值
 
 输出 JSON: {"passed":false,"score":80,"matched_requirements":["已保留的要求1","已保留的要求2","已保留的要求3"],"contradictions":["原需求为X，规划却为Y"],"omissions":["规划遗漏Z"]}"""),
 
@@ -1002,7 +1017,7 @@ $plan_output
 输出 JSON: {"conflicts":[{"type":"external","between":["A","B"],"stakes":"赌注","escalation":"升级路径"}]}"""),
 
     # ═══ V2 蓝图阶段（3 节点，AI_NovelGenerator 章法 + harnessNovel 分层规划） ═══
-    ("bootstrap.blueprint_volume_plan", "1.0.0", "deepseek",
+    ("bootstrap.blueprint_volume_plan", "1.1.0", "deepseek",
      """你是分卷规划师。请为《$selected_title》规划整书分卷结构。
 
 用户原始需求：$idea
@@ -1013,14 +1028,17 @@ $plan_output
 冲突图谱：$conflicts
 故事模式：$story_model
 创作圣经：$creative_bible
+项目目标总字数：$target_words（硬约束，所有卷的 word_target 合计必须精确等于这个数字）
+长篇闭合账本：$longform_contract
+核心机制契约：$simulator_contract
 
 要求：
-1. 按百万字长篇规划 6-12 卷，每卷含：number、title（卷名）、arc（本卷完成什么弧线）、start_chapter、end_chapter、climax（卷高潮）、hook（卷末钩子）
+1. 按项目目标规划 6-10 卷，每卷含：number、title（卷名）、arc（本卷完成什么弧线）、start_chapter、end_chapter、word_target（本卷字数）、climax（卷高潮）、hook（卷末钩子）
 2. 每卷解决一条支线冲突、推进主线冲突一级
-3. chapter_tree：与 volumes 对应的章节区间树
+3. volume_word_targets：与 volumes 一一对应的数字数组；total_word_target 必须等于项目目标；chapter_tree：与 volumes 对应且连续的章节区间树
 4. 必须承接创作圣经的长期阶段路线，不得只规划前三十章
 
-输出 JSON: {"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}"""),
+输出 JSON: {"total_word_target":1500000,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":62,"word_target":187500,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":62}]}"""),
 
     ("bootstrap.blueprint_chapter_outline", "1.1.0", "deepseek",
      """你是细纲策划师。请为《$selected_title》第一卷生成前 10 章逐章细纲。
@@ -1497,7 +1515,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "summarize_volume":     '{"summary":"卷摘要"}',
     "summarize_book":       '{"summary":"全书摘要"}',
     # ── V2 四阶段 Bootstrap 契约（示例段落数 ≥ Schema 最小值，防模型照抄示例仍失败） ──
-    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","synopsis":"给读者看的独立简介（80-180字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"800-1800字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"]}',
+    "plan_idea":              '{"idea_expanded":"展开的创意（150-300字）","synopsis":"给读者看的独立简介（80-180字）","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["不可变事实1","不可变事实2","不可变事实3"],"design_additions":[],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["生成分卷总纲","生成前30章细纲","生成第一章正文"],"creative_bible":"2400-4200字创作圣经，含核心设定/黄金三章/能力边界/长篇路线/人物关系/禁忌/校验清单","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"],"longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"simulator_contract":{"enabled":false,"horizon":"","terminal_condition":"","branches":[],"observable_state":[],"harvestable_rewards":[],"selection_rules":[],"costs_and_risks":[],"reality_writeback":""}}',
     "audit_plan_fidelity":    '{"passed":false,"score":80,"matched_requirements":["匹配1","匹配2","匹配3"],"contradictions":["矛盾"],"omissions":["遗漏"]}',
     "regenerate_titles":      '{"title_candidates":["《新书名一》","《新书名二》","《新书名三》","《新书名四》","《新书名五》"]}',
     "plan_market_fit":        '{"market_score":80,"competitive_landscape":"竞品分析","market_gap":"市场缺口"}',
@@ -1506,7 +1524,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "plan_world_architecture": '{"worldview":{"name":"世界名","rules":["规则一","规则二","规则三","规则四","规则五"],"forces":["势力一：目标"],"geography":"地理格局","history":"历史背景"}}',
     "plan_character_system":  '{"characters":[{"name":"姓名一","role":"主角","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]},{"name":"姓名二","role":"反派","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]},{"name":"姓名三","role":"挚友","arc":"弧线","motivation":"动机","flaw":"缺陷","relationships":[]}]}（characters 至少 3 人）',
     "plan_conflict_map":      '{"conflicts":[{"type":"external","between":["A","B"],"stakes":"赌注","escalation":"升级路径"}]}',
-    "blueprint_volume_plan":  '{"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":50,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":50}]}',
+    "blueprint_volume_plan":  '{"total_word_target":1500000,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":62,"word_target":187500,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":62}]}',
     "generate_story_arc":       '{"story_arcs":[{"name":"弧线名","goal":"弧线目标","start_state":"起始状态","end_state":"结束状态","participants":["人物名"],"core_conflict":"核心冲突","key_events":["事件1","事件2"],"payoff_points":["爽点"],"foreshadowing_refs":[],"outcome_impact":"对全书的影响","status":"planning","chapter_range":[1,30]}]}',
     "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',

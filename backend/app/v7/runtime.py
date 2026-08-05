@@ -228,11 +228,33 @@ def _default_story_prompt(
             f"世界观：{json.dumps(meta.get('worldview') or {}, ensure_ascii=False)[:5000]}",
             f"人物系统：{str(meta.get('_characters_text') or '')[:5000]}",
             f"第{chapter_number}章细纲：{str(outline_text)[:5000]}",
+            _generation_contract_prompt(meta),
             "只输出小说正文，不要解释、提纲、标题说明或 Markdown；必须承接上一章交接契约，推进本章冲突，并以具体动作/信息变化收束。",
         ]
         return "\n\n".join(block for block in blocks if block.split("：", 1)[-1].strip())
     finally:
         conn.close()
+
+
+def _generation_contract_prompt(meta: dict[str, Any]) -> str:
+    """Render immutable planning contracts into every prose request."""
+    blocks: list[str] = []
+    longform = meta.get("longform_contract")
+    if isinstance(longform, dict) and longform:
+        blocks.append(
+            "篇幅闭合契约（不可改写）："
+            + json.dumps(longform, ensure_ascii=False)[:4500]
+        )
+    simulator = meta.get("simulator_contract")
+    if isinstance(simulator, dict) and simulator.get("enabled") is True:
+        blocks.append(
+            "人生模拟器硬规则（不可弱化）："
+            + json.dumps(simulator, ensure_ascii=False)[:5500]
+            + "\n模拟相关剧情必须遵守：从当前状态推演到死亡/终局；展示分支、因果和死亡原因；"
+              "主角可选择回收模拟中得到的机缘/修为/功法/资源/能力；回收必须有选择、代价和现实后果，"
+              "不能无条件全拿，也不能把未执行的模拟结果当成现实事实。"
+        )
+    return "\n".join(blocks)
 
 
 def _load_quality_profile(novel_id: str) -> dict[str, Any]:
@@ -281,7 +303,23 @@ async def generate_v7_chapter(
         batch_ordinal=batch_ordinal,
     )
     effective_outline = outline
-    effective_prompt = prompt or _default_story_prompt(novel_id, resolved_number, outline)
+    if prompt:
+        # Custom editor prompts still inherit the project's immutable planning
+        # contracts; otherwise a manual prompt could silently disable the
+        # simulator rules or word/route ledger.
+        contract_conn = connect()
+        try:
+            contract_row = contract_conn.execute(
+                "SELECT meta FROM contents WHERE id=%s AND type='novel'",
+                (novel_id,),
+            ).fetchone()
+        finally:
+            contract_conn.close()
+        contract_meta = decode((contract_row or {}).get("meta"), {}) or {}
+        contract_prompt = _generation_contract_prompt(contract_meta)
+        effective_prompt = f"{prompt}\n\n{contract_prompt}" if contract_prompt else prompt
+    else:
+        effective_prompt = _default_story_prompt(novel_id, resolved_number, outline)
     quality_profile = await asyncio.to_thread(_load_quality_profile, novel_id)
     provider_config = {
         key: value

@@ -241,6 +241,11 @@ class _PlanIdeaOutput(_LenientOutput):
     commercial_positioning: str = Field(default="")
     story_promise: str = Field(default="")
     forbidden_deviations: list[str] = Field(default_factory=list, max_length=20)
+    # Long-form planning is a closed numeric ledger, not prose-only advice.
+    longform_contract: dict[str, Any] = Field(default_factory=dict)
+    # The fictional simulator contract is required only when the source idea
+    # actually contains a simulator/life-simulation mechanic.
+    simulator_contract: dict[str, Any] = Field(default_factory=dict)
 
 
 class _PlanFidelityAuditOutput(_LenientOutput):
@@ -298,6 +303,10 @@ class _PlanConflictMapOutput(_LenientOutput):
 
 class _BlueprintVolumePlanOutput(_LenientOutput):
     volumes: list[dict[str, Any]] = Field(min_length=1)
+    total_word_target: int | None = None
+    volume_word_targets: list[int] = Field(default_factory=list)
+    chapter_word_target: int | None = None
+    chapter_count: int | None = None
 
 
 class _BlueprintChapterOutlineItem(_LenientOutput):
