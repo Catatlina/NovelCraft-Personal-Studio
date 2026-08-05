@@ -911,7 +911,7 @@ mechanic_specific_contract 不得省略：至少逐项说明本机制的触发�
 
 只输出 JSON：{"creative_bible":"完整创作圣经","longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"core_mechanic_contract":{"enabled":true,"mechanic_type":"机制类型","reader_promise":"读者承诺","trigger_and_loop":"触发→选择→行动→收益→代价→状态变化→新冲突","capability_loop":"能力循环","choice_surface":"选择与取舍","visible_payoff":"可见收益","limits_and_costs":"边界与代价","failure_and_risks":"失败与风险","state_writeback":"状态写回","plot_coupling":"主线耦合","progression":"成长升级","anti_inflation":"防止通胀"},"simulator_contract":{"enabled":true,"horizon":"从当前推演到死亡或终局","terminal_condition":"死亡/道消/寿终","branches":["保守路线","激进路线"],"observable_state":["修为/伤势/资源/关系/机缘/死亡原因"],"harvestable_rewards":["情报/机缘/修为/功法/资源/能力"],"selection_rules":"选择、组合、放弃或延迟收益，不能全拿","costs_and_risks":"次数、寿元、资源、冷却、因果、失败和暴露代价","reality_writeback":"执行回收后写回现实并改变后续冲突","causal_recalculation":"回收后重新推演因果分支","plot_guardrails":"收益不能跳过主线，必须带来代价或新问题"}}"""),
 
-    ("bootstrap.expand_creative_bible", "1.1.0", "deepseek",
+    ("bootstrap.expand_creative_bible", "1.2.0", "deepseek",
      """你是长篇网文创作圣经扩写器。请只扩写创作圣经，不改变原始灵感、主角身份、题材、核心冲突、金手指规则和项目目标。
 
 原始灵感：$idea
@@ -919,7 +919,14 @@ mechanic_specific_contract 不得省略：至少逐项说明本机制的触发�
 当前创作圣经：$creative_bible
 扩写原因：$repair_feedback
 
-输出一份 2400-3200 个中文字符的可执行创作圣经。必须包含并用清晰小标题写出：核心设定与读者卖点、黄金三章与前 20 章节奏、金手指能力与边界/代价/失败方式、至少六阶段且累计不超过项目目标的长篇路线、人物关系与对手升级、目标字数对应的分卷/章节/内容占比账本、伏笔和资源/因果/时间线校验清单。不要写宣传口号，不要重复同一段，不要输出 JSON 以外的字段，不要出现另一个全书总字数。
+输出一份 2400-3200 个中文字符的可执行创作圣经。必须保留当前创作圣经中的有效内容，并用清晰小标题逐项补齐以下六个章节：
+1. 黄金三章与前 20 章节奏；
+2. 能力边界、代价和风险（具体到触发、限制、失败/暴露和升级）；
+3. 至少六阶段且累计不超过项目目标的长篇路线；
+4. 人物关系与对手升级；
+5. 篇幅与内容配比、篇幅账本（目标总字数对应的分卷/章节/内容占比）；
+6. 持续校验清单（伏笔、资源、因果、时间线和跨章连续性）。
+如果当前文本已有其中章节，不要从头压缩重写；只补缺失章节并扩展可执行细节。六个章节标题至少要出现一组对应关键词，不能用一句空话占位。不要写宣传口号，不要重复同一段，不要输出 JSON 以外的字段，不要出现另一个全书总字数。
 
 只输出 JSON：{"creative_bible":"2400-3200 个中文字符的完整创作圣经"}"""),
 

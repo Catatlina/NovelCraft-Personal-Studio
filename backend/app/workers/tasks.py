@@ -46,6 +46,7 @@ from app.services.quality_profiles import (
     quality_profile_metadata,
 )
 from app.services.planning_contract import (
+    creative_bible_section_defects,
     mechanic_contract_guidance,
     mechanic_families_for_idea,
     validate_longform_contract,
@@ -1667,11 +1668,20 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                             _target_for_bible = 0
                         _bible_minimum = 2200 if _target_for_bible >= 1_000_000 else 1600
                         _current_bible = str(output.get("creative_bible") or "")
+                        _bible_section_defects = creative_bible_section_defects(_current_bible)
                         if (
                             _target_for_bible >= 500_000
-                            and len(_current_bible.replace("\n", "")) < _bible_minimum
+                            and (
+                                len(_current_bible.replace("\n", "")) < _bible_minimum
+                                or _bible_section_defects
+                            )
                         ):
                             for _bible_attempt in range(1, 3):
+                                _missing_sections = (
+                                    "；".join(_bible_section_defects)
+                                    if _bible_section_defects
+                                    else "无"
+                                )
                                 bible_repair = complete(
                                     run_id=run_id,
                                     node_key=node_key,
@@ -1683,7 +1693,9 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                         "creative_bible": _current_bible,
                                         "repair_feedback": (
                                             f"{target_feedback}；上一次扩写约 {len(_current_bible.replace(chr(10), ''))} 字，"
-                                            f"本次至少扩写到 {_bible_minimum + 200} 字，不能只改标题或重复原句。"
+                                            f"本次至少扩写到 {_bible_minimum + 200} 字；当前缺失章节：{_missing_sections}。"
+                                            "必须保留当前创作圣经的有效内容，只补写缺失章节，且六个必需章节都要用明确小标题呈现，"
+                                            "不能只改标题、重复原句或用一句空话占位。"
                                         ),
                                     },
                                     client_mutation_id=(
@@ -1696,7 +1708,11 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                 )
                                 output["creative_bible"] = bible_repair["creative_bible"]
                                 _current_bible = str(output.get("creative_bible") or "")
-                                if len(_current_bible.replace("\n", "")) >= _bible_minimum:
+                                _bible_section_defects = creative_bible_section_defects(_current_bible)
+                                if (
+                                    len(_current_bible.replace("\n", "")) >= _bible_minimum
+                                    and not _bible_section_defects
+                                ):
                                     break
                         target_feedback = _target_words_guard(
                             output,

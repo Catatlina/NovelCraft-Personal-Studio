@@ -21,6 +21,32 @@ _WORD_RANGE_RE = re.compile(
 )
 
 
+_CREATIVE_BIBLE_REQUIRED_SECTIONS: tuple[tuple[str, ...], ...] = (
+    ("黄金三章", "开局节奏"),
+    ("能力边界", "代价和风险"),
+    ("长篇路线", "阶段路线"),
+    ("篇幅与内容配比", "篇幅账本"),
+    ("人物关系", "角色关系"),
+    ("持续校验", "校验清单"),
+)
+
+
+def creative_bible_section_defects(bible: Any) -> list[str]:
+    """Return missing executable sections without judging prose quality.
+
+    A long-form bible is an operating document for downstream planners, not
+    marketing copy.  Keep these headings as a shared deterministic contract
+    so the planning repairer and the final validator cannot disagree about
+    what "complete" means.
+    """
+    text = str(bible or "")
+    defects: list[str] = []
+    for labels in _CREATIVE_BIBLE_REQUIRED_SECTIONS:
+        if not any(label in text for label in labels):
+            defects.append(f"创作圣经缺少可执行章节：{'/'.join(labels)}")
+    return defects
+
+
 # A core mechanic is not a genre.  It is a reader-facing interaction loop
 # that can be composed with any genre (urban, xianxia, suspense, science
 # fiction, historical, etc.).  Keep this catalogue small and semantic: it is
@@ -37,7 +63,7 @@ _MECHANIC_ALIASES: dict[str, tuple[str, ...]] = {
     "panel": ("属性面板", "面板", "属性点", "数值面板"),
     "inheritance": ("传承", "血脉", "圣体", "体质", "神体", "天赋觉醒"),
     "time_loop": ("时间循环", "时间回溯", "回溯", "循环人生", "重置时间"),
-    "ability": ("超能力", "异能", "能力觉醒", "法宝", "神物", "金手指"),
+    "ability": ("金手指", "外挂", "超能力", "异能", "特殊能力", "能力觉醒", "法宝", "神物"),
     "commerce": ("商城", "兑换系统", "交易面板", "积分商城"),
 }
 
@@ -482,17 +508,7 @@ def validate_longform_contract(
     )
     defects.extend(simulator_defects)
 
-    required_sections = (
-        ("黄金三章", "开局节奏"),
-        ("能力边界", "代价和风险"),
-        ("长篇路线", "阶段路线"),
-        ("篇幅与内容配比", "篇幅账本"),
-        ("人物关系", "角色关系"),
-        ("持续校验", "校验清单"),
-    )
-    for labels in required_sections:
-        if not any(label in bible for label in labels):
-            defects.append(f"创作圣经缺少可执行章节：{'/'.join(labels)}")
+    defects.extend(creative_bible_section_defects(bible))
     return defects
 
 

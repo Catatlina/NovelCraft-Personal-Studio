@@ -1,4 +1,5 @@
 from app.services.planning_contract import (
+    creative_bible_section_defects,
     mechanic_contract_guidance,
     mechanic_families_for_idea,
     validate_core_mechanic_contract,
@@ -144,6 +145,10 @@ def test_unknown_named_cheat_falls_back_to_generic_adapter():
     assert validate_core_mechanic_contract(contract, required=True) == []
 
 
+def test_explicit_unnamed_cheat_uses_generic_ability_adapter():
+    assert mechanic_families_for_idea("主角获得一个未知金手指，规则随剧情逐步揭开") == ["ability"]
+
+
 def test_complete_longform_contract_is_accepted():
     output = {
         "creative_bible": _bible(),
@@ -156,6 +161,13 @@ def test_complete_longform_contract_is_accepted():
         idea="玄幻长篇",
         target_words=1_500_000,
     ) == []
+
+
+def test_creative_bible_requires_all_operational_sections():
+    defects = creative_bible_section_defects("黄金三章。人物关系。")
+    assert any("能力边界" in item for item in defects)
+    assert any("篇幅与内容配比" in item for item in defects)
+    assert any("持续校验" in item for item in defects)
 
 
 def test_volume_plan_requires_exact_word_ledger_and_contiguous_chapters():
