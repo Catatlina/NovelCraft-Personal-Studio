@@ -33,6 +33,12 @@ _CREATIVE_BIBLE_REQUIRED_SECTIONS: tuple[tuple[str, ...], ...] = (
     ("持续校验", "校验清单"),
 )
 
+_CREATIVE_BIBLE_STRATEGY_SECTIONS: tuple[tuple[str, ...], ...] = (
+    ("爽点阶梯", "爽点策略", "爽点规划"),
+    ("反馈轮换", "反馈类型", "外部反馈"),
+    ("金手指创新", "创新路径", "创新设计"),
+)
+
 
 def creative_bible_section_defects(bible: Any) -> list[str]:
     """Return missing executable sections without judging prose quality.
@@ -47,6 +53,42 @@ def creative_bible_section_defects(bible: Any) -> list[str]:
     for labels in _CREATIVE_BIBLE_REQUIRED_SECTIONS:
         if not any(label in text for label in labels):
             defects.append(f"创作圣经缺少可执行章节：{'/'.join(labels)}")
+    return defects
+
+
+def creative_bible_strategy_section_defects(bible: Any) -> list[str]:
+    """Validate the strategy-pack sections required for new long-form plans.
+
+    The original six headings remain the compatibility contract for historical
+    plans.  These three headings are a V7 quality-strategy contract and are
+    checked by the bootstrap repair loop, so existing novels remain readable
+    while newly planned books cannot hide commercial pacing in free-form prose.
+    """
+    text = str(bible or "")
+    defects: list[str] = []
+    for labels in _CREATIVE_BIBLE_STRATEGY_SECTIONS:
+        if not any(label in text for label in labels):
+            defects.append(f"创作圣经缺少质量策略章节：{'/'.join(labels)}")
+    return defects
+
+
+def mechanic_innovation_defects(contract: Any) -> list[str]:
+    """Return actionable defects for the three golden-finger innovation paths."""
+    if not isinstance(contract, dict) or contract.get("enabled") is not True:
+        return []
+    innovation = contract.get("innovation_contract")
+    if not isinstance(innovation, dict):
+        return ["core_mechanic_contract 缺少 innovation_contract（创新路径、差异化钩子和风险）"]
+    defects: list[str] = []
+    path = str(innovation.get("path") or "").strip().lower()
+    if path not in {"combination", "cost", "reverse"}:
+        defects.append("innovation_contract.path 必须是 combination、cost 或 reverse")
+    for field, label in (
+        ("novelty_hook", "差异化钩子"),
+        ("risk", "创新风险"),
+    ):
+        if not str(innovation.get(field) or "").strip():
+            defects.append(f"innovation_contract 缺少{label}（{field}）")
     return defects
 
 
@@ -66,8 +108,18 @@ _MECHANIC_ALIASES: dict[str, tuple[str, ...]] = {
     "panel": ("属性面板", "面板", "属性点", "数值面板"),
     "inheritance": ("传承", "血脉", "圣体", "体质", "神体", "天赋觉醒"),
     "time_loop": ("时间循环", "时间回溯", "回溯", "循环人生", "重置时间"),
+    "longevity": ("长生", "长生流", "长生不老", "苟道", "苟道流", "活得久", "寿元外挂"),
     "ability": ("金手指", "外挂", "超能力", "异能", "特殊能力", "能力觉醒", "法宝", "神物"),
     "commerce": ("商城", "兑换系统", "交易面板", "积分商城"),
+    "predation": ("吞噬流", "吞噬", "掠夺气运", "掠夺天赋", "斩杀爆装", "爆装", "复制能力", "献祭交易"),
+    "summon": ("召唤", "召唤英灵", "御兽", "契约兽", "尸傀", "亡灵大军", "分身", "化身"),
+    "artifact": ("神兵", "本命法宝", "丹炉", "神秘古书", "残卷", "镜子", "宝塔", "器灵"),
+    "livestream": ("诸天直播", "万界直播", "现代直播", "直播间", "弹幕", "天幕", "盘点视频"),
+    "rule_game": ("规则怪谈", "怪谈生存", "无限流", "副本", "异常收容", "诡异污染"),
+    "profession_skill": ("神医", "医术", "鉴宝", "透视", "厨艺", "美食", "风水", "相术", "科技外挂", "文娱", "文抄"),
+    "identity_relation": ("隐藏豪门", "赘婿", "兵王", "退伍归来", "奶爸", "女儿流", "岳父", "老丈人"),
+    "invincible_opening": ("无敌开局", "开局无敌", "扮猪吃虎", "马甲流", "苟满多少年"),
+    "anti_trope": ("无金手指", "纯凡人", "坑爹金手指", "金手指有严重代价"),
 }
 
 _MECHANIC_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -120,6 +172,13 @@ _MECHANIC_ADAPTERS: dict[str, dict[str, Any]] = {
         "guard": "循环不能无限试错；记忆、身体、关系、时间窗口或因果必须留下不可逆损耗",
         "markers": (("循环", "回溯", "重置", "重复"), ("记忆", "保留", "改变", "分支"), ("偏差", "代价", "损耗", "失去")),
     },
+    "longevity": {
+        "label": "长生/苟道",
+        "promise": "以时间和积累换取底蕴，让读者等待一次次身份揭晓与实力碾压",
+        "must_show": "寿命或时间尺度、长期积累、阶段性资源变化、暴露风险和关键出手的回报",
+        "guard": "活得久不等于自动无敌；时间必须带来关系代价、环境变化、资源消耗或更高层敌人",
+        "markers": (("长生", "寿元", "苟", "时间"), ("积累", "底蕴", "闭关", "突破"), ("暴露", "代价", "时代", "敌人")),
+    },
     "ability": {
         "label": "异能/法宝/特殊能力",
         "promise": "能力在关键处制造选择优势，但必须通过验证、成长和代价获得可信爽点",
@@ -133,6 +192,69 @@ _MECHANIC_ADAPTERS: dict[str, dict[str, Any]] = {
         "must_show": "货币/积分来源、商品分层、兑换选择、库存或价格变化和交易风险",
         "guard": "商城不能无限补洞；兑换必须消耗可追踪资源，并改变主线资源竞争",
         "markers": (("积分", "货币", "交易", "兑换"), ("商品", "资源", "选择", "库存"), ("价格", "消耗", "限制", "风险")),
+    },
+    "predation": {
+        "label": "掠夺/吞噬/爆装",
+        "promise": "击败对手不只赢一场，还能夺走其力量、资源或能力，形成主动进攻的成长反馈",
+        "must_show": "掠夺对象、获得内容、兼容/转化过程、使用代价和新敌人或失控风险",
+        "guard": "不能击杀即无限叠加；收益要有容量、冲突、污染、追查或选择成本",
+        "markers": (("吞噬", "掠夺", "击杀", "爆装"), ("修为", "能力", "掉落", "转化"), ("反噬", "污染", "暴露", "代价")),
+    },
+    "summon": {
+        "label": "召唤/契约/分身",
+        "promise": "召唤对象或分身扩大主角的行动面，但每次调用都增加管理、忠诚或资源压力",
+        "must_show": "召唤条件、对象能力和人格、指挥选择、消耗/损伤以及召唤对象对主线的反作用",
+        "guard": "召唤物不能替主角无条件代打；数量、忠诚、成长、死亡或失控必须可追踪",
+        "markers": (("召唤", "御兽", "契约", "分身"), ("指挥", "忠诚", "成长", "战斗"), ("消耗", "反噬", "失控", "死亡")),
+    },
+    "artifact": {
+        "label": "器物/法宝/古书",
+        "promise": "一件有规则和脾气的核心器物打开新的解题方式，而不是万能道具",
+        "must_show": "器物来源、可用条件、具体功能、器灵/损耗/修复和被争夺的风险",
+        "guard": "器物必须有使用场景和边界；每次升级要改变选择，不得只加数值",
+        "markers": (("神兵", "法宝", "古书", "残卷", "器灵"), ("激活", "使用", "修复", "升级"), ("反噬", "损耗", "争夺", "代价")),
+    },
+    "livestream": {
+        "label": "直播/曝光/弹幕",
+        "promise": "观众、弹幕或曝光带来信息与资源，同时把主角推到更大的注视和误解中",
+        "must_show": "信息来源、观众反应、主角如何筛选/利用、曝光后的资源变化和现实风险",
+        "guard": "弹幕不是全知旁白；观众信息要有延迟、偏见、误导或隐私代价",
+        "markers": (("直播", "弹幕", "天幕", "观众"), ("提示", "热度", "曝光", "舆论"), ("误导", "追查", "暴露", "代价")),
+    },
+    "rule_game": {
+        "label": "规则怪谈/副本",
+        "promise": "读者和主角一起拆规则、找漏洞、用一次选择换一条活路",
+        "must_show": "规则文本/异常、验证动作、违反后果、信息差和破局后的新规则",
+        "guard": "规则必须能被回溯验证；不能临场凭空加规则，也不能只靠解释而没有行动试错",
+        "markers": (("规则", "怪谈", "副本", "禁忌"), ("验证", "漏洞", "破局", "选择"), ("惩罚", "死亡", "污染", "代价")),
+    },
+    "profession_skill": {
+        "label": "职业/技能/文娱",
+        "promise": "主角用可展示的专业能力解决具体问题，在一次次结果中获得名声、资源和更大舞台",
+        "must_show": "技能来源、可验证过程、专业细节、竞争反馈和能力边界",
+        "guard": "技能不能万能；结果必须经过事件验证，并受时间、资源、行业规则和对手影响",
+        "markers": (("医术", "鉴宝", "厨艺", "科技", "文娱"), ("诊断", "鉴定", "作品", "结果"), ("竞争", "成本", "误判", "代价")),
+    },
+    "identity_relation": {
+        "label": "身份/关系反差",
+        "promise": "主角的真实身份、关系或被低估的过去改变他在场上的位置，带来社会性反馈",
+        "must_show": "误解如何形成、主角为何隐藏/承认、身份揭晓的具体结果和关系重排",
+        "guard": "身份不能只靠旁白揭晓；每次亮牌都要付出信任、暴露或责任代价",
+        "markers": (("身份", "豪门", "赘婿", "兵王", "奶爸"), ("隐藏", "揭晓", "误解", "反转"), ("关系", "责任", "暴露", "代价")),
+    },
+    "invincible_opening": {
+        "label": "无敌开局/扮猪吃虎",
+        "promise": "主角掌握超出表面认知的底牌，读者等待他在关键节点亮牌并改变局面",
+        "must_show": "隐藏理由、误判来源、亮牌时机、对手反应和亮牌后的新层级压力",
+        "guard": "无敌只限定在可解释范围；不能连续靠隐藏实力重复同一种打脸，必须升级对手和代价",
+        "markers": (("无敌", "扮猪吃虎", "马甲", "底牌"), ("隐藏", "亮牌", "误判", "反转"), ("追查", "暴露", "强敌", "代价")),
+    },
+    "anti_trope": {
+        "label": "反套路/弱金手指",
+        "promise": "主角不靠无条件外挂，用限制、判断和积累赢得更有分量的反馈",
+        "must_show": "限制本身如何制造选择，主角如何靠行动解决问题，胜利如何留下代价",
+        "guard": "反套路不能退化成没有反馈；每个弱点都要转化为具体的策略和可见进展",
+        "markers": (("凡人", "无金手指", "弱", "限制"), ("判断", "积累", "策略", "选择"), ("失败", "代价", "风险", "后果")),
     },
 }
 
@@ -512,6 +634,9 @@ def validate_longform_contract(
     defects.extend(simulator_defects)
 
     defects.extend(creative_bible_section_defects(bible))
+    defects.extend(creative_bible_strategy_section_defects(bible))
+    defects.extend(mechanic_innovation_defects(output.get("core_mechanic_contract"))
+                   if _idea_requires_core_mechanic(idea) else [])
     return defects
 
 

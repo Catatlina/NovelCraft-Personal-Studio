@@ -625,6 +625,19 @@ def generate_reader_synopsis(
     idea = str(meta.get("idea") or "").strip()
     if len(idea) < 4:
         raise HTTPException(status_code=422, detail="作品没有可用于生成简介的创作灵感")
+    # Standalone package repair must use the same V7 platform/genre strategy
+    # as the main planning chain; a static one-line hint would otherwise make
+    # old books use a different synopsis policy from newly planned books.
+    from .services.quality_profiles import compile_quality_directive, profile_from_context
+    from .v7.quality.market_snapshot import market_benchmark_directive
+
+    synopsis_profile = profile_from_context({
+        **meta,
+        "idea": idea,
+        "genre": meta.get("genre") or meta.get("source_type") or "都市",
+    })
+    synopsis_strategy = synopsis_profile.get("quality_strategy") or {}
+    synopsis_benchmark = synopsis_strategy.get("market_benchmark") or {}
     output = complete(
         run_id=None,
         node_key=None,
@@ -636,7 +649,11 @@ def generate_reader_synopsis(
             "genre": str(meta.get("genre") or meta.get("source_type") or "网文"),
             "style": str(meta.get("style") or "第三人称、冲突前置、节奏明快"),
             "idea": idea[:8000],
-            "quality_profile_directive": "简介独立于灵感和创作圣经，只写读者能看到的故事冲突、主角处境、行动目标与悬念。",
+            "quality_profile_directive": (
+                compile_quality_directive(synopsis_profile, chapter_number=1)
+                + "\n简介独立于灵感和创作圣经，只写读者能看到的故事冲突、主角处境、行动目标与悬念。"
+            ),
+            "market_benchmark": market_benchmark_directive(synopsis_benchmark),
         },
         client_mutation_id=f"synopsis:{content_id}:{uuid.uuid4()}",
     )
@@ -1381,13 +1398,25 @@ def regenerate_run_titles(
     if not human or human["status"] != "waiting_human":
         raise HTTPException(409, "书名只能在人工选名阶段重新生成")
 
+    from .services.quality_profiles import compile_quality_directive, profile_from_context
+    from .v7.quality.market_snapshot import market_benchmark_directive
+
+    title_profile = profile_from_context(context)
+    title_strategy = title_profile.get("quality_strategy") or {}
+    title_benchmark = title_strategy.get("market_benchmark") or {}
+
     result = complete(
         run_id=run_id,
         node_key="human_confirm_title",
         project_id=run["project_id"],
         task_type="regenerate_titles",
         prompt_name="bootstrap.regenerate_titles",
-        variables={**context, "feedback": payload.feedback},
+        variables={
+            **context,
+            "feedback": payload.feedback,
+            "quality_profile_directive": compile_quality_directive(title_profile, chapter_number=1),
+            "market_benchmark": market_benchmark_directive(title_benchmark),
+        },
         client_mutation_id=f"title-regenerate:{run_id}:{new_id('ttl')}",
     )
     titles = result["title_candidates"]

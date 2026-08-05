@@ -279,6 +279,7 @@ class _PlanMarketFitOutput(_LenientOutput):
     market_score: float = Field(ge=0, le=100)
     competitive_landscape: str = Field(min_length=5)
     market_gap: str = Field(min_length=5)
+    evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class _PlanStoryPatternOutput(_LenientOutput):

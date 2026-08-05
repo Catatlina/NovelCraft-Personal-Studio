@@ -47,6 +47,8 @@ from app.services.quality_profiles import (
 )
 from app.services.planning_contract import (
     creative_bible_section_defects,
+    creative_bible_strategy_section_defects,
+    mechanic_innovation_defects,
     mechanic_contract_guidance,
     mechanic_families_for_idea,
     validate_longform_contract,
@@ -371,6 +373,28 @@ def _quality_directive_for_chapter(run_context: dict) -> tuple[str, dict[str, An
     return directive, quality_profile_metadata(profile), contract if isinstance(contract, dict) else {}
 
 
+def _market_benchmark_for_run(run_context: dict[str, Any] | None, *, chapter_number: int = 1) -> dict[str, Any]:
+    """Return the selected empirical snapshot without creating a second policy store."""
+    profile = profile_from_context(run_context if isinstance(run_context, dict) else {})
+    strategy = profile.get("quality_strategy") if isinstance(profile, dict) else {}
+    benchmark = strategy.get("market_benchmark") if isinstance(strategy, dict) else {}
+    if not isinstance(benchmark, dict):
+        return {}
+    if int(chapter_number or 1) != int(benchmark.get("chapter_number") or 1):
+        # Recompile only the chapter-sensitive opening hints; the source and
+        # sample counts remain the same.  Keeping this here prevents chapter
+        # generation from carrying a stale first-chapter-only hint.
+        from app.v7.quality.market_snapshot import resolve_market_benchmark
+
+        return resolve_market_benchmark(
+            platform=profile.get("platform"),
+            genre=profile.get("genre"),
+            mechanic_families=profile.get("mechanic_families") or [],
+            chapter_number=chapter_number,
+        )
+    return benchmark
+
+
 # V3 Repair Engine (§8): three-tier repair classification. Pure, deterministic.
 # Maps a failed consistency check to the least-invasive repair that can fix it.
 _REPAIR_LEVEL_KEYWORDS = {
@@ -645,6 +669,8 @@ def _planning_contract_feedback(output: dict[str, Any], context: dict[str, Any])
         idea=str(context.get("idea") or ""),
         target_words=target_words,
     )
+    defects.extend(creative_bible_strategy_section_defects(output.get("creative_bible")))
+    defects.extend(mechanic_innovation_defects(output.get("core_mechanic_contract")))
     if not defects:
         return ""
     idea = str(context.get("idea") or "")
@@ -653,12 +679,12 @@ def _planning_contract_feedback(output: dict[str, Any], context: dict[str, Any])
     )
     repair = (
         f"本轮规划未通过硬契约，必须重做而不是解释：目标总字数严格为 {target_words} 字；"
-        "creative_bible 必须达到长篇最低字数并写出黄金三章、能力边界、六阶段路线、人物关系、篇幅账本和校验清单；"
+        "creative_bible 必须达到长篇最低字数并写出黄金三章、能力边界、六阶段路线、人物关系、篇幅账本、校验清单、爽点阶梯、反馈轮换和金手指创新路径；"
         "longform_contract 必须包含 target_words、volume_word_targets（合计精确闭合）、chapter_word_target、chapter_count、"
         "route_milestones（最后 end_words 精确等于目标）；"
         "core_mechanic_contract 必须完整包含 enabled、mechanic_type、reader_promise、trigger_and_loop、capability_loop、"
         "mechanic_specific_contract、choice_surface、visible_payoff、limits_and_costs、failure_and_risks、"
-        "state_writeback、plot_coupling、progression、anti_inflation，并落实对应的机制适配器。"
+        "state_writeback、plot_coupling、progression、anti_inflation、innovation_contract，并落实对应的机制适配器。"
     )
     if simulator_required:
         repair += (
@@ -1594,6 +1620,10 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         "quality_profile_directive": quality_directive,
                         "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
                         "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
+                        "market_benchmark": json.dumps(
+                            _market_benchmark_for_run(run_context, chapter_number=1),
+                            ensure_ascii=False,
+                        ),
                         "core_mechanic_guidance": mechanic_contract_guidance(
                             str(run_context.get("idea") or "")
                         ),
@@ -1668,7 +1698,10 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                             _target_for_bible = 0
                         _bible_minimum = 2200 if _target_for_bible >= 1_000_000 else 1600
                         _current_bible = str(output.get("creative_bible") or "")
-                        _bible_section_defects = creative_bible_section_defects(_current_bible)
+                        _bible_section_defects = (
+                            creative_bible_section_defects(_current_bible)
+                            + creative_bible_strategy_section_defects(_current_bible)
+                        )
                         if (
                             _target_for_bible >= 500_000
                             and (
@@ -1694,7 +1727,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                         "repair_feedback": (
                                             f"{target_feedback}；上一次扩写约 {len(_current_bible.replace(chr(10), ''))} 字，"
                                             f"本次至少扩写到 {_bible_minimum + 200} 字；当前缺失章节：{_missing_sections}。"
-                                            "必须保留当前创作圣经的有效内容，只补写缺失章节，且六个必需章节都要用明确小标题呈现，"
+                                            "必须保留当前创作圣经的有效内容，只补写缺失章节，且九个必需章节都要用明确小标题呈现，"
                                             "不能只改标题、重复原句或用一句空话占位。"
                                         ),
                                     },
@@ -1708,7 +1741,10 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                                 )
                                 output["creative_bible"] = bible_repair["creative_bible"]
                                 _current_bible = str(output.get("creative_bible") or "")
-                                _bible_section_defects = creative_bible_section_defects(_current_bible)
+                                _bible_section_defects = (
+                                    creative_bible_section_defects(_current_bible)
+                                    + creative_bible_strategy_section_defects(_current_bible)
+                                )
                                 if (
                                     len(_current_bible.replace("\n", "")) >= _bible_minimum
                                     and not _bible_section_defects
@@ -1782,6 +1818,10 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         "quality_profile_directive": quality_directive,
                         "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
                         "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
+                        "market_benchmark": json.dumps(
+                                _market_benchmark_for_run(run_context, chapter_number=chapter_seq),
+                            ensure_ascii=False,
+                        ),
                     }
                     # V3 Strategy Library (§6): inject the matched strategy
                     # directive + Writer skill hints into the prompt. Missing
@@ -2293,7 +2333,10 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
             ).fetchone()
             knowledge_ids_to_reindex.append(stored["id"] if stored else knowledge_id)
     elif task_type == "plan_market_fit":
-        context["market_fit"] = output
+        market_fit = dict(output)
+        if not isinstance(market_fit.get("evidence"), dict) or not market_fit.get("evidence"):
+            market_fit["evidence"] = _market_benchmark_for_run(context, chapter_number=1)
+        context["market_fit"] = market_fit
     elif task_type == "plan_story_pattern":
         context["story_pattern"] = output
     elif task_type == "plan_core_gameplay":

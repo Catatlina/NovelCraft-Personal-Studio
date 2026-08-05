@@ -15,6 +15,12 @@ from .content_policy import content_generation_contract
 from .pov_quality import THIRD_PERSON_NARRATIVE_POLICY, third_person_generation_contract
 from ..v7.quality.failure_patterns import generation_constraints, failure_pattern_metadata
 from ..v7.quality.payoff_strategy import select_payoff_strategy, strategy_metadata
+from ..v7.quality.webnovel_strategy import (
+    market_benchmark_directive,
+    knowledge_source_metadata,
+    resolve_webnovel_strategy,
+    strategy_metadata as webnovel_strategy_metadata,
+)
 
 
 QUALITY_PROFILE_SCHEMA_VERSION = "webnovel-quality-profile-v1"
@@ -414,6 +420,7 @@ def select_quality_profile(
     genre: Any = "",
     subgenre: Any = "",
     style_plugin: Any = "",
+    mechanic_families: list[str] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a deterministic merged platform + genre + subgenre profile."""
@@ -422,6 +429,10 @@ def select_quality_profile(
     genre_key = normalize_genre(overrides.get("genre") or genre)
     subgenre_key = normalize_subgenre(overrides.get("subgenre") or subgenre, genre_key)
     requested_plugin = overrides.get("style_plugin") or overrides.get("writing_plugin") or style_plugin
+    requested_families = overrides.get("mechanic_families") or mechanic_families or []
+    if not isinstance(requested_families, list):
+        requested_families = [requested_families]
+    mechanic_keys = _unique(requested_families)
     plugin_key = normalize_style_plugin(requested_plugin)
     plugin_data = _STYLE_PLUGINS.get(plugin_key) if plugin_key else None
     plugin_enabled = bool(
@@ -439,6 +450,13 @@ def select_quality_profile(
     platform_data = deepcopy(_PLATFORM_PROFILES.get(platform_key, _PLATFORM_PROFILES["fanqie"]))
     genre_data = deepcopy(_GENRE_PROFILES.get(genre_key, _GENRE_PROFILES["urban"]))
     subgenre_data = deepcopy(_SUBGENRE_PROFILES.get(subgenre_key, {}))
+    webnovel_strategy = resolve_webnovel_strategy(
+        platform=platform_key,
+        genre=genre_key,
+        subgenre=subgenre_key,
+        mechanic_families=mechanic_keys,
+        style_plugin=plugin_key,
+    )
 
     merged: dict[str, Any] = {
         "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
@@ -504,6 +522,8 @@ def select_quality_profile(
             + list(active_plugin.get("attention_beat_rules", [])[:1])
         ),
         "style_plugin_soft_metrics": deepcopy(active_plugin.get("soft_metrics") or {}),
+        "mechanic_families": mechanic_keys,
+        "quality_strategy": webnovel_strategy,
         "payoff_policy": deepcopy(platform_data.get("payoff_policy", {})),
         "payoff_strategy": select_payoff_strategy(platform_key, genre_key, subgenre_key),
         # Product-wide narrative contract.  It is intentionally not an
@@ -586,11 +606,30 @@ def profile_from_context(context: dict[str, Any] | None) -> dict[str, Any]:
         value = context.get(key)
         if value not in (None, ""):
             raw[key] = value
+    mechanic_families = raw.get("mechanic_families")
+    if not isinstance(mechanic_families, list) or not mechanic_families:
+        core_contract = context.get("core_mechanic_contract")
+        if isinstance(core_contract, dict):
+            declared = core_contract.get("mechanic_families") or core_contract.get("mechanic_type")
+            mechanic_families = declared if isinstance(declared, list) else [declared] if declared else []
+    if not mechanic_families:
+        # Import locally to keep planning_contract and quality_profiles free of
+        # a module-level cycle while still deriving a strategy from the user's
+        # original idea when no compiled contract exists yet.
+        from .planning_contract import mechanic_families_for_idea
+
+        idea = " ".join(
+            str(context.get(key) or "")
+            for key in ("idea", "inspiration", "idea_expanded", "core_hook")
+        )
+        mechanic_families = mechanic_families_for_idea(idea)
+    raw["mechanic_families"] = _unique(mechanic_families or [])
     return select_quality_profile(
         platform=context.get("platform") or context.get("platform_key") or context.get("publish_platform"),
         genre=context.get("genre") or context.get("category") or context.get("main_category"),
         subgenre=context.get("subgenre") or context.get("sub_category") or context.get("theme"),
         style_plugin=context.get("style_plugin") or context.get("writing_plugin"),
+        mechanic_families=raw.get("mechanic_families") or [],
         overrides=raw if isinstance(raw, dict) else None,
     )
 
@@ -613,6 +652,44 @@ def compile_quality_directive(
         content_generation_contract(profile),
         "金手指通用闭环：触发后必须让主角做选择并采取行动，收益要在事件中可见，同时写出边界/代价、状态变化和新的主线冲突；任何系统、模拟器、重生、空间、面板或传承都不能替主角自动通关。",
     ]
+    strategy = profile.get("quality_strategy") or {}
+    if strategy:
+        opening = strategy.get("opening") or {}
+        payoff = strategy.get("payoff") or {}
+        mechanic = strategy.get("mechanic") or {}
+        lines.append(
+            "知识策略编译结果："
+            f"开局模式={opening.get('mode') or 'fast_hook'}；"
+            f"{opening.get('directive') or ''}"
+        )
+        market_directive = market_benchmark_directive(strategy.get("market_benchmark"))
+        if market_directive:
+            lines.append("平台/题材实证软基线：" + market_directive + "。")
+        lines.append(
+            "反馈渠道轮换："
+            + "、".join(str(item) for item in (payoff.get("feedback_channels") or [])[:6])
+            + "；同一渠道不得连续模板化复用。"
+        )
+        innovation_paths = mechanic.get("innovation_paths") or {}
+        if innovation_paths:
+            lines.append(
+                "金手指创新路径（选一条并服务剧情）："
+                + "；".join(str(value) for value in list(innovation_paths.values())[:3])
+            )
+        design_rule = str(mechanic.get("design_rule") or "").strip()
+        if design_rule:
+            lines.append("金手指实证设计轴：" + design_rule)
+        design_axes = mechanic.get("design_axes") or {}
+        if isinstance(design_axes, dict) and design_axes:
+            axis_text = []
+            for axis_name, options in list(design_axes.items())[:4]:
+                if isinstance(options, list) and options:
+                    axis_text.append(f"{axis_name}={'/'.join(str(item) for item in options[:5])}")
+            if axis_text:
+                lines.append("金手指四轴候选（按剧情选择，不要全量堆叠）：" + "；".join(axis_text))
+        deai = strategy.get("deai") or {}
+        if deai.get("pre_generation"):
+            lines.append("去 AI 味事前约束：" + "；".join(str(item) for item in deai["pre_generation"]))
     package_rules = _unique(
         [*(profile.get("title_rules") or [])[:2], *(profile.get("synopsis_rules") or [])[:2]]
     )
@@ -772,6 +849,8 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "narrative_pov": profile.get("narrative_pov", THIRD_PERSON_NARRATIVE_POLICY),
         "payoff_policy": deepcopy(profile.get("payoff_policy") or {}),
         "payoff_strategy": strategy_metadata(profile.get("payoff_strategy") or {}),
+        "quality_strategy": webnovel_strategy_metadata(profile.get("quality_strategy") or {}),
+        "mechanic_families": list(profile.get("mechanic_families") or []),
         "failure_patterns": failure_pattern_metadata(
             pattern_ids=[
                 str(item.get("id"))
@@ -782,4 +861,5 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "ledgers": list(profile.get("ledgers") or []),
         "style_plugin_soft_metrics": deepcopy(profile.get("style_plugin_soft_metrics") or {}),
         "provenance": list(profile.get("provenance") or []),
+        "knowledge_provenance": knowledge_source_metadata(),
     }
