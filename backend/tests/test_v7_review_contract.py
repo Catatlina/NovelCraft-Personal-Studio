@@ -110,3 +110,11 @@ def test_review_issue_normalization_requires_source_evidence_and_bounds_characte
     assert "不要新增口头禅" in issues[0]["suggestion"]
     assert len(suppressed) == 1
     assert suppressed[0]["evidence_status"] == "unverified"
+
+
+def test_async_v7_engine_is_safe_for_sync_bridges_on_multiple_event_loops():
+    from sqlalchemy.pool import NullPool
+
+    from app.v7.db import async_engine
+
+    assert isinstance(async_engine.sync_engine.pool, NullPool)

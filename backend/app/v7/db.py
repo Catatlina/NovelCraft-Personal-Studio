@@ -16,6 +16,7 @@ from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 # Reuse V6's DATABASE_URL
 DB_URL = os.getenv("DATABASE_URL", "postgresql://genius@localhost/novelcraft_dev")
@@ -33,10 +34,18 @@ engine = create_engine(
 )
 
 # Create async engine
+#
+# The editor/live-review compatibility endpoints are synchronous FastAPI
+# handlers that bridge into V7 with ``asyncio.run``.  That means one process
+# can execute successive V7 calls on different event loops.  A normal
+# AsyncAdaptedQueuePool keeps asyncpg connections tied to the loop that checked
+# them out; reusing one on the next loop produces the production-only
+# ``Future attached to a different loop`` failure and makes the first audit
+# look unavailable.  NullPool keeps the session/transaction lifetime intact
+# while preventing loop-bound connections from crossing the sync bridge.
 async_engine = create_async_engine(
     ASYNC_DB_URL,
-    pool_size=10,
-    max_overflow=20,
+    poolclass=NullPool,
     pool_pre_ping=True,
     echo=False,
 )
