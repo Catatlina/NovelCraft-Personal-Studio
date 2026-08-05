@@ -176,6 +176,41 @@ def test_unresolved_plot_disruption_remains_evidence_without_blocking():
     assert result["passed"] is True
 
 
+def test_memory_conflict_recognizes_untyped_open_pressure_as_plot_evidence():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "封印时限",
+                "description": "封印磨损加速，苏长庚离开后可能更快裂开，时间紧迫。",
+                "severity": "high",
+            }
+        ]
+    )
+
+    assert conflicts[0]["conflict_type"] == "plot_disruption"
+    assert conflicts[0]["resolution_status"] == "unresolved"
+    assert conflicts[0]["original_severity"] == "high"
+    assert conflicts[0]["severity"] == "medium"
+
+
+def test_memory_conflict_normalizes_legacy_unresolved_plot_type():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "敌人威胁",
+                "description": "白面具人留下威胁，下一步可能袭击宗门。",
+                "severity": "high",
+                "conflict_type": "unresolved_plot",
+                "resolution_status": "unresolved",
+            }
+        ]
+    )
+
+    assert conflicts[0]["conflict_type"] == "plot_disruption"
+    assert conflicts[0]["resolution_status"] == "unresolved"
+    assert conflicts[0]["severity"] == "medium"
+
+
 def test_continuity_does_not_block_resolved_strategic_reveal():
     result = validate_transition_contract(
         {

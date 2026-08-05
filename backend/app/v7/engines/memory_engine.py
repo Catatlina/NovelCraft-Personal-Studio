@@ -64,6 +64,44 @@ _PLOT_DISRUPTION_EVENT_MARKERS = (
     "阻止",
     "改线",
 )
+_PLOT_PRESSURE_ACTION_MARKERS = (
+    "离开",
+    "离宗",
+    "启程",
+    "出发",
+    "决定",
+    "选择",
+    "寻找",
+    "守护",
+    "带走",
+    "放弃",
+)
+_PLOT_PRESSURE_CONSEQUENCE_MARKERS = (
+    "可能",
+    "更快",
+    "时间紧迫",
+    "时限",
+    "期限",
+    "将启",
+    "即将",
+    "会裂",
+    "会失控",
+    "危机",
+    "威胁",
+    "风险",
+    "后果",
+    "代价",
+)
+_HARD_CONFLICT_MARKERS = (
+    "凭空",
+    "再次出现",
+    "已经消耗",
+    "已经死亡",
+    "却活着",
+    "时间倒流",
+    "设定冲突",
+    "事实矛盾",
+)
 
 
 def normalize_memory_conflicts(
@@ -74,8 +112,9 @@ def normalize_memory_conflicts(
     A character's public instruction and concealed motive can intentionally
     diverge. That is a plot reveal, not a broken story fact, when the
     description itself records the reveal. Keep it in the evidence stream
-    but downgrade it from a hard continuity blocker. Unclassified conflicts
-    remain fail-closed and keep their original severity.
+    but downgrade it from a hard continuity blocker. Open threats and costs
+    caused by a chapter decision are also plot pressure, even when the model
+    omits the conflict type. Unclassified contradictions remain fail-closed.
     """
     normalized: list[dict[str, Any]] = []
     for conflict in conflicts or []:
@@ -104,6 +143,23 @@ def normalize_memory_conflicts(
         ):
             conflict_type = "plot_disruption"
             resolution_status = "resolved"
+        if conflict_type == "unresolved_plot":
+            # Older prompt versions used this label for an open story thread.
+            # Normalize it to the canonical type without losing its status.
+            conflict_type = "plot_disruption"
+        if (
+            not conflict_type
+            and any(marker in description for marker in _PLOT_PRESSURE_ACTION_MARKERS)
+            and any(
+                marker in description
+                for marker in _PLOT_PRESSURE_CONSEQUENCE_MARKERS
+            )
+            and not any(marker in description for marker in _HARD_CONFLICT_MARKERS)
+        ):
+            # A choice creates a new threat, cost, deadline, or risk. This is
+            # precisely the open pressure that should bridge into the next
+            # chapter, not a contradiction in the truth ledger.
+            conflict_type = "plot_disruption"
         item["conflict_type"] = conflict_type or "hard_fact"
         item["resolution_status"] = resolution_status or "unresolved"
         item["original_severity"] = str(item.get("severity") or "medium").lower()
