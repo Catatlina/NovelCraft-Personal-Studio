@@ -1,13 +1,14 @@
 # Starlume AI — 真实进度
 
-## 2026-08-06 AI 味词库可配置化与编辑会话发布候选
+## 2026-08-06 AI 味词库可配置化与编辑会话已推送部署
 
-- 运行时代码已提交：`760edd5`。本批把 `novel-reviewer` 的参考词库扩展为 11 类、版本化 `ai-flavor-lexicon-v2`，保留题材语境豁免；它只生成候选信号和原文证据，不把单个词或标点变成禁令，也不改变 V7 canonical 总分。
+- 运行时代码已提交并部署：`e3a56b2`（运行时功能基于 `760edd5`）。本批把 `novel-reviewer` 的参考词库扩展为 11 类、版本化 `ai-flavor-lexicon-v2`，保留题材语境豁免；它只生成候选信号和原文证据，不把单个词或标点变成禁令，也不改变 V7 canonical 总分。
 - 后端新增真实配置接口：`GET/PUT/POST /api/v1/quality/ai-flavor-lexicon[/reset]`。配置复用现有 `settings` 表、管理员权限和 20 秒进程缓存；保存后生成、审阅和去 AI 味指导立即读取新版本。
 - 前台新增「小说设置 → 质量规则 → AI 味词库」：可查看来源/版本/启用数量，可开关分类和词条、编辑名称/说明、添加/删除词条、保存或恢复内置版本；页面明确展示“候选信号，不是禁词表”。
 - V7 生成前、续写和最终人文化 Prompt 注入同一份词库指导，审阅仍由 V7 33 维引擎统一评分；编辑器保留自由输入的 AI 修改会话，结果先预览再应用。
 - 本地证据：后端全量 `1035 passed, 138 skipped, 1 xpassed`；前端 `49 passed`，TypeScript/lint、生产构建、`git diff --check`、`verify_ai_truthfulness.py` 和 `ai_development_gate.sh` 均通过。
-- 当前状态：词库和编辑会话为**可用（代码级）**；生产推送、部署、登录态页面实测将在本批后续完成。真实 Provider 新 Prompt 20 章长跑、两位人工盲评和最终生成质量验收仍不能宣称完成。
+- 生产证据：服务器已切换到 `e3a56b2`；数据库迁移容器正常退出，API/Worker/Beat/Frontend/PostgreSQL/Redis 均正常运行；公网 `healthz` 200；`scripts/prod_smoke.py` **15/15**；生产浏览器走查 **1 passed**；管理员词库 GET/PUT/RESET **3/3**；登录态前台已显示 11 个分类、171 个启用候选信号。
+- 当前状态：词库和编辑会话为**已部署、可用**；真实 Provider 新 Prompt 20 章长跑、两位人工盲评和最终生成质量验收仍不能宣称完成。
 
 ## 2026-08-05 本批提交、部署与生产归属验收
 
