@@ -192,6 +192,13 @@ class MemoryEngine(BaseEngine):
         result = {
             "chapter_number": data.get("chapter_number"),
             "run_id": data.get("run_id"),
+            # Preserve the director's dry-run intent through the AI phase.
+            # The director extracts memory before the chapter is accepted,
+            # then commits the validated items exactly once after every
+            # quality gate passes.  Dropping this flag here made the generic
+            # engine update phase write state prematurely and caused the
+            # acceptance-time write to run a second time.
+            "apply_updates": bool(data.get("apply_updates", True)),
             "extracted_items": items,
             "extracted_count": len(items),
             "conflicts": raw.get("conflicts") or [],
