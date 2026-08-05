@@ -24,6 +24,58 @@ CATEGORY_TO_STATE_TYPE: dict[str, str] = {
     "foreshadowing": "plot",
 }
 
+_STRATEGIC_REVEAL_MARKERS = (
+    "表面",
+    "实际上",
+    "实际",
+    "假意",
+    "故意",
+    "利用",
+    "诱导",
+    "另有打算",
+    "并非",
+    "借此",
+)
+
+
+def normalize_memory_conflicts(
+    conflicts: list[Any] | None,
+) -> list[dict[str, Any]]:
+    """Normalize model conflicts without erasing narrative reversals.
+
+    A character's public instruction and concealed motive can intentionally
+    diverge. That is a plot reveal, not a broken story fact, when the
+    description itself records the reveal. Keep it in the evidence stream
+    but downgrade it from a hard continuity blocker. Unclassified conflicts
+    remain fail-closed and keep their original severity.
+    """
+    normalized: list[dict[str, Any]] = []
+    for conflict in conflicts or []:
+        if not isinstance(conflict, dict):
+            continue
+        item = dict(conflict)
+        description = str(item.get("description") or item.get("message") or "")
+        conflict_type = str(item.get("conflict_type") or "").strip().lower()
+        resolution_status = str(
+            item.get("resolution_status") or item.get("status") or ""
+        ).strip().lower()
+        if not conflict_type and any(
+            marker in description for marker in _STRATEGIC_REVEAL_MARKERS
+        ):
+            conflict_type = "strategic_reveal"
+        if not resolution_status and conflict_type == "strategic_reveal":
+            resolution_status = "resolved"
+        item["conflict_type"] = conflict_type or "hard_fact"
+        item["resolution_status"] = resolution_status or "unresolved"
+        item["original_severity"] = str(item.get("severity") or "medium").lower()
+        if (
+            item["conflict_type"] == "strategic_reveal"
+            and item["resolution_status"] == "resolved"
+        ):
+            item["severity"] = "medium"
+        normalized.append(item)
+    return normalized
+
 
 class MemoryEngine(BaseEngine):
     """Extracts structured story memory with a real LLM call."""
@@ -133,7 +185,8 @@ class MemoryEngine(BaseEngine):
             '  "foreshadowing": [{"key":"伏笔短标识","summary":"...","detail":"...",'
             '"confidence":0.6,"evidence":"..."}],\n'
             '  "conflicts": [{"key":"冲突的已知设定","description":"如何冲突的",'
-            '"severity":"low|medium|high"}],\n'
+            '"severity":"low|medium|high","conflict_type":"hard_fact|timeline|resource|knowledge|strategic_reveal|unresolved_plot",'
+            '"resolution_status":"resolved|unresolved","evidence":"正文中解决冲突的依据"}],\n'
             '  "chapter_summary": "本章 100 字以内梗概"\n'
             "}\n"
             "confidence 取 0-1：正文明确写出的取 0.85-0.95，需要推断的取 0.5-0.75，"
@@ -141,6 +194,8 @@ class MemoryEngine(BaseEngine):
             "为保证 JSON 完整：每个数组最多输出 3 条；只保留会影响后续章节的事实；"
             "summary 不超过 30 字，detail 和 evidence 各不超过 60 字，chapter_summary 不超过 80 字；"
             "不要重复已知设定，不要输出额外字段、Markdown 或解释。"
+            "人物的表面意图与真实意图不同，且正文已经揭示时，标记为 strategic_reveal/resolved，"
+            "不要把它当作硬设定冲突；只有时间线、资源、人物已知信息或未解决事实矛盾才标记为 high。"
         )
 
         try:
@@ -150,7 +205,7 @@ class MemoryEngine(BaseEngine):
                 max_tokens=1800,
                 temperature=0.2,
                 prompt_name="v7.memory.extract",
-                prompt_version="1.1.0",
+                prompt_version="1.2.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
@@ -201,7 +256,7 @@ class MemoryEngine(BaseEngine):
             "apply_updates": bool(data.get("apply_updates", True)),
             "extracted_items": items,
             "extracted_count": len(items),
-            "conflicts": raw.get("conflicts") or [],
+            "conflicts": normalize_memory_conflicts(raw.get("conflicts") or []),
             "chapter_summary": raw.get("chapter_summary") or "",
             "model": ai["usage"].get("model"),
         }

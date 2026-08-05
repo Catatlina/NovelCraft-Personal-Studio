@@ -113,6 +113,13 @@ def validate_transition_contract(
         if not isinstance(conflict, dict):
             continue
         severity = str(conflict.get("severity") or "medium").lower()
+        conflict_type = str(conflict.get("conflict_type") or "").lower()
+        resolution_status = str(conflict.get("resolution_status") or "").lower()
+        if conflict_type == "strategic_reveal" and resolution_status == "resolved":
+            # A resolved deception/reversal is story movement. It remains
+            # visible in state_conflicts and event evidence, but it must not
+            # be treated as a contradiction in the durable hand-off.
+            continue
         if severity == "high":
             issue(
                 "state_conflict",
