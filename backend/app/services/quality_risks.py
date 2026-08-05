@@ -233,23 +233,54 @@ def evaluate_editor_review_gate(
     called quality-safe merely because it can be previewed.  The returned
     contract is also rendered into the preview response for honest review.
     """
-    contract = build_quality_repair_contract(
-        review_data,
-        dimension_minimums={
-            "continuity": minimum_score,
-            "plot_logic": minimum_score,
-            "pacing": minimum_score,
-            "writing_quality": minimum_score,
-        },
-        continuity=review_data.get("continuity"),
-    )
-    failures: list[dict[str, Any]] = []
+    canonical_gate: dict[str, Any] | None = None
+    # V7 editor/live-audit results must use the exact same acceptance gate as
+    # generation and the review page.  Keeping a second subset gate here was
+    # the source of the old “AI 分”和“实时审计” drifting apart.
+    if review_data.get("canonical_engine") == "v7":
+        from ..v7.integration.quality import evaluate_review
+
+        canonical_gate = evaluate_review(review_data)
+        contract = canonical_gate.get("quality_repair_contract") or build_quality_repair_contract(
+            review_data,
+            dimension_minimums={
+                "consistency": minimum_score,
+                "character_voice": minimum_score,
+                "plot_logic": minimum_score,
+                "pacing": minimum_score,
+                "writing_quality": minimum_score,
+                "constraint_compliance": minimum_score,
+            },
+            continuity=review_data.get("continuity"),
+        )
+        failures = [
+            {
+                "dimension": item.get("dimension") or "review",
+                "actual": item.get("actual"),
+                "minimum": item.get("minimum"),
+                "reason": item.get("reason"),
+            }
+            for item in canonical_gate.get("failures") or []
+            if isinstance(item, dict)
+        ]
+    else:
+        contract = build_quality_repair_contract(
+            review_data,
+            dimension_minimums={
+                "continuity": minimum_score,
+                "plot_logic": minimum_score,
+                "pacing": minimum_score,
+                "writing_quality": minimum_score,
+            },
+            continuity=review_data.get("continuity"),
+        )
+        failures = []
     score = float(review_data.get("score") or review_data.get("overall_score") or 0.0)
-    if score < minimum_score:
+    if canonical_gate is None and score < minimum_score:
         failures.append({"dimension": "overall_score", "actual": score, "minimum": minimum_score})
     if chars < minimum_chars:
         failures.append({"dimension": "length", "actual": chars, "minimum": minimum_chars})
-    for risk in contract["blocking_risks"]:
+    for risk in contract["blocking_risks"] if canonical_gate is None else []:
         failures.append({
             "dimension": risk["category"],
             "actual": risk.get("severity"),
@@ -264,4 +295,6 @@ def evaluate_editor_review_gate(
         "minimum_chars": minimum_chars,
         "failures": failures,
         "quality_repair_contract": contract,
+        "canonical_gate": canonical_gate,
+        "review_evidence": (canonical_gate or {}).get("review_evidence") if canonical_gate else None,
     }

@@ -19,6 +19,7 @@ from ...services.chapter_payoff import validate_payoff_contract
 from ...services.content_policy import analyze_content_policy
 from ...services.pov_quality import analyze_third_person_narrative
 from ..quality.audit_dimensions import AUDIT_DIMENSIONS
+from ..quality.review_evidence import validate_review_evidence
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -180,6 +181,23 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
                 "minimum": AUDIT_HARD_MINIMUM,
                 "reason": detail.get("evidence") or item.label,
             })
+    review_evidence = review_data.get("review_evidence") or {}
+    # Only canonical V7 reviews are held to the complete evidence contract.
+    # Older compatibility callers can still inspect their macro score, but
+    # they can never masquerade as a complete V7 audit once they opt into the
+    # canonical engine/read model.
+    if review_data.get("canonical_engine") == "v7" or review_evidence:
+        review_evidence = validate_review_evidence(
+            review_data,
+            require_continuity=False,
+        )
+        if review_evidence.get("passed") is not True:
+            failures.append({
+                "dimension": "review_evidence_incomplete",
+                "actual": review_evidence.get("missing") or "unknown",
+                "minimum": "complete",
+                "reason": "；".join(review_evidence.get("issues") or ["V7 审阅证据链不完整"]),
+            })
     deai_metrics = review_data.get("deai_metrics") or {}
     deai_risk = deai_metrics.get("risk_score")
     if isinstance(deai_risk, (int, float)) and deai_risk >= DEAI_HIGH_RISK_THRESHOLD:
@@ -227,6 +245,7 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         "quality_repair_contract": repair_contract,
         "payoff_validation": payoff_validation,
         "payoff_evidence_validation": payoff_evidence,
+        "review_evidence": review_evidence,
         "quality_profile": quality_profile,
         # Reader experience is advisory; it must not replace the continuity
         # and writing hard gates above.  It is nevertheless returned with the

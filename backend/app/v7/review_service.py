@@ -22,6 +22,7 @@ from .db import AsyncSessionLocal, async_engine
 from .engines.review_engine import ReviewEngine
 from .events.event_bus import EventBus
 from .quality.continuity import validate_transition_contract
+from .quality.review_evidence import validate_review_evidence
 from .runtime import _load_quality_profile, seed_v6_context
 from .trace.tracer import ExecutionTracer
 
@@ -169,8 +170,16 @@ def _continuity_evidence(
             "reason": "当前草稿没有可验证的 V7 转场契约",
         }
 
+    deterministic_checked = bool(
+        deterministic.get("checked") is True
+        or isinstance(deterministic.get("checked"), list)
+    )
+    model_checked = bool(model_score is not None and evidence)
+    checked = deterministic_checked or model_checked
     deterministic_passed = deterministic.get("passed") is True
-    if deterministic.get("checked") is False:
+    if not checked:
+        status = "not_checked"
+    elif deterministic.get("checked") is False:
         status = "continuous" if model_score is not None and model_score >= 85 else "warning"
     elif deterministic_passed and (model_score is None or model_score >= 85):
         status = "continuous"
@@ -181,7 +190,7 @@ def _continuity_evidence(
 
     return {
         "status": status,
-        "checked": True,
+        "checked": checked,
         "source": CANONICAL_REVIEW_PROMPT,
         "model_score": model_score,
         "narrative_flow": "；".join(evidence) or "V7 审阅器已完成跨章因果、时间线和章末桥接检查。",
@@ -250,6 +259,17 @@ def _decorate_review(
             source=source,
         ),
     })
+    evidence = validate_review_evidence(result, require_continuity=True)
+    result["review_evidence"] = evidence
+    if evidence.get("passed") is not True:
+        result["review_valid"] = False
+        existing = list(result.get("validation_failures") or [])
+        existing.append({
+            "code": "review_evidence_incomplete",
+            "message": "V7 实时审阅证据链不完整：" + "；".join(evidence.get("issues") or []),
+            "detail": evidence,
+        })
+        result["validation_failures"] = existing
     return result
 
 

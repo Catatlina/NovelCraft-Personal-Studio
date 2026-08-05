@@ -122,6 +122,16 @@ def _chapter_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_story_chapter(row: dict[str, Any]) -> bool:
+    """Exclude outline/planning nodes from the long-run chapter ledger."""
+    meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+    raw_number = row.get("seq") or meta.get("seq") or meta.get("chapter_number")
+    try:
+        return int(raw_number) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _result_status(result: Any) -> str:
     """Read the director result status without treating HTTP 200 as success."""
     if not isinstance(result, dict):
@@ -393,7 +403,10 @@ def main() -> int:
             timeout=60,
         )
         rows = listing if isinstance(listing, list) else []
-        chapters = sorted((_chapter_row(row) for row in rows), key=lambda item: item["chapter_number"])
+        chapters = sorted(
+            (_chapter_row(row) for row in rows if _is_story_chapter(row)),
+            key=lambda item: item["chapter_number"],
+        )
         persisted = _find_chapter(chapters, chapter_number)
         response_status = _result_status(result)
         if response_status != "completed":

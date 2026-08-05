@@ -1108,6 +1108,7 @@ export default function App() {
     overall_score: persistedV7Review.overall_score ?? chapterMeta.review_score,
     dimension_scores: persistedV7Review.dimension_scores ?? chapterMeta.dimension_scores,
     audit_report: persistedV7Review.audit_report ?? chapterMeta.audit_report,
+    review_evidence: persistedV7Review.review_evidence ?? chapterMeta.review_evidence,
     reader_experience: persistedV7Review.reader_experience ?? chapterMeta.reader_experience,
     issues: persistedV7Review.issues ?? chapterMeta.review_issues,
     continuity: persistedV7Review.continuity ?? chapterMeta.continuity,

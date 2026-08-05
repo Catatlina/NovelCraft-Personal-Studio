@@ -11,7 +11,7 @@ from .goal_system import GoalSystem
 from .constraint_system import ConstraintSystem
 from .version_control import VersionControl
 from .truth_store import TruthStore
-from ..quality.rule_learning import RuleLearningStore
+from ..quality.rule_learning import RuleLearningStore, QualityPatternLearningStore
 from ..repositories.decision import DecisionLogRepository
 from ..repositories.event import EventLogRepository
 
@@ -37,6 +37,7 @@ class NovelBrain:
         # learning without introducing a parallel storage system.
         self.truth = TruthStore(self.state)
         self.rules = RuleLearningStore(self.state)
+        self.quality_learning = QualityPatternLearningStore(self.state)
         
         # Repositories
         self.decision_repo = DecisionLogRepository(db)
@@ -45,7 +46,10 @@ class NovelBrain:
     async def get_overview(self) -> dict[str, Any]:
         """Get brain overview statistics."""
         # Count states by type
-        state_types = ["global", "character", "world", "plot", "reader", "chapter", "learning_rule"]
+        state_types = [
+            "global", "character", "world", "plot", "reader", "chapter",
+            "learning_rule", "learning_quality",
+        ]
         state_counts = {}
         pending_review_count = 0
         

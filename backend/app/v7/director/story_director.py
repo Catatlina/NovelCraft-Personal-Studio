@@ -45,6 +45,7 @@ from ..integration.v6_bridge import (
     persist_rejected_v7_draft,
 )
 from ..quality.continuity import validate_transition_contract
+from ..quality.review_evidence import validate_review_evidence
 from ...services.quality_profiles import quality_profile_metadata, select_quality_profile
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
@@ -454,6 +455,7 @@ class StoryDirector:
                 "quality_gate": observation.get("quality_gate", {}),
                 "audit_report": observation.get("audit_report", {}),
                 "review_provenance": observation.get("review_provenance", {}),
+                "review_evidence": observation.get("review_evidence", {}),
                 "review_hold": observation.get("review_hold", False),
                 "review_validation": observation.get("review_validation", []),
                 "passed_review": observation["passed_review"],
@@ -1061,6 +1063,7 @@ class StoryDirector:
             "constraint_violations": review_data.get("constraint_violations", []),
             "audit_report": review_data.get("audit_report", {}),
             "review_provenance": review_data.get("provenance", {}),
+            "review_evidence": review_data.get("review_evidence") or {},
             "blocking_violations": blocking,
             "passed_review": passed,
             "rework_count": rework_count,
@@ -1160,6 +1163,44 @@ class StoryDirector:
             ),
         })
         transition_contract["continuity"] = continuity
+        # Rebuild the one V7 evidence read model after the durable transition
+        # contract exists.  Review-time evidence can prove the model audit;
+        # only this update step can prove the chapter-to-chapter hand-off.
+        review_evidence = validate_review_evidence(
+            {
+                "canonical_engine": "v7",
+                "dimension_scores": observation.get("dimension_scores") or {},
+                "reader_experience": observation.get("reader_experience") or {},
+                "audit_report": observation.get("audit_report") or {},
+                "provenance": observation.get("review_provenance") or {},
+                "continuity": continuity,
+            },
+            require_continuity=True,
+        )
+        observation["review_evidence"] = review_evidence
+        if not review_evidence.get("passed"):
+            observation["passed_review"] = False
+            quality_gate = observation.get("quality_gate") or {}
+            quality_gate["passed"] = False
+            quality_gate["failures"] = [
+                *(quality_gate.get("failures") or []),
+                {
+                    "dimension": "review_evidence_incomplete",
+                    "actual": review_evidence.get("missing") or "unknown",
+                    "minimum": "complete",
+                    "reason": "；".join(review_evidence.get("issues") or ["V7 审阅证据链不完整"]),
+                },
+            ]
+            observation["quality_gate"] = quality_gate
+            observation["issues"] = [
+                *(observation.get("issues") or []),
+                {
+                    "dimension": "review_evidence_incomplete",
+                    "severity": "high",
+                    "description": "；".join(review_evidence.get("issues") or ["V7 审阅证据链不完整"]),
+                    "suggestion": "重新执行 V7 审阅，补齐 33 维逐项证据、连续性和审阅溯源",
+                },
+            ]
         if not continuity["passed"]:
             # This is an application hard gate.  A high model score cannot
             # make a chapter publishable when its durable hand-off is broken.
@@ -1193,6 +1234,24 @@ class StoryDirector:
                     for item in continuity["issues"]
                 ],
             ]
+
+        payoff_score = generation.get("payoff_score") or {}
+        payoff_score_value = (
+            payoff_score.get("score") if isinstance(payoff_score, dict) else payoff_score
+        )
+        quality_store = getattr(self.brain, "quality_learning", None)
+        quality_learning = []
+        if quality_store is not None:
+            quality_learning = await quality_store.observe_sample(
+                chapter_number=chapter_number,
+                accepted=bool(observation["passed_review"]),
+                payoff_type=(generation.get("payoff_contract") or {}).get("payoff_type"),
+                payoff_score=payoff_score_value,
+                review_score=observation.get("review_score"),
+                reader_payoff=(observation.get("reader_experience") or {}).get("payoff"),
+                continuity_passed=bool(continuity.get("passed")),
+                source_run_id=run_id,
+            )
 
         rule_learning = await self.brain.rules.observe(
             chapter_number=chapter_number,
@@ -1296,6 +1355,7 @@ class StoryDirector:
                 "continuity": continuity,
                 "final_continuity_audit": {"continuity": continuity},
                 "review_provenance": observation.get("review_provenance") or {},
+                "review_evidence": observation.get("review_evidence") or {},
                 "canonical_review": {
                     "canonical_engine": "v7",
                     "overall_score": observation.get("review_score", 0),
@@ -1308,6 +1368,7 @@ class StoryDirector:
                     "provenance": observation.get("review_provenance") or {},
                     "continuity": continuity,
                     "final_continuity_audit": {"continuity": continuity},
+                    "review_evidence": observation.get("review_evidence") or {},
                 },
                 "generation_quality": generation.get("generation_quality") or {},
                 "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
@@ -1344,6 +1405,8 @@ class StoryDirector:
                 "quality_profile": generation.get("quality_profile") or quality_profile_metadata(self.quality_profile),
                 "payoff_contract": generation.get("payoff_contract") or {},
                 "quality_gate": observation.get("quality_gate") or {},
+                "review_evidence": observation.get("review_evidence") or {},
+                "quality_learning": quality_learning,
                 "rework_count": observation["rework_count"],
                 "run_id": str(run_id),
                 "transition_contract": transition_contract,
@@ -1361,6 +1424,7 @@ class StoryDirector:
             "transition_contract": transition_contract,
             "continuity": continuity,
             "rule_learning": rule_learning,
+            "quality_learning": quality_learning,
             "chapter_summary": summary,
             "states_applied": (memory_update.result or {}).get("states_applied", 0),
             "states_pending_review": (memory_update.result or {}).get("states_pending_review", 0),

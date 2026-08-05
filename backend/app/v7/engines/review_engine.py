@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from datetime import datetime, timezone
 from typing import Any
 
 from .base import BaseEngine, EngineCapability, EngineResult
@@ -28,6 +29,10 @@ from ..quality.audit_dimensions import (
     normalize_audit_report,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
+from ..quality.review_evidence import (
+    build_review_evidence,
+    validate_review_evidence,
+)
 
 REVIEW_DIMENSIONS: tuple[str, ...] = (
     "consistency",
@@ -424,6 +429,7 @@ class ReviewEngine(BaseEngine):
             required=payoff_required,
         )
         review_result = {
+            "canonical_engine": "v7",
             "chapter_number": data.get("chapter_number"),
             "overall_score": float(overall),
             "computed_score": computed,
@@ -454,6 +460,7 @@ class ReviewEngine(BaseEngine):
                 "provider": ai["usage"].get("provider") or getattr(self.ai_gateway, "provider", "unknown"),
                 "model": ai["usage"].get("model") or getattr(self.ai_gateway, "default_model", None),
                 "text_hash": hashlib.sha256(chapter_text.encode("utf-8")).hexdigest(),
+                "scored_at": datetime.now(timezone.utc).isoformat(),
             },
             "reason": raw.get("reason", ""),
             "quality_profile": quality_profile_metadata(data.get("quality_profile") or {}) if data.get("quality_profile") else {},
@@ -462,6 +469,10 @@ class ReviewEngine(BaseEngine):
             "payoff_evidence_validation": payoff_evidence_validation,
             "payoff_evidence_repair": payoff_evidence_repair,
         }
+        review_result["review_evidence"] = build_review_evidence(
+            review_result,
+            require_continuity=False,
+        )
 
         confidence = raw.get("confidence")
         confidence = (
@@ -507,11 +518,11 @@ class ReviewEngine(BaseEngine):
             if str(v.get("severity", "")).lower() == "high"
         ]
         audit_report = result.get("audit_report") or {}
-        audit_contract_valid = (
-            audit_report.get("schema_version") == "33d-v1"
-            and audit_report.get("count") == len(AUDIT_DIMENSIONS)
-            and len(audit_report.get("items") or {}) == len(AUDIT_DIMENSIONS)
+        evidence_validation = validate_review_evidence(
+            result,
+            require_continuity=False,
         )
+        audit_contract_valid = evidence_validation["audit_33"].get("complete") is True
         payoff_evidence_validation = result.get("payoff_evidence_validation") or {}
         payoff_evidence_valid = (
             not payoff_evidence_validation.get("required")
@@ -527,12 +538,14 @@ class ReviewEngine(BaseEngine):
                 and reader_experience_complete
                 and audit_contract_valid
                 and payoff_evidence_valid
+                and evidence_validation.get("passed") is True
             ),
             "dimensions_count": len(scores),
             "score_in_range": in_range and overall_in_range,
             "reader_experience_complete": reader_experience_complete,
             "audit_contract_valid": audit_contract_valid,
             "audit_coverage": audit_report.get("coverage", 0.0),
+            "review_evidence": evidence_validation,
             "payoff_evidence_validation": payoff_evidence_validation,
             "reader_experience_summary": summarize_reader_experience(reader_experience),
             "blocking_violations": len(high_violations),
@@ -558,7 +571,13 @@ class ReviewEngine(BaseEngine):
         if not audit_contract_valid:
             validation_failures.append({
                 "code": "audit_contract_invalid",
-                "message": "33 维审计契约不完整",
+                "message": "33 维审计必须逐项返回分数、原文证据和修复动作，不能使用兼容投影",
+            })
+        if evidence_validation.get("passed") is not True:
+            validation_failures.append({
+                "code": "review_evidence_incomplete",
+                "message": "V7 审阅证据链不完整：" + "；".join(evidence_validation.get("issues") or []),
+                "detail": evidence_validation,
             })
         if not payoff_evidence_valid:
             validation_failures.append({

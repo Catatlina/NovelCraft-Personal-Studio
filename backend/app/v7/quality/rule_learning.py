@@ -21,6 +21,7 @@ LOW_RISK_CODES = {
 }
 RULE_STATUSES = {"candidate", "canary", "active", "rolled_back"}
 CANARY_ROLLOUT_PERCENT = 25
+QUALITY_LEARNING_SCHEMA_VERSION = "quality-learning-v1"
 
 
 def _fingerprint(code: str, scope: str = "novel") -> str:
@@ -247,3 +248,147 @@ class RuleLearningStore:
             source_run_id=source_run_id,
             reason=reason,
         )
+
+
+class QualityPatternLearningStore:
+    """Learn reader-facing payoff signals without silently rewriting policy.
+
+    A single chapter can record a sample, but it cannot change the global
+    generation contract.  Only repeated positive/negative observations become
+    an active, low-risk prompt hint.  The hint is deliberately about keeping
+    the result visible and varying feedback; it never copies prose or a living
+    author's wording into the generator.
+    """
+
+    def __init__(self, state: StoryStateManager):
+        self.state = state
+
+    @staticmethod
+    def _key(payoff_type: str) -> str:
+        digest = hashlib.sha256(f"payoff:{payoff_type}".encode("utf-8")).hexdigest()[:24]
+        return f"quality:{digest}"
+
+    @staticmethod
+    def _rollout_enabled(value: dict[str, Any], chapter_number: int | None) -> bool:
+        rollout = int(value.get("rollout_percent") or 0)
+        if rollout >= 100:
+            return True
+        if rollout <= 0:
+            return False
+        seed = f"{value.get('quality_key', '')}:{chapter_number or 'default'}"
+        bucket = int(hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8], 16) % 100
+        return bucket < rollout
+
+    async def observe_sample(
+        self,
+        *,
+        chapter_number: int,
+        accepted: bool,
+        payoff_type: str | None,
+        payoff_score: float | None,
+        review_score: float | None,
+        reader_payoff: float | None,
+        continuity_passed: bool,
+        source_run_id: uuid.UUID | None = None,
+    ) -> list[dict[str, Any]]:
+        payoff_type = str(payoff_type or "").strip()
+        if not payoff_type:
+            return []
+
+        numeric = [
+            value for value in (payoff_score, review_score, reader_payoff)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        quality_score = round(sum(float(value) for value in numeric) / len(numeric), 1) if numeric else 0.0
+        positive = bool(
+            accepted
+            and continuity_passed
+            and quality_score >= 80
+            and (reader_payoff is None or float(reader_payoff) >= 70)
+        )
+        key = self._key(payoff_type)
+        existing = await self.state.get_state("learning_quality", key)
+        previous = dict((existing or {}).get("value") or {})
+        samples = int(previous.get("sample_count") or 0) + 1
+        positive_count = int(previous.get("positive_count") or 0) + (1 if positive else 0)
+        negative_count = int(previous.get("negative_count") or 0) + (0 if positive else 1)
+        old_average = float(previous.get("average_score") or 0.0)
+        average_score = round(((old_average * (samples - 1)) + quality_score) / samples, 1)
+        positive_rate = round(positive_count / samples, 3)
+        status = str(previous.get("status") or "candidate")
+        if status not in {"candidate", "canary", "active", "rolled_back"}:
+            status = "candidate"
+        if status != "rolled_back":
+            if samples >= 5 and positive_count >= 3:
+                status = "active"
+                rollout_percent = 100
+            elif samples >= 3:
+                status = "canary"
+                rollout_percent = CANARY_ROLLOUT_PERCENT
+            else:
+                rollout_percent = 0
+        else:
+            rollout_percent = 0
+
+        if positive_rate >= 0.6:
+            instruction = (
+                f"爽点类型 {payoff_type} 已有多章正向验证：先写清主角行动造成的结果，"
+                "再用资源、关系、规则或对手反应呈现反馈，避免只用旁白宣布情绪。"
+            )
+        else:
+            instruction = (
+                f"爽点类型 {payoff_type} 的近期兑现偏弱：生成时必须补足依据、可见结果、"
+                "外部反馈和下一压力，不得只重复上一章的表达。"
+            )
+        value = {
+            "schema_version": QUALITY_LEARNING_SCHEMA_VERSION,
+            "quality_key": key,
+            "payoff_type": payoff_type,
+            "status": status,
+            "rollout_percent": rollout_percent,
+            "sample_count": samples,
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "positive_rate": positive_rate,
+            "average_score": average_score,
+            "last_quality_score": quality_score,
+            "last_reader_payoff": reader_payoff,
+            "last_continuity_passed": bool(continuity_passed),
+            "last_observed_chapter": chapter_number,
+            "instruction": instruction[:500],
+            "activation_policy": "5_samples_3_positive_then_active",
+        }
+        updated = await self.state.update_state(
+            "learning_quality",
+            key,
+            value,
+            0.9 if status in {"canary", "active"} else 0.7,
+            source="quality_learning",
+            source_run_id=source_run_id,
+            reason=f"chapter {chapter_number}: {'positive' if positive else 'negative'} payoff sample",
+        )
+        return [{"key": key, "action": updated.get("action"), **value}]
+
+    async def active_recommendations(
+        self,
+        *,
+        chapter_number: int | None = None,
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        states = await self.state.list_states("learning_quality", limit=max(limit * 4, 20))
+        recommendations: list[dict[str, Any]] = []
+        for state in states:
+            value = state.get("value") if isinstance(state.get("value"), dict) else {}
+            if value.get("status") not in {"canary", "active"}:
+                continue
+            if not self._rollout_enabled(value, chapter_number):
+                continue
+            recommendations.append({
+                "quality_key": value.get("quality_key") or state.get("key"),
+                "payoff_type": value.get("payoff_type"),
+                "status": value.get("status"),
+                "sample_count": value.get("sample_count", 0),
+                "positive_rate": value.get("positive_rate", 0.0),
+                "instruction": value.get("instruction"),
+            })
+        return recommendations[: max(1, limit)]

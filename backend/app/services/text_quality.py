@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 from math import ceil
 
 
@@ -67,6 +68,44 @@ def duplicate_paragraph_stats(
         "duplicate_ratio": round(duplicate_chars / max(1, total_chars), 4),
         "adjacent_duplicate_count": adjacent_count,
         "examples": examples,
+    }
+
+
+def chapter_mirror_stats(
+    text: str,
+    *,
+    previous_text: str = "",
+    minimum_chars: int = 400,
+    mirror_threshold: float = 0.86,
+) -> dict[str, object]:
+    """Detect a chapter duplicated as two halves or copied from its predecessor.
+
+    This is a safety detector, not a literary similarity score.  It only
+    raises a mirror signal when both compared regions contain enough material
+    and the normalized character streams are unusually close.
+    """
+    source = re.sub(r"\s+", "", str(text or ""))
+    previous = re.sub(r"\s+", "", str(previous_text or ""))
+    self_ratio = 0.0
+    current_parts = paragraphs(text)
+    if len(current_parts) >= 4:
+        midpoint = max(2, len(current_parts) // 2)
+        left = re.sub(r"\s+", "", "".join(current_parts[:midpoint]))
+        right = re.sub(r"\s+", "", "".join(current_parts[midpoint:]))
+        if len(left) >= minimum_chars and len(right) >= minimum_chars:
+            self_ratio = round(SequenceMatcher(None, left, right, autojunk=False).ratio(), 4)
+    previous_ratio = 0.0
+    if len(source) >= minimum_chars and len(previous) >= minimum_chars:
+        previous_ratio = round(SequenceMatcher(None, source, previous, autojunk=False).ratio(), 4)
+    return {
+        "current_chars": len(source),
+        "previous_chars": len(previous),
+        "self_mirror_ratio": self_ratio,
+        "previous_mirror_ratio": previous_ratio,
+        "self_mirror": self_ratio >= mirror_threshold,
+        "previous_mirror": previous_ratio >= mirror_threshold,
+        "passed": self_ratio < mirror_threshold and previous_ratio < mirror_threshold,
+        "threshold": mirror_threshold,
     }
 
 

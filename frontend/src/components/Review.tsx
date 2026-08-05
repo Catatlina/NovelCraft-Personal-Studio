@@ -18,6 +18,7 @@ type ReviewPayload = {
   audit_report?: AuditReport;
   reader_experience?: Record<string, number>;
   canonical_engine?: string;
+  review_evidence?: ReviewEvidence;
   continuity?: { status?: string; checked?: boolean; gaps?: unknown[]; narrative_flow?: string; source?: string; model_score?: number | null };
   provenance?: {
     engine?: string;
@@ -42,6 +43,16 @@ type ReviewPayload = {
   final_continuity_audit?: {
     continuity?: { status?: string; gaps?: unknown[]; narrative_flow?: string };
   };
+};
+
+type ReviewEvidence = {
+  status?: string;
+  complete?: boolean;
+  missing?: string[];
+  audit_33?: { status?: string; complete?: boolean; scored?: number; required?: number; coverage?: number; issues?: string[] };
+  continuity?: { status?: string; checked?: boolean; complete?: boolean; narrative_flow?: string; gaps?: unknown[] };
+  timeline?: { status?: string; complete?: boolean; score?: number | null; evidence?: string };
+  character_arcs?: { status?: string; complete?: boolean; score?: number | null; evidence?: string };
 };
 
 type AuditItem = {
@@ -184,6 +195,7 @@ export function Review({
   const consistency = review.final_consistency_check || review;
   const checks = consistency.checks || {};
   const auditReport = review.audit_report || consistency.audit_report;
+  const reviewEvidence = review.review_evidence;
   const auditItems = auditReport?.items || {};
   const dimensionScores = review.dimension_scores || review.dimensions || consistency.dimension_scores || {};
   const numericDimensionScores = Object.values(dimensionScores).map(scoreValue).filter((value): value is number => value !== null);
@@ -211,7 +223,7 @@ export function Review({
     ...cleanItems(continuity?.gaps),
   ]);
   const strengths = cleanItems(review.strengths);
-  const hasEvidence = score !== null || Object.keys(dimensionScores).length > 0 || Object.keys(auditItems).length > 0 || Object.keys(checks).length > 0 || issues.length > 0 || Boolean(continuity);
+  const hasEvidence = score !== null || Object.keys(dimensionScores).length > 0 || Object.keys(auditItems).length > 0 || Object.keys(checks).length > 0 || issues.length > 0 || Boolean(continuity) || Boolean(reviewEvidence);
   const recommendation = chapter?.meta?.repair_recommendation as {
     action?: "repair_local" | "rewrite_chapter" | "replan_chapter";
     level?: string;
@@ -387,6 +399,17 @@ export function Review({
             </section>
           )}
 
+          {reviewEvidence && reviewEvidence.complete === false && (
+            <section className="review-evidence-warning starlume-card">
+              <strong>V7 证据链尚未完整</strong>
+              <span>
+                {reviewEvidence.missing?.length
+                  ? `缺少：${reviewEvidence.missing.join("、")}`
+                  : "本次结果只能作为待复核结果，页面不会把缺失证据补成通过。"}
+              </span>
+            </section>
+          )}
+
           <section className="review-dimensions starlume-card">
             <div className="section-heading"><div><p className="eyebrow">SEVEN DIMENSIONS</p><h3>核心质量维度</h3></div><span>{numericDimensionScores.length} 项有分数</span></div>
             <div className="dimension-grid">
@@ -411,6 +434,7 @@ export function Review({
               <div><strong>{auditReport ? `${Math.round((auditReport.coverage ?? 0) * 100)}%` : "—"}</strong><span>模型逐项覆盖</span></div>
               <div><strong>{auditReport?.complete ? "完整" : auditReport ? "兼容" : "未返回"}</strong><span>{auditReport?.source === "macro_projection" ? "部分由七维分数折算" : "审计契约状态"}</span></div>
               <div><strong>{statusLabel(continuity?.status)}</strong><span>跨章连续性</span></div>
+              <div><strong>{reviewEvidence ? (reviewEvidence.complete ? "完整" : "待补齐") : "未返回"}</strong><span>V7 证据链</span></div>
             </div>
             {Object.keys(auditItems).length > 0 ? (
               <div className="review-audit-groups">

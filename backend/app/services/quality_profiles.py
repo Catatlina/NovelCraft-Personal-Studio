@@ -13,6 +13,8 @@ from typing import Any
 
 from .content_policy import content_generation_contract
 from .pov_quality import THIRD_PERSON_NARRATIVE_POLICY, third_person_generation_contract
+from ..v7.quality.failure_patterns import generation_constraints, failure_pattern_metadata
+from ..v7.quality.payoff_strategy import select_payoff_strategy, strategy_metadata
 
 
 QUALITY_PROFILE_SCHEMA_VERSION = "webnovel-quality-profile-v1"
@@ -62,8 +64,8 @@ _SUBGENRE_ALIASES = {
     "升级流": "xuanhuan_upgrade",
     "传统玄幻": "xuanhuan_upgrade",
     "凡人流": "xuanhuan_mortal",
-    "苟道": "xuanhuan_mortal",
-    "苟道流": "xuanhuan_mortal",
+    "苟道": "xuanhuan_cautious",
+    "苟道流": "xuanhuan_cautious",
     "长生": "xuanhuan_longlife",
     "长生流": "xuanhuan_longlife",
     "长生苟道": "xuanhuan_longlife",
@@ -211,6 +213,19 @@ _SUBGENRE_PROFILES: dict[str, dict[str, Any]] = {
         "payoff_types": ["resource_gain", "information_advantage", "survival", "hidden_strength", "breakthrough"],
         "ledgers": ["资源库存", "风险暴露", "底牌", "人情债", "伤势与恢复"],
     },
+    "xuanhuan_cautious": {
+        "label": "苟道流",
+        "opening_rules": [
+            "先处理一个必须马上解决的生存、资源或身份风险，再展示主角的谨慎收益",
+            "苟不是停滞，每章至少让资源、信息、关系、身份或风险发生可见变化",
+        ],
+        "payoff_types": ["survival", "resource_gain", "information_advantage", "hidden_strength", "rule_exploit", "reveal"],
+        "style_rules": [
+            "主角的谨慎要通过具体选择和后果体现，不能反复用‘小心谨慎’概括",
+            "底牌揭示必须改变对手判断或下一步风险，不能只作为角色介绍",
+        ],
+        "ledgers": ["资源库存", "风险暴露", "底牌", "身份伪装", "人情债"],
+    },
     "xuanhuan_epic": {
         "label": "史诗玄幻",
         "opening_rules": ["大谜团必须落在当前人物能感知的具体事件里", "每次扩张世界前先回收或推进一个近景问题"],
@@ -267,6 +282,7 @@ _STYLE_PLUGINS: dict[str, dict[str, Any]] = {
         "compatible_genres": {"xuanhuan"},
         "compatible_subgenres": {
             "xuanhuan_mortal",
+            "xuanhuan_cautious",
             "xuanhuan_system",
             "xuanhuan_longlife",
         },
@@ -471,6 +487,7 @@ def select_quality_profile(
         ),
         "style_plugin_soft_metrics": deepcopy(active_plugin.get("soft_metrics") or {}),
         "payoff_policy": deepcopy(platform_data.get("payoff_policy", {})),
+        "payoff_strategy": select_payoff_strategy(platform_key, genre_key, subgenre_key),
         # Product-wide narrative contract.  It is intentionally not an
         # author-style override: all current web-novel profiles use third
         # person in narration, while quoted character voice may still use
@@ -478,6 +495,17 @@ def select_quality_profile(
         "narrative_pov": THIRD_PERSON_NARRATIVE_POLICY,
         "provenance": _unique(list(_SOURCE_PACKS) + active_plugin.get("provenance", [])),
     }
+    strategy = merged["payoff_strategy"]
+    merged["payoff_policy"].update({
+        "max_low_payoff_streak": strategy.get("max_low_payoff_streak"),
+        "early_chapters_need_payoff": strategy.get("early_chapter_count"),
+        "early_min_payoff_intensity": strategy.get("early_min_intensity"),
+        "default_payoff_intensity": strategy.get("default_intensity"),
+        "feedback_required": bool(strategy.get("feedback_required")),
+        "payoff_type_cycle": list(strategy.get("type_cycle") or []),
+        "no_repeat_window": int(strategy.get("no_repeat_window") or 0),
+    })
+    merged["failure_pattern_constraints"] = generation_constraints(profile=merged)
     # Project-level explicit settings are additive, never a replacement for
     # the built-in safety contract.
     for key in ("opening_rules", "chapter_rules", "style_rules", "anti_ai_rules", "ledgers", "payoff_types", "attention_beat_rules"):
@@ -496,6 +524,31 @@ def select_quality_profile(
                 "feedback_required_types",
             }
         })
+    if isinstance(overrides.get("payoff_strategy"), dict):
+        # Project-level strategy overrides can tune the curve, but cannot
+        # remove the safety/continuity contract or replace the selected
+        # platform/genre strategy wholesale.
+        merged["payoff_strategy"].update({
+            key: value
+            for key, value in overrides["payoff_strategy"].items()
+            if key in {
+                "label", "default_intensity", "early_min_intensity",
+                "early_chapter_count", "max_low_payoff_streak",
+                "feedback_required", "no_repeat_window", "type_cycle",
+                "directive",
+            }
+        })
+        strategy = merged["payoff_strategy"]
+        merged["payoff_policy"].update({
+            "max_low_payoff_streak": strategy.get("max_low_payoff_streak"),
+            "early_chapters_need_payoff": strategy.get("early_chapter_count"),
+            "early_min_payoff_intensity": strategy.get("early_min_intensity"),
+            "default_payoff_intensity": strategy.get("default_intensity"),
+            "feedback_required": bool(strategy.get("feedback_required")),
+            "payoff_type_cycle": list(strategy.get("type_cycle") or []),
+            "no_repeat_window": int(strategy.get("no_repeat_window") or 0),
+        })
+    merged["failure_pattern_constraints"] = generation_constraints(profile=merged)
     merged["attention_beat_policy"] = {
         "soft": True,
         "description": "以读者注意力节点为软基线，不按固定字数硬切段或硬塞爽点",
@@ -564,16 +617,66 @@ def compile_quality_directive(
     if attention_rules:
         lines.append("读者注意力基线（软规则）：「" + "；".join(attention_rules) + "」。")
     payoff_policy = profile.get("payoff_policy") or {}
+    payoff_strategy = profile.get("payoff_strategy") or {}
+    chapter_mode = str(
+        (chapter_function or {}).get("chapter_type")
+        or (chapter_function or {}).get("chapter_mode")
+        or "normal"
+    ).strip().lower()
+    mode_policy = (payoff_strategy.get("chapter_modes") or {}).get(chapter_mode) or {}
+    active_choice_required = bool(mode_policy.get("active_choice_required", True))
+    visible_feedback_required = bool(
+        mode_policy.get("visible_feedback_required", payoff_strategy.get("feedback_required", False))
+    )
+    if payoff_strategy:
+        lines.append(
+            "爽点策略："
+            f"{payoff_strategy.get('label') or payoff_strategy.get('strategy_id')}; "
+            f"类型轮换窗口={payoff_strategy.get('no_repeat_window', 0)}章；"
+            f"优先类型={'、'.join(str(item) for item in (payoff_strategy.get('type_cycle') or [])[:6])}。"
+        )
+        if payoff_strategy.get("directive"):
+            lines.append("策略执行重点：" + str(payoff_strategy["directive"]))
     payoff_floor = str(
         payoff_policy.get("early_min_payoff_intensity")
         if seq <= int(payoff_policy.get("early_chapters_need_payoff") or 0)
         else payoff_policy.get("default_payoff_intensity") or "small"
     )
     payoff_streak = int(payoff_policy.get("max_low_payoff_streak") or 1)
+    action_rule = (
+        "本章必须由主角主动选择造成一处可见变化"
+        if active_choice_required
+        else "本章可以承接前章后果，但必须兑现前章后果或制造新的可见压力"
+    )
+    feedback_rule = "本章必须有可见外部反馈" if visible_feedback_required else "反馈可通过资源、关系、信息或风险变化体现，不强制围观"
     lines.append(
-        "爽点执行协议（生成前硬约束）：一章至少完成一处由主角主动选择造成的可见变化；"
+        f"爽点执行协议（生成前硬约束，章节类型={chapter_mode}）：{action_rule}；{feedback_rule}；"
         f"当前阶段爽点强度不低于{payoff_floor}档，不能连续超过{payoff_streak}章只有铺垫没有兑现。"
     )
+    recent_types = [
+        str(item).strip()
+        for item in (chapter_function or {}).get("recent_payoff_types") or []
+        if str(item).strip()
+    ]
+    if recent_types:
+        lines.append(
+            "最近已使用爽点类型："
+            + "、".join(recent_types[-6:])
+            + "；本章优先选择策略轮换中尚未连续出现的类型，避免复制上一章反馈。"
+        )
+    pattern_rules = [
+        item for item in (profile.get("failure_pattern_constraints") or [])
+        if isinstance(item, dict) and item.get("constraint")
+    ]
+    if pattern_rules:
+        lines.append(
+            "历史报告失败模式（本次生成前预防）："
+            + "；".join(
+                f"{item.get('id')}[{item.get('severity')}] {item.get('constraint')}"
+                for item in pattern_rules[:6]
+            )
+            + "。"
+        )
     lines.append(
         "爽点五步法可压缩进4-6个节拍：压制（让读者感到损失/风险）→蓄力（给出选择、依据或底牌）"
         "→爆发（行动造成明确结果）→反馈（对手、组织、资源、规则或旁观者发生可见变化）"
@@ -646,6 +749,14 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "style_plugin_label": profile.get("style_plugin_label", ""),
         "narrative_pov": profile.get("narrative_pov", THIRD_PERSON_NARRATIVE_POLICY),
         "payoff_policy": deepcopy(profile.get("payoff_policy") or {}),
+        "payoff_strategy": strategy_metadata(profile.get("payoff_strategy") or {}),
+        "failure_patterns": failure_pattern_metadata(
+            pattern_ids=[
+                str(item.get("id"))
+                for item in (profile.get("failure_pattern_constraints") or [])
+                if isinstance(item, dict) and item.get("id")
+            ]
+        ),
         "ledgers": list(profile.get("ledgers") or []),
         "style_plugin_soft_metrics": deepcopy(profile.get("style_plugin_soft_metrics") or {}),
         "provenance": list(profile.get("provenance") or []),

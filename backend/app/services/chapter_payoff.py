@@ -12,6 +12,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Any
 
+from app.v7.quality.payoff_strategy import choose_payoff_type
+
 
 PAYOFF_SCHEMA_VERSION = "chapter-payoff-contract-v2"
 PAYOFF_INTENSITY_LEVELS = ("small", "medium", "high", "peak")
@@ -324,6 +326,7 @@ def normalize_payoff_contract(value: Any, *, chapter_number: int | None = None) 
     return {
         "schema_version": str(data.get("schema_version") or PAYOFF_SCHEMA_VERSION),
         "chapter_number": int(data.get("chapter_number") or chapter_number or 0),
+        "chapter_type": _first(data, "chapter_type", "chapter_mode") or "normal",
         "reader_promise": _first(data, "reader_promise", "reader_expectation", "promise"),
         "pressure": _first(data, "pressure", "conflict", "tension_target", "stakes"),
         "active_choice": _first(data, "active_choice", "choice", "decision", "action"),
@@ -353,13 +356,28 @@ def build_payoff_contract(
     *,
     chapter_number: int | None = None,
     profile: dict[str, Any] | None = None,
+    recent_types: list[str] | None = None,
+    chapter_function: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a contract from outline/plot fields without inventing facts."""
     data = value if isinstance(value, dict) else {}
     contract = normalize_payoff_contract(data, chapter_number=chapter_number)
+    if isinstance(chapter_function, dict):
+        contract["chapter_type"] = str(
+            chapter_function.get("chapter_type")
+            or chapter_function.get("chapter_mode")
+            or contract.get("chapter_type")
+            or "normal"
+        ).strip().lower()
     if not contract["payoff_type"]:
-        genre = str((profile or {}).get("genre") or "")
-        contract["payoff_type"] = "breakthrough" if genre == "xuanhuan" else "status_reversal"
+        profile = profile if isinstance(profile, dict) else {}
+        contract["payoff_type"] = choose_payoff_type(
+            profile.get("payoff_strategy") or {},
+            chapter_number=int(chapter_number or 1),
+            allowed_types=profile.get("payoff_types") or [],
+            recent_types=recent_types or [],
+        )
+        contract["payoff_type_source"] = "strategy_rotation"
     if not _first(data, "payoff_intensity", "intensity", "level", "payoff_level"):
         policy = (profile or {}).get("payoff_policy") or {}
         early_limit = int(policy.get("early_chapters_need_payoff") or 0)
@@ -441,6 +459,7 @@ def validate_payoff_contract(
     *,
     profile: dict[str, Any] | None = None,
     required: bool = False,
+    chapter_function: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate the minimum commercial-narrative contract.
 
@@ -449,10 +468,24 @@ def validate_payoff_contract(
     readable while new chapters cannot silently omit the reader promise.
     """
     contract = normalize_payoff_contract(value)
-    hard_fields = ("reader_promise", "pressure", "active_choice", "visible_result", "next_pressure")
+    profile = profile if isinstance(profile, dict) else {}
+    strategy = profile.get("payoff_strategy") or {}
+    chapter_function = chapter_function if isinstance(chapter_function, dict) else {}
+    if not chapter_function and contract.get("chapter_type"):
+        chapter_function = {"chapter_type": contract.get("chapter_type")}
+    chapter_mode = str(
+        chapter_function.get("chapter_type")
+        or chapter_function.get("chapter_mode")
+        or "normal"
+    ).strip().lower()
+    mode_policy = (strategy.get("chapter_modes") or {}).get(chapter_mode) or {}
+    active_choice_required = bool(mode_policy.get("active_choice_required", True))
+    hard_fields = ("reader_promise", "pressure", "visible_result", "next_pressure")
+    if active_choice_required:
+        hard_fields = (*hard_fields[:2], "active_choice", *hard_fields[2:])
     missing = [key for key in hard_fields if not contract.get(key)]
     soft_missing = [key for key in ("cost", "payoff_feedback") if not contract.get(key)]
-    policy = (profile or {}).get("payoff_policy") or {}
+    policy = profile.get("payoff_policy") or {}
     raw_type = _first(
         value if isinstance(value, dict) else {},
         "payoff_type",
@@ -482,8 +515,12 @@ def validate_payoff_contract(
     if required and intensity_score < PAYOFF_INTENSITY_SCORES.get(min_intensity, 1):
         strength_issues.append(f"爽点强度低于{min_intensity}档")
     feedback_types = set(policy.get("feedback_required_types") or PAYOFF_FEEDBACK_TYPES)
+    feedback_required = bool(
+        mode_policy.get("visible_feedback_required", policy.get("feedback_required", False))
+    )
     if required and (
-        contract.get("payoff_type") in feedback_types
+        feedback_required
+        or contract.get("payoff_type") in feedback_types
         or intensity in {"high", "peak"}
     ) and not contract.get("payoff_feedback"):
         strength_issues.append("缺少可见反馈（可为对手/组织/资源/规则后果，不要求固定围观群众）")
@@ -501,6 +538,9 @@ def validate_payoff_contract(
         "intensity": intensity,
         "intensity_score": intensity_score,
         "minimum_intensity": min_intensity,
+        "chapter_mode": chapter_mode,
+        "active_choice_required": active_choice_required,
+        "visible_feedback_required": feedback_required,
         "contract": contract,
     }
 
@@ -561,6 +601,202 @@ def validate_payoff_evidence(
         "required": required,
         "checked": checked,
         "invalid": invalid,
+    }
+
+
+def validate_payoff_variety(
+    payoff_type: str,
+    recent_types: list[str] | None = None,
+    *,
+    profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Keep repeated payoff types from becoming a chapter template.
+
+    A single repeated type is a warning because a legitimate scene arc may
+    need it twice.  The gate only fails when the same type occupies the whole
+    configured rotation window and an alternative exists for the profile.
+    """
+    profile = profile if isinstance(profile, dict) else {}
+    strategy = profile.get("payoff_strategy") or {}
+    current = str(payoff_type or "").strip()
+    recent = [str(item).strip() for item in (recent_types or []) if str(item).strip()]
+    window = max(2, int(strategy.get("no_repeat_window") or 3))
+    tail = recent[-window:]
+    cycle = [str(item) for item in strategy.get("type_cycle") or [] if str(item)]
+    alternatives = [item for item in cycle if item != current]
+    repeated = bool(current and current in tail)
+    streak = 0
+    for item in reversed(recent):
+        if item != current:
+            break
+        streak += 1
+    blocked = bool(current and streak >= window and alternatives)
+    return {
+        "schema_version": PAYOFF_SCHEMA_VERSION,
+        "passed": not blocked,
+        "payoff_type": current,
+        "recent_types": recent[-8:],
+        "window": window,
+        "repeated": repeated,
+        "streak": streak,
+        "alternatives": alternatives[:6],
+        "warning": "本章爽点类型与近期重复，优先换用策略轮换类型" if repeated else "",
+        "issue": "同一爽点类型已连续占满轮换窗口，需重新规划" if blocked else "",
+    }
+
+
+def score_payoff_contract(
+    value: Any,
+    *,
+    profile: dict[str, Any] | None = None,
+    text: str = "",
+    recent_types: list[str] | None = None,
+    recent_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Produce an explainable reader-payoff score from contract evidence.
+
+    This is intentionally deterministic.  It measures whether the chapter
+    plan made a real promise and supplied an observable result; it does not
+    pretend to measure literary value or replace a blind review.
+    """
+    contract = normalize_payoff_contract(value)
+    source_text = str(text or "")
+    result_anchor = str(contract.get("visible_result") or "").strip()
+    feedback = str(contract.get("payoff_feedback") or "").strip()
+    next_pressure = str(contract.get("next_pressure") or "").strip()
+    result_visible = bool(result_anchor) and (
+        result_anchor in source_text
+        or (
+            len(_anchor_key(result_anchor)) >= 8
+            and _anchor_key(result_anchor) in _anchor_key(source_text)
+        )
+    )
+    variety = validate_payoff_variety(
+        contract.get("payoff_type"),
+        recent_types,
+        profile=profile,
+    )
+    strategy = profile.get("payoff_strategy") or {}
+    history = [
+        item for item in (recent_history or [])
+        if isinstance(item, dict) and item.get("chapter_number") is not None
+    ]
+    history.append({
+        "chapter_number": contract.get("chapter_number"),
+        "payoff_type": contract.get("payoff_type"),
+        "payoff_intensity": contract.get("payoff_intensity") or "small",
+    })
+    intensity_values = [
+        PAYOFF_INTENSITY_SCORES.get(str(item.get("payoff_intensity") or "small"), 1)
+        for item in history
+    ]
+    type_values = [
+        str(item.get("payoff_type") or "").strip()
+        for item in history
+        if str(item.get("payoff_type") or "").strip()
+    ]
+    max_low_streak = max(1, int((profile.get("payoff_policy") or {}).get("max_low_payoff_streak") or 2))
+    five_chapter_values = intensity_values[-5:]
+    five_chapter_streak = 0
+    five_chapter_max_streak = 0
+    for item in five_chapter_values:
+        if item <= 1:
+            five_chapter_streak += 1
+            five_chapter_max_streak = max(five_chapter_max_streak, five_chapter_streak)
+        else:
+            five_chapter_streak = 0
+    five_chapter_ready = len(five_chapter_values) >= 5
+    five_chapter_score = (
+        100
+        if five_chapter_ready and five_chapter_max_streak <= max_low_streak
+        else 65
+        if five_chapter_ready
+        else 50
+    )
+    if five_chapter_ready and len(set(five_chapter_values)) >= 2:
+        five_chapter_score = min(100, five_chapter_score + 10)
+    twenty_chapter_values = intensity_values[-20:]
+    twenty_chapter_types = type_values[-20:]
+    twenty_chapter_ready = len(twenty_chapter_values) >= 20
+    twenty_type_diversity = (
+        len(set(twenty_chapter_types)) / len(twenty_chapter_types)
+        if twenty_chapter_types
+        else 0.0
+    )
+    twenty_chapter_score = (
+        round(min(100, 60 + twenty_type_diversity * 40))
+        if twenty_chapter_ready
+        else 50
+    )
+    if twenty_chapter_ready and max(five_chapter_values or [1]) <= 1:
+        twenty_chapter_score = max(0, twenty_chapter_score - 20)
+    dimensions = {
+        "expectation_fulfillment": 100 if contract.get("reader_promise") and result_anchor else 0,
+        "protagonist_agency": 100 if contract.get("active_choice") else 0,
+        "result_visibility": 100 if result_visible else (55 if result_anchor else 0),
+        "feedback_effectiveness": 100 if feedback else 0,
+        "payoff_intensity": round(
+            PAYOFF_INTENSITY_SCORES.get(str(contract.get("payoff_intensity") or "small"), 1) / 4 * 100
+        ),
+        "hook_strength": 100 if next_pressure else 0,
+        "payoff_variety": 65 if variety.get("repeated") else 100,
+        "five_chapter_curve": five_chapter_score,
+        "twenty_chapter_distribution": twenty_chapter_score,
+    }
+    weights = {
+        "expectation_fulfillment": 0.15,
+        "protagonist_agency": 0.15,
+        "result_visibility": 0.15,
+        "feedback_effectiveness": 0.12,
+        "payoff_intensity": 0.10,
+        "hook_strength": 0.14,
+        "payoff_variety": 0.07,
+        "five_chapter_curve": 0.06,
+        "twenty_chapter_distribution": 0.06,
+    }
+    score = round(sum(dimensions[key] * weights[key] for key in dimensions), 1)
+    return {
+        "schema_version": PAYOFF_SCHEMA_VERSION,
+        "score": score,
+        "passed": score >= 70,
+        "source": "deterministic_contract",
+        "dimensions": dimensions,
+        "weights": weights,
+        "evidence": {
+            "reader_promise": bool(contract.get("reader_promise")),
+            "active_choice": bool(contract.get("active_choice")),
+            "visible_result": result_visible,
+            "payoff_feedback": bool(feedback),
+            "next_pressure": bool(next_pressure),
+            "payoff_type": contract.get("payoff_type") or "",
+            "five_chapter_curve": {
+                "ready": five_chapter_ready,
+                "sample_count": len(five_chapter_values),
+                "required": 5,
+                "max_low_payoff_streak": five_chapter_max_streak,
+                "allowed_low_payoff_streak": max_low_streak,
+            },
+            "twenty_chapter_distribution": {
+                "ready": twenty_chapter_ready,
+                "sample_count": len(twenty_chapter_values),
+                "required": 20,
+                "type_diversity": round(twenty_type_diversity, 3),
+                "types": sorted(set(twenty_chapter_types)),
+                "strategy": strategy.get("strategy_id"),
+            },
+        },
+        "variety": variety,
+        "warnings": [
+            message
+            for message in (
+                "正文中未定位到契约声明的可见结果" if result_anchor and not result_visible else "",
+                "本章爽点类型与近期重复" if variety.get("repeated") else "",
+                "爽点契约综合分低于 70" if score < 70 else "",
+                "五章爽点曲线样本不足，暂不判定" if not five_chapter_ready else "",
+                "二十章爽点分布样本不足，暂不判定" if not twenty_chapter_ready else "",
+            )
+            if message
+        ],
     }
 
 

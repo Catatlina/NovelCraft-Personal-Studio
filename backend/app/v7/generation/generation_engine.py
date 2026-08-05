@@ -31,6 +31,7 @@ from ...services.ai_runtime import (
 )
 from ...services.unified_gateway import UnifiedAIGateway
 from ...services.text_quality import (
+    chapter_mirror_stats,
     deduplicate_full_paragraphs,
     duplicate_paragraph_stats,
     normalize_and_validate_rewrite,
@@ -39,6 +40,8 @@ from ...services.chapter_payoff import (
     build_payoff_contract,
     validate_payoff_beat_structure,
     validate_payoff_contract,
+    validate_payoff_variety,
+    score_payoff_contract,
 )
 from ...services.content_policy import analyze_content_policy, content_generation_contract
 from ...services.quality_profiles import (
@@ -284,10 +287,22 @@ class ContextAssembler:
         constraints = await self.brain.constraints.list_constraints(limit=50)
         style_card = await self.load_style_card()
         active_rules = await self.brain.rules.active_instructions(chapter_number=chapter_number)
+        quality_learning = []
+        quality_store = getattr(self.brain, "quality_learning", None)
+        if quality_store is not None:
+            quality_learning = await quality_store.active_recommendations(
+                chapter_number=chapter_number,
+                limit=4,
+            )
 
         previous = await self.load_previous_chapters(
             chapter_number,
             count=3,
+            include_rejected=include_rejected,
+        )
+        payoff_history_chapters = await self.load_previous_chapters(
+            chapter_number,
+            count=20,
             include_rejected=include_rejected,
         )
         recap_parts: list[str] = []
@@ -300,7 +315,9 @@ class ContextAssembler:
                 )
         last_tail = ""
         previous_transition_contract: dict[str, Any] = {}
-        if previous:
+        recent_payoff_types: list[str] = []
+        recent_payoff_history: list[dict[str, Any]] = []
+        if payoff_history_chapters:
             last_text = previous[-1].get("text") or ""
             # The old 400-character tail was too short to carry a scene's
             # actor/location/object state into the next chapter.  Keep a
@@ -313,6 +330,21 @@ class ContextAssembler:
                     "provisional": True,
                     "warning": "上一章尚未通过质量复核；可承接事实，但不得把未确认状态当作真相写死。",
                 }
+            for previous_chapter in payoff_history_chapters:
+                previous_contract = previous_chapter.get("payoff_contract") or {}
+                payoff_type = str(previous_contract.get("payoff_type") or "").strip()
+                if payoff_type:
+                    recent_payoff_types.append(payoff_type)
+                if payoff_type or previous_contract.get("payoff_intensity"):
+                    recent_payoff_history.append({
+                        "chapter_number": previous_chapter.get("chapter_number"),
+                        "payoff_type": payoff_type,
+                        "payoff_intensity": previous_contract.get("payoff_intensity") or "small",
+                        "payoff_score": (
+                            previous_chapter.get("payoff_score")
+                            or (previous_chapter.get("generation_quality") or {}).get("payoff_score")
+                        ),
+                    })
 
         layers = {
             "story_state": {
@@ -355,9 +387,15 @@ class ContextAssembler:
             ],
             "recap": recap_parts,
             "previous_tail": last_tail,
+            # Kept out of the rendered prompt; used only by the deterministic
+            # mirror detector after the new chapter is generated.
+            "previous_full_text": previous[-1].get("text") if previous else "",
             "previous_transition_contract": previous_transition_contract,
+            "recent_payoff_types": recent_payoff_types[-8:],
+            "recent_payoff_history": recent_payoff_history[-20:],
             "style_card": style_card,
             "active_rules": active_rules,
+            "quality_learning": quality_learning,
         }
 
         rendered = self.render(layers)
@@ -446,6 +484,18 @@ class ContextAssembler:
                 )
             )
 
+        quality_learning = layers.get("quality_learning") or []
+        if quality_learning:
+            blocks.append(
+                "【本项目正负样本学习提示（达到灰度门槛后才会出现）】\n"
+                + "\n".join(
+                    f"- {item.get('instruction')}（样本{item.get('sample_count', 0)}，"
+                    f"正向率{float(item.get('positive_rate') or 0) * 100:.0f}%）"
+                    for item in quality_learning[:4]
+                    if isinstance(item, dict) and item.get("instruction")
+                )
+            )
+
         recap = layers.get("recap", [])
         if recap:
             blocks.append("【前情提要】\n" + "\n".join(recap))
@@ -473,6 +523,7 @@ class ContextAssembler:
             "previous_tail": layers.get("previous_tail", ""),
             "style_card": layers.get("style_card", {}),
             "active_rules": layers.get("active_rules", []),
+            "quality_learning": layers.get("quality_learning", []),
         }
         anchor = cls.render(anchor_layers)
         state_blob = cls.render(
@@ -575,6 +626,7 @@ class SceneDirector:
             "hook": plot_brief.get("hook"),
             "reader_promise": plot_brief.get("reader_promise"),
             "payoff_contract": plot_brief.get("payoff_contract") or {},
+            "chapter_type": plot_brief.get("chapter_type") or plot_brief.get("chapter_mode") or "normal",
             "emotional_target": plot_brief.get("emotional_target"),
             "opening_anchor": plot_brief.get("opening_anchor"),
             "risks": plot_brief.get("risks") or [],
@@ -640,6 +692,7 @@ class SceneDirector:
             "{\n"
             '  "chapter_title": "本章标题",\n'
             '  "scene_goal": "本章要达成的叙事目的",\n'
+            '  "chapter_type": "normal|aftermath|relationship|suspense",\n'
             '  "beats": [{"name":"节拍名","purpose":"作用","content":"要写什么",'
             '"emotion":"情绪","target_words":800,"payoff_phase":"pressure|build|burst|feedback|aftershock"}],\n'
             '  "pov_character": "视角人物",\n'
@@ -663,6 +716,7 @@ class SceneDirector:
             "严格覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段；"
             "至少有一个 beat 明确写 build（压制后的试探、准备、取舍或蓄力），不能把连续的压力描述冒充 build。"
             "chapter_title 必须是 2-12 字的事件、物件、冲突或情绪短标题；"
+            "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
             "禁止写成剧情摘要、操作说明或元叙述，禁止出现‘第X章’、‘本章’、"
             "‘主角在……发现……’、‘读者将……’等模板。"
         )
@@ -691,6 +745,9 @@ class SceneDirector:
         )
         plan.setdefault("beats", [])
         plan["chapter_number"] = chapter_number
+        plan["chapter_type"] = str(plan.get("chapter_type") or "normal").strip().lower()
+        if plan["chapter_type"] not in {"normal", "aftermath", "relationship", "suspense"}:
+            plan["chapter_type"] = "normal"
         plan["target_word_count"] = target_word_count
         plan["_usage"] = result["usage"]
         return plan
@@ -962,6 +1019,20 @@ class DeAIPipeline:
 
         if self.gateway is None:
             raise AIGatewayError("semantic final_humanize gateway is not configured")
+        payoff_contract = payoff_contract if isinstance(payoff_contract, dict) else {}
+        protected_payoff_fields = (
+            ("主动选择", "active_choice"),
+            ("爆发结果", "visible_result"),
+            ("可见反馈", "payoff_feedback"),
+            ("章末压力", "next_pressure"),
+            ("关键证据锚点", "text_anchor"),
+        )
+        protected_payoff_lines = [
+            f"- {label}：{payoff_contract.get(key)}"
+            for label, key in protected_payoff_fields
+            if payoff_contract.get(key)
+        ]
+        protected_payoff_block = "\n".join(protected_payoff_lines) or "（本章没有单独提供可保护锚点，以正文事实为准）"
         humanize_prompt = (
             "请对下面这章小说执行最终人文化定稿。只改表达，不改事件、人物、"
             "因果、物品状态或对话信息；保留具体细节和自然分段。按四层检查："
@@ -978,6 +1049,8 @@ class DeAIPipeline:
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
             f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=payoff_contract, active_rules=active_rules)}\n\n"
+            "【爽点保护锚点】以下内容必须保留其事实、因果和读者可见性；可以调整措辞，不能删除、弱化成抽象总结或改成原文没有的事件：\n"
+            f"{protected_payoff_block}\n\n"
             "【爽点保真】保留并强化本章已经写出的压制、主动选择、爆发结果、可见反馈和余波；"
             "去 AI 味只改表达，不得把强反馈改成平铺直叙，不得删掉对手态度、资源变化、规则后果或新的压力；"
             "不得为了制造爽点新增原文没有的事件。\n"
@@ -2063,6 +2136,13 @@ class GenerationEngine:
                 confidence=float(scene_plan.get("confidence", 0.8) or 0.8),
             )
 
+        scene_plan["recent_payoff_types"] = list(
+            (context.get("context_layers") or {}).get("recent_payoff_types") or []
+        )[-8:]
+        scene_plan["recent_payoff_history"] = list(
+            (context.get("context_layers") or {}).get("recent_payoff_history") or []
+        )[-20:]
+
         # The payoff contract is a generation input, not only a review field.
         # Normalise it before the writer and humanizer see the chapter so a
         # missing/weak plan cannot be hidden by a later prose score.
@@ -2071,17 +2151,26 @@ class GenerationEngine:
             scene_plan.get("payoff_contract") or {},
             chapter_number=chapter_number,
             profile=self.quality_profile,
+            recent_types=(context.get("context_layers") or {}).get("recent_payoff_types") or [],
+            chapter_function=scene_plan,
         )
         scene_plan["payoff_contract"] = payoff_contract
         payoff_validation = validate_payoff_contract(
             payoff_contract,
             profile=self.quality_profile,
             required=payoff_contract_required,
+            chapter_function=scene_plan,
+        )
+        payoff_variety = validate_payoff_variety(
+            payoff_contract.get("payoff_type"),
+            scene_plan.get("recent_payoff_types") or [],
+            profile=self.quality_profile,
         )
         payoff_beat_validation = validate_payoff_beat_structure(
             scene_plan.get("beats") or []
         )
         scene_plan["payoff_validation"] = payoff_validation
+        scene_plan["payoff_variety"] = payoff_variety
         scene_plan["payoff_beat_validation"] = payoff_beat_validation
 
         # Step: AI generation (at most one quality-checked continuation)
@@ -2282,6 +2371,17 @@ class GenerationEngine:
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
         generation_failures = [*preflight_failures, *continuation_failures]
+        mirror_stats = chapter_mirror_stats(
+            final_text,
+            previous_text=str(context_layers.get("previous_full_text") or ""),
+        )
+        if not mirror_stats.get("passed"):
+            generation_failures.append({
+                "code": "chapter_mirror",
+                "severity": "high",
+                "message": "正文与自身前后半段或上一章高度镜像，不能进入完成状态",
+                "evidence": mirror_stats,
+            })
         if word_count < minimum_chapter_chars:
             generation_failures.append(
                 {
@@ -2353,6 +2453,20 @@ class GenerationEngine:
                 "message": "爽点节拍没有覆盖：" + "、".join(payoff_beat_validation.get("missing_phases") or []),
                 "evidence": payoff_beat_validation,
             })
+        if payoff_contract_required and not payoff_variety.get("passed"):
+            generation_failures.append({
+                "code": "payoff_type_repetition",
+                "severity": "high",
+                "message": payoff_variety.get("issue") or "本章爽点类型重复度过高",
+                "evidence": payoff_variety,
+            })
+        payoff_score = score_payoff_contract(
+            payoff_contract,
+            profile=self.quality_profile,
+            text=final_text,
+            recent_types=scene_plan.get("recent_payoff_types") or [],
+            recent_history=scene_plan.get("recent_payoff_history") or [],
+        )
         generation_quality = {
             "schema_version": "generation-quality-v1",
             "passed": not generation_failures,
@@ -2365,6 +2479,9 @@ class GenerationEngine:
             "content_policy": final_content_policy,
             "payoff_validation": payoff_validation,
             "payoff_beat_validation": payoff_beat_validation,
+            "payoff_variety": payoff_variety,
+            "payoff_score": payoff_score,
+            "chapter_mirror": mirror_stats,
             "quality_profile": quality_profile_metadata(self.quality_profile),
         }
 
@@ -2401,10 +2518,15 @@ class GenerationEngine:
                 "constraints": context["context_layers"].get("constraints", []),
                 "style_card": context["context_layers"].get("style_card", {}),
                 "active_rules": context["context_layers"].get("active_rules", []),
+                "recent_payoff_types": context["context_layers"].get("recent_payoff_types", []),
+                "recent_payoff_history": context["context_layers"].get("recent_payoff_history", []),
             },
             "scene_plan": scene_plan,
             "payoff_contract": payoff_contract,
             "payoff_validation": payoff_validation,
+            "payoff_variety": payoff_variety,
+            "payoff_score": payoff_score,
+            "chapter_mirror": mirror_stats,
             "pov_metrics": final_pov_metrics,
             "content_policy": final_content_policy,
             "quality_profile": quality_profile_metadata(self.quality_profile),
@@ -2568,6 +2690,7 @@ class GenerationEngine:
             "叙述模式：第三人称限知；对白/短信中的‘我’可以保留，叙述句中的‘我’不可以出现。\n"
             f"核心冲突：{scene_plan.get('conflict', '')}\n"
             f"节奏：{scene_plan.get('pacing', 'medium')}\n"
+            f"章节功能类型：{scene_plan.get('chapter_type') or scene_plan.get('chapter_mode') or 'normal'}\n"
             f"读者承诺：{scene_plan.get('reader_promise', '')}\n"
             f"情绪曲线：{scene_plan.get('emotional_target', '')}\n"
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"

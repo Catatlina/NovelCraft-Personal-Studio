@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.text_quality import (
+    chapter_mirror_stats,
     content_chars,
     deduplicate_full_paragraphs,
     duplicate_paragraph_stats,
@@ -75,3 +76,22 @@ def test_canonical_dedup_repair_removes_only_exact_full_paragraph_copies():
 
     assert repaired == "\n\n".join([first, second])
     assert evidence["removed_paragraphs"] == 1
+
+
+def test_chapter_mirror_stats_detects_a_chapter_repeated_as_two_halves():
+    first = "第一段推进冲突，人物做出选择，现场留下新的后果。" * 12
+    second = "第二段继续推进冲突，人物做出选择，现场留下新的后果。" * 12
+    chapter = "\n\n".join([first, second, first, second])
+    stats = chapter_mirror_stats(chapter)
+
+    assert stats["self_mirror"] is True
+    assert stats["passed"] is False
+
+
+def test_chapter_mirror_stats_does_not_block_distinct_adjacent_chapters():
+    current = "当前章节围绕交易展开，主角拿到一份新证据并改变计划。" * 18
+    previous = "上一章节围绕追踪展开，主角躲过一次检查并失去一件物品。" * 18
+    stats = chapter_mirror_stats(current, previous_text=previous)
+
+    assert stats["previous_mirror"] is False
+    assert stats["passed"] is True
