@@ -143,6 +143,39 @@ def test_continuity_does_not_block_resolved_plot_disruption():
     assert result["issues"] == []
 
 
+def test_unresolved_plot_disruption_remains_evidence_without_blocking():
+    conflicts = normalize_memory_conflicts(
+        [
+            {
+                "key": "第七层争夺",
+                "description": "白面具人欲取第七层，苏长庚必须守护。",
+                "severity": "high",
+                "conflict_type": "plot_disruption",
+                "resolution_status": "unresolved",
+            }
+        ]
+    )
+
+    result = validate_transition_contract(
+        {
+            "schema_version": "v2",
+            "chapter_number": 9,
+            "start_state": {"previous_transition_contract": {"chapter_number": 8}},
+            "end_state": {"last_tail": "守护", "summary": "敌人留下威胁"},
+            "next_chapter_bridge": "守护",
+            "state_delta": {},
+            "open_threads": [{"key": "第七层争夺"}],
+        },
+        chapter_number=9,
+        previous_contract={"chapter_number": 8},
+        state_conflicts=conflicts,
+    )
+
+    assert conflicts[0]["severity"] == "medium"
+    assert conflicts[0]["resolution_status"] == "unresolved"
+    assert result["passed"] is True
+
+
 def test_continuity_does_not_block_resolved_strategic_reveal():
     result = validate_transition_contract(
         {

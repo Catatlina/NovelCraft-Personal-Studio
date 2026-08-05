@@ -107,8 +107,13 @@ def normalize_memory_conflicts(
         item["conflict_type"] = conflict_type or "hard_fact"
         item["resolution_status"] = resolution_status or "unresolved"
         item["original_severity"] = str(item.get("severity") or "medium").lower()
-        if (
-            item["conflict_type"] in {"strategic_reveal", "plot_disruption"}
+        if item["conflict_type"] == "plot_disruption":
+            # An unresolved plot disruption is an open threat or changed goal,
+            # not a contradiction. Keep it as evidence for the next chapter,
+            # but never let the high label block a valid story hand-off.
+            item["severity"] = "medium"
+        elif (
+            item["conflict_type"] == "strategic_reveal"
             and item["resolution_status"] == "resolved"
         ):
             item["severity"] = "medium"
@@ -234,8 +239,8 @@ class MemoryEngine(BaseEngine):
             "summary 不超过 30 字，detail 和 evidence 各不超过 60 字，chapter_summary 不超过 80 字；"
             "不要重复已知设定，不要输出额外字段、Markdown 或解释。"
             "人物的表面意图与真实意图不同，且正文已经揭示时，标记为 strategic_reveal/resolved，"
-            "不要把它当作硬设定冲突；计划被事件打断、被迫改线属于 plot_disruption/resolved，"
-            "也不要阻断；只有时间线、资源、人物已知信息或未解决事实矛盾才标记为 high。"
+            "不要把它当作硬设定冲突；计划被事件打断、被迫改线或对手制造新阻力属于 plot_disruption，"
+            "即使仍未解决也不要标记为 high；只有时间线、资源、人物已知信息或未解决事实矛盾才标记为 high。"
         )
 
         try:
@@ -245,7 +250,7 @@ class MemoryEngine(BaseEngine):
                 max_tokens=1800,
                 temperature=0.2,
                 prompt_name="v7.memory.extract",
-                prompt_version="1.3.0",
+                prompt_version="1.4.0",
             )
         except AIGatewayError as exc:
             return EngineResult(
