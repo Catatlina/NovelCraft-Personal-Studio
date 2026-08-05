@@ -1,5 +1,17 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-06 AI 味词库与编辑会话
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| AI 味词库前台可查看、配置、编辑 | 可用 | `Settings.tsx`“质量规则”入口；11 类词库可开关、改名、改说明、增删词条；`Settings.quality.test.tsx` 覆盖读取、展开、添加、保存 | 推送部署后登录态页面复核 |
+| AI 味词库可持久化并回读 | 可用 | `/api/v1/quality/ai-flavor-lexicon` GET/PUT/RESET；现有 `settings` 表；`backend/app/api/v1/quality.py`；commit `760edd5` | 生产数据库保存/回读 smoke |
+| 词库参与生成前约束但不变成单词禁令 | 可用 | `render_ai_flavor_guidance` 注入生成、续写、人文化 Prompt；`mode=advisory`、`hard_gate=false`；V7 审阅保留原文证据和题材豁免 | 新 Prompt Provider 长跑与人工误伤评估 |
+| 编辑器支持自由输入 AI 修改意见 | 可用 | `EditorAiChat.tsx` 与 `EditorAiChat.test.tsx`；先生成预览，确认后才应用 | 生产登录态操作复核 |
+| 本批质量/真实性门禁 | 已验收 | 后端 `1035 passed`、前端 `49 passed`、TypeScript/lint/build、`verify_ai_truthfulness.py`、`ai_development_gate.sh` clean | 真实生成质量仍需独立外部验收 |
+
+本批“可用”仅表示代码和离线回归闭环，不表示生产质量或人工盲评已验收；真实 Provider 20 章、两位评审和最终读者体验仍按独立门禁处理。
+
 ## 2026-08-05 部署后真实证据补充
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |

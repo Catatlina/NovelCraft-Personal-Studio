@@ -1,6 +1,15 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-05
+> 更新时间：2026-08-06
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
+
+## 2026-08-06 本批交接：AI 味词库与编辑会话
+
+- 代码提交 `760edd5` 已完成本地验证，尚待推送和生产重建；不要把生产快照下方的 `d1253f2` 误认为已经包含本批变更。
+- AI 味词库实现位于 `backend/app/v7/quality/novel_reviewer_reference.py`，默认版本 `ai-flavor-lexicon-v2`，11 个分类；`backend/app/api/v1/quality.py` 提供读取、保存和恢复内置版本的接口，配置存入现有 `settings` 表。
+- 前台入口是 `frontend/src/components/Settings.tsx` 的“质量规则”标签；它支持分类/词条开关、编辑、增删、保存和恢复。词库明确是候选信号，不是禁词表；系统流、模拟器和面板术语按题材语境豁免。
+- 生成、续写、最终人文化和 V7 审阅都使用同一份候选词库指导；Prompt provenance 已同步更新。`EditorAiChat` 提供自由输入修改意见，生成结果仍先预览后应用。
+- 本地交付证据：后端 `1035 passed, 138 skipped, 1 xpassed`；前端 `49 passed`；TypeScript/lint、build、`verify_ai_truthfulness.py`、`GATE_ALLOW_WARNINGS=1 bash scripts/ai_development_gate.sh` 均通过，后一个命令实际结果为 clean，不依赖 warning 放行。
+- 未完成边界：本批尚未推送/部署；新 Prompt 真实 Provider 20 章长跑、两位人工盲评和最终生成质量验收仍保持原状态，不能用本地回归替代。
 
 ## 当前部署快照（2026-08-05）
 
