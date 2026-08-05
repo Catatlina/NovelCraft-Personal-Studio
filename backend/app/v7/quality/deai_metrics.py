@@ -85,8 +85,15 @@ def _repeated_paragraph_opening(text: str) -> dict[str, Any]:
         first = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", paragraph.strip())
         if first:
             # Two characters retain useful signals such as ``顾沉``/``他把``
-            # while avoiding a false positive for the generic ``他``/``她``.
-            openings[first[:2]] += 1
+            # while avoiding a false positive for generic pronoun-led prose.
+            # The latter must be skipped as a whole two-character prefix:
+            # after a safe fallback repair, ``他把``/``他在`` is still a
+            # perfectly ordinary third-person opening and must not replace a
+            # real repeated-name signal.
+            opening = first[:2]
+            if opening[:1] in "他她它我你":
+                continue
+            openings[opening] += 1
     opening, count = openings.most_common(1)[0] if openings else ("", 0)
     return {
         "opening": opening,

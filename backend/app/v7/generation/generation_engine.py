@@ -884,6 +884,108 @@ class DeAIPipeline:
             "不得删掉事件，也不要把它机械替换成另一个单一口头禅。"
         )
 
+    @staticmethod
+    def _deterministic_paragraph_opening_repair(
+        text: str,
+        opening: str,
+        *,
+        max_ratio: float = 0.25,
+    ) -> tuple[str, dict[str, Any]]:
+        """Safely reduce repeated named-character paragraph openings.
+
+        A targeted Provider repair is preferred because it can choose a more
+        natural action or object lead.  If that small request returns an empty
+        or malformed result, however, the whole chapter must not be rejected
+        when a lossless local repair is possible.  This fallback only changes
+        a few leading occurrences of a specific two-character name to the
+        neutral third-person pronoun ``他``; it never merges, deletes, or
+        invents paragraphs and it skips quoted dialogue openings.
+        """
+        source = str(text or "")
+        opening = str(opening or "").strip()
+        evidence: dict[str, Any] = {
+            "mode": "deterministic",
+            "opening": opening,
+            "applied": False,
+            "replaced_count": 0,
+            "before_ratio": 0.0,
+            "after_ratio": 0.0,
+            "reason": "",
+        }
+        if len(opening) != 2 or opening[0] in "他她它我你":
+            evidence["reason"] = "generic_or_unsupported_opening"
+            return source, evidence
+
+        segments = re.split(r"(\n+)", source)
+        paragraph_indexes = [
+            index
+            for index in range(0, len(segments), 2)
+            if segments[index].strip()
+        ]
+        total = len(paragraph_indexes)
+        if total < 12:
+            evidence["reason"] = "too_few_paragraphs"
+            return source, evidence
+
+        quote_starts = ('"', "“", "”", "‘", "’", "「", "」", "『", "』")
+        matches: list[int] = []
+        for index in paragraph_indexes:
+            paragraph = segments[index]
+            leading = paragraph[: len(paragraph) - len(paragraph.lstrip())]
+            body = paragraph[len(leading) :]
+            if body.startswith(quote_starts):
+                continue
+            if body.startswith(opening) and len(body) > len(opening):
+                matches.append(index)
+
+        before_count = len(matches)
+        evidence["before_count"] = before_count
+        evidence["before_ratio"] = round(before_count / total, 4) if total else 0.0
+        allowed = max(1, int(total * max_ratio))
+        required = max(0, before_count - allowed)
+        if required <= 0:
+            evidence["after_ratio"] = evidence["before_ratio"]
+            evidence["reason"] = "already_within_target"
+            return source, evidence
+
+        # Keep the first named opening for clarity and spread replacements
+        # through the chapter instead of changing one contiguous block.
+        candidates = matches[1:]
+        selected_positions: list[int] = []
+        if required >= len(candidates):
+            selected_positions = list(range(len(candidates)))
+        elif required == 1:
+            selected_positions = [len(candidates) // 2]
+        else:
+            for step in range(required):
+                position = round(step * (len(candidates) - 1) / (required - 1))
+                if position not in selected_positions:
+                    selected_positions.append(position)
+        selected = {candidates[position] for position in selected_positions}
+
+        replaced = 0
+        for index in selected:
+            paragraph = segments[index]
+            leading = paragraph[: len(paragraph) - len(paragraph.lstrip())]
+            body = paragraph[len(leading) :]
+            if not body.startswith(opening) or len(body) <= len(opening):
+                continue
+            segments[index] = leading + "他" + body[len(opening) :]
+            replaced += 1
+
+        repaired = "".join(segments)
+        after_metrics = analyze_deai_patterns(repaired)
+        after_opening = after_metrics.get("repeated_paragraph_opening") or {}
+        after_ratio = float(after_opening.get("ratio") or 0.0)
+        evidence.update({
+            "applied": replaced > 0 and after_ratio < 0.30,
+            "replaced_count": replaced,
+            "after_count": after_opening.get("count", 0),
+            "after_ratio": round(after_ratio, 4),
+            "reason": "ok" if replaced > 0 and after_ratio < 0.30 else "target_not_reached",
+        })
+        return repaired if evidence["applied"] else source, evidence
+
     async def process(
         self,
         text: str,
@@ -1262,13 +1364,28 @@ class DeAIPipeline:
                     "usage": opening_repair_usage,
                 })
             except (AIGatewayError, ValueError) as exc:
-                opening_repair_gate = {
-                    "passed": False,
-                    "mode": "targeted",
-                    "code": "repeated_paragraph_opening",
-                    "message": str(exc),
-                    "before_ratio": opening_risk.get("ratio"),
-                }
+                fallback_text, fallback_evidence = self._deterministic_paragraph_opening_repair(
+                    text,
+                    str(opening_risk.get("opening") or ""),
+                )
+                if fallback_evidence.get("applied"):
+                    text = fallback_text
+                    after_metrics = analyze_deai_patterns(text, profile=quality_profile)
+                    opening_repair_gate = {
+                        **fallback_evidence,
+                        "passed": True,
+                        "mode": "deterministic_fallback",
+                        "provider_error": str(exc),
+                    }
+                else:
+                    opening_repair_gate = {
+                        "passed": False,
+                        "mode": "targeted",
+                        "code": "repeated_paragraph_opening",
+                        "message": str(exc),
+                        "before_ratio": opening_risk.get("ratio"),
+                        "fallback": fallback_evidence,
+                    }
                 layers.append({
                     "layer": "targeted_paragraph_opening_repair",
                     "changes": 0,
@@ -1276,6 +1393,13 @@ class DeAIPipeline:
                     "reason": str(exc),
                     "usage": opening_repair_usage,
                 })
+                if fallback_evidence.get("applied"):
+                    layers.append({
+                        "layer": "deterministic_paragraph_opening_repair",
+                        "changes": int(fallback_evidence.get("replaced_count") or 0),
+                        "applied": True,
+                        "evidence": fallback_evidence,
+                    })
         layers.append(
             {
                 "layer": "semantic_final_humanize",

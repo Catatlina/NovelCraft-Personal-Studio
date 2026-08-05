@@ -30,6 +30,67 @@ def test_repeated_chapter_title_gets_an_existing_plot_event_suffix():
     assert compact == "语音里的求救·一个陌生男人"
 
 
+def test_deterministic_opening_repair_preserves_paragraphs_and_reaches_target():
+    paragraphs = [
+        f"陆沉在第{i}次试剑时记住了一个细节，剑锋擦过石面，留下了一道新痕。"
+        for i in range(18)
+    ] + [
+        "周长老站在廊下，没有打断这场练习。",
+        "晨雾散开时，远处的钟声敲了三下。",
+    ]
+    source = "\n\n".join(paragraphs)
+
+    repaired, evidence = DeAIPipeline._deterministic_paragraph_opening_repair(
+        source,
+        "陆沉",
+    )
+
+    assert evidence["applied"] is True
+    assert evidence["replaced_count"] == 13
+    assert evidence["after_ratio"] < 0.30
+    assert len(repaired.split("\n\n")) == len(paragraphs)
+    assert repaired.count("陆沉") < source.count("陆沉")
+
+
+def test_deai_opening_provider_failure_uses_lossless_deterministic_fallback():
+    paragraphs = [
+        f"陆沉在第{i}次试剑时记住了一个细节，剑锋擦过石面，留下了一道新痕。"
+        for i in range(18)
+    ] + [
+        "周长老站在廊下，没有打断这场练习。",
+        "晨雾散开时，远处的钟声敲了三下。",
+    ]
+    source = "\n\n".join(paragraphs)
+
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "data": {
+                        "humanized_text": source,
+                        "changes": ["保留正文事实"],
+                        "ai_patterns_removed": [],
+                    },
+                    "usage": {"tokens_input": 1, "tokens_output": 1, "cost": 0.0},
+                }
+            raise AIGatewayError("opening repair provider returned empty output")
+
+    result = asyncio.run(DeAIPipeline(Gateway()).process(source))
+
+    assert result["quality_gate"]["passed"] is True
+    assert result["quality_gate"]["mode"] == "deterministic_fallback"
+    assert result["quality_gate"]["after_ratio"] < 0.30
+    assert any(
+        layer["layer"] == "deterministic_paragraph_opening_repair"
+        and layer["applied"] is True
+        for layer in result["layers_applied"]
+    )
+
+
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     prompt = GenerationEngine._build_generation_prompt(
         None,
