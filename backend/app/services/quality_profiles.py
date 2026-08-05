@@ -611,6 +611,7 @@ def compile_quality_directive(
         f"平台重点：{profile.get('reader_priority') or '冲突清楚、反馈具体、下一步明确'}。",
         third_person_generation_contract(),
         content_generation_contract(profile),
+        "金手指通用闭环：触发后必须让主角做选择并采取行动，收益要在事件中可见，同时写出边界/代价、状态变化和新的主线冲突；任何系统、模拟器、重生、空间、面板或传承都不能替主角自动通关。",
     ]
     package_rules = _unique(
         [*(profile.get("title_rules") or [])[:2], *(profile.get("synopsis_rules") or [])[:2]]

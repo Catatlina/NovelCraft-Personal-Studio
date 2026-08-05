@@ -1847,6 +1847,10 @@ def _enrich_blueprint_context(context: dict, novel_id: str) -> dict:
             enriched["longform_contract"] = json.dumps(
                 _m.get("longform_contract"), ensure_ascii=False
             )[:4000]
+        if _m.get("core_mechanic_contract"):
+            enriched["core_mechanic_contract"] = json.dumps(
+                _m.get("core_mechanic_contract"), ensure_ascii=False
+            )[:5000]
         if _m.get("simulator_contract"):
             enriched["simulator_contract"] = json.dumps(
                 _m.get("simulator_contract"), ensure_ascii=False
@@ -2111,6 +2115,8 @@ def _persist_output(run_id: str, node_key: str, task_type: str, output: dict,
                 # fall back to a shorter route or a weaker simulator rule.
                 if isinstance(output.get("longform_contract"), dict):
                     m["longform_contract"] = output["longform_contract"]
+                if isinstance(output.get("core_mechanic_contract"), dict):
+                    m["core_mechanic_contract"] = output["core_mechanic_contract"]
                 if isinstance(output.get("simulator_contract"), dict):
                     m["simulator_contract"] = output["simulator_contract"]
                 m["planning_contract_version"] = "v2"

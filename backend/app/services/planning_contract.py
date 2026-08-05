@@ -50,6 +50,76 @@ def _idea_requires_simulator(idea: str) -> bool:
     return any(marker in text for marker in ("模拟器", "人生模拟", "模拟未来", "推演未来"))
 
 
+def _idea_requires_core_mechanic(idea: str) -> bool:
+    text = str(idea or "")
+    return any(
+        marker in text
+        for marker in (
+            "金手指", "系统", "签到", "模拟器", "人生模拟", "重生", "空间",
+            "随身", "面板", "传承", "血脉", "灵泉", "商城", "时间循环",
+            "时间回溯", "属性", "能力",
+        )
+    )
+
+
+def validate_core_mechanic_contract(
+    contract: Any,
+    *,
+    required: bool = False,
+) -> list[str]:
+    """Validate the shared contract used by every cheat/core story mechanic.
+
+    A mechanic is only useful when it creates a repeatable reader-facing loop:
+    trigger -> protagonist choice -> visible payoff -> cost/limit -> state
+    change -> a new problem.  This keeps system, rebirth, space, inheritance,
+    and simulator stories on the same quality rails without forcing them into
+    one fictional implementation.
+    """
+    if not isinstance(contract, dict):
+        return ["必须提供结构化 core_mechanic_contract"] if required else []
+    enabled = contract.get("enabled")
+    if required and enabled is False:
+        return ["原始需求包含核心金手指，core_mechanic_contract.enabled 不能为 false"]
+    if not required and enabled is not True:
+        return []
+
+    required_fields = {
+        "mechanic_type": "机制类型",
+        "reader_promise": "读者承诺",
+        "capability_loop": "能力循环",
+        "choice_surface": "主角选择面",
+        "visible_payoff": "可见收益",
+        "limits_and_costs": "边界与代价",
+        "failure_and_risks": "失败与风险",
+        "state_writeback": "状态写回",
+        "plot_coupling": "主线耦合",
+        "progression": "成长升级",
+    }
+    defects: list[str] = []
+    for field, label in required_fields.items():
+        value = contract.get(field)
+        if value in (None, "", [], {}):
+            defects.append(f"core_mechanic_contract 缺少{label}（{field}）")
+
+    loop = str(contract.get("capability_loop", ""))
+    loop_markers = ("触发", "选择", "行动", "结果", "收益", "代价", "新问题", "冲突")
+    if sum(marker in loop for marker in loop_markers) < 5:
+        defects.append("能力循环必须写清触发、选择、行动、可见结果、代价和新问题")
+    choice = str(contract.get("choice_surface", ""))
+    if not any(marker in choice for marker in ("选择", "取舍", "放弃", "风险")):
+        defects.append("金手指必须让主角做选择和取舍，不能替主角自动通关")
+    costs = str(contract.get("limits_and_costs", ""))
+    if len(costs.strip()) < 12:
+        defects.append("金手指必须有可执行的使用边界和代价")
+    writeback = str(contract.get("state_writeback", ""))
+    if not any(marker in writeback for marker in ("现实", "状态", "改变", "写回", "后果")):
+        defects.append("金手指收益必须写回人物、资源、关系或风险状态，并产生后果")
+    coupling = str(contract.get("plot_coupling", ""))
+    if not any(marker in coupling for marker in ("主线", "冲突", "新问题", "升级", "不能跳过")):
+        defects.append("金手指必须服务主线冲突，收益后要产生新问题或升级")
+    return defects
+
+
 def validate_simulator_contract(
     contract: Any,
     *,
@@ -80,6 +150,8 @@ def validate_simulator_contract(
         "selection_rules": "收益选择规则",
         "costs_and_risks": "模拟与回收代价",
         "reality_writeback": "回写现实规则",
+        "causal_recalculation": "回收后的因果重算规则",
+        "plot_guardrails": "不跳过主线的剧情护栏",
     }
     for field, label in required_fields.items():
         value = contract.get(field)
@@ -90,16 +162,39 @@ def validate_simulator_contract(
     if not any(marker in horizon for marker in ("死亡", "身死", "终局", "寿终", "道消", "结局")):
         defects.append("模拟范围必须明确从当前状态推演到死亡或终局，不能只看未来几天")
 
+    branches = contract.get("branches")
+    branch_text = str(branches)
+    if isinstance(branches, list) and len(branches) < 2:
+        defects.append("模拟器至少要展开两条可比较的未来分支")
+    elif not isinstance(branches, list) and not any(
+        marker in branch_text for marker in ("两条", "多条", "分支")
+    ):
+        defects.append("branches 必须说明至少两条可比较的未来分支")
+
     rewards = str(contract.get("harvestable_rewards", ""))
     if not any(marker in rewards for marker in ("机缘", "修为", "功法", "资源", "能力")):
         defects.append("模拟收益必须至少允许选择回收机缘、修为、功法、资源或能力中的一类")
+
+    selection = str(contract.get("selection_rules", ""))
+    if not any(marker in selection for marker in ("选择", "取舍", "组合", "放弃")):
+        defects.append("收益选择规则必须允许选择、取舍、组合或放弃，不能默认全量领取")
+    if any(marker in selection for marker in ("全部带回", "无条件全拿", "全部获得")):
+        defects.append("收益选择规则不能允许无条件全量带回，否则会直接破坏剧情张力")
 
     writeback = str(contract.get("reality_writeback", ""))
     if not any(marker in writeback for marker in ("带回", "回收", "现实", "选择", "改写", "改变")):
         defects.append("必须说明主角如何选择模拟收益并将其带回现实，以及选择如何改变现实")
 
+    recalculation = str(contract.get("causal_recalculation", ""))
+    if not any(marker in recalculation for marker in ("重算", "重新模拟", "重新推演", "分支", "因果")):
+        defects.append("回收收益后必须重新计算受影响的因果和未来分支")
+    guardrails = str(contract.get("plot_guardrails", ""))
+    if not any(marker in guardrails for marker in ("主线", "冲突", "代价", "新问题", "不能跳过")):
+        defects.append("剧情护栏必须说明收益不能跳过主线冲突，并要带来新问题、代价或升级")
+
     costs = str(contract.get("costs_and_risks", ""))
-    if len(costs.strip()) < 8:
+    cost_markers = ("次数", "寿元", "资源", "因果", "失败", "暴露", "代价", "冷却")
+    if len(costs.strip()) < 12 or sum(marker in costs for marker in cost_markers) < 2:
         defects.append("模拟器必须有可执行的次数、寿元、资源、因果或失败代价，不能无条件全拿")
     return defects
 
@@ -168,6 +263,11 @@ def validate_longform_contract(
                 if ends and ends[-1] != target:
                     defects.append("最后一个路线里程碑必须落在项目目标总字数")
 
+    core_defects = validate_core_mechanic_contract(
+        output.get("core_mechanic_contract"),
+        required=_idea_requires_core_mechanic(idea),
+    )
+    defects.extend(core_defects)
     simulator_defects = validate_simulator_contract(
         output.get("simulator_contract"),
         required=_idea_requires_simulator(idea),

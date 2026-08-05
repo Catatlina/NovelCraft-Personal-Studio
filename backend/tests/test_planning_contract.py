@@ -1,8 +1,26 @@
 from app.services.planning_contract import (
+    validate_core_mechanic_contract,
     validate_longform_contract,
     validate_simulator_contract,
     validate_volume_plan_contract,
 )
+
+
+def _core_mechanic_contract() -> dict:
+    return {
+        "enabled": True,
+        "mechanic_type": "simulator",
+        "reader_promise": "提前看见危险并用选择换取活路",
+        "capability_loop": "触发→选择→行动→可见收益→代价→状态变化→新问题",
+        "choice_surface": "选择、取舍、放弃或承担风险",
+        "visible_payoff": "事件和对手反应中的收益",
+        "limits_and_costs": "次数、资源、冷却和因果代价",
+        "failure_and_risks": "失败、暴露和反噬",
+        "state_writeback": "写回现实状态并产生后果",
+        "plot_coupling": "推动主线冲突并制造新问题",
+        "progression": "分阶段升级能力",
+        "anti_inflation": "不能替主角通关，强收益带来新债务",
+    }
 
 
 def _longform_contract(target: int = 1_500_000) -> dict:
@@ -61,10 +79,20 @@ def test_simulator_contract_requires_terminal_future_and_harvest_choice():
     assert any("机缘、修为、功法" in item for item in defects)
 
 
+def test_core_mechanic_contract_is_generic_and_reusable():
+    assert validate_core_mechanic_contract(_core_mechanic_contract(), required=True) == []
+    defects = validate_core_mechanic_contract(
+        {"enabled": True, "mechanic_type": "space", "reader_promise": "囤货"},
+        required=True,
+    )
+    assert any("能力循环" in item for item in defects)
+
+
 def test_complete_longform_contract_is_accepted():
     output = {
         "creative_bible": _bible(),
         "longform_contract": _longform_contract(),
+        "core_mechanic_contract": {"enabled": False},
         "simulator_contract": {"enabled": False},
     }
     assert validate_longform_contract(

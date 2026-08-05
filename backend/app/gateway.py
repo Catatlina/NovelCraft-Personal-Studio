@@ -243,6 +243,9 @@ class _PlanIdeaOutput(_LenientOutput):
     forbidden_deviations: list[str] = Field(default_factory=list, max_length=20)
     # Long-form planning is a closed numeric ledger, not prose-only advice.
     longform_contract: dict[str, Any] = Field(default_factory=dict)
+    # Shared contract for every core cheat/mechanic; specialised contracts
+    # (for example simulator_contract) add only type-specific rules.
+    core_mechanic_contract: dict[str, Any] = Field(default_factory=dict)
     # The fictional simulator contract is required only when the source idea
     # actually contains a simulator/life-simulation mechanic.
     simulator_contract: dict[str, Any] = Field(default_factory=dict)

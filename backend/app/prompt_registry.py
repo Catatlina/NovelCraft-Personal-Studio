@@ -854,17 +854,32 @@ $instruction
    - volume_count：整书卷数；volume_word_targets：每卷字数数组，合计必须精确等于 $target_words
    - chapter_word_target：单章目标字数；chapter_count：预计总章数
    - route_milestones：至少 6 个里程碑，每项含 label、start_words、end_words、goal，最后一项 end_words 必须等于 $target_words，任何 end_words 不得超过 $target_words
-11. 【核心机制契约】如果原始需求包含“模拟器/人生模拟/模拟未来/推演未来”，必须额外输出 simulator_contract，且不能只写“知道自己何时会死”：
+11. 【通用金手指契约】无论核心机制是系统/签到、模拟器、重生、空间、面板、传承/血脉、时间循环还是其他能力，都必须输出 core_mechanic_contract：
+   - enabled、mechanic_type、reader_promise：能力给读者的核心期待
+   - trigger_and_loop：触发→主角选择/取舍→具体行动→可见收益→代价/风险→状态变化→新冲突
+   - capability_loop：能力具体能做什么，不能只写“很强”或“提供帮助”
+   - choice_surface：主角可以选择什么、放弃什么、承担什么，不允许金手指替主角自动通关
+   - visible_payoff：收益必须在事件、对手反应、资源变化或关系变化中可见
+   - limits_and_costs、failure_and_risks：能力边界、失败方式、冷却/资源/暴露/因果等代价
+   - state_writeback：收益如何写回人物、资源、关系、身份和风险状态
+   - plot_coupling：能力如何推动主线、制造新问题和更高层冲突
+   - progression、anti_inflation：能力如何升级，以及如何避免一次性解决所有问题
+   若原始需求没有特殊金手指，core_mechanic_contract.enabled 必须为 false，不得擅自增加系统或模拟器。
+12. 【模拟器专属契约】如果原始需求包含“模拟器/人生模拟/模拟未来/推演未来”，必须额外输出 simulator_contract，且不能只写“知道自己何时会死”：
    - enabled：true；horizon：从当前状态推演到死亡或终局
-   - terminal_condition：死亡/道消/寿终等终局判定；branches：分支展开和因果变化
+   - terminal_condition：死亡/道消/寿终等终局判定；branches：至少两条可比较路线，展示关键分叉、收益、代价、关系变化和死亡原因
    - observable_state：每条未来分支可观察的修为、伤势、资源、关系、机缘和死亡原因
-   - harvestable_rewards：模拟中可获得并可供选择回收的机缘、修为、功法、资源或能力
-   - selection_rules：主角如何选择带回哪些收益，不能无条件全拿
-   - costs_and_risks：模拟次数、寿元、资源、因果偏移、失败或回收代价
-   - reality_writeback：选择回收后如何写回现实，以及现实如何改变后续模拟
+   - harvestable_rewards：模拟中可获得并可供选择回收的情报、机缘、修为、功法、资源或能力，并区分收益等级
+   - selection_rules：主角可选择、组合、放弃或延迟带回收益，不能无条件全拿
+   - costs_and_risks：模拟次数、寿元、资源、冷却、因果偏移、失败、暴露或新债务等可执行代价
+   - reality_writeback：只有执行回收后才写回现实，并改变敌我关系、资源和后续冲突
+   - causal_recalculation：回收后从改变的现实状态重新推演受影响的因果和未来分支
+   - plot_guardrails：收益不能跳过主线冲突；每次强收益至少带来代价、新问题或更高层敌人
    如果原始需求不含模拟器，simulator_contract.enabled 必须为 false，并不得擅自新增模拟器设定。
 
 已有标题参考（可空）：$suggested_title
+
+必须同时输出 core_mechanic_contract；若为模拟器，再输出包含终局、分支、收益回收、因果重算和剧情护栏的 simulator_contract。字段缺失视为规划失败，不得用 creative_bible 中的一段散文替代结构化契约。
 
 输出 JSON: {"idea_expanded":"展开的创意","synopsis":"给读者看的独立简介","core_hook":"核心卖点","target_audience":"目标受众","title_candidates":["《书名一》","《书名二》","《书名三》","《书名四》","《书名五》"],"source_facts":["用户明确事实1","用户明确事实2","用户明确事实3"],"design_additions":["不改变原意的补强建议"],"forbidden_changes":["禁止漂移1","禁止漂移2","禁止漂移3"],"downstream_deliverables":["后续交付物1"],"creative_bible":"完整创作圣经","commercial_positioning":"平台/读者画像/核心爽点/核心卖点/阅读期待","story_promise":"一句话故事承诺","forbidden_deviations":["禁止圣母","禁止无理由暴富"],"longform_contract":{"target_words":1500000,"volume_count":8,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"chapter_word_target":3000,"chapter_count":500,"route_milestones":[{"label":"阶段一","start_words":0,"end_words":187500,"goal":"阶段目标"}]},"simulator_contract":{"enabled":false,"horizon":"","terminal_condition":"","branches":[],"observable_state":[],"harvestable_rewards":[],"selection_rules":[],"costs_and_risks":[],"reality_writeback":""}}"""),
 
@@ -1030,6 +1045,7 @@ $plan_output
 创作圣经：$creative_bible
 项目目标总字数：$target_words（硬约束，所有卷的 word_target 合计必须精确等于这个数字）
 长篇闭合账本：$longform_contract
+通用金手指闭环：$core_mechanic_contract
 核心机制契约：$simulator_contract
 
 要求：

@@ -245,6 +245,14 @@ def _generation_contract_prompt(meta: dict[str, Any]) -> str:
             "篇幅闭合契约（不可改写）："
             + json.dumps(longform, ensure_ascii=False)[:4500]
         )
+    core_mechanic = meta.get("core_mechanic_contract")
+    if isinstance(core_mechanic, dict) and core_mechanic.get("enabled") is True:
+        blocks.append(
+            "核心金手指闭环（不可弱化）："
+            + json.dumps(core_mechanic, ensure_ascii=False)[:5500]
+            + "\n金手指剧情必须形成：触发→主角选择/取舍→具体行动→可见收益→代价或风险→人物/资源/关系状态变化→新的主线冲突；"
+              "不能用面板播报替代事件，不能让金手指替主角自动通关。"
+        )
     simulator = meta.get("simulator_contract")
     if isinstance(simulator, dict) and simulator.get("enabled") is True:
         blocks.append(
