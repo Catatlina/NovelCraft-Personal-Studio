@@ -96,6 +96,32 @@ def test_library_lists_newest_first_and_detail_contains_book_shape():
     assert v2_outline["chapter_outlines"] == chapter_outlines
 
 
+def test_project_listing_excludes_soft_deleted_workspaces():
+    """Deleted test workspaces must not reappear in the workspace switcher."""
+    from app.db import connect, new_id
+
+    client, headers, project_id = _auth_project()
+    db = connect()
+    deleted_project_id = new_id()
+    owner_id = db.execute("SELECT owner_id FROM projects WHERE id=%s", (project_id,)).fetchone()["owner_id"]
+    db.execute(
+        """INSERT INTO projects (id, name, description, owner_id, is_deleted)
+           VALUES (%s, '已删除测试空间', '', %s, TRUE)""",
+        (deleted_project_id, owner_id),
+    )
+    db.execute(
+        """INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (%s, %s, %s, 'owner')""",
+        (new_id(), deleted_project_id, owner_id),
+    )
+    db.commit()
+    db.close()
+
+    listed = client.get("/api/v1/projects", headers=headers)
+    assert listed.status_code == 200
+    assert deleted_project_id not in {row["id"] for row in listed.json()["data"]}
+
+
 def test_library_server_side_search_filter_sort():
     """NC-LIB-002: q/status/sort are applied server-side with whitelisted ORDER BY."""
     from app.db import connect, encode, new_id

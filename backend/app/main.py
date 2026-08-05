@@ -418,7 +418,8 @@ def healthz() -> ApiResponse:
 def list_projects(user: dict = Depends(get_current_user)) -> ApiResponse:
     conn = connect()
     rows = [dict(row) for row in conn.execute(
-        "SELECT p.* FROM projects p JOIN project_members pm ON p.id = pm.project_id WHERE pm.user_id = %s ORDER BY p.created_at DESC",
+        "SELECT p.* FROM projects p JOIN project_members pm ON p.id = pm.project_id "
+        "WHERE pm.user_id = %s AND p.is_deleted = FALSE ORDER BY p.created_at DESC",
         (user["id"],),
     ).fetchall()]
     conn.close()
