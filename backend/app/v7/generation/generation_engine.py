@@ -798,14 +798,18 @@ class DeAIPipeline:
     # In particular, a deliberate repeated phrase or a small amount of
     # ellipsis is common in web fiction and should not erase the author's
     # voice merely because a detector noticed it.
+    # P0-1 质量整改：恢复去AI味语义重写，把之前性能优化删掉的flag加回来
     SEMANTIC_REWRITE_FLAGS = {
         "dash_density",
+        "ellipsis_density",          # P0-1: 恢复省略号密度检测
         "uniform_cadence",
         "repeated_paragraph_opening",
         "ai_phrase",
+        "repeated_phrase",           # P0-1: 恢复重复短语检测
         "repeated_tic",
     }
-    SEMANTIC_REWRITE_SEVERITIES = {"medium", "high"}
+    # P0-1 质量整改：降低语义重写触发门槛，low级别也触发
+    SEMANTIC_REWRITE_SEVERITIES = {"low", "medium", "high"}
     DETERMINISTIC_HARD_FLAGS = {
         "dash_density",
         "uniform_cadence",
