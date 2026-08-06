@@ -859,6 +859,9 @@ class TestNovelBrain:
             "world",
             "plot",
             "reader",
+            "chapter",
+            "learning_rule",
+            "learning_quality",
         }
         assert overview["goals"] == {
             "total": 0,
