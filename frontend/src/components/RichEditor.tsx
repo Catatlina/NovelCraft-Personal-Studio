@@ -73,6 +73,37 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
     },
   });
 
+  const emitEditorText = useCallback((domTarget?: EventTarget | null) => {
+    if (!editor || editor.isDestroyed) return;
+    const stateText = editor.getText({ blockSeparator: "\n\n" });
+    // A contenteditable can receive an input from browser automation, IME, or
+    // mobile composition before ProseMirror has reconciled its internal state.
+    // Prefer the document state, but fall back to the actual DOM text so Save
+    // never persists an empty document while the user can visibly see text.
+    const domText = domTarget instanceof HTMLElement
+      ? (domTarget.innerText || domTarget.textContent || "")
+      : "";
+    const text = stateText || domText;
+    lastEmittedValue.current = text;
+    onChange(text);
+  }, [editor, onChange]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    // EditorContent moves ProseMirror's contenteditable node into its own
+    // wrapper during mount. Listening on that node itself keeps DOM-originated
+    // input (Playwright fill, IME, mobile composition and paste) observable
+    // even when React's wrapper handler is not attached to the moved node.
+    const dom = editor.view.dom;
+    const syncVisibleText = () => emitEditorText(dom);
+    dom.addEventListener("input", syncVisibleText);
+    dom.addEventListener("blur", syncVisibleText);
+    return () => {
+      dom.removeEventListener("input", syncVisibleText);
+      dom.removeEventListener("blur", syncVisibleText);
+    };
+  }, [editor, emitEditorText]);
+
   useEffect(() => {
     // React StrictMode may reconnect passive effects after Tiptap has already
     // destroyed this editor instance. Calling getHTML() in that window reaches
@@ -108,7 +139,12 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
       </div>
 
       {/* Editor area */}
-      <EditorContent editor={editor} style={{ minHeight: 300, padding: "0 8px", fontSize: 15, lineHeight: 1.8 }} />
+      <EditorContent
+        editor={editor}
+        onInput={event => emitEditorText(event.target)}
+        onBlur={event => emitEditorText(event.target)}
+        style={{ minHeight: 300, padding: "0 8px", fontSize: 15, lineHeight: 1.8 }}
+      />
 
       {/* Floating AI bar on text selection */}
       {showAiBar && (

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, api, apiRaw } from "../lib/api";
-import { Pagination, Accordion, ConfirmDialog, EmptyState } from "./ui";
+import { Pagination, Accordion, ConfirmDialog, EmptyState, Spinner } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import { NovelAnalysisReport } from "./NovelAnalysisReport";
+import { Search } from "lucide-react";
 
 type Wrapped<T> = { data: T };
 type Source = { source_key: string; display_name: string; last_success_at?: string; last_error?: string; capture_status?: string; user_action_required?: boolean; ocr_required?: boolean };
@@ -85,7 +86,7 @@ function topicEvidence(topic: Topic): React.ReactNode {
   );
 }
 
-export function RankingCenter({ projectId, onBookCreated }: { projectId: string; onBookCreated: (novelId: string, runId?: string) => Promise<void> }) {
+export function RankingCenter({ projectId, onBookCreated, onCreate }: { projectId: string; onBookCreated: (novelId: string, runId?: string) => Promise<void>; onCreate?: () => void }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -104,6 +105,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   const [analysisMode, setAnalysisMode] = useState<"single" | "multi">("single");
   const [multiAnalysisResult, setMultiAnalysisResult] = useState<any>(null);
   const [multiAnalysisLoading, setMultiAnalysisLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [typedScan, setTypedScan] = useState({
     platform: "fanqie",
     gender: "all",
@@ -114,19 +116,39 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
   });
 
   async function load() {
-    const [s, p, t] = await Promise.allSettled([
-      apiRaw<Wrapped<Source[]>>(`/api/v1/ranking/sources?project_id=${projectId}`),
-      apiRaw<Wrapped<Snapshot[]>>(`/api/v1/ranking/snapshots?project_id=${projectId}`),
-      apiRaw<Wrapped<Topic[]>>(`/api/v1/ranking/topics?project_id=${projectId}`),
-    ]);
-    if (s.status === "fulfilled") setSources(s.value.data);
-    if (p.status === "fulfilled") setSnapshots(p.value.data);
-    if (t.status === "fulfilled") setTopics(t.value.data);
-    const failed = [s, p, t].filter(item => item.status === "rejected");
-    if (failed.length) setMessage(`${failed.length} 个分区加载失败，其他数据仍可使用`);
+    if (!projectId) {
+      setSources([]);
+      setSnapshots([]);
+      setTopics([]);
+      setBookmarkedTopics([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const [s, p, t] = await Promise.allSettled([
+        apiRaw<Wrapped<Source[]>>(`/api/v1/ranking/sources?project_id=${projectId}`),
+        apiRaw<Wrapped<Snapshot[]>>(`/api/v1/ranking/snapshots?project_id=${projectId}`),
+        apiRaw<Wrapped<Topic[]>>(`/api/v1/ranking/topics?project_id=${projectId}`),
+      ]);
+      if (s.status === "fulfilled") setSources(s.value.data);
+      if (p.status === "fulfilled") setSnapshots(p.value.data);
+      if (t.status === "fulfilled") setTopics(t.value.data);
+      const failed = [s, p, t].filter(item => item.status === "rejected");
+      if (failed.length) setMessage(`${failed.length} 个分区加载失败，其他数据仍可使用`);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { void load().catch(error => setMessage(String(error))); }, [projectId]);
+  useEffect(() => {
+    if (!projectId) {
+      setMessage("");
+      void load();
+      return;
+    }
+    void load().catch(error => setMessage(String(error)));
+  }, [projectId]);
 
   async function scan(source: Source) {
     setBusy(`scan:${source.source_key}`); setMessage("");
@@ -412,7 +434,7 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     } catch { /* ignore */ }
   }
 
-  useEffect(() => { if (topicTab === "bookmarked") void loadBookmarked(); }, [topicTab, projectId]);
+  useEffect(() => { if (topicTab === "bookmarked" && projectId) void loadBookmarked(); }, [topicTab, projectId]);
 
   // Status badge helper
   const statusBadge = (status: string, captureStatus?: string) => {
@@ -441,7 +463,24 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
     : allOpenItems;
   const snapshotItemsPager = usePagination({ items: openItems, pageSize: 10, mode: "client" });
 
-  return <div style={{ display: "grid", gap: 20 }}>
+  if (!projectId) {
+    return <div className="ranking-page page-enter">
+      <div className="page-head">
+        <div>
+          <h1>扫榜选书</h1>
+          <p>从真实榜单样本中分析趋势、卖点和市场空位</p>
+        </div>
+      </div>
+      <div className="workspace-empty-state starlume-card" role="status">
+        <span className="workspace-empty-icon"><Search size={24} /></span>
+        <h2>正在准备榜单工作区</h2>
+        <p>项目列表还在加载，榜单来源、快照和选题池会在项目就绪后显示。你也可以先创建一本小说。</p>
+        {onCreate && <button type="button" className="btn-sm btn-primary" onClick={onCreate}>打开创作向导</button>}
+      </div>
+    </div>;
+  }
+
+  return <div className="ranking-page" style={{ display: "grid", gap: 20 }}>
     {/* ── Page head ── */}
     <div className="page-head">
       <div>
@@ -475,6 +514,8 @@ export function RankingCenter({ projectId, onBookCreated }: { projectId: string;
         {message}
       </div>
     )}
+
+    {loading && <div className="page-loading" role="status"><Spinner label="正在读取榜单工作区…" /></div>}
 
     <details className="card" open>
       <summary className="card-head" style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

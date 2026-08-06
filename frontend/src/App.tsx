@@ -199,6 +199,13 @@ export default function App() {
   const [historyError, setHistoryError] = useState("");
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
+  const updateEditorText = useCallback((nextText: string) => {
+    // Keep the imperative save path in sync in the same turn as an editor
+    // input. React state may commit after a fast Save click (or an automated
+    // fill), so saveChapter must never rely only on the previous render.
+    editorTextRef.current = nextText;
+    setEditorText(nextText);
+  }, []);
   // NC-LIVE-AUDIT: refs so the debounced live reviewer always reads fresh guards.
   const pendingAiEditRef = useRef(pendingAiEdit);
   const streamPreviewRef = useRef(streamPreview);
@@ -384,29 +391,37 @@ export default function App() {
 
   useEffect(() => {
     if (!novel || !project) return;
+    // Once the author explicitly opens a novel, activateNovel is the single
+    // owner of its chapter selection. A background cache/server refresh must
+    // never race it and put an older (often empty) body back into the editor.
+    if (userSelectedNovel.current) return;
     let active = true;
+    const loadEpoch = novelSelectionEpoch.current;
+    const canApply = () => active
+      && loadEpoch === novelSelectionEpoch.current
+      && !userSelectedNovel.current;
     const contentsKey = `contents:${novel.id}`;
     // Preserve deterministic precedence: cached data can paint first, but a
     // later server response must always win. Parallel promises previously let
     // stale IndexedDB rows overwrite freshly saved chapter text after reload.
     void (async () => {
       const cachedItems = await cacheGet<Content[]>(contentsKey);
-      if (!active) return;
+      if (!canApply()) return;
       const cachedChapters = (cachedItems || []).filter(item => item.type === "chapter");
       setChapters(cachedChapters);
       const cachedChapter = cachedChapters[0] ?? null;
       if (cachedChapter) {
         setChapter(cachedChapter);
         setEditorText(docToText(cachedChapter.body));
-        void loadVersions(cachedChapter.id);
+        if (canApply()) void loadVersions(cachedChapter.id);
         const offline = await cacheGet<Content>(`offline-content:${cachedChapter.id}`);
-        if (!active) return;
+        if (!canApply()) return;
         if (offline) { setChapter(offline); setEditorText(docToText(offline.body)); }
       }
 
       try {
         const items = await api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`);
-        if (!active) return;
+        if (!canApply()) return;
         void cacheSet(contentsKey, items);
         const chapterItems = items.filter(i => i.type === "chapter").sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
         if (chapterItems.length === 0) return; // 服务器无章节时不覆盖已缓存的内容
@@ -414,13 +429,13 @@ export default function App() {
         const current = chapterItems.find(item => item.id === chapter?.id) ?? chapterItems[0] ?? null;
         setChapter(current);
         setEditorText(current ? docToText(current.body) : "");
-        if (current) void loadVersions(current.id);
+        if (current && canApply()) void loadVersions(current.id);
       } catch {
         // Cached chapters remain usable while offline.
       }
     })();
     return () => { active = false; };
-  }, [novel?.id, project?.id, run?.status]);
+  }, [novel?.id, project?.id]);
 
   useEffect(() => {
     if (!project) {
@@ -643,7 +658,7 @@ export default function App() {
   async function saveChapter(textOverride?: string): Promise<boolean> {
     if (!chapter) return false;
     const prevText = docToText(chapter.body);
-    const nextText = textOverride ?? editorText;
+    const nextText = textOverride ?? editorTextRef.current;
     const mutationId = crypto.randomUUID();
     const body = {
       body: textToDoc(nextText), label: "offline_save",
@@ -1180,12 +1195,13 @@ export default function App() {
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
-      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId, chapterId) => {
+      {tab === "library" && <BookLibrary projectId={project?.id || ""} onCreate={() => setTab("wizard")} onOpen={async (bookId, chapterId) => {
         if (await activateNovel(bookId, chapterId)) setTab("editor");
       }} />}
-      {tab === "ranking" && project && (
+      {tab === "ranking" && (
         <RankingCenter
-          projectId={project.id}
+          projectId={project?.id || ""}
+          onCreate={() => setTab("wizard")}
           onBookCreated={async (novelId, runId) => {
             const book = await api<Content>(`/api/v1/contents/${novelId}`);
             setNovel(book);
@@ -1208,6 +1224,7 @@ export default function App() {
         onConfirm={confirmTitle}
         onRegenerateTitles={regenerateTitles}
         onNewRun={refreshRun}
+        onOpenWizard={() => setTab("wizard")}
       />}
       {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} narrativeEvidence={narrative.evidence as { timeline_source?: string; arcs_source?: string } | undefined} onRepairApplied={(updated) => {
         if (!chapter) return;
@@ -1237,7 +1254,7 @@ export default function App() {
       }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText: updateEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}

@@ -280,6 +280,7 @@ export function Progress({
   onConfirm,
   onRegenerateTitles,
   onNewRun,
+  onOpenWizard,
   history = [],
   historyTotal = 0,
   historyLoading = false,
@@ -293,6 +294,7 @@ export function Progress({
   onConfirm: (title: string) => Promise<void>;
   onRegenerateTitles: (feedback: string) => Promise<void>;
   onNewRun: (runId: string) => Promise<void>;
+  onOpenWizard?: () => void;
   history?: GenerationHistoryItem[];
   historyTotal?: number;
   historyLoading?: boolean;
@@ -449,11 +451,15 @@ export function Progress({
           <p className="eyebrow">CREATION PROGRESS</p>
           <h2>还没有正在运行的创作。</h2>
           <p>从「创作向导」启动一本小说后，AI 的每一步真实状态、产物和失败原因都会显示在这里。</p>
-          {novel?.id && (
+          <div className="progress-empty-actions">
+          {novel?.id ? (
             <button className="btn-sm btn-primary" disabled={bootstrapping} onClick={() => void reexecuteAll()}>
               <Sparkles size={15} /> {bootstrapping ? "正在启动…" : "开始创作"}
             </button>
-          )}
+          ) : onOpenWizard ? (
+            <button className="btn-sm btn-primary" onClick={onOpenWizard}><Sparkles size={15} /> 打开创作向导</button>
+          ) : null}
+          </div>
         </section>
         <GenerationHistoryPanel items={history} total={historyTotal} loading={historyLoading} error={historyError} onOpen={onOpenHistory} loadingMore={historyLoadingMore} onLoadMore={onLoadMoreHistory} />
       </div>

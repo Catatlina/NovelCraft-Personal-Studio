@@ -834,3 +834,11 @@
 - `PROD_BASE=https://novel.xyjin.xyz backend/.venv/bin/python scripts/prod_smoke.py` 全部 15 项通过；生产浏览器走查 `BASE_URL=https://novel.xyjin.xyz npx playwright test e2e/prod-walkthrough*.spec.ts` 为 **4 passed**。
 - 部署过程中首次 seed 因容器脚本导入路径缺少 `/app` 失败，已用正确 `PYTHONPATH=/app` 重试成功；该运行时问题已记录，不隐藏为无异常部署。
 - 生产部署当前标记为**可用**；生产真实 20 章双轨和人工盲评仍未执行，不能把部署 smoke 当作生成质量验收。
+# 2026-08-06 Demo 视觉骨架落地（本地工作树）
+
+- 用户反馈“页面仍像旧版、不是 Demo”后，已将 Demo 的结构性视觉落地到主应用，不再只改颜色和空状态。
+- 全局页头增加 NovelCraft 工作台面包屑；主导航不变。
+- 首页增加真实 KPI 条、作品数据表、质量状态和目标进度；没有真实数据时显示空状态/未评分，不使用静态演示数据。
+- 创作向导采用左侧步骤轨道 + 右侧表单/预览；书库、进度、扫榜、设置统一为深色墨蓝控制台面板并保留原功能链路。
+- 验证：`npm run lint`、`npm run build`、`npm test -- --run`（49/49）、`e2e/pages-smoke.spec.ts`（1/1）通过；登录态浏览器已逐页检查首页、创作向导、书库、进度、扫榜和设置。
+- 状态：**本地可用，未提交/未推送/未部署**。发布后还需做生产截图级验收。

@@ -109,6 +109,10 @@ export function WorkspaceDashboard({
     () => [...books].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 3),
     [books],
   );
+  const totalWords = books.reduce((sum, book) => sum + Number(book.total_words || 0), 0);
+  const totalChapters = books.reduce((sum, book) => sum + Number(book.chapter_count || 0), 0) || chaptersCount;
+  const targetWords = books.reduce((sum, book) => sum + Number(book.meta?.target_words || 0), 0);
+  const wordProgress = targetWords > 0 ? Math.min(100, Math.round((totalWords / targetWords) * 100)) : null;
   const runDisplayStatus = displayRunStatus(run);
   const failedNodes = run?.nodes.filter(node => ["failed", "pending_budget", "pending_provider", "needs_review"].includes(node.status)) || [];
   const waitingNodes = run?.nodes.filter(node => ["waiting_human", "pending_approval"].includes(node.status)) || [];
@@ -151,6 +155,30 @@ export function WorkspaceDashboard({
         <button type="button" className="primary-action" onClick={() => onNavigate("wizard")}>
           <WandSparkles size={18} /> 新建小说
         </button>
+      </section>
+
+      <section className="dashboard-kpi-grid" aria-label="工作台概览">
+        <article className="starlume-card dashboard-kpi">
+          <div className="dashboard-kpi-label"><BookOpen size={17} /> 总字数</div>
+          <strong>{totalWords.toLocaleString("zh-CN")}</strong>
+          <span>{books.length ? `${books.length} 本作品累计` : "创建作品后开始累计"}</span>
+        </article>
+        <article className="starlume-card dashboard-kpi">
+          <div className="dashboard-kpi-label"><FilePenLine size={17} /> 章节数</div>
+          <strong>{totalChapters.toLocaleString("zh-CN")}</strong>
+          <span>{currentNovelTitle ? `当前作品：${bookTitle(currentNovelTitle)}` : "当前工作区"}</span>
+        </article>
+        <article className="starlume-card dashboard-kpi">
+          <div className="dashboard-kpi-label"><CircleCheckBig size={17} /> 审阅状态</div>
+          <strong>{run ? (runDisplayStatus === "needs_review" ? "待处理" : runDisplayStatus === "succeeded" ? "已完成" : "进行中") : "未评分"}</strong>
+          <span>{run ? "来自当前 V7 运行记录" : "生成章节后显示真实证据"}</span>
+        </article>
+        <article className="starlume-card dashboard-kpi">
+          <div className="dashboard-kpi-label"><Sparkles size={17} /> 目标进度</div>
+          <strong>{wordProgress === null ? "—" : `${wordProgress}%`}</strong>
+          <span>{wordProgress === null ? "暂未设置目标字数" : `${totalWords.toLocaleString("zh-CN")} / ${targetWords.toLocaleString("zh-CN")} 字`}</span>
+          {wordProgress !== null && <div className="dashboard-kpi-track" aria-label={`全书目标进度 ${wordProgress}%`}><span style={{ width: `${wordProgress}%` }} /></div>}
+        </article>
       </section>
 
       <section className="dashboard-grid dashboard-focus-grid">
@@ -220,20 +248,19 @@ export function WorkspaceDashboard({
             <button type="button" className="quiet-action" onClick={() => onNavigate("wizard")}>创建小说</button>
           </div>
         ) : (
-          <div className="book-card-grid">
+          <div className="dashboard-books-table starlume-card">
+            <div className="dashboard-books-table-head"><span>作品</span><span>状态</span><span>章节</span><span>字数</span><span>最近更新</span><span>操作</span></div>
             {recentBooks.map(book => {
               const targetWords = Number(book.meta?.target_words || 0);
               const percent = targetWords > 0 ? Math.min(100, Math.round(((book.total_words || 0) / targetWords) * 100)) : null;
               return (
-                <button type="button" className="starlume-card book-project-card" key={book.id} onClick={() => onNavigate("library")}>
-                  <div className="book-project-top">
-                    <span className="book-glyph"><BookOpen size={20} /></span>
-                    <span className="book-status">{STATUS_LABELS[book.status] || "创作中"}</span>
-                  </div>
-                  <h4>{cleanNovelTitle(book.title)}</h4>
-                  <p>{book.chapter_count || 0} 章 · {(book.total_words || 0).toLocaleString("zh-CN")} 字</p>
-                  {percent !== null && <div className="fine-progress" aria-label={`目标字数完成 ${percent}%`}><span style={{ width: `${percent}%` }} /></div>}
-                  <small>最近更新于 {relativeTime(book.updated_at || book.created_at)}</small>
+                <button type="button" className="dashboard-book-row" key={book.id} onClick={() => onNavigate("library")}>
+                  <span className="dashboard-book-title"><span className="book-glyph"><BookOpen size={18} /></span><span><strong>{cleanNovelTitle(book.title)}</strong><small className="dashboard-book-summary">{book.chapter_count || 0} 章 · {(book.total_words || 0).toLocaleString("zh-CN")} 字</small></span></span>
+                  <span className="book-status">{STATUS_LABELS[book.status] || "创作中"}</span>
+                  <span>{(book.chapter_count || 0).toLocaleString("zh-CN")}</span>
+                  <span>{(book.total_words || 0).toLocaleString("zh-CN")}</span>
+                  <span className="dashboard-book-time">{relativeTime(book.updated_at || book.created_at)}{percent !== null && <><small>{percent}%</small><span role="img" className="dashboard-book-progress" aria-label={`目标字数完成 ${percent}%`}><span style={{ width: `${percent}%` }} /></span></>}</span>
+                  <span className="dashboard-book-arrow"><ArrowRight size={16} /></span>
                 </button>
               );
             })}
