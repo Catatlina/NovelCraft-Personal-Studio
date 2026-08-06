@@ -521,6 +521,7 @@ def import_work(project_id: str, payload: WorkImportRequest, user: dict = Depend
         "style": payload.style,
         "target_words": payload.target_words,
         "creative_bible": payload.text,
+        "outline": payload.text,
         "imported": True,
         "imported_at": datetime.now(timezone.utc).isoformat(),
     }
