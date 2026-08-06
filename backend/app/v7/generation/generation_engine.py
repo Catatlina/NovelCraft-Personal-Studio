@@ -293,7 +293,7 @@ class ContextAssembler:
         if quality_store is not None:
             quality_learning = await quality_store.active_recommendations(
                 chapter_number=chapter_number,
-                limit=4,
+                limit=2,  # P1-1 质量整改：quality_learning 从4条降到2条
             )
 
         previous = await self.load_previous_chapters(
@@ -303,7 +303,7 @@ class ContextAssembler:
         )
         payoff_history_chapters = await self.load_previous_chapters(
             chapter_number,
-            count=20,
+            count=5,  # P1-1 质量整改：payoff_history 从20章降到5章
             include_rejected=include_rejected,
         )
         recap_parts: list[str] = []
@@ -337,14 +337,11 @@ class ContextAssembler:
                 if payoff_type:
                     recent_payoff_types.append(payoff_type)
                 if payoff_type or previous_contract.get("payoff_intensity"):
+                    # P1-1 质量整改：精简payoff_history，只保留类型和强度
                     recent_payoff_history.append({
                         "chapter_number": previous_chapter.get("chapter_number"),
                         "payoff_type": payoff_type,
                         "payoff_intensity": previous_contract.get("payoff_intensity") or "small",
-                        "payoff_score": (
-                            previous_chapter.get("payoff_score")
-                            or (previous_chapter.get("generation_quality") or {}).get("payoff_score")
-                        ),
                     })
 
         layers = {
@@ -393,7 +390,7 @@ class ContextAssembler:
             "previous_full_text": previous[-1].get("text") if previous else "",
             "previous_transition_contract": previous_transition_contract,
             "recent_payoff_types": recent_payoff_types[-8:],
-            "recent_payoff_history": recent_payoff_history[-20:],
+            "recent_payoff_history": recent_payoff_history[-5:],  # P1-1 质量整改：从20章降到5章
             "style_card": style_card,
             "active_rules": active_rules,
             "quality_learning": quality_learning,
@@ -492,7 +489,7 @@ class ContextAssembler:
                 + "\n".join(
                     f"- {item.get('instruction')}（样本{item.get('sample_count', 0)}，"
                     f"正向率{float(item.get('positive_rate') or 0) * 100:.0f}%）"
-                    for item in quality_learning[:4]
+                    for item in quality_learning[:2]  # P1-1 质量整改：从4条降到2条
                     if isinstance(item, dict) and item.get("instruction")
                 )
             )
