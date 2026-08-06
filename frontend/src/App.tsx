@@ -384,29 +384,37 @@ export default function App() {
 
   useEffect(() => {
     if (!novel || !project) return;
+    // Once the author explicitly opens a novel, activateNovel is the single
+    // owner of its chapter selection. A background cache/server refresh must
+    // never race it and put an older (often empty) body back into the editor.
+    if (userSelectedNovel.current) return;
     let active = true;
+    const loadEpoch = novelSelectionEpoch.current;
+    const canApply = () => active
+      && loadEpoch === novelSelectionEpoch.current
+      && !userSelectedNovel.current;
     const contentsKey = `contents:${novel.id}`;
     // Preserve deterministic precedence: cached data can paint first, but a
     // later server response must always win. Parallel promises previously let
     // stale IndexedDB rows overwrite freshly saved chapter text after reload.
     void (async () => {
       const cachedItems = await cacheGet<Content[]>(contentsKey);
-      if (!active) return;
+      if (!canApply()) return;
       const cachedChapters = (cachedItems || []).filter(item => item.type === "chapter");
       setChapters(cachedChapters);
       const cachedChapter = cachedChapters[0] ?? null;
       if (cachedChapter) {
         setChapter(cachedChapter);
         setEditorText(docToText(cachedChapter.body));
-        void loadVersions(cachedChapter.id);
+        if (canApply()) void loadVersions(cachedChapter.id);
         const offline = await cacheGet<Content>(`offline-content:${cachedChapter.id}`);
-        if (!active) return;
+        if (!canApply()) return;
         if (offline) { setChapter(offline); setEditorText(docToText(offline.body)); }
       }
 
       try {
         const items = await api<Content[]>(`/api/v1/contents?project_id=${project.id}&parent_id=${novel.id}`);
-        if (!active) return;
+        if (!canApply()) return;
         void cacheSet(contentsKey, items);
         const chapterItems = items.filter(i => i.type === "chapter").sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
         if (chapterItems.length === 0) return; // 服务器无章节时不覆盖已缓存的内容
@@ -414,13 +422,13 @@ export default function App() {
         const current = chapterItems.find(item => item.id === chapter?.id) ?? chapterItems[0] ?? null;
         setChapter(current);
         setEditorText(current ? docToText(current.body) : "");
-        if (current) void loadVersions(current.id);
+        if (current && canApply()) void loadVersions(current.id);
       } catch {
         // Cached chapters remain usable while offline.
       }
     })();
     return () => { active = false; };
-  }, [novel?.id, project?.id, run?.status]);
+  }, [novel?.id, project?.id]);
 
   useEffect(() => {
     if (!project) {
