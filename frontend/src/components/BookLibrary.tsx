@@ -86,7 +86,7 @@ function formatBookOutline(outline: unknown): string {
   return sections.join("\n\n") || JSON.stringify(outline, null, 2);
 }
 
-export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: (bookId: string, chapterId?: string) => Promise<void> }) {
+export function BookLibrary({ projectId, onOpen, onCreate }: { projectId: string; onOpen: (bookId: string, chapterId?: string) => Promise<void>; onCreate?: () => void }) {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -158,7 +158,13 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   };
 
   useEffect(() => {
-    setBooks([]); setError(""); setLoading(true);
+    setBooks([]); setError(""); setDetail(null); setLoading(Boolean(projectId));
+    if (!projectId) {
+      Object.values(pollers.current).forEach(id => window.clearInterval(id));
+      pollers.current = {};
+      return () => {};
+    }
+    setLoading(true);
     api<Book[]>(`/api/v1/library/books?project_id=${projectId}`).then(result => {
       setBooks(result); setError(""); result.forEach(book => void loadBookState(book));
     }).catch(caught => setError(String(caught))).finally(() => setLoading(false));
@@ -376,6 +382,23 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
   });
   const bookPager = usePagination({ items: filtered, pageSize: 10, mode: "client" });
 
+  if (!projectId) {
+    return <section className="library-page page-enter">
+      <div className="page-head">
+        <div>
+          <h1>我的书库</h1>
+          <p>管理已创建的小说、章节和导出版本</p>
+        </div>
+      </div>
+      <div className="workspace-empty-state starlume-card" role="status">
+        <span className="workspace-empty-icon"><BookOpen size={24} /></span>
+        <h2>正在准备你的创作空间</h2>
+        <p>项目列表还在加载，书库数据会在项目就绪后自动出现。若你还没有项目，可以先从创作向导开始。</p>
+        {onCreate && <button type="button" className="btn-sm btn-primary" onClick={onCreate}>打开创作向导</button>}
+      </div>
+    </section>;
+  }
+
   if (detail) {
     const book = detail.book;
     const outline = formatBookOutline(detail.outline || book.meta?.outline || {
@@ -509,13 +532,19 @@ export function BookLibrary({ projectId, onOpen }: { projectId: string; onOpen: 
         <option value="chapters">按章节数</option>
       </select>
     </div>
-    {!loading && !books.length && !error ? <EmptyState icon={<BookOpen size={26} />} title="书库为空" description="从创作向导创建第一本小说，或导入已有章节目录。" /> : <>
+    {!loading && !books.length && !error ? <div className="workspace-empty-state library-empty-state" role="status">
+      <span className="workspace-empty-icon"><BookOpen size={24} /></span>
+      <h2>书库还是空的</h2>
+      <p>从创作向导创建第一本小说，或在已有作品中导入章节目录。</p>
+      {onCreate && <button type="button" className="btn-sm btn-primary" onClick={onCreate}>创建第一本小说</button>}
+    </div> : <>
       <div className="book-list">{bookPager.pageData.map((book, index) => {
         const batch = batches[book.id];
         const completion = completions[book.id];
         const rank = (bookPager.page - 1) * bookPager.pageSize + index + 1;
         const badgeClass = book.status === "draft" ? "gray" : book.status === "planning" ? "cyan" : book.status === "generated" ? "purple" : book.status === "completed" ? "green" : "gray";
         return <article className="card book-library-card" key={book.id}>
+          <span className={`book-library-cover ${rank % 3 === 0 ? "gold" : rank % 3 === 1 ? "indigo" : "purple"}`} aria-hidden="true">{book.title.trim().slice(0, 1) || "书"}</span>
           <div className="book-library-content">
             <div className="card-head">
               <div className="card-title" style={{ gap: 6 }}>

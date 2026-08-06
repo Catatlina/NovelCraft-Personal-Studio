@@ -1180,12 +1180,13 @@ export default function App() {
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
-      {tab === "library" && project && <BookLibrary projectId={project.id} onOpen={async (bookId, chapterId) => {
+      {tab === "library" && <BookLibrary projectId={project?.id || ""} onCreate={() => setTab("wizard")} onOpen={async (bookId, chapterId) => {
         if (await activateNovel(bookId, chapterId)) setTab("editor");
       }} />}
-      {tab === "ranking" && project && (
+      {tab === "ranking" && (
         <RankingCenter
-          projectId={project.id}
+          projectId={project?.id || ""}
+          onCreate={() => setTab("wizard")}
           onBookCreated={async (novelId, runId) => {
             const book = await api<Content>(`/api/v1/contents/${novelId}`);
             setNovel(book);
@@ -1208,6 +1209,7 @@ export default function App() {
         onConfirm={confirmTitle}
         onRegenerateTitles={regenerateTitles}
         onNewRun={refreshRun}
+        onOpenWizard={() => setTab("wizard")}
       />}
       {tab === "review" && <Review chapter={chapter} review={review} characters={characters} timeline={narrative.timeline} arcs={narrative.arcs} narrativeEvidence={narrative.evidence as { timeline_source?: string; arcs_source?: string } | undefined} onRepairApplied={(updated) => {
         if (!chapter) return;

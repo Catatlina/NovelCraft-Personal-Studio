@@ -159,9 +159,13 @@ export function Layout({
 
       <main className={`app-main${collapsed ? "" : " sidebar-pinned"}`}>
         <header className="app-header">
-          <div className="app-header-title">
-            <h1>{title}</h1>
-            {runStatus && <span className={`run-state ${runStatus}`}>{RUN_LABELS[runStatus] || runStatus}</span>}
+          <div className="app-header-left">
+            <div className="header-brand" aria-label="NovelCraft 工作台">NovelCraft</div>
+            <span className="header-breadcrumb-divider" aria-hidden="true">/</span>
+            <div className="app-header-title">
+              <h1>{title}</h1>
+              {runStatus && <span className={`run-state ${runStatus}`}>{RUN_LABELS[runStatus] || runStatus}</span>}
+            </div>
           </div>
           <div className="header-actions">
             {projects && projects.length > 1 && (

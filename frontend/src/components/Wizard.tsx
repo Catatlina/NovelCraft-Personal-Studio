@@ -155,6 +155,7 @@ export function Wizard({
 
   function validate() {
     const nextErrors: Record<string, string> = {};
+    if (!projectId) nextErrors.project = "项目尚未准备好，请等待项目列表加载完成后再开始生成。";
     if (idea.trim().length < 4) nextErrors.idea = "请至少用 4 个字描述你的故事";
     if (!genre.trim()) nextErrors.genre = "请选择小说题材";
     if (customStyleMode && !style.trim()) nextErrors.style = "请填写自定义写作风格，或改选一个预设";
@@ -182,9 +183,34 @@ export function Wizard({
         </div>
       )}
 
+      {!projectId && !keyMissing && (
+        <div className="wizard-alert wizard-project-waiting" role="status">
+          <span><Loader2 className="spin" size={18} /></span>
+          <div>
+            <strong>正在准备项目</strong>
+            <p>项目列表加载完成后才能启动真实生成任务；你可以先填写灵感和创作边界。</p>
+          </div>
+        </div>
+      )}
+
       <div className="wizard-layout">
-        <form className="wizard-form starlume-card" onSubmit={event => { event.preventDefault(); validate(); }}>
-          <div className="wizard-step">
+        <aside className="wizard-step-list starlume-card" aria-label="创作步骤">
+          <p className="eyebrow">CREATE FLOW</p>
+          <button type="button" className="wizard-step-item active" onClick={() => document.getElementById("wizard-idea")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <span>01</span><div><strong>故事灵感</strong><small>先说清想写什么</small></div>
+          </button>
+          <button type="button" className="wizard-step-item" onClick={() => document.getElementById("wizard-quality")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <span>02</span><div><strong>作品气质</strong><small>平台、题材与风格</small></div>
+          </button>
+          <button type="button" className="wizard-step-item" onClick={() => document.getElementById("wizard-scale")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <span>03</span><div><strong>创作规模</strong><small>决定长篇规划尺度</small></div>
+          </button>
+          <div className="wizard-step-note"><Sparkles size={15} /><p>生成前会把这些选择写入创作契约，后续章节都会沿用。</p></div>
+        </aside>
+
+        <div className="wizard-main-column">
+          <form className="wizard-form starlume-card" onSubmit={event => { event.preventDefault(); validate(); }}>
+          <div id="wizard-idea" className="wizard-step">
             <span>01</span>
             <div>
               <h3>故事灵感</h3>
@@ -205,7 +231,7 @@ export function Wizard({
           </label>
 
           <div className="wizard-divider" />
-          <div className="wizard-step">
+          <div id="wizard-quality" className="wizard-step">
             <span>02</span>
             <div>
               <h3>作品气质</h3>
@@ -290,7 +316,7 @@ export function Wizard({
           </div>
 
           <div className="wizard-divider" />
-          <div className="wizard-step">
+          <div id="wizard-scale" className="wizard-step">
             <span>03</span>
             <div>
               <h3>创作规模</h3>
@@ -323,25 +349,26 @@ export function Wizard({
             {errors.targetWords && <small className="field-error">{errors.targetWords}</small>}
           </label>
 
-          <button type="submit" className="wizard-submit" disabled={busy || keyMissing}>
+          <button type="submit" className="wizard-submit" disabled={busy || keyMissing || !projectId}>
             {busy ? <><Loader2 className="spin" size={18} /> 正在创建并启动…</> : <><Sparkles size={18} /> 开始生成小说 <ArrowRight size={17} /></>}
           </button>
           <p className="wizard-submit-note">启动后可离开页面，进度会持续保存；书名确认前不会继续后续创作。</p>
-        </form>
+          </form>
 
-        <aside className="wizard-aside">
-          <div className="wizard-preview starlume-card">
-            <span className="preview-icon"><BookOpen size={22} /></span>
-            <p className="eyebrow">本次创作</p>
-            <h3>{genre || "待选择题材"} · {(targetWords || 0).toLocaleString("zh-CN")} 字</h3>
-            <p>{idea.trim() || "你的故事灵感会在这里形成第一份创作摘要。"}</p>
-            <div><Feather size={15} /><span>{style || "待设置写作风格"}</span></div>
-          </div>
-          <div className="wizard-promise">
-            <strong>你始终拥有最终决定权</strong>
-            <p>AI 先产出候选方案，关键节点需要你确认。失败会明确展示并允许重试，不会用占位内容冒充结果。</p>
-          </div>
-        </aside>
+          <aside className="wizard-aside">
+            <div className="wizard-preview starlume-card">
+              <span className="preview-icon"><BookOpen size={22} /></span>
+              <p className="eyebrow">本次创作</p>
+              <h3>{genre || "待选择题材"} · {(targetWords || 0).toLocaleString("zh-CN")} 字</h3>
+              <p>{idea.trim() || "你的故事灵感会在这里形成第一份创作摘要。"}</p>
+              <div><Feather size={15} /><span>{style || "待设置写作风格"}</span></div>
+            </div>
+            <div className="wizard-promise">
+              <strong>你始终拥有最终决定权</strong>
+              <p>AI 先产出候选方案，关键节点需要你确认。失败会明确展示并允许重试，不会用占位内容冒充结果。</p>
+            </div>
+          </aside>
+        </div>
       </div>
 
       <section className="wizard-form starlume-card" style={{ marginTop: 24 }}>

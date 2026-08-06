@@ -239,6 +239,13 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         <p>只保留与个人小说创作直接相关的连接、数据与账号设置。</p>
       </section>
 
+      {!projectId && (
+        <div className="settings-project-state" role="status">
+          <Database size={17} />
+          <span>当前还没有选中的项目。AI 连接、质量规则和词库仍可配置；创作数据导入导出会在项目加载后启用。</span>
+        </div>
+      )}
+
       {notice && <div className={`settings-notice ${notice.kind}`} role="status">{notice.kind === "success" ? <Check size={16} /> : <Lock size={16} />}{notice.text}</div>}
 
       <div className="settings-layout">
