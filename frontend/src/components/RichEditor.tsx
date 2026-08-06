@@ -89,6 +89,22 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
   }, [editor, onChange]);
 
   useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    // EditorContent moves ProseMirror's contenteditable node into its own
+    // wrapper during mount. Listening on that node itself keeps DOM-originated
+    // input (Playwright fill, IME, mobile composition and paste) observable
+    // even when React's wrapper handler is not attached to the moved node.
+    const dom = editor.view.dom;
+    const syncVisibleText = () => emitEditorText(dom);
+    dom.addEventListener("input", syncVisibleText);
+    dom.addEventListener("blur", syncVisibleText);
+    return () => {
+      dom.removeEventListener("input", syncVisibleText);
+      dom.removeEventListener("blur", syncVisibleText);
+    };
+  }, [editor, emitEditorText]);
+
+  useEffect(() => {
     // React StrictMode may reconnect passive effects after Tiptap has already
     // destroyed this editor instance. Calling getHTML() in that window reaches
     // a disposed ProseMirror schema and crashes the entire editor route.

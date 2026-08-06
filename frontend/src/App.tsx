@@ -199,6 +199,13 @@ export default function App() {
   const [historyError, setHistoryError] = useState("");
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
+  const updateEditorText = useCallback((nextText: string) => {
+    // Keep the imperative save path in sync in the same turn as an editor
+    // input. React state may commit after a fast Save click (or an automated
+    // fill), so saveChapter must never rely only on the previous render.
+    editorTextRef.current = nextText;
+    setEditorText(nextText);
+  }, []);
   // NC-LIVE-AUDIT: refs so the debounced live reviewer always reads fresh guards.
   const pendingAiEditRef = useRef(pendingAiEdit);
   const streamPreviewRef = useRef(streamPreview);
@@ -651,7 +658,7 @@ export default function App() {
   async function saveChapter(textOverride?: string): Promise<boolean> {
     if (!chapter) return false;
     const prevText = docToText(chapter.body);
-    const nextText = textOverride ?? editorText;
+    const nextText = textOverride ?? editorTextRef.current;
     const mutationId = crypto.randomUUID();
     const body = {
       body: textToDoc(nextText), label: "offline_save",
@@ -1247,7 +1254,7 @@ export default function App() {
       }} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText: updateEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} />}

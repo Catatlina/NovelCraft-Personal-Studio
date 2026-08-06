@@ -49,7 +49,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
-  saveChapter: () => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string, targetText?: string) => void;
+  saveChapter: (textOverride?: string) => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string, targetText?: string) => void;
   versions: Version[]; restoreVersion: (id: string) => void;
   offlineNotice?: string; offlineQueueCount?: number;
   offlineAiResults?: Array<{ id: string; text: string }>;
@@ -102,12 +102,18 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   saveRef.current = saveChapter;
   const [autoSavedAt, setAutoSavedAt] = useState("");
   const dirty = !!chapter && editorText !== serverText;
+  const readVisibleEditorText = () => {
+    const editorNode = Array.from(document.querySelectorAll<HTMLElement>(".ed-main .ProseMirror"))
+      .find(node => node.isConnected && (node.offsetParent !== null || node.getClientRects().length > 0));
+    if (!editorNode) return editorText;
+    return editorNode.innerText || editorNode.textContent || "";
+  };
   useEffect(() => {
     const handler = async (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
       event.preventDefault();
       if (editorAiLoading || !chapter) return;
-      const saved = await Promise.resolve(saveRef.current());
+      const saved = await Promise.resolve(saveRef.current(readVisibleEditorText()));
       if (saved !== false) setAutoSavedAt(new Date().toLocaleTimeString());
     };
     window.addEventListener("keydown", handler);
@@ -192,7 +198,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           <button className="btn-sm btn-ghost" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("polish")} style={{ gap: 4 }}>
             <Wand2 size={13} />润色
           </button>
-          <button onClick={saveChapter} disabled={!chapter || editorAiLoading} className="btn-sm btn-primary" style={{ gap: 4 }}>
+          <button onClick={() => void saveChapter(readVisibleEditorText())} disabled={!chapter || editorAiLoading} className="btn-sm btn-primary" style={{ gap: 4 }}>
             <Save size={14} />保存
           </button>
         </div>
