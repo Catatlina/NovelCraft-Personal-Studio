@@ -17,7 +17,7 @@ class ApiResponse(BaseModel):
 
 
 class NovelCreate(BaseModel):
-    idea: str = Field(min_length=4, max_length=10000)
+    idea: str = Field(min_length=4, max_length=100000)
     genre: str = Field(default="东方玄幻", max_length=80)
     platform: str = Field(default="fanqie", max_length=40)
     subgenre: str = Field(default="", max_length=80)

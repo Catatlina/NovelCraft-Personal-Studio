@@ -223,11 +223,11 @@ export function Wizard({
               value={idea}
               onChange={event => { setIdea(event.target.value); clearError("idea"); }}
               rows={6}
-              maxLength={3000}
+              maxLength={100000}
               placeholder="例如：一个写作者发现，自己删掉的章节正在现实里发生……"
               aria-invalid={Boolean(errors.idea)}
             />
-            <small className={errors.idea ? "field-error" : ""}>{errors.idea || `${idea.length} / 3000`}</small>
+            <small className={errors.idea ? "field-error" : ""}>{errors.idea || `${idea.length} / 100000`}</small>
           </label>
 
           <div className="wizard-divider" />
