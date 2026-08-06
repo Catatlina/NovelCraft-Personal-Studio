@@ -72,19 +72,14 @@ BATCH_AUTOGENERATION_CONFIDENCE_FLOOR = 0.05
 # These defects are safe to repair against the already generated chapter.
 # Anything involving story structure, score dimensions, payoff, continuity or
 # length must still take the full bounded rewrite path.
+# P0-2 质量整改：缩小本地修复范围，只保留纯确定性问题
+# 需要语义理解的问题（AI味、节奏、结构等）走完整重写，不要在本地修
 LOCAL_PROSE_REPAIR_DIMENSIONS = frozenset({
-    "third_person_narrative",
-    "profanity_or_insult",
-    "sensitive_content",
-    "urban_real_world_entity",
-    "ai_pattern_risk",
-    "dash_density",
-    "uniform_cadence",
-    "repeated_paragraph_opening",
-    "duplicate_paragraph",
-    "repeated_tic",
-    "rewrite_candidate_rejected",
-    "deai_quality_gate_failed",
+    "third_person_narrative",    # 人称错误，纯替换
+    "profanity_or_insult",       # 违禁词，纯替换
+    "sensitive_content",         # 敏感内容，纯替换
+    "urban_real_world_entity",   # 真实实体，纯替换
+    "duplicate_paragraph",       # 重复段落，纯删除
 })
 
 

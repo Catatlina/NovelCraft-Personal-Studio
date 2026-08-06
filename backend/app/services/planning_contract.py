@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# P0-5 质量整改：导入金手指规则，用于爽感强度检查
+from ..v7.quality.webnovel_strategy import _MECHANIC_RULES
+
 
 _TOTAL_WORD_RE = re.compile(
     r"(?:目标总字数|总字数|全书总字数|目标篇幅|全书篇幅)"
@@ -361,6 +364,29 @@ def mechanic_runtime_directive(contract: Any) -> str:
         "核心机制适配层（必须在事件中兑现，不得只报设定）：",
         "每次使用按‘触发→主角选择/取舍→具体行动→可见收益→代价/风险→状态写回→新冲突’落地。",
     ]
+    # P0-5 质量整改：金手指爽感强度运行时指令
+    # 检查是否有high及以上强度的金手指，如果有则增加爽感要求
+    max_intensity = "low"
+    intensity_order = {"low": 0, "medium": 1, "high": 2, "peak": 3}
+    for family in families:
+        rule = _MECHANIC_RULES.get(family)
+        if rule and rule.get("payoff_intensity"):
+            family_intensity = rule["payoff_intensity"]
+            if intensity_order.get(family_intensity, 0) > intensity_order.get(max_intensity, 0):
+                max_intensity = family_intensity
+    if intensity_order.get(max_intensity, 0) >= intensity_order["high"]:
+        lines.append(
+            f"爽感强度要求：本作品金手指为{max_intensity}级，每次使用必须带来可见的碾压级优势和强烈反馈，"
+            "不能只报设定不兑现爽感。"
+        )
+    # P0-5 质量整改：无敌开局类型增加前3章展示碾压优势的要求
+    if "invincible_opening" in families:
+        rule = _MECHANIC_RULES.get("invincible_opening", {})
+        showcase_chapter = rule.get("opening_showcase_chapter", 3)
+        lines.append(
+            f"开局碾压要求：无敌开局类型，前{showcase_chapter}章必须展示一次主角的碾压级优势，"
+            "通过扮猪吃虎/亮牌打脸制造强爽点。"
+        )
     for family in families:
         adapter = _MECHANIC_ADAPTERS.get(family)
         if adapter:
@@ -443,6 +469,50 @@ def validate_core_mechanic_contract(
     coupling = str(contract.get("plot_coupling", ""))
     if not any(marker in coupling for marker in ("主线", "冲突", "新问题", "升级", "不能跳过")):
         defects.append("金手指必须服务主线冲突，收益后要产生新问题或升级")
+
+    # P0-5 质量整改：金手指爽感强度检查
+    # 检查金手指是否有足够的爽感强度，不能只强调代价而忽略爽感
+    families = _canonical_mechanic_families(contract)
+    max_intensity = "low"
+    intensity_order = {"low": 0, "medium": 1, "high": 2, "peak": 3}
+    for family in families:
+        rule = _MECHANIC_RULES.get(family)
+        if rule and rule.get("payoff_intensity"):
+            family_intensity = rule["payoff_intensity"]
+            if intensity_order.get(family_intensity, 0) > intensity_order.get(max_intensity, 0):
+                max_intensity = family_intensity
+
+    # 对于high及以上强度的金手指，检查visible_payoff是否足够震撼
+    if intensity_order.get(max_intensity, 0) >= intensity_order["high"]:
+        visible_payoff = str(contract.get("visible_payoff", ""))
+        payoff_markers = ("碾压", "秒杀", "震惊", "全场", "轰动", "震撼", "越级", "翻盘", "逆袭", "装逼")
+        if not any(marker in visible_payoff for marker in payoff_markers):
+            defects.append(
+                f"金手指爽感强度为{max_intensity}级，visible_payoff 必须包含碾压/震惊/全场轰动等强爽感描述"
+            )
+
+    # 对于peak强度的金手指（无敌开局），检查开局碾压设计
+    if "invincible_opening" in families:
+        rule = _MECHANIC_RULES.get("invincible_opening", {})
+        if rule.get("opening_domination"):
+            showcase_chapter = rule.get("opening_showcase_chapter", 3)
+            # 检查是否有开局展示碾压优势的设计
+            opening_text = " ".join(
+                str(contract.get(field, ""))
+                for field in ("reader_promise", "trigger_and_loop", "capability_loop", "visible_payoff")
+            )
+            opening_markers = ("开局", "第一章", "前三章", "第1章", "第3章", "前期", "登场")
+            domination_markers = ("碾压", "无敌", "秒杀", "震惊", "全场", "扮猪吃虎", "隐藏实力", "亮牌")
+            has_opening_domination = any(
+                om in opening_text and dm in opening_text
+                for om in opening_markers
+                for dm in domination_markers
+            )
+            if not has_opening_domination:
+                defects.append(
+                    f"无敌开局类型金手指必须在前{showcase_chapter}章展示一次碾压级优势，"
+                    "reader_promise/capability_loop 中要明确开局碾压设计"
+                )
 
     # Generic fields prevent the provider from omitting the loop entirely;
     # adapter checks prevent every mechanic from being described with the same

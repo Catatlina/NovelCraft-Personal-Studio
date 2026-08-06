@@ -49,6 +49,11 @@ DEAI_BLOCKING_FLAGS = {
     "repeated_tic",
 }
 
+# P1-3 质量整改：新增质量门控灰度开关
+# 默认关闭 hard gate，只做 soft warning，观察误判率后再决定是否启用
+CHAPTER_MIRROR_HARD_GATE = False  # 章节镜像检测：默认soft warning
+PAYOFF_VARIETY_HARD_GATE = False  # 爽点类型多样性：默认soft warning
+
 
 def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
     """Return the application-level decision for an AI review payload."""

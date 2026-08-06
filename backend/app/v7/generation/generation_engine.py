@@ -53,6 +53,9 @@ from ..quality.deai_metrics import analyze_deai_patterns
 from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
 from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
+# P1-3 质量整改：导入质量门控灰度开关
+from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_GATE
+
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
@@ -293,7 +296,7 @@ class ContextAssembler:
         if quality_store is not None:
             quality_learning = await quality_store.active_recommendations(
                 chapter_number=chapter_number,
-                limit=4,
+                limit=2,  # P1-1 质量整改：quality_learning 从4条降到2条
             )
 
         previous = await self.load_previous_chapters(
@@ -303,7 +306,7 @@ class ContextAssembler:
         )
         payoff_history_chapters = await self.load_previous_chapters(
             chapter_number,
-            count=20,
+            count=5,  # P1-1 质量整改：payoff_history 从20章降到5章
             include_rejected=include_rejected,
         )
         recap_parts: list[str] = []
@@ -337,14 +340,11 @@ class ContextAssembler:
                 if payoff_type:
                     recent_payoff_types.append(payoff_type)
                 if payoff_type or previous_contract.get("payoff_intensity"):
+                    # P1-1 质量整改：精简payoff_history，只保留类型和强度
                     recent_payoff_history.append({
                         "chapter_number": previous_chapter.get("chapter_number"),
                         "payoff_type": payoff_type,
                         "payoff_intensity": previous_contract.get("payoff_intensity") or "small",
-                        "payoff_score": (
-                            previous_chapter.get("payoff_score")
-                            or (previous_chapter.get("generation_quality") or {}).get("payoff_score")
-                        ),
                     })
 
         layers = {
@@ -393,7 +393,7 @@ class ContextAssembler:
             "previous_full_text": previous[-1].get("text") if previous else "",
             "previous_transition_contract": previous_transition_contract,
             "recent_payoff_types": recent_payoff_types[-8:],
-            "recent_payoff_history": recent_payoff_history[-20:],
+            "recent_payoff_history": recent_payoff_history[-5:],  # P1-1 质量整改：从20章降到5章
             "style_card": style_card,
             "active_rules": active_rules,
             "quality_learning": quality_learning,
@@ -492,7 +492,7 @@ class ContextAssembler:
                 + "\n".join(
                     f"- {item.get('instruction')}（样本{item.get('sample_count', 0)}，"
                     f"正向率{float(item.get('positive_rate') or 0) * 100:.0f}%）"
-                    for item in quality_learning[:4]
+                    for item in quality_learning[:2]  # P1-1 质量整改：从4条降到2条
                     if isinstance(item, dict) and item.get("instruction")
                 )
             )
@@ -798,14 +798,18 @@ class DeAIPipeline:
     # In particular, a deliberate repeated phrase or a small amount of
     # ellipsis is common in web fiction and should not erase the author's
     # voice merely because a detector noticed it.
+    # P0-1 质量整改：恢复去AI味语义重写，把之前性能优化删掉的flag加回来
     SEMANTIC_REWRITE_FLAGS = {
         "dash_density",
+        "ellipsis_density",          # P0-1: 恢复省略号密度检测
         "uniform_cadence",
         "repeated_paragraph_opening",
         "ai_phrase",
+        "repeated_phrase",           # P0-1: 恢复重复短语检测
         "repeated_tic",
     }
-    SEMANTIC_REWRITE_SEVERITIES = {"medium", "high"}
+    # P0-1 质量整改：降低语义重写触发门槛，low级别也触发
+    SEMANTIC_REWRITE_SEVERITIES = {"low", "medium", "high"}
     DETERMINISTIC_HARD_FLAGS = {
         "dash_density",
         "uniform_cadence",
@@ -1153,7 +1157,14 @@ class DeAIPipeline:
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
             f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=payoff_contract, active_rules=active_rules)}\n\n"
             f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
-            "【爽点保护锚点】以下内容必须保留其事实、因果和读者可见性；可以调整措辞，不能删除、弱化成抽象总结或改成原文没有的事件：\n"
+            # P1-2 质量整改：调整爽点保护锚点的描述
+            # 明确告诉模型：保护的是事实和因果，表达方式可以完全彻底重写
+            "【爽点保护锚点】以下内容是本章爽点的核心事实与因果链，必须完整保留：\n"
+            "- 保护范围：事件、人物动作、结果、对手反应、资源变化、规则后果、新的压力\n"
+            "- 可以做的：表达方式可以完全彻底重写，换说法、换语序、换描写角度都可以\n"
+            "- 不能做的：删除、弱化成抽象总结、改成原文没有的事件、降低爽感强度\n"
+            "注意：锚点保护的是'发生了什么'和'为什么发生'，不是'怎么说的'；\n"
+            "去AI味重写时请大胆改写表达方式，不要只微调措辞导致AI腔残留。\n"
             f"{protected_payoff_block}\n\n"
             "【爽点保真】保留并强化本章已经写出的压制、主动选择、爆发结果、可见反馈和余波；"
             "去 AI 味只改表达，不得把强反馈改成平铺直叙，不得删掉对手态度、资源变化、规则后果或新的压力；"
@@ -2502,7 +2513,9 @@ class GenerationEngine:
             final_text,
             previous_text=str(context_layers.get("previous_full_text") or ""),
         )
-        if not mirror_stats.get("passed"):
+        # P1-3 质量整改：chapter_mirror 从 hard gate 降为 soft warning
+        # 只有当 CHAPTER_MIRROR_HARD_GATE 为 True 时才拦截
+        if not mirror_stats.get("passed") and CHAPTER_MIRROR_HARD_GATE:
             generation_failures.append({
                 "code": "chapter_mirror",
                 "severity": "high",
@@ -2580,7 +2593,9 @@ class GenerationEngine:
                 "message": "爽点节拍没有覆盖：" + "、".join(payoff_beat_validation.get("missing_phases") or []),
                 "evidence": payoff_beat_validation,
             })
-        if payoff_contract_required and not payoff_variety.get("passed"):
+        # P1-3 质量整改：payoff_variety 从 hard gate 降为 soft warning
+        # 只有当 PAYOFF_VARIETY_HARD_GATE 为 True 时才拦截
+        if payoff_contract_required and not payoff_variety.get("passed") and PAYOFF_VARIETY_HARD_GATE:
             generation_failures.append({
                 "code": "payoff_type_repetition",
                 "severity": "high",

@@ -19,12 +19,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "fanqie_fast",
         "opening_attention_chars": 300,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：提高爽点强度默认值
+        "default_intensity": "medium",        # P0-3: small → medium
+        "early_min_intensity": "high",        # P0-3: medium → high
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 5,
         "type_cycle": [
             "status_reversal", "money_or_resource", "information_advantage",
             "opponent_reaction", "career_progress", "reveal", "resource_gain",
@@ -42,12 +45,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "qidian_depth",
         "opening_attention_chars": 900,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：提高爽点强度默认值
+        "default_intensity": "medium",        # P0-3: small → medium
+        "early_min_intensity": "medium",      # P0-3: 保持medium（起点慢热）
         "early_chapter_count": 3,
         "max_low_payoff_streak": 2,
         "feedback_required": False,
         "no_repeat_window": 4,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 7,
         "type_cycle": [
             "information_advantage", "resource_gain", "relationship_shift",
             "reveal", "breakthrough", "status_reversal", "sacrifice",
@@ -65,12 +71,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "xuanhuan_upgrade",
         "opening_attention_chars": 500,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：提高爽点强度默认值
+        "default_intensity": "medium",        # P0-3: small → medium
+        "early_min_intensity": "high",        # P0-3: medium → high
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 7,
         "type_cycle": ["status_reversal", "breakthrough", "combat_advantage", "resource_gain", "reveal"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "把境界差距、能力依据、实际验证和旁观反馈写成动作链，不用状态播报代替升级。",
@@ -80,12 +89,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "xuanhuan_mortal",
         "opening_attention_chars": 900,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：苟道流保持慢热，default还是small
+        "default_intensity": "small",         # P0-3: 保持small（苟道流慢热）
+        "early_min_intensity": "medium",      # P0-3: 保持medium
         "early_chapter_count": 3,
         "max_low_payoff_streak": 2,
         "feedback_required": False,
         "no_repeat_window": 4,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 10,
         "type_cycle": ["resource_gain", "information_advantage", "survival", "hidden_strength", "reveal", "breakthrough"],
         "chapter_modes": {
             "normal": {"active_choice_required": True, "visible_feedback_required": True},
@@ -98,12 +110,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "xuanhuan_cautious",
         "opening_attention_chars": 1000,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：苟道流保持慢热，default还是small
+        "default_intensity": "small",         # P0-3: 保持small（苟道流慢热）
+        "early_min_intensity": "medium",      # P0-3: 保持medium
         "early_chapter_count": 3,
         "max_low_payoff_streak": 2,
         "feedback_required": False,
         "no_repeat_window": 5,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 10,
         "type_cycle": [
             "survival", "resource_gain", "information_advantage",
             "hidden_strength", "rule_exploit", "relationship_shift", "reveal",
@@ -120,12 +135,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "xuanhuan_longlife",
         "opening_attention_chars": 900,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：长生流保持慢热，default还是small
+        "default_intensity": "small",         # P0-3: 保持small（长生流慢热）
+        "early_min_intensity": "medium",      # P0-3: 保持medium
         "early_chapter_count": 3,
         "max_low_payoff_streak": 2,
         "feedback_required": False,
         "no_repeat_window": 5,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 10,
         "type_cycle": ["survival", "resource_gain", "hidden_strength", "relationship_shift", "reveal", "status_reversal"],
         "chapter_modes": {
             "normal": {"active_choice_required": True, "visible_feedback_required": True},
@@ -138,12 +156,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "system",
         "opening_attention_chars": 300,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：提高爽点强度默认值
+        "default_intensity": "medium",        # P0-3: small → medium
+        "early_min_intensity": "high",        # P0-3: medium → high
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 5,
         "type_cycle": ["system_reward", "ability_discovery", "resource_gain", "status_reversal", "reveal"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "奖励必须改变主角选择并带来现实后果，不能连续用面板数字代替剧情。",
@@ -153,12 +174,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "urban_shenhao",
         "opening_attention_chars": 500,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：提高爽点强度默认值
+        "default_intensity": "medium",        # P0-3: small → medium
+        "early_min_intensity": "high",        # P0-3: medium → high
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 5,
         "type_cycle": ["money_or_resource", "status_reversal", "industry_breakthrough", "opponent_reaction", "information_advantage"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "金额、时间、资源和对手优势必须具体；爽点落到选择和结果，不只报资产数字。",
@@ -168,12 +192,15 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "urban_brainstorm",
         "opening_attention_chars": 300,
         "opening_attention_is_hard": False,
-        "default_intensity": "small",
-        "early_min_intensity": "medium",
+        # P0-3 质量整改：提高爽点强度默认值
+        "default_intensity": "medium",        # P0-3: small → medium
+        "early_min_intensity": "high",        # P0-3: medium → high
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
+        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
+        "peak_intensity_interval": 5,
         "type_cycle": ["rule_exploit", "reveal", "status_reversal", "information_advantage", "relationship_shift"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "异常规则要迫使人物做选择；每次规则出现都要改变局面，不做规则展览。",
