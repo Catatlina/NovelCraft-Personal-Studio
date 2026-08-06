@@ -270,7 +270,7 @@ def validate_editor_candidate(
                 f"编辑候选篇幅超出安全范围：{source_count}->{candidate_count}",
                 details={"source_chars": source_count, "candidate_chars": candidate_count},
             )
-    elif canonical == "rewrite_chapter":
+    elif is_full_chapter:  # rewrite_chapter 已归一化为 canonical="rewrite"，故用 is_full_chapter 命中此分支
         minimum = max(2000, int(source_count * 0.80))
         maximum = max(minimum, int(source_count * 1.20))
         if candidate_count < minimum or candidate_count > maximum:

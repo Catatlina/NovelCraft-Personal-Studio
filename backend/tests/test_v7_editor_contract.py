@@ -98,6 +98,41 @@ def test_v7_editor_candidate_rejects_duplicate_paragraphs():
     assert exc.value.code in {"EDITOR_ADJACENT_DUPLICATE", "EDITOR_LENGTH_OUTSIDE_SAFE_RANGE"}
 
 
+def test_v7_editor_rewrite_chapter_allows_source_overlap():
+    """整章重写必须保留人物/对白/场景事实，故不能按续写规则禁止与原文重叠。
+
+    回归：rewrite_chapter 归一化为 canonical="rewrite" 后，原守卫条件写成
+    `canonical == "rewrite_chapter"` 永远为假（死代码），导致整章重写误走 continue
+    分支的 _cross_duplicate_stats 校验，只要候选与原文有任意一段 ≥40 字重合就被
+    误杀（报错「续写候选重复了当前正文段落」）。修复后应以 is_full_chapter 命中
+    专属整章篇幅守卫，允许与原文存在合理重叠的合法整章候选通过。
+    """
+    from app.v7.editor_service import validate_editor_candidate
+
+    shared = "沈舟推开门，屋里一片漆黑，他摸到墙上的开关，灯却没有亮，走廊尽头传来的脚步声正一步一步靠近。"
+
+    def source_para(i: int) -> str:
+        return (
+            f"第{i}段：雨水顺着窗沿滴落，巷子里的灯影被拉得很长，他想起一些零碎的往事，"
+            f"指尖还留着冰凉的触感，门外的风把一张旧报纸吹到了脚边。"
+        )
+
+    def rewrite_para(j: int) -> str:
+        return (
+            f"改写第{j}段：他把呼吸压到最轻，手探进外套内侧，金属抵着掌心发凉，"
+            f"巷口的灯影在雨里晃，像谁没说完的一句话。"
+        )
+
+    source = shared + "\n\n" + "\n\n".join(source_para(i) for i in range(1, 71))
+    # 合法整章重写：保留 shared 这个与原文重合的事实段落，其余全部改写；
+    # 无第一人称、无相邻重复，篇幅在 0.8~1.2x 安全区间内。
+    candidate = shared + "\n\n" + "\n\n".join(rewrite_para(j) for j in range(1, 71))
+
+    result = validate_editor_candidate("rewrite_chapter", source, candidate)
+    assert result["passed"] is True
+    assert result["candidate_chars"] >= 2000
+
+
 def test_v7_editor_gateway_routes_to_existing_model_route_keys():
     from app.v7.generation.generation_engine import AIGateway
 
