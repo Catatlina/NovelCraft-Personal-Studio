@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, importWork } from "../lib/api";
 import { usePagination } from "../hooks/usePagination";
 import { Pagination, ConfirmDialog, Spinner, EmptyState } from "./ui";
-import { Search, BookOpen, ArrowLeft, Trash2, Sparkles } from "lucide-react";
+import { Search, BookOpen, ArrowLeft, Trash2, Sparkles, Upload } from "lucide-react";
 
 type Book = { id: string; title: string; status: string; meta: Record<string, any>; created_at: string; updated_at: string; synopsis?: string; idea?: string; genre?: string; latest_chapter_title?: string; latest_chapter_seq?: number; total_words?: number; chapter_count?: number };
 type BookDetail = { book: Book; synopsis: string; idea?: string; genre: string; outline: unknown; latest_chapter?: any; chapters: any[]; total_words: number };
@@ -97,6 +97,10 @@ export function BookLibrary({ projectId, onOpen, onCreate }: { projectId: string
   const [completions, setCompletions] = useState<Record<string, Completion>>({});
   const [importBookId, setImportBookId] = useState("");
   const [directoryText, setDirectoryText] = useState("");
+  // 导入作品（粘贴 / 上传 MD/TXT）
+  const [importWorkOpen, setImportWorkOpen] = useState(false);
+  const [importWorkName, setImportWorkName] = useState("");
+  const [importWorkText, setImportWorkText] = useState("");
   const [detail, setDetail] = useState<BookDetail | null>(null);
   const [synopsisBusy, setSynopsisBusy] = useState(false);
   const [rejectingChapterId, setRejectingChapterId] = useState("");
@@ -244,6 +248,34 @@ export function BookLibrary({ projectId, onOpen, onCreate }: { projectId: string
       setNotice(`目录文件读取失败：${String(caught)}`);
     }
   }
+
+  async function readImportFile(file?: File) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setImportWorkText(text);
+      if (!importWorkName) setImportWorkName(file.name.replace(/\.(md|markdown|txt)$/i, ""));
+      setNotice(`已读取文件：${file.name}（${text.length.toLocaleString()} 字）`);
+    } catch (caught) {
+      setNotice(`文件读取失败：${String(caught)}`);
+    }
+  }
+
+  const importWorkSubmit = async () => {
+    const text = importWorkText.trim();
+    const name = importWorkName.trim() || "导入作品";
+    if (!text) { setNotice("请先粘贴设定文本或上传 .md/.txt 文件。"); return; }
+    setBusy("importWork"); setNotice("");
+    try {
+      await importWork(projectId, name, text);
+      setNotice(`已导入《${name}》：${text.length.toLocaleString()} 字原文已存进「灵感」与「创作圣经」，未触发 AI 重写。`);
+      setImportWorkOpen(false); setImportWorkText(""); setImportWorkName("");
+      const refreshed = await api<Book[]>(`/api/v1/library/books?project_id=${projectId}`);
+      setBooks(refreshed); refreshed.forEach(book => void loadBookState(book));
+    } catch (caught) {
+      setNotice(`导入失败：${String(caught)}`);
+    } finally { setBusy(""); }
+  };
 
   const importDirectory = async (book: Book) => {
     if (!importPreview.length) { setNotice("没有识别到章节目录，请使用“第1章 标题”等格式。"); return; }
@@ -500,6 +532,9 @@ export function BookLibrary({ projectId, onOpen, onCreate }: { projectId: string
         <p>{filtered.length} 本 · {books.length} 本总计</p>
       </div>
       <div className="head-actions">
+        <button className="btn-sm btn-primary" style={{ width: "auto" }} onClick={() => { setImportWorkOpen(previous => !previous); setNotice(""); }}>
+          <Upload size={14} />导入作品
+        </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-2)" }}>
           批次章节数
           <input type="number" min={1} max={50} value={batchCount}
@@ -513,6 +548,27 @@ export function BookLibrary({ projectId, onOpen, onCreate }: { projectId: string
     </div>
     {error && <div className="badge red" style={{ marginBottom: 12 }}>{error}</div>}
     {notice && <div className="badge gray" style={{ marginBottom: 12 }}>{notice}</div>}
+    {importWorkOpen && <div className="book-library-import" style={{ marginBottom: 16, padding: 16, background: "var(--bg)", borderRadius: "var(--r-sm)", border: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <strong style={{ fontSize: 14 }}>导入作品（粘贴或上传 .md/.txt）</strong>
+        <button className="btn-ghost" style={{ padding: "2px 8px" }} onClick={() => setImportWorkOpen(false)}>关闭</button>
+      </div>
+      <small style={{ display: "block", color: "var(--text-3)", marginBottom: 10 }}>
+        原文会逐字存进「灵感」与「创作圣经」，写作引擎直接读取，不触发 AI 重写；单本上限约 100 万字。
+      </small>
+      <input className="form-input" style={{ width: "100%", marginBottom: 8 }} placeholder="作品名（留空则用文件名）" value={importWorkName} onChange={event => setImportWorkName(event.target.value)} />
+      <label className="btn-sm" style={{ display: "inline-flex", marginBottom: 8, background: "var(--bg-hover)", color: "var(--text-2)", border: "1px solid var(--border)", cursor: "pointer" }}>
+        读取 .md / .txt 文件
+        <input type="file" accept=".md,.markdown,.txt,text/plain,text/markdown" style={{ display: "none" }} onChange={event => { void readImportFile(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+      </label>
+      <textarea className="form-input" rows={10} style={{ width: "100%", marginBottom: 6, fontFamily: "inherit" }} placeholder={"在此粘贴完整设定 / 大纲 / 世界观 / 金手指 / 角色……"} value={importWorkText} onChange={event => setImportWorkText(event.target.value)} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <small style={{ color: "var(--text-3)" }}>{importWorkText.trim().length.toLocaleString()} 字</small>
+        <button className="btn-sm btn-primary" style={{ width: "auto" }} disabled={busy === "importWork" || !importWorkText.trim()} onClick={() => void importWorkSubmit()}>
+          {busy === "importWork" ? "导入中…" : "确认导入"}
+        </button>
+      </div>
+    </div>}
     {/* NC-LIB-002: Search + filter + sort toolbar */}
     <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
       <div className="search-box" style={{ flex: 1, maxWidth: 400 }}>

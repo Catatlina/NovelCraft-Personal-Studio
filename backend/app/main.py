@@ -486,6 +486,70 @@ def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get
     return ok(novel)
 
 
+class WorkImportRequest(BaseModel):
+    """Import a full novel setting (outline / world / power system / rules / characters)
+    from pasted text or an uploaded .md/.txt file. The raw text is preserved verbatim in
+    meta.idea (灵感) and copied into meta.creative_bible + knowledge_items(kind='creative_bible')
+    so the writing engine reads it as-is. No AI bootstrap is triggered, so the user's text is
+    never rewritten."""
+    text: str = Field(min_length=1, max_length=1_000_000)
+    name: str = Field(default="", max_length=200)
+    genre: str = Field(default="东方玄幻", max_length=80)
+    platform: str = Field(default="fanqie", max_length=40)
+    subgenre: str = Field(default="", max_length=80)
+    style: str = Field(default="克制、悬疑、强画面感", max_length=160)
+    target_words: int = Field(default=1000000, ge=1000, le=3000000)
+
+
+@app.post("/api/v1/projects/{project_id}/import")
+def import_work(project_id: str, payload: WorkImportRequest, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn = connect()
+    project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = %s", (project_id,)).fetchone())
+    if project is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="project not found")
+    ensure_project_member(conn, project_id, user, {"owner", "editor"})
+    novel_id = new_id("cnt")
+    title = payload.name.strip() or "待命名作品"
+    body = {"type": "doc", "content": []}
+    # Verbatim preservation: the full imported text lives in idea and creative_bible.
+    meta = {
+        "idea": payload.text,
+        "genre": payload.genre,
+        "platform": payload.platform,
+        "subgenre": payload.subgenre,
+        "style": payload.style,
+        "target_words": payload.target_words,
+        "creative_bible": payload.text,
+        "imported": True,
+        "imported_at": datetime.now(timezone.utc).isoformat(),
+    }
+    conn.execute(
+        """
+        INSERT INTO contents (id, project_id, type, title, body, meta, status)
+        VALUES (%s, %s, 'novel', %s, %s, %s, 'draft')
+        """,
+        (novel_id, project_id, title, encode(body), encode(meta)),
+    )
+    conn.execute(
+        "INSERT INTO versions (id, entity_type, entity_id, label, snapshot) VALUES (%s, 'content', %s, 'imported_setting', %s)",
+        (new_id("ver"), novel_id, encode({"title": title, "body": body, "meta": meta})),
+    )
+    # Mirror the setting into knowledge_items so the writing engine reads it verbatim
+    # instead of requiring an AI bootstrap that would rewrite the user's text.
+    conn.execute(
+        """
+        INSERT INTO knowledge_items (id, project_id, content_id, kind, title, body, meta)
+        VALUES (%s, %s, %s, 'creative_bible', '创作圣经（导入）', %s, %s)
+        """,
+        (new_id(), project_id, novel_id, payload.text, encode({})),
+    )
+    conn.commit()
+    novel = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone()))
+    conn.close()
+    return ok(novel)
+
+
 @app.get("/api/v1/contents")
 def list_contents(project_id: str = Query(...), parent_id: str | None = None,
                   limit: int = Query(50, le=200), offset: int = Query(0, ge=0),

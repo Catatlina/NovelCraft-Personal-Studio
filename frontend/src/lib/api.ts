@@ -126,6 +126,19 @@ export async function api<T = unknown>(url: string, init?: RequestInit): Promise
   return envelope.data as BusinessData<T>;
 }
 
+/** Import a full novel setting (pasted text or uploaded .md/.txt) into a project.
+ *  The raw text is preserved verbatim in meta.idea + meta.creative_bible; no AI
+ *  rewrite is triggered. */
+export async function importWork(projectId: string, name: string, text: string) {
+  return api<{ id: string; title: string; meta: Record<string, any> }>(
+    `/api/v1/projects/${projectId}/import`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name, text }),
+    },
+  );
+}
+
 /** SSE streaming request — same auth headers as api(); onDelta fires per text
  *  chunk; resolves with the full text from the terminal {done,text} frame. */
 export async function apiStream(
