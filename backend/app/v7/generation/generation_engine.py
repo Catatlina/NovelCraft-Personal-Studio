@@ -53,6 +53,9 @@ from ..quality.deai_metrics import analyze_deai_patterns
 from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
 from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
+# P1-3 质量整改：导入质量门控灰度开关
+from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_GATE
+
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
@@ -2510,7 +2513,9 @@ class GenerationEngine:
             final_text,
             previous_text=str(context_layers.get("previous_full_text") or ""),
         )
-        if not mirror_stats.get("passed"):
+        # P1-3 质量整改：chapter_mirror 从 hard gate 降为 soft warning
+        # 只有当 CHAPTER_MIRROR_HARD_GATE 为 True 时才拦截
+        if not mirror_stats.get("passed") and CHAPTER_MIRROR_HARD_GATE:
             generation_failures.append({
                 "code": "chapter_mirror",
                 "severity": "high",
@@ -2588,7 +2593,9 @@ class GenerationEngine:
                 "message": "爽点节拍没有覆盖：" + "、".join(payoff_beat_validation.get("missing_phases") or []),
                 "evidence": payoff_beat_validation,
             })
-        if payoff_contract_required and not payoff_variety.get("passed"):
+        # P1-3 质量整改：payoff_variety 从 hard gate 降为 soft warning
+        # 只有当 PAYOFF_VARIETY_HARD_GATE 为 True 时才拦截
+        if payoff_contract_required and not payoff_variety.get("passed") and PAYOFF_VARIETY_HARD_GATE:
             generation_failures.append({
                 "code": "payoff_type_repetition",
                 "severity": "high",
