@@ -189,7 +189,7 @@ PROMPT_SEEDS = [
 
 输出 JSON: {"characters":[{"name":"姓名","role":"角色","personality":"性格","arc":"弧线","motivation":"驱动力","relationship":"关系"}]}"""),
 
-    ("bootstrap.gen_outline", "3.0.0", "deepseek",
+    ("bootstrap.gen_outline", "3.1.0", "deepseek",
      """你是百万字级商业网文的总纲策划师。请生成完整的「小说工程总纲」。
 
 书名：$selected_title
@@ -209,7 +209,14 @@ PROMPT_SEEDS = [
   "chapter_plan": [{"chapter":1,"title":"章名","goal":"目标","conflict":"冲突","twist":"转折","hook":"钩子"}]
 }
 
-要求：8-12 卷覆盖百万字、前 30 章单章级详细、每卷有高潮和钩子。"""),
+要求：8-12 卷覆盖百万字、前 30 章单章级详细、每卷有高潮和钩子。
+
+P1-5 质量整改：爽点节奏要求——番茄风格快节奏
+- 第1章就要有爽点，开局就抓住读者
+- 每章至少1个小爽点，章章有反馈
+- 每3-5章一个中型高潮
+- 每卷至少3个大高潮（high强度以上）
+- 爽点类型轮换：打脸/资源/身份/规则/关系变化交替出现"""),
 
     ("bootstrap.gen_chapter1", "3.5.0", "deepseek",
      """你是资深网文作家。请根据完整设定写第一章正文。严格遵守 oh-story 写作方法论。
@@ -1134,7 +1141,7 @@ $plan_output
 
 输出 JSON: {"total_word_target":1500000,"volume_word_targets":[187500,187500,187500,187500,187500,187500,187500,187500],"volumes":[{"number":1,"title":"卷名","arc":"弧线","start_chapter":1,"end_chapter":62,"word_target":187500,"climax":"高潮","hook":"钩子"}],"chapter_tree":[{"volume":1,"start_chapter":1,"end_chapter":62}]}"""),
 
-    ("bootstrap.blueprint_chapter_outline", "1.1.0", "deepseek",
+    ("bootstrap.blueprint_chapter_outline", "1.2.0", "deepseek",
      """你是细纲策划师。请为《$selected_title》第一卷生成前 10 章逐章细纲。
 
 用户原始需求：$idea
@@ -1151,7 +1158,12 @@ $plan_output
 要求（AI_NovelGenerator 章法）：
 1. 每章含：volume、seq（章节序号）、title（章名）、outline（80-150 字梗概：目标→阻碍→行动→代价→转折）、beats（3-5 个节拍）、foreshadow_plant（本章埋的伏笔，可空）、foreshadow_reap（本章回收的伏笔，可空）以及 payoff_contract（reader_promise/pressure/active_choice/payoff_type/visible_result/witness_reaction/cost/next_pressure/setup_refs）。爽点不等于每章打脸，也可以是揭示、资源、关系变化、逃生或规则利用，但必须有可见结果和下一压力
 2. 第 1-3 章必须按创作圣经里的黄金三章目标推进；如果用户要求前三章坦白/立规矩/完成关键事件，不得拖延
-3. 每 2-3 章安排一个小爽点、第 9-10 章安排第一个中型高潮
+3. P1-5 质量整改：加快爽点节奏——番茄风格快节奏，开局就爽
+   - 第1章就要有爽点（小爽点或以上），不能等到第2-3章
+   - 每章至少1个小爽点，章章有反馈，章章有进展
+   - 每3-5章一个中型高潮（medium强度以上）
+   - 前10章至少2个high强度爽点（大打脸/大逆袭/大震惊）
+   - 爽点类型要轮换：打脸/资源/身份/规则/关系变化交替出现，避免连续同类型
 4. 严格核对年代顺序：重生前事件必须发生在用户指定的未来年份，醒来后才进入过去年份；不得把两个年代混写
 5. 每一章只承担自己的细纲内容，不得提前把后续多章剧情塞进第一章
 6. 【V3 Chapter Function 必填】每章额外明确三项功能约束，避免"有事件无作用"的水字：
