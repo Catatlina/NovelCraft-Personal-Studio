@@ -845,22 +845,24 @@ def score_payoff_contract(
         "five_chapter_curve": five_chapter_score,
         "twenty_chapter_distribution": twenty_chapter_score,
     }
+    # P0-4 质量整改：提高爽点强度权重，把爽感作为核心指标
     weights = {
-        "expectation_fulfillment": 0.15,
-        "protagonist_agency": 0.15,
-        "result_visibility": 0.15,
-        "feedback_effectiveness": 0.12,
-        "payoff_intensity": 0.10,
-        "hook_strength": 0.14,
-        "payoff_variety": 0.07,
-        "five_chapter_curve": 0.06,
-        "twenty_chapter_distribution": 0.06,
+        "expectation_fulfillment": 0.12,    # P0-4: 0.15 → 0.12
+        "protagonist_agency": 0.15,         # P0-4: 保持0.15（主角主动性重要）
+        "result_visibility": 0.12,          # P0-4: 0.15 → 0.12
+        "feedback_effectiveness": 0.12,     # P0-4: 保持0.12
+        "payoff_intensity": 0.20,           # P0-4: 0.10 → 0.20（提到最高权重之一）
+        "hook_strength": 0.12,              # P0-4: 0.14 → 0.12
+        "payoff_variety": 0.05,             # P0-4: 0.07 → 0.05
+        "five_chapter_curve": 0.07,         # P0-4: 0.06 → 0.07（微调）
+        "twenty_chapter_distribution": 0.05, # P0-4: 0.06 → 0.05
     }
     score = round(sum(dimensions[key] * weights[key] for key in dimensions), 1)
+    # P0-4 质量整改：提高爽点评分通过标准，70→75
     return {
         "schema_version": PAYOFF_SCHEMA_VERSION,
         "score": score,
-        "passed": score >= 70,
+        "passed": score >= 75,              # P0-4: 70 → 75
         "source": "deterministic_contract",
         "dimensions": dimensions,
         "weights": weights,
