@@ -20,6 +20,9 @@ from ...services.content_policy import analyze_content_policy
 from ...services.pov_quality import analyze_third_person_narrative
 from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 from ..quality.review_evidence import validate_review_evidence
+from ..quality.world_constraint import get_constraint_pack
+from ..quality.reader_simulation import simulate_reader_first_pass
+from ..quality.hook_analysis import analyze_hook_power
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -115,6 +118,56 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
     quality_profile = review_data.get("quality_profile") or {}
     payoff_contract = review_data.get("payoff_contract") or {}
     payoff_validation = review_data.get("payoff_validation") or {}
+    
+    # 阶段1：封神世界观硬约束注入
+    # 检查 quality_profile 中是否指定了世界观约束，如果有则进行检查
+    # 目前作为 soft warning，不阻塞质量门禁，后续可根据需要升级为 hard gate
+    world_constraint_result = None
+    world_constraint_genre = quality_profile.get("world_constraint") if quality_profile else None
+    if world_constraint_genre:
+        constraint_pack = get_constraint_pack(world_constraint_genre)
+        if constraint_pack:
+            chapter_text = review_data.get("chapter_text") or ""
+            if chapter_text:
+                world_constraint_result = constraint_pack.check_text(chapter_text)
+                # 目前作为 soft warning，不加入 failures
+                # 如果后续需要升级为 hard gate，可以取消下面的注释
+                # if not world_constraint_result["passed"]:
+                #     for violation in world_constraint_result["violations"]:
+                #         if violation["severity"] == "high":
+                #             failures.append({
+                #                 "dimension": f"world_constraint_{violation['rule_id']}",
+                #                 "actual": violation["count"],
+                #                 "minimum": 0,
+                #                 "reason": f"世界观约束违反：{violation['description']}",
+                #             })
+    
+    # 阶段3："读第一遍"模拟审查
+    # 模拟读者第一次阅读的感受和判断
+    # 目前作为可选功能，默认不启用（需要AI调用，有成本）
+    # 可以通过 quality_profile.enable_reader_simulation 开关控制
+    reader_simulation_result = None
+    enable_reader_simulation = quality_profile.get("enable_reader_simulation") if quality_profile else False
+    if enable_reader_simulation:
+        chapter_text = review_data.get("chapter_text") or ""
+        if chapter_text:
+            platform = quality_profile.get("platform", "general") if quality_profile else "general"
+            reader_simulation_result = simulate_reader_first_pass(chapter_text, platform)
+    
+    # 阶段4：首章钩力分析
+    # 对首章做专项分析，输出钩力报告
+    # 作为信息输出，不阻塞质量门禁
+    # 可以通过 quality_profile.enable_hook_analysis 开关控制
+    hook_analysis_result = None
+    enable_hook_analysis = quality_profile.get("enable_hook_analysis") if quality_profile else False
+    if enable_hook_analysis:
+        chapter_text = review_data.get("chapter_text") or ""
+        if chapter_text:
+            platform = quality_profile.get("platform", "general") if quality_profile else "general"
+            # 检查是否是首章
+            chapter_number = review_data.get("chapter_number", 1)
+            is_first_chapter = (chapter_number == 1)
+            hook_analysis_result = analyze_hook_power(chapter_text, platform, is_first_chapter)
     if quality_profile and payoff_contract:
         payoff_validation = validate_payoff_contract(
             payoff_contract,
@@ -264,4 +317,13 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         # decision so weak expectation/payoff is visible to rework and UI.
         "reader_experience": reader_experience,
         "reader_experience_warnings": reader_experience_issues(reader_experience),
+        # 世界观硬约束检查结果（阶段1新增）
+        # 目前作为 soft warning，不阻塞质量门禁
+        "world_constraint": world_constraint_result,
+        # "读第一遍"模拟审查结果（阶段3新增）
+        # 目前作为可选功能，默认不启用
+        "reader_simulation": reader_simulation_result,
+        # 首章钩力分析结果（阶段4新增）
+        # 作为信息输出，不阻塞质量门禁
+        "hook_analysis": hook_analysis_result,
     }
