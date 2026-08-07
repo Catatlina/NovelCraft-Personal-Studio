@@ -13,6 +13,7 @@ from typing import Any
 
 from ...services.text_quality import duplicate_paragraph_stats
 from .novel_reviewer_reference import analyze_novel_reviewer_lexicon
+from .structural_ai_smell import analyze_structural_ai_smell
 
 
 _SENTENCE_RE = re.compile(r"[^。！？!?\n]+[。！？!?]?")
@@ -147,6 +148,7 @@ def analyze_deai_patterns(
             "tic_metrics": {"hits": 0, "density_per_1000": 0.0, "breakdown": {}, "dominant": "", "dominant_count": 0, "repeated": False},
             "duplicate_paragraphs": duplicate_paragraph_stats(""),
             "novel_reviewer_lexicon": analyze_novel_reviewer_lexicon("", profile=profile),
+            "structural_ai_smell": None,
         }
 
     compact = re.sub(r"\s+", "", text)
@@ -164,6 +166,23 @@ def analyze_deai_patterns(
     tic_metrics = _tic_metrics(text, profile)
     duplicate_paragraphs = duplicate_paragraph_stats(text)
     novel_reviewer_lexicon = analyze_novel_reviewer_lexicon(text, profile=profile)
+    
+    # 阶段2：去AI味两层互补 - 模式级检测
+    # 与词级检查并联，补充检测行文模式和结构
+    # 目前作为信息返回，不加入 flags，后续可根据需要调整
+    structural_ai_smell_result = None
+    if size >= 500:  # 文本太短时不做模式级检测，结果不准确
+        # 根据平台选择阈值预设
+        platform = profile.get("platform") if profile else None
+        if platform == "fanqie":
+            preset = "tomato"
+        elif platform == "qidian":
+            preset = "qidian"
+        elif platform == "jjwxc":
+            preset = "jjwxc"
+        else:
+            preset = "default"
+        structural_ai_smell_result = analyze_structural_ai_smell(text, preset)
     dash_density = dash_count / size * 1000
     ellipsis_density = ellipsis_count / size * 1000
 
@@ -241,4 +260,7 @@ def analyze_deai_patterns(
         "tic_metrics": tic_metrics,
         "duplicate_paragraphs": duplicate_paragraphs,
         "novel_reviewer_lexicon": novel_reviewer_lexicon,
+        # 阶段2：去AI味两层互补 - 模式级检测结果
+        # 与词级检查并联，补充检测行文模式和结构
+        "structural_ai_smell": structural_ai_smell_result,
     }
