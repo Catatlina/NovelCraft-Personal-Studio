@@ -106,6 +106,8 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/v7/quality/emotional_arc.py:_generate_suggestions": "deterministic suggestion generation based on arc analysis, pure rule-based logic no AI calls",
     "backend/app/v7/quality/retention_predictor.py:_generate_suggestion": "deterministic single-feature suggestion generation, pure rule-based logic no AI calls",
     "backend/app/v7/quality/retention_predictor.py:_generate_improvement_suggestions": "deterministic improvement suggestion list generation, pure rule-based logic no AI calls",
+    "backend/app/v7/services/subgenre_discovery.py:_generate_subgenre_description": "deterministic subgenre name and description generation based on feature differences, pure rule-based logic no AI calls",
+    "backend/app/v7/services/subgenre_discovery.py:calculate_silhouette_score": "deterministic silhouette score calculation for clustering evaluation, pure mathematical computation no AI calls",
     "backend/app/services/content_policy.py:analyze_content_policy": "deterministic local policy scan for profanity, sensitive terms, and fictional-world entity leakage; no generated output",
     "backend/app/services/pov_quality.py:analyze_third_person_narrative": "deterministic first-person marker scan for the third-person narrative gate; no generated output",
     "backend/app/services/ten_layer_analysis.py:analyze_book_profile": "deterministic metadata normalization layer",
