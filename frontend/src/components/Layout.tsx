@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
+  BarChart3,
   BookOpen,
   Brain,
   CircleCheckBig,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   Sun,
   WandSparkles,
+  Layers,
 } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { cleanNovelTitle } from "../lib/titleDisplay";
@@ -23,7 +25,7 @@ export type AppTab =
   | "progress" | "review" | "editor" | "costs" | "billing" | "prompts" | "dag"
   | "settings" | "studio" | "publish" | "hotspot" | "knowledge" | "fanout"
   | "versions" | "foreshadowing" | "collaboration" | "agents" | "plugins"
-  | "skills" | "chat" | "marketplace" | "v7";
+  | "skills" | "chat" | "marketplace" | "v7" | "genre-manager" | "quality-analysis";
 
 const NAV_ITEMS: Array<{ id: AppTab; label: string; icon: React.ReactNode }> = [
   { id: "dashboard", label: "小说首页", icon: <Sparkles size={19} /> },
@@ -33,6 +35,8 @@ const NAV_ITEMS: Array<{ id: AppTab; label: string; icon: React.ReactNode }> = [
   { id: "progress", label: "创作进度", icon: <CircleCheckBig size={19} /> },
   { id: "editor", label: "章节编辑器", icon: <FilePenLine size={19} /> },
   { id: "review", label: "审阅与一致性", icon: <BookOpen size={19} /> },
+  { id: "quality-analysis", label: "质量分析看板", icon: <BarChart3 size={19} /> },
+  { id: "genre-manager", label: "品类管理", icon: <Layers size={19} /> },
   { id: "v7", label: "V7 智能体", icon: <Brain size={19} /> },
   { id: "settings", label: "小说设置", icon: <Settings size={19} /> },
 ];

@@ -6,6 +6,8 @@ import { Review } from "./components/Review";
 import { CommandPalette } from "./components/CommandPalette";
 import { Settings } from "./components/Settings";
 import { V7Dashboard } from "./v7/pages/V7Dashboard";
+import GenreManager from "./v7/pages/GenreManager";
+import QualityReport from "./v7/pages/QualityReport";
 import { LoginPage } from "./components/LoginPage";
 import { BookLibrary } from "./components/BookLibrary";
 import { ApiError, api as baseApi, apiRaw, apiStream } from "./lib/api";
@@ -35,7 +37,7 @@ type Tab = AppTab;
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
-const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings", "ranking", "v7"]);
+const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings", "ranking", "v7", "genre-manager", "quality-analysis"]);
 const LEGACY_TAB_REDIRECTS: Record<string, Tab> = {
   home: "dashboard",
   overview: "dashboard",
@@ -1136,7 +1138,7 @@ export default function App() {
     canonical_engine: "v7",
   } : legacyReview) as any;
 
-  const titles: Record<Tab, string> = { dashboard: "小说首页", overview: "数据概览", workspace: "小说首页", ranking: "扫榜选书", library: "我的书库", wizard: "创作向导", progress: "创作进度", review: "审阅与一致性", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "小说设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话", marketplace: "模块市场", v7: "V7 智能体" };
+  const titles: Record<Tab, string> = { dashboard: "小说首页", overview: "数据概览", workspace: "小说首页", ranking: "扫榜选书", library: "我的书库", wizard: "创作向导", progress: "创作进度", review: "审阅与一致性", editor: "章节编辑器", costs: "AI 成本", billing: "订阅与套餐", prompts: "Prompt 管理", dag: "工作流编排", settings: "小说设置", studio: "内容工作室", publish: "发布看板", hotspot: "热点追踪", knowledge: "知识库", fanout: "多平台分发", versions: "版本历史", foreshadowing: "伏笔看板", collaboration: "协作管理", agents: "智能体", plugins: "插件管理", skills: "Skill 中心", chat: "AI 对话", marketplace: "模块市场", v7: "V7 智能体", "genre-manager": "品类管理", "quality-analysis": "质量分析看板" };
   const cmdActions = [
     { id: "dashboard", label: "小说首页", action: () => setTab("dashboard") },
     { id: "wizard", label: "创作向导 · 新建小说", action: () => setTab("wizard") },
@@ -1144,6 +1146,8 @@ export default function App() {
     { id: "progress", label: "创作进度 · 查看 AI 工作流", action: () => setTab("progress") },
     { id: "editor", label: "章节编辑器 · 继续写作", action: () => setTab("editor") },
     { id: "review", label: "审阅与一致性 · 检查小说", action: () => setTab("review") },
+    { id: "quality-analysis", label: "质量分析看板 · 可视化报告", action: () => setTab("quality-analysis") },
+    { id: "genre-manager", label: "品类管理 · 品类库与规则", action: () => setTab("genre-manager") },
     { id: "settings", label: "小说设置 · AI 与创作偏好", action: () => setTab("settings") },
   ];
 
@@ -1263,6 +1267,10 @@ export default function App() {
         onOpenProgress={() => setTab("progress")}
         onOpenReview={() => setTab("review")}
         onOpenLibrary={() => setTab("library")}
+      />}
+      {tab === "genre-manager" && <GenreManager />}
+      {tab === "quality-analysis" && <QualityReport
+        novelId={novel?.id ?? null}
       />}
       </>}
       <CommandPalette commands={cmdActions} />
