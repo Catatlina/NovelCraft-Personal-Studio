@@ -10,24 +10,51 @@ from copy import deepcopy
 from typing import Any
 
 
-PAYOFF_STRATEGY_SCHEMA_VERSION = "payoff-strategy-v1"
+PAYOFF_STRATEGY_SCHEMA_VERSION = "payoff-strategy-v2"
 
 
 _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
+    "fanqie_aggressive": {
+        "label": "番茄爽文激进",
+        "strategy_id": "fanqie_aggressive",
+        "opening_attention_chars": 200,
+        "opening_attention_is_hard": True,
+        # 番茄爽文激进策略：爽度拉满
+        "default_intensity": "high",          # 爽文激进版：默认high
+        "early_min_intensity": "peak",        # 前3章直接peak级爽点
+        "early_chapter_count": 3,
+        "max_low_payoff_streak": 0,           # 不允许连续低爽点
+        "feedback_required": True,
+        "no_repeat_window": 2,
+        "peak_intensity_interval": 3,         # 每3章至少一次peak
+        "high_intensity_interval": 1,         # 每章至少一次high以上
+        "type_cycle": [
+            "status_reversal", "system_reward", "opponent_humiliation",
+            "money_or_resource", "combat_domination", "audience_shock",
+            "identity_reveal", "resource_gain",
+        ],
+        "chapter_modes": {
+            "normal": {"active_choice_required": True, "visible_feedback_required": True, "face_slap_required": True},
+            "aftermath": {"active_choice_required": False, "visible_feedback_required": True},
+            "relationship": {"active_choice_required": False, "visible_feedback_required": True},
+            "suspense": {"active_choice_required": False, "visible_feedback_required": True},
+        },
+        "directive": "开局直接冲突，打脸必须狠，反馈必须夸张；每章至少一次high级爽点，每3章一次peak；反派嚣张欠揍，主角碾压式胜利，全场哗然反馈拉满。",
+    },
     "fanqie_fast": {
         "label": "番茄快节奏",
         "strategy_id": "fanqie_fast",
         "opening_attention_chars": 300,
         "opening_attention_is_hard": False,
-        # P0-3 质量整改：提高爽点强度默认值
-        "default_intensity": "medium",        # P0-3: small → medium
-        "early_min_intensity": "high",        # P0-3: medium → high
+        # 番茄爽文加码：default medium→high, early_min high→peak
+        "default_intensity": "high",          # 加码：medium → high
+        "early_min_intensity": "peak",        # 加码：high → peak
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
-        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
-        "peak_intensity_interval": 5,
+        # 加码：peak间隔从5→4
+        "peak_intensity_interval": 4,
         "type_cycle": [
             "status_reversal", "money_or_resource", "information_advantage",
             "opponent_reaction", "career_progress", "reveal", "resource_gain",
@@ -71,16 +98,16 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "xuanhuan_upgrade",
         "opening_attention_chars": 500,
         "opening_attention_is_hard": False,
-        # P0-3 质量整改：提高爽点强度默认值
-        "default_intensity": "medium",        # P0-3: small → medium
-        "early_min_intensity": "high",        # P0-3: medium → high
+        # 番茄爽文加码：default medium→high, early_min high→peak
+        "default_intensity": "high",          # 加码：medium → high
+        "early_min_intensity": "peak",        # 加码：high → peak
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
-        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
-        "peak_intensity_interval": 7,
-        "type_cycle": ["status_reversal", "breakthrough", "combat_advantage", "resource_gain", "reveal"],
+        # 加码：peak间隔从7→5
+        "peak_intensity_interval": 5,
+        "type_cycle": ["status_reversal", "breakthrough", "combat_advantage", "resource_gain", "reveal", "audience_shock"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "把境界差距、能力依据、实际验证和旁观反馈写成动作链，不用状态播报代替升级。",
     },
@@ -156,16 +183,16 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "system",
         "opening_attention_chars": 300,
         "opening_attention_is_hard": False,
-        # P0-3 质量整改：提高爽点强度默认值
-        "default_intensity": "medium",        # P0-3: small → medium
-        "early_min_intensity": "high",        # P0-3: medium → high
+        # 番茄爽文加码：default medium→high, early_min high→peak
+        "default_intensity": "high",          # 加码：medium → high
+        "early_min_intensity": "peak",        # 加码：high → peak
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
-        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
-        "peak_intensity_interval": 5,
-        "type_cycle": ["system_reward", "ability_discovery", "resource_gain", "status_reversal", "reveal"],
+        # 加码：peak间隔从5→4
+        "peak_intensity_interval": 4,
+        "type_cycle": ["system_reward", "ability_discovery", "resource_gain", "status_reversal", "reveal", "audience_shock"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "奖励必须改变主角选择并带来现实后果，不能连续用面板数字代替剧情。",
     },
@@ -174,16 +201,16 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "urban_shenhao",
         "opening_attention_chars": 500,
         "opening_attention_is_hard": False,
-        # P0-3 质量整改：提高爽点强度默认值
-        "default_intensity": "medium",        # P0-3: small → medium
-        "early_min_intensity": "high",        # P0-3: medium → high
+        # 番茄爽文加码：default medium→high, early_min high→peak
+        "default_intensity": "high",          # 加码：medium → high
+        "early_min_intensity": "peak",        # 加码：high → peak
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
-        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
-        "peak_intensity_interval": 5,
-        "type_cycle": ["money_or_resource", "status_reversal", "industry_breakthrough", "opponent_reaction", "information_advantage"],
+        # 加码：peak间隔从5→4
+        "peak_intensity_interval": 4,
+        "type_cycle": ["money_or_resource", "status_reversal", "industry_breakthrough", "opponent_reaction", "information_advantage", "audience_shock"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "金额、时间、资源和对手优势必须具体；爽点落到选择和结果，不只报资产数字。",
     },
@@ -192,16 +219,16 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
         "strategy_id": "urban_brainstorm",
         "opening_attention_chars": 300,
         "opening_attention_is_hard": False,
-        # P0-3 质量整改：提高爽点强度默认值
-        "default_intensity": "medium",        # P0-3: small → medium
-        "early_min_intensity": "high",        # P0-3: medium → high
+        # 番茄爽文加码：default medium→high, early_min high→peak
+        "default_intensity": "high",          # 加码：medium → high
+        "early_min_intensity": "peak",        # 加码：high → peak
         "early_chapter_count": 3,
         "max_low_payoff_streak": 1,
         "feedback_required": True,
         "no_repeat_window": 3,
-        # P0-3 质量整改：peak强度爽点间隔（每N章至少一次peak）
-        "peak_intensity_interval": 5,
-        "type_cycle": ["rule_exploit", "reveal", "status_reversal", "information_advantage", "relationship_shift"],
+        # 加码：peak间隔从5→4
+        "peak_intensity_interval": 4,
+        "type_cycle": ["rule_exploit", "reveal", "status_reversal", "information_advantage", "relationship_shift", "audience_shock"],
         "chapter_modes": {"normal": {"active_choice_required": True, "visible_feedback_required": True}},
         "directive": "异常规则要迫使人物做选择；每次规则出现都要改变局面，不做规则展览。",
     },
@@ -209,7 +236,9 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
 
 
 def select_payoff_strategy(platform: str, genre: str, subgenre: str) -> dict[str, Any]:
-    if subgenre == "urban_shenhao":
+    if subgenre in {"fanqie_aggressive", "爽文激进", "番茄激进"}:
+        key = "fanqie_aggressive"
+    elif subgenre == "urban_shenhao":
         key = "urban_shenhao"
     elif subgenre == "urban_brainstorm":
         key = "urban_brainstorm"

@@ -937,11 +937,11 @@ def score_payoff_contract(
         "twenty_chapter_distribution": 0.02, # P2-4: 0.03 → 0.02（降低长期分布权重）
     }
     score = round(sum(dimensions[key] * weights[key] for key in dimensions), 1)
-    # P0-4 质量整改：提高爽点评分通过标准，70→75
+    # 番茄爽文加码：爽点评分通过标准从75→80
     return {
         "schema_version": PAYOFF_SCHEMA_VERSION,
         "score": score,
-        "passed": score >= 75,              # P0-4: 70 → 75
+        "passed": score >= 80,              # 加码：75 → 80
         "source": "deterministic_contract",
         "dimensions": dimensions,
         "weights": weights,
