@@ -6,9 +6,9 @@
  * - 深色 indigo 主题
  * - 卡片式布局
  * - 视觉层次分明
- * - 数据饱满无空白
+ * - 真实 API 数据，无 mock
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   ChevronDown,
@@ -22,7 +22,9 @@ import {
   Shield,
   Sparkles,
   Upload,
+  Loader2,
 } from 'lucide-react';
+import brainApi from '../api/client';
 
 interface GenrePack {
   id: string;
@@ -34,9 +36,9 @@ interface GenrePack {
   is_active: boolean;
   parent_id: string | null;
   icon_url: string | null;
-  rule_count?: number;
-  knowledge_count?: number;
-  prompt_count?: number;
+  extra_metadata?: any;
+  created_at?: string;
+  updated_at?: string;
   children?: GenrePack[];
 }
 
@@ -55,9 +57,14 @@ interface GenreRule {
 
 interface GenreKnowledge {
   id: string;
+  genre_id: string;
+  knowledge_type: string;
   title: string;
-  category: string;
-  summary: string;
+  content: string;
+  tags: string[];
+  priority: number;
+  is_active: boolean;
+  inherited_from: string | null;
 }
 
 interface GenreManagerProps {
@@ -66,7 +73,7 @@ interface GenreManagerProps {
 
 type DetailTab = 'style' | 'quality' | 'forbidden';
 
-// ============ Mock 数据 ============
+// ============ 常量 ============
 
 const SCOPE_LABELS: Record<string, string> = {
   webnovel: '通用网文',
@@ -88,234 +95,155 @@ const RULE_TYPE_LABELS: Record<string, string> = {
   style_card: '风格卡',
 };
 
-const MOCK_GENRES: GenrePack[] = [
-  {
-    id: 'base',
-    name: '通用网文',
-    slug: 'base',
-    description: '所有网文品类的基础规则集，包含通用质量门禁、AI味检测阈值和基础写作规范。',
-    scope: 'webnovel',
-    is_builtin: true,
-    is_active: true,
-    parent_id: null,
-    icon_url: null,
-    rule_count: 30,
-    knowledge_count: 10,
-    prompt_count: 5,
-  },
-  {
-    id: 'tomato',
-    name: '番茄爽文',
-    slug: 'tomato',
-    description: '番茄小说平台爽文专属规则，强化爽点密度、节奏把控和读者留存优化。',
-    scope: 'fanqie',
-    is_builtin: true,
-    is_active: true,
-    parent_id: 'base',
-    icon_url: null,
-    rule_count: 20,
-    knowledge_count: 8,
-    prompt_count: 3,
-  },
-  {
-    id: 'qidian',
-    name: '起点玄幻',
-    slug: 'qidian',
-    description: '起点中文网玄幻品类规则，侧重世界观构建、升级体系和长篇布局。',
-    scope: 'qidian',
-    is_builtin: true,
-    is_active: true,
-    parent_id: 'base',
-    icon_url: null,
-    rule_count: 15,
-    knowledge_count: 12,
-    prompt_count: 2,
-  },
-  {
-    id: 'jjwxc',
-    name: '晋江言情',
-    slug: 'jjwxc',
-    description: '晋江文学城言情品类规则，注重情感细腻度、人物关系和情节张力。',
-    scope: 'jjwxc',
-    is_builtin: true,
-    is_active: true,
-    parent_id: 'base',
-    icon_url: null,
-    rule_count: 18,
-    knowledge_count: 10,
-    prompt_count: 4,
-  },
-  {
-    id: 'fengshen',
-    name: '封神举国',
-    slug: 'fengshen',
-    description: '封神题材举国流专属规则，包含封神世界观硬约束、阵营设定和举国流爽点模式。',
-    scope: 'fanqie',
-    is_builtin: true,
-    is_active: true,
-    parent_id: 'tomato',
-    icon_url: null,
-    rule_count: 8,
-    knowledge_count: 15,
-    prompt_count: 2,
-  },
-  {
-    id: 'datang',
-    name: '大唐后台',
-    slug: 'datang',
-    description: '大唐背景官场文专属规则，包含历史考据、官场逻辑和时代特色语言。',
-    scope: 'fanqie',
-    is_builtin: true,
-    is_active: true,
-    parent_id: 'tomato',
-    icon_url: null,
-    rule_count: 10,
-    knowledge_count: 20,
-    prompt_count: 2,
-  },
-];
-
-const MOCK_STYLE_CARD = {
-  keywords: ['快节奏', '爽点密集', '打脸爽快', '金手指强', '升级清晰'],
-  pacing: '每 3000 字一个小爽点，每 10000 字一个大爽点',
-  language: '直白易懂，少用生僻词，对话占比 40% 以上',
-  tone: '轻松幽默，主角性格鲜明，冲突直接',
-  structure: '开局即高潮，三章内见金手指，十章内第一次打脸',
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#22c55e',
+  warning: '#eab308',
+  info: '#3b82f6',
 };
 
-const MOCK_QUALITY_RULES = [
-  { key: 'ai_smell_score', name: 'AI 味综合评分', value: '≥ 75 分', severity: 'error', inherited: false },
-  { key: 'transition_density', name: '转折词密度', value: '≤ 5 次/千字', severity: 'warning', inherited: true },
-  { key: 'payoff_density', name: '爽点密度', value: '≥ 1 个/千字', severity: 'error', inherited: false },
-  { key: 'chapter_word_count', name: '章节字数', value: '2000-5000 字', severity: 'info', inherited: true },
-  { key: 'dialogue_ratio', name: '对话占比', value: '≥ 35%', severity: 'warning', inherited: false },
-  { key: 'pacing_variance', name: '节奏变异度', value: '≤ 30%', severity: 'warning', inherited: true },
-];
-
-const MOCK_FORBIDDEN_RULES = [
-  { category: '高级违规', items: [
-    { name: '政治敏感内容', desc: '禁止涉及现实政治敏感话题' },
-    { name: '色情低俗描写', desc: '禁止露骨性描写和低俗内容' },
-    { name: '违法犯罪教唆', desc: '禁止教唆违法犯罪行为' },
-  ]},
-  { category: '中级违规', items: [
-    { name: '负面价值观', desc: '禁止传播错误价值观' },
-    { name: '人身攻击', desc: '禁止针对特定群体的人身攻击' },
-    { name: '封建迷信', desc: '禁止宣扬封建迷信思想' },
-  ]},
-  { category: '低级违规', items: [
-    { name: '错别字过多', desc: '每千字错别字不超过 3 个' },
-    { name: '标点不规范', desc: '规范使用中文标点符号' },
-    { name: '段落过长', desc: '单段不超过 200 字' },
-  ]},
-];
-
-const MOCK_KNOWLEDGE: GenreKnowledge[] = [
-  { id: '1', title: '番茄爽文黄金三章', category: '开篇技巧', summary: '第一章：钩子+金手指；第二章：第一次小冲突；第三章：第一次打脸。' },
-  { id: '2', title: '举国流核心爽点', category: '爽点模式', summary: '从弱到强的国家建设、科技碾压、文化输出、万国来朝。' },
-  { id: '3', title: '封神世界观设定', category: '世界观', summary: '阐截两教、封神榜、三十六路伐西岐、诛仙阵等核心设定。' },
-  { id: '4', title: '读者留存优化技巧', category: '留存策略', summary: '章末钩子、悬念设置、节奏控制、期待感管理。' },
-  { id: '5', title: '打脸情节设计公式', category: '情节设计', summary: '铺垫-冲突-爆发-余韵四步法，确保打脸爽快不憋屈。' },
-  { id: '6', title: '角色人设塑造要点', category: '人物塑造', summary: '主角辨识度、配角记忆点、反派立体感、群像平衡。' },
-];
-
-// ============ 工具函数 ============
-
-function getSeverityTone(severity: string) {
-  if (severity === 'error') return 'danger';
-  if (severity === 'warning') return 'amber';
-  return 'green';
-}
-
-// ============ 子组件 ============
-
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  tone = 'indigo',
-}: {
-  icon: typeof Layers;
-  label: string;
-  value: string;
-  detail: string;
-  tone?: 'indigo' | 'green' | 'amber' | 'gray' | 'danger';
-}) {
-  return (
-    <div className="v7-metric-card">
-      <div className={`v7-metric-icon ${tone}`}><Icon size={18} /></div>
-      <div className="v7-metric-copy">
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{detail}</small>
-      </div>
-    </div>
-  );
-}
-
-// ============ 主组件 ============
+// ============ 组件 ============
 
 export default function GenreManager({ novelId }: GenreManagerProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGenreId, setSelectedGenreId] = useState<string>('tomato');
-  const [expandedGenres, setExpandedGenres] = useState<Set<string>>(new Set(['base', 'tomato']));
+  const [selectedGenreId, setSelectedGenreId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>('style');
-  const [loading, setLoading] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
-  // 构建品类树
-  const genreTree = useMemo(() => {
-    const map = new Map<string, GenrePack>();
-    MOCK_GENRES.forEach(g => map.set(g.id, { ...g, children: [] }));
+  // 数据状态
+  const [genreTree, setGenreTree] = useState<any[]>([]);
+  const [allGenres, setAllGenres] = useState<GenrePack[]>([]);
+  const [selectedGenre, setSelectedGenre] = useState<GenrePack | null>(null);
+  const [parentGenre, setParentGenre] = useState<GenrePack | null>(null);
+  const [styleRules, setStyleRules] = useState<GenreRule[]>([]);
+  const [qualityRules, setQualityRules] = useState<GenreRule[]>([]);
+  const [forbiddenRules, setForbiddenRules] = useState<GenreRule[]>([]);
+  const [knowledgeList, setKnowledgeList] = useState<GenreKnowledge[]>([]);
+  const [inheritanceChain, setInheritanceChain] = useState<GenrePack[]>([]);
 
-    const roots: GenrePack[] = [];
-    map.forEach(genre => {
-      if (genre.parent_id && map.has(genre.parent_id)) {
-        map.get(genre.parent_id)!.children!.push(genre);
-      } else {
-        roots.push(genre);
+  // 加载状态
+  const [loadingTree, setLoadingTree] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [treeError, setTreeError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  // ── 加载品类树 ──────────────────────────────────────────────────────
+
+  const loadGenreTree = useCallback(async () => {
+    setLoadingTree(true);
+    setTreeError(null);
+    try {
+      const result = await brainApi.getGenreTree();
+      setGenreTree(result.tree || []);
+
+      // 扁平化所有品类
+      const flatten = (nodes: any[]): GenrePack[] => {
+        let result: GenrePack[] = [];
+        nodes.forEach(node => {
+          result.push(node);
+          if (node.children && node.children.length > 0) {
+            result = result.concat(flatten(node.children));
+          }
+        });
+        return result;
+      };
+      const flat = flatten(result.tree || []);
+      setAllGenres(flat);
+
+      // 默认选中第一个根节点
+      if (flat.length > 0 && !selectedGenreId) {
+        const firstRoot = result.tree?.[0];
+        if (firstRoot) {
+          setSelectedGenreId(firstRoot.id);
+          setExpandedNodes(prev => new Set(prev).add(firstRoot.id));
+        }
       }
-    });
-
-    return roots;
-  }, []);
-
-  // 选中的品类
-  const selectedGenre = useMemo(() => {
-    return MOCK_GENRES.find(g => g.id === selectedGenreId) || null;
+    } catch (err: any) {
+      setTreeError(err.message || '加载品类树失败');
+    } finally {
+      setLoadingTree(false);
+    }
   }, [selectedGenreId]);
 
-  // 父品类
-  const parentGenre = useMemo(() => {
-    if (!selectedGenre?.parent_id) return null;
-    return MOCK_GENRES.find(g => g.id === selectedGenre.parent_id) || null;
-  }, [selectedGenre]);
+  useEffect(() => {
+    loadGenreTree();
+  }, [loadGenreTree]);
 
-  // 过滤品类
-  const filteredGenres = useMemo(() => {
-    if (!searchQuery) return genreTree;
+  // ── 加载品类详情 ────────────────────────────────────────────────────
+
+  const loadGenreDetail = useCallback(async (genreId: string) => {
+    if (!genreId) return;
+
+    setLoadingDetail(true);
+    setDetailError(null);
+
+    try {
+      // 并行加载所有数据
+      const [packResult, styleResult, qualityResult, forbiddenResult, knowledgeResult, chainResult] = await Promise.all([
+        brainApi.getGenrePack(genreId),
+        brainApi.listGenreRules(genreId, { rule_type: 'style', include_inherited: true }),
+        brainApi.listGenreRules(genreId, { rule_type: 'quality_threshold', include_inherited: true }),
+        brainApi.listGenreRules(genreId, { rule_type: 'forbidden', include_inherited: true }),
+        brainApi.listGenreKnowledge(genreId, { include_inherited: true }),
+        brainApi.getGenreInheritanceChain(genreId),
+      ]);
+
+      setSelectedGenre(packResult.pack);
+      setStyleRules(styleResult.rules || []);
+      setQualityRules(qualityResult.rules || []);
+      setForbiddenRules(forbiddenResult.rules || []);
+      setKnowledgeList(knowledgeResult.knowledge || []);
+      setInheritanceChain(chainResult.chain || []);
+
+      // 查找父品类
+      if (packResult.pack?.parent_id) {
+        const parent = allGenres.find(g => g.id === packResult.pack.parent_id);
+        setParentGenre(parent || null);
+      } else {
+        setParentGenre(null);
+      }
+    } catch (err: any) {
+      setDetailError(err.message || '加载品类详情失败');
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [allGenres]);
+
+  useEffect(() => {
+    if (selectedGenreId) {
+      loadGenreDetail(selectedGenreId);
+    }
+  }, [selectedGenreId, loadGenreDetail]);
+
+  // ── 品类树过滤 ──────────────────────────────────────────────────────
+
+  const filteredTree = useMemo(() => {
+    if (!searchQuery.trim()) return genreTree;
 
     const query = searchQuery.toLowerCase();
-    const filterTree = (genres: GenrePack[]): GenrePack[] => {
-      return genres
-        .map(g => {
-          const children = g.children ? filterTree(g.children) : [];
-          const match = g.name.toLowerCase().includes(query) ||
-            g.slug.toLowerCase().includes(query) ||
-            (g.description && g.description.toLowerCase().includes(query));
-          if (match || children.length > 0) {
-            return { ...g, children };
+    const filterNodes = (nodes: any[]): any[] => {
+      return nodes
+        .map(node => {
+          const children = node.children ? filterNodes(node.children) : [];
+          const matches = node.name.toLowerCase().includes(query) ||
+            node.slug.toLowerCase().includes(query);
+          if (matches || children.length > 0) {
+            return { ...node, children };
           }
           return null;
         })
-        .filter(Boolean) as GenrePack[];
+        .filter(Boolean);
     };
 
-    return filterTree(genreTree);
+    return filterNodes(genreTree);
   }, [genreTree, searchQuery]);
 
-  const toggleGenre = useCallback((id: string) => {
-    setExpandedGenres(prev => {
+  // ── 展开/收起 ───────────────────────────────────────────────────────
+
+  const toggleNode = useCallback((id: string) => {
+    setExpandedNodes(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -326,29 +254,49 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
     });
   }, []);
 
-  const handleRefresh = useCallback(() => {
-    setLoading(true);
-    setTimeout(() => setLoading(false), 800);
-  }, []);
+  // ── 统计数据 ────────────────────────────────────────────────────────
 
-  const renderGenreNode = (genre: GenrePack, depth: number = 0) => {
-    const hasChildren = genre.children && genre.children.length > 0;
-    const isExpanded = expandedGenres.has(genre.id);
-    const isSelected = selectedGenreId === genre.id;
+  const stats = useMemo(() => {
+    if (!selectedGenre) return null;
+
+    const totalRules = styleRules.length + qualityRules.length + forbiddenRules.length;
+    const inheritedRules = [...styleRules, ...qualityRules, ...forbiddenRules].filter(r => r.inherited_from).length;
+    const ownRules = totalRules - inheritedRules;
+
+    return {
+      totalRules,
+      ownRules,
+      inheritedRules,
+      knowledgeCount: knowledgeList.length,
+      inheritanceDepth: inheritanceChain.length,
+    };
+  }, [selectedGenre, styleRules, qualityRules, forbiddenRules, knowledgeList, inheritanceChain]);
+
+  // ── 渲染品类树节点 ──────────────────────────────────────────────────
+
+  const renderTreeNode = (node: any, level: number = 0) => {
+    const hasChildren = node.children && node.children.length > 0;
+    const isExpanded = expandedNodes.has(node.id);
+    const isSelected = selectedGenreId === node.id;
 
     return (
-      <div key={genre.id}>
+      <div key={node.id}>
         <div
-          className={`v7-genre-tree-node ${isSelected ? 'active' : ''}`}
-          style={{ paddingLeft: `${depth * 16 + 12}px` }}
-          onClick={() => setSelectedGenreId(genre.id)}
+          className={`v7-genre-tree-node ${isSelected ? 'selected' : ''}`}
+          style={{ paddingLeft: `${12 + level * 16}px` }}
+          onClick={() => {
+            setSelectedGenreId(node.id);
+            if (hasChildren && !isExpanded) {
+              toggleNode(node.id);
+            }
+          }}
         >
           {hasChildren ? (
             <button
               className="v7-genre-tree-toggle"
               onClick={(e) => {
                 e.stopPropagation();
-                toggleGenre(genre.id);
+                toggleNode(node.id);
               }}
             >
               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -356,68 +304,81 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
           ) : (
             <span className="v7-genre-tree-spacer" />
           )}
-
-          <BookOpen
-            size={16}
-            className={genre.is_builtin ? 'v7-genre-icon-builtin' : 'v7-genre-icon-custom'}
-          />
-
+          <span className={`v7-genre-tree-icon ${node.is_builtin ? 'builtin' : 'custom'}`}>
+            {node.is_builtin ? <Layers size={14} /> : <Sparkles size={14} />}
+          </span>
           <div className="v7-genre-tree-info">
-            <span className="v7-genre-tree-name">{genre.name}</span>
+            <span className="v7-genre-tree-name">{node.name}</span>
             <span className="v7-genre-tree-meta">
-              {SCOPE_LABELS[genre.scope] || genre.scope}
-              {genre.is_builtin && ' · 内置'}
+              <span className="v7-genre-tree-count">{node.children?.length || 0} 子品类</span>
             </span>
           </div>
-
-          <span className="v7-genre-tree-count">{genre.rule_count || 0}</span>
         </div>
-
         {hasChildren && isExpanded && (
           <div className="v7-genre-tree-children">
-            {genre.children!.map(child => renderGenreNode(child, depth + 1))}
+            {node.children.map((child: any) => renderTreeNode(child, level + 1))}
           </div>
         )}
       </div>
     );
   };
 
-  const DETAIL_TABS: Array<{ key: DetailTab; label: string; icon: typeof Sparkles }> = [
-    { key: 'style', label: '风格卡', icon: Sparkles },
-    { key: 'quality', label: '质量门禁', icon: Shield },
-    { key: 'forbidden', label: '禁止规则', icon: Shield },
-  ];
+  // ── 空状态渲染 ──────────────────────────────────────────────────────
+
+  const renderEmptyState = (title: string, description: string) => (
+    <div className="v7-empty-state">
+      <div className="v7-empty-icon">
+        <BookOpen size={32} />
+      </div>
+      <h4>{title}</h4>
+      <p>{description}</p>
+    </div>
+  );
+
+  // ── 加载状态渲染 ────────────────────────────────────────────────────
+
+  const renderLoading = (text: string = '加载中...') => (
+    <div className="v7-loading-state">
+      <Loader2 className="v7-spinner" size={24} />
+      <p>{text}</p>
+    </div>
+  );
+
+  // ── 主渲染 ──────────────────────────────────────────────────────────
 
   return (
-    <div className="v7-monitor page-enter">
-      <header className="v7-monitor-head">
+    <div className="v7-page">
+      <div className="v7-page-head">
         <div>
-          <p className="v7-kicker">品类工厂 · 规则库</p>
+          <p className="v7-kicker">品类库</p>
           <h2>品类管理</h2>
-          <p>
-            管理网文品类规则包，支持继承、覆盖和蒸馏。内置品类经过实战验证，可直接使用或二次定制。
-          </p>
+          <p className="v7-page-desc">管理小说品类规则、风格卡和知识库</p>
         </div>
-        <div className="v7-monitor-head-actions">
-          <span className="v7-chain-badge"><Layers size={14} /> 继承引擎</span>
-          <button
-            type="button"
-            className="v7-refresh-button"
-            onClick={handleRefresh}
-            disabled={loading}
-          >
-            <RefreshCw size={15} className={loading ? 'v7-spin' : undefined} /> 刷新
+        <div className="v7-page-actions">
+          <button className="v7-btn v7-btn-secondary">
+            <Upload size={16} />
+            导入
+          </button>
+          <button className="v7-btn v7-btn-secondary">
+            <Download size={16} />
+            导出
+          </button>
+          <button className="v7-btn v7-btn-primary">
+            <Plus size={16} />
+            新建品类
           </button>
         </div>
-      </header>
+      </div>
 
       <div className="v7-genre-layout">
-        {/* 左侧：品类树 */}
-        <aside className="v7-genre-sidebar">
+        {/* ── 左侧：品类树 ── */}
+        <div className="v7-genre-sidebar">
           <div className="v7-panel">
             <div className="v7-panel-head">
-              <div><p className="v7-kicker">品类树</p><h3>全部品类</h3></div>
-              <span className="v7-panel-count">{MOCK_GENRES.length} 个</span>
+              <h3>品类树</h3>
+              <button className="v7-icon-btn" onClick={loadGenreTree} title="刷新">
+                <RefreshCw size={14} />
+              </button>
             </div>
 
             <div className="v7-genre-search">
@@ -431,258 +392,361 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
             </div>
 
             <div className="v7-genre-tree">
-              {filteredGenres.map(genre => renderGenreNode(genre))}
+              {loadingTree && renderLoading('加载品类树...')}
+              {treeError && (
+                <div className="v7-error-state">
+                  <p>加载失败：{treeError}</p>
+                  <button className="v7-btn v7-btn-secondary" onClick={loadGenreTree}>
+                    重试
+                  </button>
+                </div>
+              )}
+              {!loadingTree && !treeError && filteredTree.length === 0 && renderEmptyState(
+                '暂无品类',
+                '点击右上角"新建品类"创建第一个品类'
+              )}
+              {!loadingTree && !treeError && filteredTree.length > 0 && (
+                filteredTree.map(node => renderTreeNode(node))
+              )}
             </div>
 
             <div className="v7-genre-sidebar-footer">
-              <button type="button" className="v7-primary-button">
-                <Plus size={14} /> 新建品类
+              <button className="v7-btn v7-btn-primary v7-btn-block">
+                <Plus size={14} />
+                新建品类
               </button>
             </div>
           </div>
-        </aside>
+        </div>
 
-        {/* 中间：品类详情 */}
-        <main className="v7-genre-main">
-          {selectedGenre ? (
-            <div className="v7-monitor-stack">
-              {/* 品类头部 */}
-              <section className="v7-panel">
+        {/* ── 中间：品类详情 ── */}
+        <div className="v7-genre-detail">
+          {loadingDetail && renderLoading('加载品类详情...')}
+          {detailError && (
+            <div className="v7-panel">
+              <div className="v7-error-state">
+                <p>加载失败：{detailError}</p>
+                <button className="v7-btn v7-btn-secondary" onClick={() => selectedGenreId && loadGenreDetail(selectedGenreId)}>
+                  重试
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!loadingDetail && !detailError && selectedGenre && stats && (
+            <>
+              {/* 头部信息 */}
+              <div className="v7-panel">
                 <div className="v7-genre-detail-head">
+                  <div className="v7-genre-detail-icon">
+                    <Layers size={24} />
+                  </div>
                   <div className="v7-genre-detail-title">
-                    <div className="v7-genre-detail-icon">
-                      <BookOpen size={24} />
+                    <div className="v7-genre-detail-name-row">
+                      <h3>{selectedGenre.name}</h3>
+                      {selectedGenre.is_builtin && (
+                        <span className="v7-badge v7-badge-info">内置</span>
+                      )}
+                      {!selectedGenre.is_active && (
+                        <span className="v7-badge v7-badge-gray">已停用</span>
+                      )}
                     </div>
-                    <div>
-                      <div className="v7-genre-detail-name-row">
-                        <h2>{selectedGenre.name}</h2>
-                        {selectedGenre.is_builtin ? (
-                          <span className="v7-mini-badge indigo">内置</span>
-                        ) : (
-                          <span className="v7-mini-badge green">自建</span>
-                        )}
-                      </div>
-                      <p className="v7-genre-detail-desc">{selectedGenre.description}</p>
+                    <p className="v7-genre-detail-desc">
+                      {selectedGenre.description || '暂无描述'}
+                    </p>
+                    <div className="v7-genre-detail-meta">
+                      <span>slug: {selectedGenre.slug}</span>
+                      <span>范围: {SCOPE_LABELS[selectedGenre.scope] || selectedGenre.scope}</span>
+                      {parentGenre && <span>继承自: {parentGenre.name}</span>}
                     </div>
                   </div>
                   <div className="v7-genre-detail-actions">
-                    <button className="v7-link-button">
-                      <Upload size={14} /> 导入
+                    <button className="v7-btn v7-btn-secondary">
+                      <RefreshCw size={14} />
+                      刷新
                     </button>
-                    <button className="v7-link-button">
-                      <Download size={14} /> 导出
+                    <button className="v7-btn v7-btn-secondary">
+                      编辑
                     </button>
                   </div>
                 </div>
 
-                <div className="v7-metric-grid">
-                  <MetricCard
-                    icon={Shield}
-                    label="规则总数"
-                    value={String(selectedGenre.rule_count || 0)}
-                    detail={`继承 ${parentGenre?.rule_count || 0} + 新增 ${(selectedGenre.rule_count || 0) - (parentGenre?.rule_count || 0)}`}
-                    tone="indigo"
-                  />
-                  <MetricCard
-                    icon={BookOpen}
-                    label="知识条目"
-                    value={String(selectedGenre.knowledge_count || 0)}
-                    detail="品类专属知识库"
-                    tone="green"
-                  />
-                  <MetricCard
-                    icon={Sparkles}
-                    label="Prompt 模板"
-                    value={String(selectedGenre.prompt_count || 0)}
-                    detail="生成专用模板"
-                    tone="amber"
-                  />
-                  <MetricCard
-                    icon={Layers}
-                    label="继承层级"
-                    value={parentGenre ? '2 层' : '1 层'}
-                    detail={parentGenre ? `父类：${parentGenre.name}` : '根品类'}
-                    tone="gray"
-                  />
+                {/* 指标卡片 */}
+                <div className="v7-metric-grid v7-metric-grid-4">
+                  <div className="v7-metric-card">
+                    <div className="v7-metric-label">规则总数</div>
+                    <div className="v7-metric-value">{stats.totalRules}</div>
+                    <div className="v7-metric-sub">自有 {stats.ownRules} · 继承 {stats.inheritedRules}</div>
+                  </div>
+                  <div className="v7-metric-card">
+                    <div className="v7-metric-label">风格规则</div>
+                    <div className="v7-metric-value">{styleRules.length}</div>
+                    <div className="v7-metric-sub">写作风格约束</div>
+                  </div>
+                  <div className="v7-metric-card">
+                    <div className="v7-metric-label">质量门禁</div>
+                    <div className="v7-metric-value">{qualityRules.length}</div>
+                    <div className="v7-metric-sub">质量阈值规则</div>
+                  </div>
+                  <div className="v7-metric-card">
+                    <div className="v7-metric-label">知识条目</div>
+                    <div className="v7-metric-value">{knowledgeList.length}</div>
+                    <div className="v7-metric-sub">知识库条目数</div>
+                  </div>
                 </div>
-              </section>
+              </div>
 
-              {/* Tab 导航 */}
-              <nav className="v7-view-nav" aria-label="品类详情视图">
-                {DETAIL_TABS.map(item => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      type="button"
-                      key={item.key}
-                      className={detailTab === item.key ? 'active' : ''}
-                      aria-selected={detailTab === item.key}
-                      role="tab"
-                      onClick={() => setDetailTab(item.key)}
-                    >
-                      <Icon size={16} />
-                      <span><strong>{item.label}</strong><small>查看{item.label}详情</small></span>
-                    </button>
-                  );
-                })}
-              </nav>
+              {/* 标签页导航 */}
+              <div className="v7-view-nav">
+                <button
+                  className={`v7-view-tab ${detailTab === 'style' ? 'active' : ''}`}
+                  onClick={() => setDetailTab('style')}
+                >
+                  <Sparkles size={14} />
+                  风格卡
+                  <span className="v7-tab-count">{styleRules.length}</span>
+                </button>
+                <button
+                  className={`v7-view-tab ${detailTab === 'quality' ? 'active' : ''}`}
+                  onClick={() => setDetailTab('quality')}
+                >
+                  <Shield size={14} />
+                  质量门禁
+                  <span className="v7-tab-count">{qualityRules.length}</span>
+                </button>
+                <button
+                  className={`v7-view-tab ${detailTab === 'forbidden' ? 'active' : ''}`}
+                  onClick={() => setDetailTab('forbidden')}
+                >
+                  <XCircle size={14} />
+                  禁止规则
+                  <span className="v7-tab-count">{forbiddenRules.length}</span>
+                </button>
+              </div>
 
               {/* 风格卡 */}
               {detailTab === 'style' && (
-                <section className="v7-panel">
+                <div className="v7-panel">
                   <div className="v7-panel-head">
-                    <div><p className="v7-kicker">风格定义</p><h3>品类风格卡</h3></div>
-                    <span className="v7-panel-count">5 项</span>
+                    <h3>风格规则</h3>
+                    <span className="v7-panel-count">{styleRules.length} 条</span>
                   </div>
-                  <div className="v7-style-card">
-                    <div className="v7-style-keywords">
-                      <h4>风格关键词</h4>
-                      <div className="v7-keyword-list">
-                        {MOCK_STYLE_CARD.keywords.map((kw, i) => (
-                          <span key={i} className="v7-keyword-tag">{kw}</span>
-                        ))}
-                      </div>
+                  {styleRules.length === 0 ? (
+                    renderEmptyState('暂无风格规则', '该品类还没有配置风格规则')
+                  ) : (
+                    <div className="v7-rule-list">
+                      {styleRules.map(rule => (
+                        <div key={rule.id} className="v7-rule-row">
+                          <div className="v7-rule-info">
+                            <div className="v7-rule-name">
+                              {rule.rule_key}
+                              {rule.inherited_from && (
+                                <span className="v7-rule-badge v7-badge v7-badge-gray">继承</span>
+                              )}
+                            </div>
+                            {rule.description && (
+                              <div className="v7-rule-desc">{rule.description}</div>
+                            )}
+                          </div>
+                          <div className="v7-rule-value">
+                            {typeof rule.rule_value === 'object'
+                              ? JSON.stringify(rule.rule_value)
+                              : String(rule.rule_value)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="v7-style-grid">
-                      <div className="v7-style-item">
-                        <h4>节奏特点</h4>
-                        <p>{MOCK_STYLE_CARD.pacing}</p>
-                      </div>
-                      <div className="v7-style-item">
-                        <h4>语言风格</h4>
-                        <p>{MOCK_STYLE_CARD.language}</p>
-                      </div>
-                      <div className="v7-style-item">
-                        <h4>整体调性</h4>
-                        <p>{MOCK_STYLE_CARD.tone}</p>
-                      </div>
-                      <div className="v7-style-item">
-                        <h4>结构特征</h4>
-                        <p>{MOCK_STYLE_CARD.structure}</p>
-                      </div>
-                    </div>
-                  </div>
-                </section>
+                  )}
+                </div>
               )}
 
               {/* 质量门禁 */}
               {detailTab === 'quality' && (
-                <section className="v7-panel">
+                <div className="v7-panel">
                   <div className="v7-panel-head">
-                    <div><p className="v7-kicker">质量阈值</p><h3>质量门禁规则</h3></div>
-                    <span className="v7-panel-count">{MOCK_QUALITY_RULES.length} 条</span>
+                    <h3>质量门禁规则</h3>
+                    <span className="v7-panel-count">{qualityRules.length} 条</span>
                   </div>
-                  <div className="v7-rule-list">
-                    {MOCK_QUALITY_RULES.map(rule => (
-                      <div key={rule.key} className="v7-rule-row">
-                        <div className="v7-rule-info">
-                          <span className="v7-rule-name">{rule.name}</span>
-                          {rule.inherited && <span className="v7-rule-badge inherited">继承</span>}
+                  {qualityRules.length === 0 ? (
+                    renderEmptyState('暂无质量门禁规则', '该品类还没有配置质量门禁阈值')
+                  ) : (
+                    <div className="v7-rule-list">
+                      {qualityRules.map(rule => (
+                        <div key={rule.id} className="v7-rule-row">
+                          <div className="v7-rule-info">
+                            <div className="v7-rule-name">
+                              {rule.rule_key}
+                              {rule.inherited_from && (
+                                <span className="v7-rule-badge v7-badge v7-badge-gray">继承</span>
+                              )}
+                            </div>
+                            {rule.description && (
+                              <div className="v7-rule-desc">{rule.description}</div>
+                            )}
+                          </div>
+                          <div className="v7-rule-value">
+                            <span
+                              className="v7-rule-badge"
+                              style={{
+                                backgroundColor: `${SEVERITY_COLORS[rule.severity] || '#6b7280'}20`,
+                                color: SEVERITY_COLORS[rule.severity] || '#6b7280',
+                              }}
+                            >
+                              {rule.severity}
+                            </span>
+                            {typeof rule.rule_value === 'object'
+                              ? JSON.stringify(rule.rule_value)
+                              : String(rule.rule_value)}
+                          </div>
                         </div>
-                        <div className={`v7-rule-value v7-tone-${getSeverityTone(rule.severity)}`}>
-                          {rule.value}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="v7-panel-note">
-                    <Shield size={14} /> 质量门禁在生成前后自动执行，违规内容会触发重生成或人工审核。
-                  </p>
-                </section>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* 禁止规则 */}
               {detailTab === 'forbidden' && (
-                <section className="v7-panel">
+                <div className="v7-panel">
                   <div className="v7-panel-head">
-                    <div><p className="v7-kicker">违规分级</p><h3>禁止规则清单</h3></div>
-                    <span className="v7-panel-count">三级分类</span>
+                    <h3>禁止规则</h3>
+                    <span className="v7-panel-count">{forbiddenRules.length} 条</span>
                   </div>
-                  <div className="v7-forbidden-groups">
-                    {MOCK_FORBIDDEN_RULES.map(group => (
-                      <div key={group.category} className="v7-forbidden-group">
-                        <h4 className={`v7-forbidden-category v7-tone-${
-                          group.category.includes('高级') ? 'danger' :
-                          group.category.includes('中级') ? 'amber' : 'green'
-                        }`}>
-                          {group.category}
-                        </h4>
+                  {forbiddenRules.length === 0 ? (
+                    renderEmptyState('暂无禁止规则', '该品类还没有配置禁止规则')
+                  ) : (
+                    <div className="v7-forbidden-groups">
+                      <div className="v7-forbidden-group">
+                        <div className="v7-forbidden-category">违禁词/句</div>
                         <div className="v7-forbidden-list">
-                          {group.items.map((item, i) => (
-                            <div key={i} className="v7-forbidden-item">
-                              <strong>{item.name}</strong>
-                              <p>{item.desc}</p>
+                          {forbiddenRules.map(rule => (
+                            <div key={rule.id} className="v7-forbidden-item">
+                              <span className="v7-forbidden-text">{rule.rule_key}</span>
+                              {rule.inherited_from && (
+                                <span className="v7-badge v7-badge-gray">继承</span>
+                              )}
+                              {rule.description && (
+                                <span className="v7-forbidden-desc">{rule.description}</span>
+                              )}
                             </div>
                           ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </section>
+                    </div>
+                  )}
+                </div>
               )}
-            </div>
-          ) : (
-            <section className="v7-panel v7-empty-panel">
-              <div className="v7-access-icon"><Layers size={22} /></div>
-              <h3>选择一个品类</h3>
-              <p>从左侧品类树选择一个品类，查看详细规则和知识条目。</p>
-            </section>
+            </>
           )}
-        </main>
 
-        {/* 右侧：规则对比 + 知识 */}
-        <aside className="v7-genre-rightbar">
-          {selectedGenre && parentGenre && (
-            <section className="v7-panel">
-              <div className="v7-panel-head">
-                <div><p className="v7-kicker">继承对比</p><h3>与父品类差异</h3></div>
-                <GitCompare size={16} />
-              </div>
+          {!loadingDetail && !detailError && !selectedGenre && !loadingTree && (
+            <div className="v7-panel">
+              {renderEmptyState('请选择品类', '从左侧品类树中选择一个品类查看详情')}
+            </div>
+          )}
+        </div>
+
+        {/* ── 右侧：规则对比 + 知识库 ── */}
+        <div className="v7-genre-rightbar">
+          {/* 规则对比 */}
+          <div className="v7-panel">
+            <div className="v7-panel-head">
+              <h3><GitCompare size={16} /> 规则对比</h3>
+            </div>
+            {loadingDetail && renderLoading('加载中...')}
+            {!loadingDetail && inheritanceChain.length <= 1 && (
               <div className="v7-compare-summary">
                 <div className="v7-compare-item">
+                  <span className="v7-compare-label">继承层级</span>
+                  <span className="v7-compare-value">根品类</span>
+                </div>
+                <div className="v7-compare-note">
+                  这是根品类，没有父品类
+                </div>
+              </div>
+            )}
+            {!loadingDetail && inheritanceChain.length > 1 && (
+              <div className="v7-compare-summary">
+                <div className="v7-compare-item">
+                  <span className="v7-compare-label">继承深度</span>
+                  <span className="v7-compare-value">{inheritanceChain.length} 层</span>
+                </div>
+                <div className="v7-compare-item">
+                  <span className="v7-compare-label">自有规则</span>
+                  <span className="v7-compare-value">{stats?.ownRules || 0} 条</span>
+                </div>
+                <div className="v7-compare-item">
                   <span className="v7-compare-label">继承规则</span>
-                  <span className="v7-compare-value">{parentGenre.rule_count || 0} 条</span>
+                  <span className="v7-compare-value">{stats?.inheritedRules || 0} 条</span>
                 </div>
-                <div className="v7-compare-item">
-                  <span className="v7-compare-label">新增规则</span>
-                  <span className="v7-compare-value v7-tone-green">
-                    +{(selectedGenre.rule_count || 0) - (parentGenre.rule_count || 0)} 条
-                  </span>
-                </div>
-                <div className="v7-compare-item">
-                  <span className="v7-compare-label">覆盖规则</span>
-                  <span className="v7-compare-value v7-tone-amber">2 条</span>
+                <div className="v7-compare-detail">
+                  <div className="v7-compare-chain">
+                    {inheritanceChain.map((g, i) => (
+                      <div key={g.id} className="v7-compare-chain-item">
+                        <span className="v7-compare-chain-name">{g.name}</span>
+                        {i < inheritanceChain.length - 1 && (
+                          <ChevronRight size={12} className="v7-compare-chain-arrow" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div className="v7-compare-detail">
-                <p className="v7-compare-note">
-                  继承自 <strong>{parentGenre.name}</strong>，在此基础上针对番茄平台特性进行了优化。
-                </p>
-              </div>
-            </section>
-          )}
+            )}
+          </div>
 
-          {selectedGenre && (
-            <section className="v7-panel">
-              <div className="v7-panel-head">
-                <div><p className="v7-kicker">知识条目</p><h3>品类知识库</h3></div>
-                <span className="v7-panel-count">{MOCK_KNOWLEDGE.length} 条</span>
-              </div>
+          {/* 知识库 */}
+          <div className="v7-panel">
+            <div className="v7-panel-head">
+              <h3><BookOpen size={16} /> 知识库</h3>
+              <span className="v7-panel-count">{knowledgeList.length} 条</span>
+            </div>
+            {loadingDetail && renderLoading('加载中...')}
+            {!loadingDetail && knowledgeList.length === 0 && (
+              renderEmptyState('暂无知识条目', '该品类还没有添加知识条目')
+            )}
+            {!loadingDetail && knowledgeList.length > 0 && (
               <div className="v7-knowledge-list">
-                {MOCK_KNOWLEDGE.map(item => (
+                {knowledgeList.slice(0, 6).map(item => (
                   <div key={item.id} className="v7-knowledge-item">
                     <div className="v7-knowledge-header">
                       <span className="v7-knowledge-title">{item.title}</span>
-                      <span className="v7-knowledge-category">{item.category}</span>
+                      <span className="v7-knowledge-category">{item.knowledge_type}</span>
                     </div>
-                    <p className="v7-knowledge-summary">{item.summary}</p>
+                    <p className="v7-knowledge-summary">
+                      {item.content?.substring(0, 80)}{item.content?.length > 80 ? '...' : ''}
+                    </p>
+                    {item.inherited_from && (
+                      <span className="v7-badge v7-badge-gray">继承</span>
+                    )}
                   </div>
                 ))}
               </div>
-            </section>
-          )}
-        </aside>
+            )}
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+// 缺少的图标组件
+function XCircle({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6" />
+      <path d="m9 9 6 6" />
+    </svg>
   );
 }

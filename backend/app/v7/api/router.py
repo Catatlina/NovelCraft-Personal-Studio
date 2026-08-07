@@ -14,6 +14,7 @@ from .prompt import router as prompt_router
 from .genres import router as genres_router
 from .series import router as series_router
 from .branch_generator import router as branch_router
+from .quality import router as quality_router
 
 router = APIRouter(prefix="/api/v7", tags=["v7"])
 
@@ -40,3 +41,6 @@ router.include_router(series_router, prefix="/series", tags=["series"])
 
 # Branch Generator API
 router.include_router(branch_router, prefix="/branches", tags=["branches"])
+
+# Quality Analysis API
+router.include_router(quality_router, prefix="/quality", tags=["quality"])

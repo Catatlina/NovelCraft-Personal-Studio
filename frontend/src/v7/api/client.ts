@@ -516,6 +516,79 @@ class BrainApiClient {
     const qs = novelId ? `?novel_id=${encodeURIComponent(novelId)}` : '';
     return this.request(`/v7/prompt/executions/stats/${encodeURIComponent(promptName)}${qs}`);
   }
+
+  // ── Genres (品类库) ────────────────────────────────────────────────────
+
+  async getGenreTree(): Promise<{ tree: any[] }> {
+    return this.request('/v7/genres/tree');
+  }
+
+  async listGenrePacks(params?: {
+    scope?: string;
+    is_active?: boolean;
+    skip?: number;
+    limit?: number;
+  }): Promise<{ total: number; skip: number; limit: number; packs: any[] }> {
+    const query = new URLSearchParams();
+    if (params?.scope) query.set('scope', params.scope);
+    if (params?.is_active !== undefined) query.set('is_active', String(params.is_active));
+    if (params?.skip) query.set('skip', String(params.skip));
+    if (params?.limit) query.set('limit', String(params.limit));
+    return this.request(`/v7/genres/packs?${query.toString()}`);
+  }
+
+  async getGenrePack(packId: string): Promise<{ pack: any }> {
+    return this.request(`/v7/genres/packs/${packId}`);
+  }
+
+  async listGenreRules(
+    packId: string,
+    params?: { rule_type?: string; include_inherited?: boolean }
+  ): Promise<{ total: number; rules: any[] }> {
+    const query = new URLSearchParams();
+    if (params?.rule_type) query.set('rule_type', params.rule_type);
+    if (params?.include_inherited) query.set('include_inherited', String(params.include_inherited));
+    return this.request(`/v7/genres/packs/${packId}/rules?${query.toString()}`);
+  }
+
+  async listGenreKnowledge(
+    packId: string,
+    params?: { knowledge_type?: string; include_inherited?: boolean }
+  ): Promise<{ total: number; knowledge: any[] }> {
+    const query = new URLSearchParams();
+    if (params?.knowledge_type) query.set('knowledge_type', params.knowledge_type);
+    if (params?.include_inherited) query.set('include_inherited', String(params.include_inherited));
+    return this.request(`/v7/genres/packs/${packId}/knowledge?${query.toString()}`);
+  }
+
+  async getGenreInheritanceChain(packId: string): Promise<{ chain: any[]; depth: number }> {
+    return this.request(`/v7/genres/packs/${packId}/chain`);
+  }
+
+  // ── Quality Analysis (质量分析) ───────────────────────────────────────
+
+  async getQualityReview(chapterId: string): Promise<any> {
+    return this.request(`/v7/quality/chapters/${chapterId}/quality-review`);
+  }
+
+  async getAiSmell(chapterId: string): Promise<any> {
+    return this.request(`/v7/quality/chapters/${chapterId}/ai-smell`);
+  }
+
+  async getCharacterStats(novelId: string): Promise<any> {
+    return this.request(`/v7/quality/novels/${novelId}/character-stats`);
+  }
+
+  async getEmotionalArc(novelId: string, params?: {
+    start_chapter?: number;
+    end_chapter?: number;
+  }): Promise<any> {
+    const query = new URLSearchParams();
+    if (params?.start_chapter) query.set('start_chapter', String(params.start_chapter));
+    if (params?.end_chapter) query.set('end_chapter', String(params.end_chapter));
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/v7/quality/novels/${novelId}/emotional-arc${qs}`);
+  }
 }
 
 const brainApi = new BrainApiClient();
