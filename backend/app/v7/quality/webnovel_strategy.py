@@ -163,6 +163,119 @@ _FEEDBACK_CHANNELS = (
 )
 
 
+# P2-6 质量整改：反馈强度分级与全场级反馈设计规则
+_FEEDBACK_INTENSITY_RULES: dict[str, Any] = {
+    "intensity_levels": {
+        "small": {
+            "label": "小反馈",
+            "description": "局部、个人级别的反馈，影响范围小",
+            "examples": [
+                "对手脸色一变",
+                "旁边几个人窃窃私语",
+                "主角获得少量资源",
+                "某个人对主角态度改变",
+            ],
+            "适用场景": "小爽点、日常情节、铺垫阶段",
+        },
+        "medium": {
+            "label": "中反馈",
+            "description": "房间/小队级别的反馈，影响范围中等",
+            "examples": [
+                "满屋子人都安静了",
+                "整个小队都惊呆了",
+                "主角获得重要资源",
+                "一个组织对主角态度改变",
+            ],
+            "适用场景": "中型爽点、情节推进、小高潮",
+        },
+        "high": {
+            "label": "大反馈",
+            "description": "全场/全城级别的反馈，影响范围大",
+            "examples": [
+                "全场鸦雀无声",
+                "众人都懵了",
+                "全城都在议论主角",
+                "一个大势力对主角刮目相看",
+            ],
+            "适用场景": "大爽点、大高潮、重要转折",
+        },
+        "peak": {
+            "label": "全场级反馈",
+            "description": "全场/全行业/全大陆级别的反馈，影响范围极大",
+            "examples": [
+                "全场一片死寂，落针可闻",
+                "所有人都石化了，不敢相信自己的眼睛",
+                "整个修炼界都震动了",
+                "无数大佬坐不住了",
+                "刷新了所有人的认知",
+                "颠覆了整个行业的常识",
+            ],
+            "适用场景": "peak强度爽点、终极高潮、卷末大爽点",
+        },
+    },
+    "matching_rule": {
+        "description": "爽点强度必须和反馈强度匹配，高强度爽点必须配高强度反馈",
+        "rules": [
+            "small爽点 → small或medium反馈",
+            "medium爽点 → medium或high反馈",
+            "high爽点 → high或peak反馈",
+            "peak爽点 → 必须配peak反馈（全场级）",
+        ],
+        "violation_penalty": "爽点强度高但反馈太弱，爽感会大打折扣，读者会觉得'就这？'",
+    },
+    "crowd_feedback_design": {
+        "label": "全场级反馈设计原则",
+        "description": "避免模板化的'众人震惊'，要写出层次感和真实感",
+        "principles": [
+            "分层反应：先前排，再中排，最后后排，不同位置的人反应不同",
+            "身份差异：大佬的反应和小喽啰的反应不一样，内行和外行的反应不一样",
+            "动作细节：不要只写'众人惊呆了'，要写具体的动作（手里的杯子掉了、筷子停在半空、倒吸凉气等）",
+            "声音变化：从喧闹到安静的过程，先有人失声，然后越来越安静，最后鸦雀无声",
+            "后续影响：反馈不能只停留在当场，还要有后续影响（消息传开、大佬关注、敌人忌惮等）",
+        ],
+        "anti_patterns": [
+            "千篇一律的'众人哗然'（所有人反应都一样）",
+            "只有旁白描述，没有具体动作和细节",
+            "反馈停留在当场，没有后续影响",
+            "小爽点配大反馈（比例失调）",
+        ],
+    },
+}
+
+
+_VILLAIN_DESIGN_RULES: dict[str, Any] = {
+    "cross_level_face_slap": {
+        "label": "越级打脸设计",
+        "description": "爽文核心爽点之一，主角以弱胜强、越级挑战，打脸比自己强的对手。",
+        "core_principle": "反派必须比主角强至少一个等级，打脸才有足够爽感。",
+        "early_stage_rule": "前10章的反派必须比主角强1-2个大等级，让读者觉得'这怎么赢'，然后主角用金手指或智慧逆袭。",
+        "escalation_rule": "反派强度随剧情逐步升级，打完小的来中的，打完中的来大的，打完大的来更大的。",
+        "face_slap_structure": [
+            "反派嚣张挑衅（让读者恨）",
+            "众人不看好主角（压低预期）",
+            "主角隐藏实力（蓄势）",
+            "主角出手碾压（爆发）",
+            "全场哗然/反派崩溃（反馈）",
+            "更大的反派出现（新压力）",
+        ],
+        "villain_intensity_levels": {
+            "small": "小喽啰/看门狗/路人反派",
+            "medium": "小boss/门派弟子/富二代",
+            "high": "大boss/长老/家族族长",
+            "peak": "终极boss/宗主/皇帝/仙人",
+        },
+    },
+    "villain_quality": {
+        "label": "反派质量要求",
+        "description": "好的反派能让爽点更爽，不能是弱智反派。",
+        "intelligence_requirement": "反派必须有基本智商，不能犯低级错误，否则打脸没有成就感。",
+        "motivation_requirement": "反派必须有明确的动机和利益诉求，不能为了坏而坏。",
+        "strength_requirement": "反派必须有真实的实力背景，不能只是嘴上厉害，一触即溃。",
+        "escalation_requirement": "每个阶段的反派都要比上一个阶段的更强、更聪明、更有背景。",
+    },
+}
+
+
 _MECHANIC_RULES: dict[str, dict[str, Any]] = {
     "system": {
         "label": "系统/任务",
@@ -414,7 +527,11 @@ def resolve_webnovel_strategy(
             "feedback_channels": list(_FEEDBACK_CHANNELS),
             "feedback_no_repeat_window": 3,
             "rule": "每章至少有一个可见结果；反馈可以是态度、资源、身份、关系、规则或风险变化，不强制群众围观。",
+            # P2-6 质量整改：反馈强度分级与全场级反馈设计规则
+            "intensity_rules": deepcopy(_FEEDBACK_INTENSITY_RULES),
         },
+        # P2-5 质量整改：反派设计与越级打脸规则
+        "villain_design": deepcopy(_VILLAIN_DESIGN_RULES),
         "mechanic": {
             "families": families,
             "required_fields": [

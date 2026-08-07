@@ -29,6 +29,24 @@ AI_FLAVOR_LEXICON_SETTING_KEY = "quality.ai_flavor_lexicon"
 AI_FLAVOR_LEXICON_SCHEMA_VERSION = "ai-flavor-lexicon-v2"
 _LEXICON_CACHE_TTL_SECONDS = 20.0
 _LEXICON_CACHE: tuple[float, dict[str, Any], str] | None = None
+
+# P2-3 质量整改：词库灰度验证开关
+# True = 灰度模式，只计算统计数据，不产生 candidate_risks
+# False = 正常模式，产生 candidate_risks 供审阅者参考
+AI_FLAVOR_LEXICON_GRAYSCALE = True
+
+# P2-3 质量整改：调整后的阈值，减少误判
+# 原阈值过低，正常网文写作中这些词的出现频率就很高
+FILLER_DENSITY_THRESHOLD = 5.0  # 从1.5提高到5.0，正常网文filler词密度通常在3-8/千字
+TRANSITION_HIT_THRESHOLD = 8    # 从5提高到8，转场词是正常写作手段
+CLASSIC_DESCRIPTION_THRESHOLD = 5  # 从3提高到5，经典神态短语是正常描写手段
+SUMMARY_LECTURE_THRESHOLD = 4   # 从2提高到4，总结说教词偶尔出现很正常
+CLICHE_METAPHOR_THRESHOLD = 4   # 从2提高到4，空泛比喻偶尔出现很正常
+MECHANICAL_REACTION_THRESHOLD = 5  # 从3提高到5，群像反应词偶尔出现很正常
+DIRECT_EMOTION_THRESHOLD = 5    # 从3提高到5，直接情绪标签偶尔出现很正常
+DIALOGUE_TEMPLATE_THRESHOLD = 5  # 从3提高到5，对白模板偶尔出现很正常
+ENDING_SCAFFOLD_THRESHOLD = 3   # 从2提高到3，章尾脚手架偶尔出现很正常
+SYSTEM_TERMS_THRESHOLD = 5      # 从3提高到5，系统术语在系统文中很常见
 _LEXICON_CACHE_LOCK = threading.RLock()
 
 
@@ -459,8 +477,36 @@ def analyze_novel_reviewer_lexicon(
         )
 
     candidates: list[dict[str, Any]] = []
+
+    # P2-3 质量整改：灰度模式下只计算统计数据，不产生候选风险
+    # 新配置先观察，确认无误判后再启用
+    if AI_FLAVOR_LEXICON_GRAYSCALE:
+        return {
+            "schema_version": AI_FLAVOR_LEXICON_SCHEMA_VERSION,
+            "reference": novel_reviewer_reference_metadata(),
+            "mode": "grayscale_observation",
+            "hard_gate": False,
+            "grayscale": True,
+            "system_context": system_context,
+            "configuration": {
+                "source": lexicon_source or lexicon.get("source") or "profile_or_builtin",
+                "version": lexicon.get("version", 2),
+                "category_count": len(lexicon.get("categories") or []),
+                "active_phrase_count": sum(
+                    1
+                    for category in lexicon.get("categories") or []
+                    if category.get("enabled", True)
+                    for item in category.get("phrases") or []
+                    if item.get("enabled", True)
+                ),
+            },
+            "categories": categories,
+            "candidate_risks": [],
+            "rule": "灰度观察模式：词库只统计不告警，新配置验证无误后再启用。单个词、单个标点或题材正常术语不构成问题；必须结合密度、重复、语境和正文证据。",
+        }
+
     classic = categories.get("classic_description") or {}
-    if classic.get("active") and classic.get("hit_count", 0) >= 3:
+    if classic.get("active") and classic.get("hit_count", 0) >= CLASSIC_DESCRIPTION_THRESHOLD:
         candidates.append({
             "code": "classic_description_stacking",
             "category": "classic_description",
@@ -469,7 +515,7 @@ def analyze_novel_reviewer_lexicon(
             "reason": "经典神态/心理短语出现堆叠，需要结合人物反应和场景后果复核。",
         })
     filler = categories.get("filler") or {}
-    if filler.get("active") and filler.get("density_per_1000", 0) > 1.5:
+    if filler.get("active") and filler.get("density_per_1000", 0) > FILLER_DENSITY_THRESHOLD:
         candidates.append({
             "code": "filler_density_candidate",
             "category": "filler",
@@ -479,7 +525,7 @@ def analyze_novel_reviewer_lexicon(
         })
     transition = categories.get("transition") or {}
     repeated_transition = max(transition.get("phrases", {}).values(), default=0)
-    if transition.get("active") and (transition.get("hit_count", 0) >= 5 or repeated_transition >= 3):
+    if transition.get("active") and (transition.get("hit_count", 0) >= TRANSITION_HIT_THRESHOLD or repeated_transition >= 3):
         candidates.append({
             "code": "transition_stacking_candidate",
             "category": "transition",
@@ -489,12 +535,12 @@ def analyze_novel_reviewer_lexicon(
         })
 
     candidate_rules = (
-        ("summary_lecture", "summary_lecture_stacking", 2, "总结/说教表达出现堆叠，需检查是否遮蔽了动作和因果。"),
-        ("cliche_metaphor", "cliche_metaphor_stacking", 2, "空泛比喻集中出现，需换成可观察的动作、物件或后果。"),
-        ("mechanical_reaction", "mechanical_reaction_stacking", 3, "群像反应模板重复，需让不同角色给出不同利益或行动反馈。"),
-        ("direct_emotion", "direct_emotion_labeling", 3, "直接情绪标签偏多，需用人物选择、身体反应或细节承载情绪。"),
-        ("dialogue_template", "dialogue_template_stacking", 3, "对白模板集中出现，需检查角色是否拥有具体目的和潜台词。"),
-        ("ending_scaffold", "ending_scaffold_repetition", 2, "章尾脚手架重复，需把钩子落到具体发现、选择或新压力。"),
+        ("summary_lecture", "summary_lecture_stacking", SUMMARY_LECTURE_THRESHOLD, "总结/说教表达出现堆叠，需检查是否遮蔽了动作和因果。"),
+        ("cliche_metaphor", "cliche_metaphor_stacking", CLICHE_METAPHOR_THRESHOLD, "空泛比喻集中出现，需换成可观察的动作、物件或后果。"),
+        ("mechanical_reaction", "mechanical_reaction_stacking", MECHANICAL_REACTION_THRESHOLD, "群像反应模板重复，需让不同角色给出不同利益或行动反馈。"),
+        ("direct_emotion", "direct_emotion_labeling", DIRECT_EMOTION_THRESHOLD, "直接情绪标签偏多，需用人物选择、身体反应或细节承载情绪。"),
+        ("dialogue_template", "dialogue_template_stacking", DIALOGUE_TEMPLATE_THRESHOLD, "对白模板集中出现，需检查角色是否拥有具体目的和潜台词。"),
+        ("ending_scaffold", "ending_scaffold_repetition", ENDING_SCAFFOLD_THRESHOLD, "章尾脚手架重复，需把钩子落到具体发现、选择或新压力。"),
     )
     for category_key, code, minimum, reason in candidate_rules:
         category = categories.get(category_key) or {}
@@ -507,7 +553,7 @@ def analyze_novel_reviewer_lexicon(
                 "reason": reason,
             })
     system_terms = categories.get("system_terms") or {}
-    if system_terms.get("active") and system_terms.get("hit_count", 0) >= 3:
+    if system_terms.get("active") and system_terms.get("hit_count", 0) >= SYSTEM_TERMS_THRESHOLD:
         candidates.append({
             "code": "system_term_template_candidate",
             "category": "system_terms",
@@ -521,6 +567,7 @@ def analyze_novel_reviewer_lexicon(
         "reference": novel_reviewer_reference_metadata(),
         "mode": "candidate_only",
         "hard_gate": False,
+        "grayscale": False,
         "system_context": system_context,
         "configuration": {
             "source": lexicon_source or lexicon.get("source") or "profile_or_builtin",

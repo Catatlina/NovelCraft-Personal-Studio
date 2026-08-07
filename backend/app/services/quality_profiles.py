@@ -642,81 +642,27 @@ def compile_quality_directive(
     payoff_contract: dict[str, Any] | None = None,
     active_rules: list[Any] | None = None,
 ) -> str:
-    """Compile only the relevant rules into a bounded Writer directive."""
+    """Compile only the relevant rules into a bounded Writer directive.
+
+    P2-2 质量整改：精简为核心5条，避免prompt过载让模型分心。
+    详细方法论移到生成后审查逻辑中，生成前只给核心约束。
+    核心5条：开局模式、爽点执行、反馈要求、去AI味底线、节奏控制。
+    """
     profile = profile if isinstance(profile, dict) else select_quality_profile()
     seq = int(chapter_number or 1)
-    lines = [
-        f"质量策略 {profile.get('profile_id', QUALITY_PROFILE_SCHEMA_VERSION)}：以网络小说读者继续阅读为第一目标。",
-        f"平台重点：{profile.get('reader_priority') or '冲突清楚、反馈具体、下一步明确'}。",
-        third_person_generation_contract(),
-        content_generation_contract(profile),
-        "金手指通用闭环：触发后必须让主角做选择并采取行动，收益要在事件中可见，同时写出边界/代价、状态变化和新的主线冲突；任何系统、模拟器、重生、空间、面板或传承都不能替主角自动通关。",
-    ]
     strategy = profile.get("quality_strategy") or {}
-    if strategy:
-        opening = strategy.get("opening") or {}
-        payoff = strategy.get("payoff") or {}
-        mechanic = strategy.get("mechanic") or {}
-        lines.append(
-            "知识策略编译结果："
-            f"开局模式={opening.get('mode') or 'fast_hook'}；"
-            f"{opening.get('directive') or ''}"
-        )
-        market_directive = market_benchmark_directive(strategy.get("market_benchmark"))
-        if market_directive:
-            lines.append("平台/题材实证软基线：" + market_directive + "。")
-        lines.append(
-            "反馈渠道轮换："
-            + "、".join(str(item) for item in (payoff.get("feedback_channels") or [])[:6])
-            + "；同一渠道不得连续模板化复用。"
-        )
-        innovation_paths = mechanic.get("innovation_paths") or {}
-        if innovation_paths:
-            lines.append(
-                "金手指创新路径（选一条并服务剧情）："
-                + "；".join(str(value) for value in list(innovation_paths.values())[:3])
-            )
-        design_rule = str(mechanic.get("design_rule") or "").strip()
-        if design_rule:
-            lines.append("金手指实证设计轴：" + design_rule)
-        design_axes = mechanic.get("design_axes") or {}
-        if isinstance(design_axes, dict) and design_axes:
-            axis_text = []
-            for axis_name, options in list(design_axes.items())[:4]:
-                if isinstance(options, list) and options:
-                    axis_text.append(f"{axis_name}={'/'.join(str(item) for item in options[:5])}")
-            if axis_text:
-                lines.append("金手指四轴候选（按剧情选择，不要全量堆叠）：" + "；".join(axis_text))
-        deai = strategy.get("deai") or {}
-        if deai.get("pre_generation"):
-            lines.append("去 AI 味事前约束：" + "；".join(str(item) for item in deai["pre_generation"]))
-    package_rules = _unique(
-        [*(profile.get("title_rules") or [])[:2], *(profile.get("synopsis_rules") or [])[:2]]
-    )
-    if package_rules:
-        lines.append("书名/简介包装：" + "；".join(package_rules) + "。")
-    plugin_rules = [str(item) for item in (profile.get("style_plugin_directive") or [])[:2] if str(item).strip()]
-    if plugin_rules:
-        lines.append("可选风格插件（已启用）：" + "；".join(plugin_rules) + "。")
-    plugin_focus = [str(item) for item in (profile.get("style_plugin_rules") or [])[:9] if str(item).strip()]
-    if plugin_focus:
-        lines.append("插件执行重点：" + "；".join(plugin_focus) + "。")
-    if seq <= 3:
-        lines.append("开篇阶段：本章必须尽快落到具体处境/冲突，完成可见反馈，并把下一章问题落到动作或发现。")
-    for label, key, limit in (
-        ("本章规则", "opening_rules", 3),
-        ("章节节奏", "chapter_rules", 3),
-        ("题材要求", "style_rules", 4),
-        ("去 AI 味", "anti_ai_rules", 3),
-    ):
-        values = [str(item) for item in (profile.get(key) or [])[:limit] if str(item).strip()]
-        if values:
-            lines.append(f"{label}：" + "；".join(values) + "。")
-    attention_rules = [str(item) for item in (profile.get("attention_beat_rules") or [])[:2] if str(item).strip()]
-    if attention_rules:
-        lines.append("读者注意力基线（软规则）：「" + "；".join(attention_rules) + "」。")
-    payoff_policy = profile.get("payoff_policy") or {}
     payoff_strategy = profile.get("payoff_strategy") or {}
+    payoff_policy = profile.get("payoff_policy") or {}
+
+    # 1. 开局模式
+    opening = strategy.get("opening") or {}
+    opening_mode = opening.get("mode") or "fast_hook"
+    opening_directive = opening.get("directive") or "前300字必须落到具体处境/压力，不要铺垫背景"
+    opening_text = f"开局模式：{opening_mode}——{opening_directive}"
+    if seq <= 3:
+        opening_text += "；开篇阶段必须尽快落到具体处境/冲突，完成可见反馈，并把下一章问题落到动作或发现。"
+
+    # 2. 爽点执行
     chapter_mode = str(
         (chapter_function or {}).get("chapter_type")
         or (chapter_function or {}).get("chapter_mode")
@@ -724,18 +670,6 @@ def compile_quality_directive(
     ).strip().lower()
     mode_policy = (payoff_strategy.get("chapter_modes") or {}).get(chapter_mode) or {}
     active_choice_required = bool(mode_policy.get("active_choice_required", True))
-    visible_feedback_required = bool(
-        mode_policy.get("visible_feedback_required", payoff_strategy.get("feedback_required", False))
-    )
-    if payoff_strategy:
-        lines.append(
-            "爽点策略："
-            f"{payoff_strategy.get('label') or payoff_strategy.get('strategy_id')}; "
-            f"类型轮换窗口={payoff_strategy.get('no_repeat_window', 0)}章；"
-            f"优先类型={'、'.join(str(item) for item in (payoff_strategy.get('type_cycle') or [])[:6])}。"
-        )
-        if payoff_strategy.get("directive"):
-            lines.append("策略执行重点：" + str(payoff_strategy["directive"]))
     payoff_floor = str(
         payoff_policy.get("early_min_payoff_intensity")
         if seq <= int(payoff_policy.get("early_chapters_need_payoff") or 0)
@@ -743,96 +677,97 @@ def compile_quality_directive(
     )
     payoff_streak = int(payoff_policy.get("max_low_payoff_streak") or 1)
     action_rule = (
-        "本章必须由主角主动选择造成一处可见变化"
+        "主角必须主动选择造成一处可见变化"
         if active_choice_required
-        else "本章可以承接前章后果，但必须兑现前章后果或制造新的可见压力"
+        else "可以承接前章后果，但必须兑现前章后果或制造新的可见压力"
     )
-    feedback_rule = "本章必须有可见外部反馈" if visible_feedback_required else "反馈可通过资源、关系、信息或风险变化体现，不强制围观"
-    lines.append(
-        f"爽点执行协议（生成前硬约束，章节类型={chapter_mode}）：{action_rule}；{feedback_rule}；"
+    payoff_text = (
+        f"爽点执行：{action_rule}；按压制→蓄力→爆发→反馈→余波推进；"
         f"当前阶段爽点强度不低于{payoff_floor}档，不能连续超过{payoff_streak}章只有铺垫没有兑现。"
     )
-    recent_types = [
-        str(item).strip()
-        for item in (chapter_function or {}).get("recent_payoff_types") or []
-        if str(item).strip()
-    ]
-    if recent_types:
-        lines.append(
-            "最近已使用爽点类型："
-            + "、".join(recent_types[-6:])
-            + "；本章优先选择策略轮换中尚未连续出现的类型，避免复制上一章反馈。"
-        )
-    pattern_rules = [
-        item for item in (profile.get("failure_pattern_constraints") or [])
-        if isinstance(item, dict) and item.get("constraint")
-    ]
-    if pattern_rules:
-        lines.append(
-            "历史报告失败模式（本次生成前预防）："
-            + "；".join(
-                f"{item.get('id')}[{item.get('severity')}] {item.get('constraint')}"
-                for item in pattern_rules[:6]
-            )
-            + "。"
-        )
-    lines.append(
-        "爽点五步法可压缩进4-6个节拍：压制（让读者感到损失/风险）→蓄力（给出选择、依据或底牌）"
-        "→爆发（行动造成明确结果）→反馈（对手、组织、资源、规则或旁观者发生可见变化）"
-        "→余波（代价、身份变化或新的压力）。反馈不得固定写成‘众人震惊’，但不能只在旁白里宣布爽。"
+
+    # 3. 反馈要求
+    payoff = strategy.get("payoff") or {}
+    feedback_channels = payoff.get("feedback_channels") or []
+    feedback_text = (
+        "反馈要求：反馈必须落到对手/组织/资源/规则/旁观者的可见变化，"
+        "不得固定写成'众人震惊'，但也不能只在旁白里宣布爽；"
+        f"反馈渠道轮换：{'、'.join(str(item) for item in feedback_channels[:4]) or '多渠道交替'}，同一渠道不得连续模板化复用。"
     )
-    soft_metrics = profile.get("style_plugin_soft_metrics") or {}
-    if soft_metrics:
-        dialogue_range = soft_metrics.get("dialogue_ratio_target") or []
-        dialogue_text = f"对白约{dialogue_range[0] * 100:.0f}%–{dialogue_range[1] * 100:.0f}%" if len(dialogue_range) == 2 else ""
-        metric_text = _unique([
-            f"均句长约不超过{soft_metrics['mean_sentence_chars_target_max']}字" if soft_metrics.get("mean_sentence_chars_target_max") else "",
-            dialogue_text,
-            f"修辞不超过{soft_metrics['rhetoric_density_per_1k_max']}/千字" if soft_metrics.get("rhetoric_density_per_1k_max") else "",
-            f"填充词不超过{soft_metrics['filler_density_per_1k_max']}/千字" if soft_metrics.get("filler_density_per_1k_max") else "",
-            "系统弹窗接近于零" if soft_metrics.get("system_popup_density_per_1k_max") is not None else "",
-        ])
-        if metric_text:
-            lines.append("风格指纹软目标（只作验收参考，不机械凑数）：" + "；".join(metric_text) + "。")
-    learned_rules = [str(item).strip() for item in (active_rules or []) if str(item).strip()]
-    if learned_rules:
-        lines.append("来自已通过章节的学习规则（仅作定向提示，不覆盖事实和本章契约）：" + "；".join(learned_rules[:4]) + "。")
-    ledgers = "、".join(str(item) for item in (profile.get("ledgers") or [])[:6])
-    if ledgers:
-        lines.append(f"状态账本：{ledgers}；任何新增事实、能力、资源和关系都要在正文中有来源、消耗或后果。")
-    if isinstance(chapter_function, dict):
-        goal = str(chapter_function.get("chapter_goal") or "").strip()
-        expectation = str(chapter_function.get("reader_expectation") or "").strip()
-        if goal or expectation:
-            lines.append(f"本章功能：目标={goal or '推进主线'}；读者期待={expectation or '留下具体追读理由'}。")
-    if isinstance(payoff_contract, dict):
+
+    # 4. 去AI味底线
+    deai = strategy.get("deai") or {}
+    deai_pre = deai.get("pre_generation") or []
+    deai_text = (
+        "去AI味底线：避免同构句、模板套话、总结体，用动作/对白/人物口吻承载情绪；"
+        "段首承接要有变化，同一两字人名作为段落开头尽量不超过全章约四分之一；"
+        "标点不设禁用清单，只处理整章高密度、连续重复或模板化使用。"
+    )
+    if deai_pre:
+        deai_text += "；重点注意：" + "；".join(str(item) for item in deai_pre[:2])
+
+    # 5. 节奏控制
+    chapter_rules = profile.get("chapter_rules") or []
+    rhythm_text = (
+        "节奏控制：每约800-1200字出现一次局部变化（动作/信息/情绪转折）；"
+        "转折前给读者可见的动作、线索或异常，高潮后留下具体余波；"
+        "人物只能使用自己已经获得的信息，能力/物品/时间/地点必须有来源。"
+    )
+    if chapter_rules:
+        rhythm_text += "；" + "；".join(str(item) for item in chapter_rules[:2])
+
+    # 差异化策略核心（保留题材/平台特色）
+    market_directive = market_benchmark_directive(strategy.get("market_benchmark"))
+    style_plugin = profile.get("style_plugin_directive") or []
+    style_text = ""
+    if market_directive or style_plugin:
+        style_parts = []
+        if market_directive:
+            style_parts.append(f"平台/题材特色：{market_directive}")
+        if style_plugin:
+            style_parts.append("风格插件：" + "；".join(str(item) for item in style_plugin[:2]))
+        style_text = "\n" + "\n".join(style_parts)
+
+    # 本章爽点契约（如果有的话）
+    contract_text = ""
+    if isinstance(payoff_contract, dict) and payoff_contract:
         fields = (
             ("承诺", "reader_promise"),
             ("压力", "pressure"),
             ("主动选择", "active_choice"),
             ("可见结果", "visible_result"),
             ("可见反馈", "payoff_feedback"),
-            ("代价/余波", "cost"),
             ("下一压力", "next_pressure"),
         )
-        contract_text = "；".join(f"{label}={payoff_contract.get(key)}" for label, key in fields if payoff_contract.get(key))
-        if contract_text:
-            lines.append("本章爽点契约：" + contract_text + "。结果必须由角色行动造成，不能只在旁白里宣布。")
-        intensity = str(payoff_contract.get("payoff_intensity") or payoff_contract.get("level") or "")
-        arc = payoff_contract.get("payoff_arc") or payoff_contract.get("payoff_phases") or []
-        if intensity or arc:
-            lines.append(
-                "爽点档位/节拍："
-                + (f"强度={intensity}；" if intensity else "")
-                + ("结构=" + "→".join(str(item) for item in arc) if arc else "")
-                + "。"
-            )
-    lines.append(
-        "段首承接要有变化：同一两字人名作为段落开头尽量不超过全章约四分之一，不要机械重复同一动作起笔；可从动作、场景、物件、对白或他人反应切入，"
-        "但要保持第三人称限知清晰，不能用大量‘他/她’替换造成另一种模板感。"
+        contract_summary = "；".join(
+            f"{label}={payoff_contract.get(key)}"
+            for label, key in fields
+            if payoff_contract.get(key)
+        )
+        if contract_summary:
+            contract_text = f"\n本章爽点契约：{contract_summary}。结果必须由角色行动造成。"
+
+    # 第三人称和内容契约（基础硬约束，不能省）
+    base_contract = (
+        f"{third_person_generation_contract()}\n"
+        f"{content_generation_contract(profile)}"
     )
-    lines.append("标点不设禁用清单；只处理整章高密度、连续重复或模板化使用，保留自然对白和人物习惯。")
-    return "\n".join(lines)[:5000]
+
+    lines = [
+        f"质量策略核心5条（精简版）：以读者继续阅读为第一目标。",
+        base_contract,
+        opening_text,
+        payoff_text,
+        feedback_text,
+        deai_text,
+        rhythm_text,
+    ]
+    if style_text:
+        lines.append(style_text.strip())
+    if contract_text:
+        lines.append(contract_text.strip())
+
+    return "\n".join(lines)[:3000]
 
 
 def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:

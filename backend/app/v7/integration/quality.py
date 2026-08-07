@@ -23,7 +23,8 @@ from ..quality.review_evidence import validate_review_evidence
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
-MAX_REWORKS = 2
+MAX_REWORKS = 3  # P2-1 质量整改：从2增加到3，给完整重写更多机会
+MAX_LOCAL_REPAIRS = 1  # 本地修复最多尝试次数，不计入MAX_REWORKS配额
 
 # These dimensions directly affect cross-chapter reading experience.  A low
 # emotional/pacing score is reviewable; a low continuity/logic/writing score is
