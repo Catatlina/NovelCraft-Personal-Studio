@@ -205,9 +205,16 @@ def is_retryable_provider_failure(error: Any) -> bool:
 class ContextAssembler:
     """Assembles real generation context out of the Novel Brain."""
 
-    def __init__(self, brain: NovelBrain, project_id: str | None = None):
+    def __init__(
+        self,
+        brain: NovelBrain,
+        project_id: str | None = None,
+        genre_id: str | None = None,
+    ):
         self.brain = brain
         self.project_id = project_id
+        self.genre_id = genre_id
+        self._genre_cache: dict[str, Any] | None = None
 
     async def load_style_card(self) -> dict[str, Any]:
         """Load the V6 author/genre card used by the shared project scope."""
@@ -234,6 +241,88 @@ class ContextAssembler:
                 conn.close()
 
         return await asyncio.to_thread(_read)
+
+    async def load_genre_context(self) -> dict[str, Any]:
+        """加载品类上下文（风格卡、知识、约束等）。
+
+        从品类库加载当前品类的规则、知识、风格卡等信息，
+        支持继承解析（子品类没有的自动用父品类的）。
+        """
+        if not self.genre_id:
+            return {}
+
+        # 缓存命中
+        if self._genre_cache is not None:
+            return self._genre_cache
+
+        try:
+            from ..services.genre_inheritance import (
+                resolve_genre_rules,
+                resolve_genre_knowledge,
+            )
+            from ..db import async_session
+
+            async with async_session() as db:
+                # 解析规则（含继承）
+                rules = await resolve_genre_rules(db, self.genre_id)
+
+                # 解析知识（含继承）
+                knowledge = await resolve_genre_knowledge(db, self.genre_id)
+
+                # 提取风格卡
+                style_card = {}
+                for rule in rules:
+                    if rule.rule_type == "style_card":
+                        style_card = rule.rule_value or {}
+                        break
+
+                # 提取约束
+                constraints = []
+                for rule in rules:
+                    if rule.rule_type in ("forbidden_words", "world_constraint"):
+                        constraints.append({
+                            "type": rule.rule_type,
+                            "key": rule.rule_key,
+                            "value": rule.rule_value,
+                            "severity": rule.severity,
+                            "description": rule.description,
+                        })
+
+                # 整理知识条目（按类型分组）
+                knowledge_by_type: dict[str, list[dict[str, Any]]] = {}
+                for item in knowledge:
+                    ktype = item.knowledge_type or "other"
+                    if ktype not in knowledge_by_type:
+                        knowledge_by_type[ktype] = []
+                    knowledge_by_type[ktype].append({
+                        "title": item.title,
+                        "content": item.content,
+                        "tags": item.tags or [],
+                        "priority": item.priority,
+                    })
+
+                # 按优先级排序
+                for ktype in knowledge_by_type:
+                    knowledge_by_type[ktype].sort(
+                        key=lambda x: x.get("priority", 0), reverse=True
+                    )
+
+                result = {
+                    "genre_id": self.genre_id,
+                    "style_card": style_card,
+                    "constraints": constraints,
+                    "knowledge": knowledge_by_type,
+                    "total_rules": len(rules),
+                    "total_knowledge": len(knowledge),
+                }
+
+                self._genre_cache = result
+                return result
+
+        except Exception as e:
+            # 品类加载失败不影响主流程
+            logger.warning(f"加载品类上下文失败: {e}")
+            return {}
 
     async def load_previous_chapters(
         self,
@@ -298,6 +387,9 @@ class ContextAssembler:
                 chapter_number=chapter_number,
                 limit=2,  # P1-1 质量整改：quality_learning 从4条降到2条
             )
+
+        # 加载品类上下文（第8层）
+        genre_context = await self.load_genre_context()
 
         previous = await self.load_previous_chapters(
             chapter_number,
@@ -397,6 +489,7 @@ class ContextAssembler:
             "style_card": style_card,
             "active_rules": active_rules,
             "quality_learning": quality_learning,
+            "genre": genre_context,  # 第8层：品类上下文
         }
 
         rendered = self.render(layers)
@@ -474,6 +567,41 @@ class ContextAssembler:
                 "【V6作者风格卡（只约束表达，不改变剧情事实）】\n"
                 + json.dumps(style_card, ensure_ascii=False, separators=(",", ":"))
             )
+
+        # 品类风格卡与约束（第8层）
+        genre = layers.get("genre") or {}
+        if genre:
+            genre_style = genre.get("style_card") or {}
+            if genre_style:
+                blocks.append(
+                    "【品类风格卡（品类专属写作风格）】\n"
+                    + json.dumps(genre_style, ensure_ascii=False, separators=(",", ":"))
+                )
+
+            genre_constraints = genre.get("constraints") or []
+            if genre_constraints:
+                lines = []
+                for c in genre_constraints[:10]:
+                    desc = c.get("description") or c.get("key") or ""
+                    severity = c.get("severity", "info")
+                    lines.append(f"- [{severity}] {desc}")
+                blocks.append("【品类约束（必须遵守）】\n" + "\n".join(lines))
+
+            genre_knowledge = genre.get("knowledge") or {}
+            if genre_knowledge:
+                # 只渲染最重要的知识（参考类和世界观类）
+                important_types = ["reference", "world_setting", "character"]
+                knowledge_lines = []
+                for ktype in important_types:
+                    items = genre_knowledge.get(ktype, [])
+                    if items:
+                        knowledge_lines.append(f"## {ktype}")
+                        for item in items[:3]:  # 每种类型最多3条
+                            title = item.get("title", "")
+                            content = item.get("content", "")[:200]  # 截断长内容
+                            knowledge_lines.append(f"- {title}: {content}...")
+                if knowledge_lines:
+                    blocks.append("【品类知识库（写作参考）】\n" + "\n".join(knowledge_lines))
 
         active_rules = layers.get("active_rules") or []
         if active_rules:
