@@ -31,6 +31,22 @@ PAYOFF_INTENSITY_ALIASES = {
     "超大": "peak",
     "高潮": "peak",
 }
+# P2-4 质量整改：反馈强度等级
+# 和爽点强度对应，高强度爽点必须匹配高强度反馈
+FEEDBACK_INTENSITY_LEVELS = ("small", "medium", "high", "peak")
+FEEDBACK_INTENSITY_SCORES = {"small": 1, "medium": 2, "high": 3, "peak": 4}
+
+# P2-4 质量整改：高强度反馈关键词
+# 出现这些词说明反馈强度较高
+HIGH_FEEDBACK_KEYWORDS = (
+    "全场", "众人", "所有人", "鸦雀无声", "一片哗然", "震惊", "石化",
+    "不敢相信", "难以置信", "目瞪口呆", "倒吸一口凉气", "哗然",
+    "轰动", "震动", "震撼", "沸腾", "炸开了锅", "不敢置信",
+)
+PEAK_FEEDBACK_KEYWORDS = (
+    "全场震惊", "全场鸦雀无声", "所有人都懵了", "一片死寂",
+    "史无前例", "前所未有", "颠覆认知", "刷新认知",
+)
 PAYOFF_PHASES = ("pressure", "build", "burst", "feedback", "aftershock")
 PAYOFF_PHASE_ALIASES = {
     "压制": "pressure",
@@ -193,6 +209,59 @@ def _normalize_payoff_intensity(value: Any, *, default: str = "small") -> str:
     if raw in PAYOFF_INTENSITY_LEVELS:
         return raw
     return PAYOFF_INTENSITY_ALIASES.get(raw, default)
+
+
+# P2-4 质量整改：推断反馈强度
+def _infer_feedback_intensity(feedback_text: str, *, payoff_intensity: str = "small") -> str:
+    """从反馈文本中推断反馈强度。
+
+    基于关键词匹配和文本长度粗略估计，用于评分参考。
+    高强度爽点应该匹配高强度反馈。
+    """
+    text = str(feedback_text or "").strip()
+    if not text:
+        return "small"
+
+    text_lower = text.lower()
+    score = 1  # 默认 small
+
+    # 关键词匹配
+    peak_count = sum(1 for kw in PEAK_FEEDBACK_KEYWORDS if kw in text_lower)
+    if peak_count >= 1:
+        score = max(score, 4)  # peak
+
+    high_count = sum(1 for kw in HIGH_FEEDBACK_KEYWORDS if kw in text_lower)
+    if high_count >= 3:
+        score = max(score, 4)  # peak
+    elif high_count >= 2:
+        score = max(score, 3)  # high
+    elif high_count >= 1:
+        score = max(score, 2)  # medium
+
+    # 文本长度：越长通常反馈越充分
+    text_len = len(text)
+    if text_len >= 200:
+        score = max(score, 3)  # high
+    elif text_len >= 100:
+        score = max(score, 2)  # medium
+    elif text_len >= 30:
+        score = max(score, 1)  # small
+
+    # 爽点强度和反馈强度的匹配：高强度爽点至少要有中等反馈
+    payoff_score = PAYOFF_INTENSITY_SCORES.get(payoff_intensity, 1)
+    if payoff_score >= 3:  # high 或 peak 爽点
+        # 爽点强度高但反馈太弱，按爽点强度的下一档来算
+        score = max(score, payoff_score - 1)
+
+    # 映射回等级
+    if score >= 4:
+        return "peak"
+    elif score >= 3:
+        return "high"
+    elif score >= 2:
+        return "medium"
+    else:
+        return "small"
 
 
 def _normalize_payoff_phases(value: Any) -> list[str]:
@@ -837,6 +906,13 @@ def score_payoff_contract(
         "protagonist_agency": 100 if contract.get("active_choice") else 0,
         "result_visibility": 100 if result_visible else (55 if result_anchor else 0),
         "feedback_effectiveness": 100 if feedback else 0,
+        # P2-4 质量整改：增加反馈强度评分
+        "feedback_intensity": round(
+            FEEDBACK_INTENSITY_SCORES.get(
+                _infer_feedback_intensity(feedback, payoff_intensity=contract.get("payoff_intensity") or "small"),
+                1
+            ) / 4 * 100
+        ),
         "payoff_intensity": round(
             # P1-6: 没有主动选择的爽点评分直接降一档
             max(1, PAYOFF_INTENSITY_SCORES.get(str(contract.get("payoff_intensity") or "small"), 1) - (0 if contract.get("active_choice") else 1)) / 4 * 100
@@ -846,17 +922,19 @@ def score_payoff_contract(
         "five_chapter_curve": five_chapter_score,
         "twenty_chapter_distribution": twenty_chapter_score,
     }
-    # P1-6 质量整改：强化主角主动性，提升主动装逼设计
+    # P2-4 质量整改：增加反馈强度权重，调整其他维度权重
+    # 反馈强度是爽感的重要组成部分，高强度爽点必须匹配高强度反馈
     weights = {
         "expectation_fulfillment": 0.12,    # P0-4: 0.15 → 0.12
         "protagonist_agency": 0.18,         # P1-6: 0.15 → 0.18（主角主动性是爽感核心）
         "result_visibility": 0.12,          # P0-4: 0.15 → 0.12
-        "feedback_effectiveness": 0.12,     # P0-4: 保持0.12
+        "feedback_effectiveness": 0.08,     # P2-4: 0.12 → 0.08（反馈强度单独评分）
+        "feedback_intensity": 0.08,         # P2-4: 新增（反馈强度，匹配爽点强度）
         "payoff_intensity": 0.20,           # P0-4: 0.10 → 0.20（提到最高权重之一）
         "hook_strength": 0.12,              # P0-4: 0.14 → 0.12
-        "payoff_variety": 0.04,             # P1-6: 0.05 → 0.04（降低多样性权重，优先保证爽感强度和主动性）
-        "five_chapter_curve": 0.07,         # P0-4: 0.06 → 0.07（微调）
-        "twenty_chapter_distribution": 0.03, # P1-6: 0.05 → 0.03（降低长期分布权重，优先保证每章爽感）
+        "payoff_variety": 0.03,             # P2-4: 0.04 → 0.03（降低多样性权重）
+        "five_chapter_curve": 0.05,         # P2-4: 0.07 → 0.05（降低短期曲线权重）
+        "twenty_chapter_distribution": 0.02, # P2-4: 0.03 → 0.02（降低长期分布权重）
     }
     score = round(sum(dimensions[key] * weights[key] for key in dimensions), 1)
     # P0-4 质量整改：提高爽点评分通过标准，70→75
