@@ -838,24 +838,25 @@ def score_payoff_contract(
         "result_visibility": 100 if result_visible else (55 if result_anchor else 0),
         "feedback_effectiveness": 100 if feedback else 0,
         "payoff_intensity": round(
-            PAYOFF_INTENSITY_SCORES.get(str(contract.get("payoff_intensity") or "small"), 1) / 4 * 100
+            # P1-6: 没有主动选择的爽点评分直接降一档
+            max(1, PAYOFF_INTENSITY_SCORES.get(str(contract.get("payoff_intensity") or "small"), 1) - (0 if contract.get("active_choice") else 1)) / 4 * 100
         ),
         "hook_strength": 100 if next_pressure else 0,
         "payoff_variety": 65 if variety.get("repeated") else 100,
         "five_chapter_curve": five_chapter_score,
         "twenty_chapter_distribution": twenty_chapter_score,
     }
-    # P0-4 质量整改：提高爽点强度权重，把爽感作为核心指标
+    # P1-6 质量整改：强化主角主动性，提升主动装逼设计
     weights = {
         "expectation_fulfillment": 0.12,    # P0-4: 0.15 → 0.12
-        "protagonist_agency": 0.15,         # P0-4: 保持0.15（主角主动性重要）
+        "protagonist_agency": 0.18,         # P1-6: 0.15 → 0.18（主角主动性是爽感核心）
         "result_visibility": 0.12,          # P0-4: 0.15 → 0.12
         "feedback_effectiveness": 0.12,     # P0-4: 保持0.12
         "payoff_intensity": 0.20,           # P0-4: 0.10 → 0.20（提到最高权重之一）
         "hook_strength": 0.12,              # P0-4: 0.14 → 0.12
-        "payoff_variety": 0.05,             # P0-4: 0.07 → 0.05
+        "payoff_variety": 0.04,             # P1-6: 0.05 → 0.04（降低多样性权重，优先保证爽感强度和主动性）
         "five_chapter_curve": 0.07,         # P0-4: 0.06 → 0.07（微调）
-        "twenty_chapter_distribution": 0.05, # P0-4: 0.06 → 0.05
+        "twenty_chapter_distribution": 0.03, # P1-6: 0.05 → 0.03（降低长期分布权重，优先保证每章爽感）
     }
     score = round(sum(dimensions[key] * weights[key] for key in dimensions), 1)
     # P0-4 质量整改：提高爽点评分通过标准，70→75
