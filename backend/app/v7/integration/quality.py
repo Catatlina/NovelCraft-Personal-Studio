@@ -21,6 +21,7 @@ from ...services.pov_quality import analyze_third_person_narrative
 from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 from ..quality.review_evidence import validate_review_evidence
 from ..quality.world_constraint import get_constraint_pack
+from ..quality.reader_simulation import simulate_reader_first_pass
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -139,6 +140,18 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
                 #                 "minimum": 0,
                 #                 "reason": f"世界观约束违反：{violation['description']}",
                 #             })
+    
+    # 阶段3："读第一遍"模拟审查
+    # 模拟读者第一次阅读的感受和判断
+    # 目前作为可选功能，默认不启用（需要AI调用，有成本）
+    # 可以通过 quality_profile.enable_reader_simulation 开关控制
+    reader_simulation_result = None
+    enable_reader_simulation = quality_profile.get("enable_reader_simulation") if quality_profile else False
+    if enable_reader_simulation:
+        chapter_text = review_data.get("chapter_text") or ""
+        if chapter_text:
+            platform = quality_profile.get("platform", "general") if quality_profile else "general"
+            reader_simulation_result = simulate_reader_first_pass(chapter_text, platform)
     if quality_profile and payoff_contract:
         payoff_validation = validate_payoff_contract(
             payoff_contract,
@@ -291,4 +304,7 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         # 世界观硬约束检查结果（阶段1新增）
         # 目前作为 soft warning，不阻塞质量门禁
         "world_constraint": world_constraint_result,
+        # "读第一遍"模拟审查结果（阶段3新增）
+        # 目前作为可选功能，默认不启用
+        "reader_simulation": reader_simulation_result,
     }
