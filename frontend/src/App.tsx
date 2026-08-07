@@ -1271,6 +1271,8 @@ export default function App() {
       {tab === "genre-manager" && <GenreManager />}
       {tab === "quality-analysis" && <QualityReport
         novelId={novel?.id ?? null}
+        chapters={chapters}
+        selectedChapterId={chapter?.id ?? null}
       />}
       </>}
       <CommandPalette commands={cmdActions} />

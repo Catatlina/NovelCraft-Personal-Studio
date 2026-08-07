@@ -48,7 +48,8 @@ import brainApi from '../api/client';
 
 interface QualityReportProps {
   novelId?: string | null;
-  chapterNumber?: number;
+  chapters?: any[];
+  selectedChapterId?: string | null;
 }
 
 type ReportView = 'depth' | 'ai_smell' | 'emotion' | 'characters';
@@ -102,8 +103,11 @@ function getAnomalyTypeLabel(type: string) {
 
 // ============ 组件 ============
 
-export default function QualityReport({ novelId, chapterNumber }: QualityReportProps) {
+export default function QualityReport({ novelId, chapters = [], selectedChapterId }: QualityReportProps) {
   const [activeView, setActiveView] = useState<ReportView>('depth');
+
+  // 当前选中的章节
+  const [currentChapterId, setCurrentChapterId] = useState<string | null>(selectedChapterId || null);
 
   // 数据状态
   const [qualityReview, setQualityReview] = useState<any>(null);
@@ -123,39 +127,53 @@ export default function QualityReport({ novelId, chapterNumber }: QualityReportP
   const [charactersError, setCharactersError] = useState<string | null>(null);
   const [emotionError, setEmotionError] = useState<string | null>(null);
 
+  // 当选中的章节变化时更新当前章节
+  useEffect(() => {
+    if (selectedChapterId) {
+      setCurrentChapterId(selectedChapterId);
+    }
+  }, [selectedChapterId]);
+
+  // 当章节列表变化时，如果没有选中章节，默认选第一个
+  useEffect(() => {
+    if (!currentChapterId && chapters.length > 0) {
+      setCurrentChapterId(chapters[0].id);
+    }
+  }, [chapters, currentChapterId]);
+
   // ── 加载质量审查 ────────────────────────────────────────────────────
 
   const loadQualityReview = useCallback(async () => {
-    if (!chapterNumber) return;
+    if (!currentChapterId) return;
 
     setLoadingReview(true);
     setReviewError(null);
     try {
-      const result = await brainApi.getQualityReview(String(chapterNumber));
+      const result = await brainApi.getQualityReview(currentChapterId);
       setQualityReview(result);
     } catch (err: any) {
       setReviewError(err.message || '加载质量审查失败');
     } finally {
       setLoadingReview(false);
     }
-  }, [chapterNumber]);
+  }, [currentChapterId]);
 
   // ── 加载 AI 味检测 ──────────────────────────────────────────────────
 
   const loadAiSmell = useCallback(async () => {
-    if (!chapterNumber) return;
+    if (!currentChapterId) return;
 
     setLoadingAiSmell(true);
     setAiSmellError(null);
     try {
-      const result = await brainApi.getAiSmell(String(chapterNumber));
+      const result = await brainApi.getAiSmell(currentChapterId);
       setAiSmell(result);
     } catch (err: any) {
       setAiSmellError(err.message || '加载 AI 味检测失败');
     } finally {
       setLoadingAiSmell(false);
     }
-  }, [chapterNumber]);
+  }, [currentChapterId]);
 
   // ── 加载角色统计 ────────────────────────────────────────────────────
 
@@ -203,7 +221,7 @@ export default function QualityReport({ novelId, chapterNumber }: QualityReportP
     } else if (activeView === 'emotion') {
       loadEmotionalArc();
     }
-  }, [activeView, loadQualityReview, loadAiSmell, loadCharacterStats, loadEmotionalArc]);
+  }, [activeView, currentChapterId, loadQualityReview, loadAiSmell, loadCharacterStats, loadEmotionalArc]);
 
   // ── 计算总览指标 ────────────────────────────────────────────────────
 
@@ -242,7 +260,7 @@ export default function QualityReport({ novelId, chapterNumber }: QualityReportP
     } else if (activeView === 'emotion') {
       loadEmotionalArc();
     }
-  }, [activeView, loadQualityReview, loadAiSmell, loadCharacterStats, loadEmotionalArc]);
+  }, [activeView, currentChapterId, loadQualityReview, loadAiSmell, loadCharacterStats, loadEmotionalArc]);
 
   // ── 空状态渲染 ──────────────────────────────────────────────────────
 
@@ -286,7 +304,31 @@ export default function QualityReport({ novelId, chapterNumber }: QualityReportP
           <h2>质量分析看板</h2>
           <p className="v7-page-desc">多维度质量分析与可视化报告</p>
         </div>
-        <div className="v7-page-actions">
+        <div className="v7-page-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {/* 章节选择器 */}
+          {chapters.length > 0 && (
+            <select
+              className="v7-select"
+              value={currentChapterId || ''}
+              onChange={(e) => setCurrentChapterId(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                background: 'rgba(30, 27, 75, 0.6)',
+                color: '#e0e7ff',
+                fontSize: '14px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              {chapters.map((ch: any) => (
+                <option key={ch.id} value={ch.id}>
+                  {ch.title || `第${ch.seq || 1}章`}
+                </option>
+              ))}
+            </select>
+          )}
           <button className="v7-btn v7-btn-secondary" onClick={refreshCurrent}>
             <RefreshCw size={16} />
             刷新
