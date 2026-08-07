@@ -451,7 +451,7 @@ function EmotionArcView() {
                   `${value} · ${props.payload.label}`,
                   '情感强度'
                 ]}
-                labelFormatter={(label) => `第${label}章`}
+                labelFormatter={(label: any) => `第${label}章`}
               />
               <Line
                 type="monotone"
