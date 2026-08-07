@@ -22,6 +22,7 @@ from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 from ..quality.review_evidence import validate_review_evidence
 from ..quality.world_constraint import get_constraint_pack
 from ..quality.reader_simulation import simulate_reader_first_pass
+from ..quality.hook_analysis import analyze_hook_power
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -152,6 +153,21 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         if chapter_text:
             platform = quality_profile.get("platform", "general") if quality_profile else "general"
             reader_simulation_result = simulate_reader_first_pass(chapter_text, platform)
+    
+    # 阶段4：首章钩力分析
+    # 对首章做专项分析，输出钩力报告
+    # 作为信息输出，不阻塞质量门禁
+    # 可以通过 quality_profile.enable_hook_analysis 开关控制
+    hook_analysis_result = None
+    enable_hook_analysis = quality_profile.get("enable_hook_analysis") if quality_profile else False
+    if enable_hook_analysis:
+        chapter_text = review_data.get("chapter_text") or ""
+        if chapter_text:
+            platform = quality_profile.get("platform", "general") if quality_profile else "general"
+            # 检查是否是首章
+            chapter_number = review_data.get("chapter_number", 1)
+            is_first_chapter = (chapter_number == 1)
+            hook_analysis_result = analyze_hook_power(chapter_text, platform, is_first_chapter)
     if quality_profile and payoff_contract:
         payoff_validation = validate_payoff_contract(
             payoff_contract,
@@ -307,4 +323,7 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         # "读第一遍"模拟审查结果（阶段3新增）
         # 目前作为可选功能，默认不启用
         "reader_simulation": reader_simulation_result,
+        # 首章钩力分析结果（阶段4新增）
+        # 作为信息输出，不阻塞质量门禁
+        "hook_analysis": hook_analysis_result,
     }
