@@ -39,7 +39,7 @@ _BASE_STRATEGIES: dict[str, dict[str, Any]] = {
             "relationship": {"active_choice_required": False, "visible_feedback_required": True},
             "suspense": {"active_choice_required": False, "visible_feedback_required": True},
         },
-        "directive": "开局直接冲突，打脸必须狠，反馈必须夸张；每章至少一次high级爽点，每3章一次peak；反派嚣张欠揍，主角碾压式胜利，全场震惊反馈拉满。",
+        "directive": "开局直接冲突，打脸必须狠，反馈必须夸张；每章至少一次high级爽点，每3章一次peak；反派嚣张欠揍，主角碾压式胜利，全场哗然反馈拉满。",
     },
     "fanqie_fast": {
         "label": "番茄快节奏",
