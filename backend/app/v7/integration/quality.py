@@ -20,6 +20,7 @@ from ...services.content_policy import analyze_content_policy
 from ...services.pov_quality import analyze_third_person_narrative
 from ..quality.audit_dimensions import AUDIT_DIMENSIONS
 from ..quality.review_evidence import validate_review_evidence
+from ..quality.world_constraint import get_constraint_pack
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -115,6 +116,29 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
     quality_profile = review_data.get("quality_profile") or {}
     payoff_contract = review_data.get("payoff_contract") or {}
     payoff_validation = review_data.get("payoff_validation") or {}
+    
+    # 阶段1：封神世界观硬约束注入
+    # 检查 quality_profile 中是否指定了世界观约束，如果有则进行检查
+    # 目前作为 soft warning，不阻塞质量门禁，后续可根据需要升级为 hard gate
+    world_constraint_result = None
+    world_constraint_genre = quality_profile.get("world_constraint") if quality_profile else None
+    if world_constraint_genre:
+        constraint_pack = get_constraint_pack(world_constraint_genre)
+        if constraint_pack:
+            chapter_text = review_data.get("chapter_text") or ""
+            if chapter_text:
+                world_constraint_result = constraint_pack.check_text(chapter_text)
+                # 目前作为 soft warning，不加入 failures
+                # 如果后续需要升级为 hard gate，可以取消下面的注释
+                # if not world_constraint_result["passed"]:
+                #     for violation in world_constraint_result["violations"]:
+                #         if violation["severity"] == "high":
+                #             failures.append({
+                #                 "dimension": f"world_constraint_{violation['rule_id']}",
+                #                 "actual": violation["count"],
+                #                 "minimum": 0,
+                #                 "reason": f"世界观约束违反：{violation['description']}",
+                #             })
     if quality_profile and payoff_contract:
         payoff_validation = validate_payoff_contract(
             payoff_contract,
@@ -264,4 +288,7 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         # decision so weak expectation/payoff is visible to rework and UI.
         "reader_experience": reader_experience,
         "reader_experience_warnings": reader_experience_issues(reader_experience),
+        # 世界观硬约束检查结果（阶段1新增）
+        # 目前作为 soft warning，不阻塞质量门禁
+        "world_constraint": world_constraint_result,
     }
