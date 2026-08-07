@@ -488,7 +488,7 @@ def validate_core_mechanic_contract(
         payoff_markers = ("碾压", "秒杀", "震惊", "全场", "轰动", "震撼", "越级", "翻盘", "逆袭", "装逼")
         if not any(marker in visible_payoff for marker in payoff_markers):
             defects.append(
-                f"金手指爽感强度为{max_intensity}级，visible_payoff 必须包含碾压/震惊/全场轰动等强爽感描述"
+                f"金手指爽感强度为{max_intensity}级，visible_payoff 必须包含碾压级/全场轰动等强爽感描述"
             )
 
     # 对于peak强度的金手指（无敌开局），检查开局碾压设计
