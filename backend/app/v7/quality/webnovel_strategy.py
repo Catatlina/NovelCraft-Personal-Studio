@@ -163,6 +163,40 @@ _FEEDBACK_CHANNELS = (
 )
 
 
+# P2-5 质量整改：反派设计与越级打脸规则
+_VILLAIN_DESIGN_RULES: dict[str, Any] = {
+    "cross_level_face_slap": {
+        "label": "越级打脸设计",
+        "description": "爽文核心爽点之一，主角以弱胜强、越级挑战，打脸比自己强的对手。",
+        "core_principle": "反派必须比主角强至少一个等级，打脸才有足够爽感。",
+        "early_stage_rule": "前10章的反派必须比主角强1-2个大等级，让读者觉得'这怎么赢'，然后主角用金手指或智慧逆袭。",
+        "escalation_rule": "反派强度随剧情逐步升级，打完小的来中的，打完中的来大的，打完大的来更大的。",
+        "face_slap_structure": [
+            "反派嚣张挑衅（让读者恨）",
+            "众人不看好主角（压低预期）",
+            "主角隐藏实力（蓄势）",
+            "主角出手碾压（爆发）",
+            "全场哗然/反派崩溃（反馈）",
+            "更大的反派出现（新压力）",
+        ],
+        "villain_intensity_levels": {
+            "small": "小喽啰/看门狗/路人反派",
+            "medium": "小boss/门派弟子/富二代",
+            "high": "大boss/长老/家族族长",
+            "peak": "终极boss/宗主/皇帝/仙人",
+        },
+    },
+    "villain_quality": {
+        "label": "反派质量要求",
+        "description": "好的反派能让爽点更爽，不能是弱智反派。",
+        "intelligence_requirement": "反派必须有基本智商，不能犯低级错误，否则打脸没有成就感。",
+        "motivation_requirement": "反派必须有明确的动机和利益诉求，不能为了坏而坏。",
+        "strength_requirement": "反派必须有真实的实力背景，不能只是嘴上厉害，一触即溃。",
+        "escalation_requirement": "每个阶段的反派都要比上一个阶段的更强、更聪明、更有背景。",
+    },
+}
+
+
 _MECHANIC_RULES: dict[str, dict[str, Any]] = {
     "system": {
         "label": "系统/任务",
@@ -415,6 +449,8 @@ def resolve_webnovel_strategy(
             "feedback_no_repeat_window": 3,
             "rule": "每章至少有一个可见结果；反馈可以是态度、资源、身份、关系、规则或风险变化，不强制群众围观。",
         },
+        # P2-5 质量整改：反派设计与越级打脸规则
+        "villain_design": deepcopy(_VILLAIN_DESIGN_RULES),
         "mechanic": {
             "families": families,
             "required_fields": [
