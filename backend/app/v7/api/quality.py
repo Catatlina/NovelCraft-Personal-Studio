@@ -31,7 +31,6 @@ from ..quality.character_balance import (
 from ..quality.emotional_arc import (
     analyze_emotional_arc,
     EmotionalArcResult,
-    EmotionAnomaly,
 )
 
 router = APIRouter(
