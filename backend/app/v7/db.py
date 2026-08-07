@@ -140,6 +140,7 @@ def init_v7_db() -> None:
         event,
         seed,
         genre,
+        series,
     )
 
     Base.metadata.create_all(bind=engine)
