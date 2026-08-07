@@ -86,6 +86,11 @@ _SUBGENRE_ALIASES = {
     "家族修仙": "xuanhuan_family",
     "系统流": "xuanhuan_system",
     "签到": "xuanhuan_system",
+    # 番茄爽文激进策略
+    "fanqie_aggressive": "fanqie_aggressive",
+    "番茄激进": "fanqie_aggressive",
+    "爽文激进": "fanqie_aggressive",
+    "激进爽文": "fanqie_aggressive",
 }
 
 _STYLE_PLUGIN_ALIASES = {
