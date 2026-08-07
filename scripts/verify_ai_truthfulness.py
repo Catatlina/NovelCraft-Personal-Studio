@@ -177,6 +177,8 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/v7/quality/novel_reviewer_reference.py:build_editorial_review_view": "deterministic projection of existing V7 scores into the editorial view; no second score",
     "backend/app/v7/engines/review_engine.py:normalize_review_issues": "deterministic evidence normalization for provider-produced review issues",
     "backend/app/services/agent_registry.py:_load_review_target": "deterministic review-target loader; provider call occurs in V7 review service",
+    "backend/app/v7/api/branch_generator.py:_generate_mock_branches": "deterministic mock branch generation for demo/development purposes, returns static template text not real AI output",
+    "backend/app/v7/api/branch_generator.py:generate_branches": "API endpoint dispatcher for branch generation; current implementation returns mock data, real AI generation will be added later",
 }
 
 
