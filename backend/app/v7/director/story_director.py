@@ -35,6 +35,7 @@ from ..generation.generation_engine import (
 from ..repositories.decision import DecisionPermissionRepository
 from ..integration.quality import (
     MAX_REWORKS,
+    MAX_LOCAL_REPAIRS,  # P2-1 质量整改：本地修复最大次数，不计入MAX_REWORKS
     QUALITY_REWORK_SCORE,
     evaluate_review,
 )
@@ -881,21 +882,23 @@ class StoryDirector:
             # confusing it with a transport failure.
             review_hold = True
         score = float(review_data.get("overall_score") or 0.0)
-        rework_count = 0
+        rework_count = 0  # 完整重写次数，计入MAX_REWORKS配额
+        local_repair_count = 0  # P2-1 质量整改：本地修复次数，不计入MAX_REWORKS配额
         force_full_rework = False
 
         # Rework is bounded, but the gate is not fail-open: after the retry
         # budget is exhausted the chapter remains needs_review and never enters
         # the V6 library as a reviewed chapter.
+        # P2-1 质量整改：本地修复不计入MAX_REWORKS配额，单独计数
         while (
             allow_rework
             and not review_hold
             and not evaluate_review(review_data)["passed"]
             and rework_count < MAX_REWORKS
+            and (local_repair_count < MAX_LOCAL_REPAIRS or force_full_rework)
             and await self.permission_system.can_auto_decide("chapter_rework", 0.9)
         ):
             gate = evaluate_review(review_data)
-            rework_count += 1
             issues = review_data.get("issues") or []
             failures = "；".join(
                 _format_quality_failure(item)
@@ -915,24 +918,26 @@ class StoryDirector:
                 str(item) for item in (gate.get("quality_repair_contract") or {}).get("required_repair_feedback") or []
             )
             feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}".strip("；。")
-            await self.brain.record_decision(
-                "chapter_rework",
-                "rework",
-                decision_reason=(
-                    f"Chapter {chapter_number} rewrite {rework_count}/{MAX_REWORKS}; "
-                    f"score {score:.1f}, rework threshold {QUALITY_REWORK_SCORE:.0f}: {feedback}"
-                ),
-                confidence=0.85,
-                permission_level="notify",
-                status="completed",
-                decided_by="ai",
-            )
             gate_for_rework = evaluate_review(review_data)
             use_local_repair = (
                 not force_full_rework
+                and local_repair_count < MAX_LOCAL_REPAIRS
                 and self._can_use_local_prose_repair(gate_for_rework)
             )
             if use_local_repair:
+                local_repair_count += 1
+                await self.brain.record_decision(
+                    "chapter_rework",
+                    "local_repair",
+                    decision_reason=(
+                        f"Chapter {chapter_number} local repair {local_repair_count}/{MAX_LOCAL_REPAIRS} (不计入重写配额); "
+                        f"score {score:.1f}, rework threshold {QUALITY_REWORK_SCORE:.0f}: {feedback}"
+                    ),
+                    confidence=0.85,
+                    permission_level="notify",
+                    status="completed",
+                    decided_by="ai",
+                )
                 try:
                     generation = await self.generation_engine.repair_local_quality(
                         generation,
@@ -950,6 +955,19 @@ class StoryDirector:
                     use_local_repair = False
 
             if not use_local_repair:
+                rework_count += 1
+                await self.brain.record_decision(
+                    "chapter_rework",
+                    "full_rework",
+                    decision_reason=(
+                        f"Chapter {chapter_number} full rewrite {rework_count}/{MAX_REWORKS}; "
+                        f"score {score:.1f}, rework threshold {QUALITY_REWORK_SCORE:.0f}: {feedback}"
+                    ),
+                    confidence=0.85,
+                    permission_level="notify",
+                    status="completed",
+                    decided_by="ai",
+                )
                 generation = await self.generation_engine.generate_chapter(
                     chapter_number,
                     prompt=(plan.get("prompt") or "")
