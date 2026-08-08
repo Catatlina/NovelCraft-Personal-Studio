@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.v7.db import async_engine, get_async_db
 from app.v7.models.genre import GenrePack, GenreRule, GenreKnowledge, GenrePrompt
-from app.v7.db import Base
+from app.v7.models.base import Base
 
 
 # ── 预置品类数据 ──────────────────────────────────────────────────────────
