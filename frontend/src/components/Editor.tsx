@@ -6,6 +6,7 @@ import { PacingCurve } from "./PacingCurve";
 import { SceneBoard } from "./SceneBoard";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
+import { apiEnvelope, ApiError } from "../lib/api";
 import "../styles/novel-prose.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown>; parent_id?: string | null };
@@ -647,50 +648,63 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
                   setRewriteLoading(true);
                   setRewriteError("");
                   try {
-                    const response = await fetch(`/api/v1/chapters/${chapter.id}/rewrite`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        instructions: rewriteInstructions,
-                        mode: "full",
-                      }),
-                    });
-                    const data = await response.json();
-                    if (!response.ok || !data?.ok) {
-                      throw new Error(data?.detail?.message || data?.detail || "重写失败");
-                    }
-                    setRewriteTaskId(data.data.task_id || "");
+                    const data = await apiEnvelope<{ task_id: string }>(
+                      `/api/v1/chapters/${chapter.id}/rewrite`,
+                      {
+                        method: "POST",
+                        body: JSON.stringify({
+                          instructions: rewriteInstructions,
+                          mode: "full",
+                        }),
+                      }
+                    );
+                    setRewriteTaskId(data.data?.task_id || "");
                     // 开始轮询状态
                     const pollStatus = async () => {
                       try {
-                        const statusRes = await fetch(`/api/v1/chapters/${chapter.id}/regeneration`);
-                        const statusData = await statusRes.json();
-                        if (statusData?.ok) {
-                          const status = statusData.data?.status;
-                          if (status === "completed" || status === "pending_review") {
-                            setRewriteLoading(false);
-                            setRewriteDialogOpen(false);
-                            // 刷新页面以加载新内容
-                            window.location.reload();
-                            return;
-                          }
-                          if (status === "failed") {
-                            setRewriteLoading(false);
-                            setRewriteError(statusData.data?.message || "重写失败");
-                            return;
-                          }
+                        const statusData = await apiEnvelope<{ status: string; message?: string }>(
+                          `/api/v1/chapters/${chapter.id}/regeneration`
+                        );
+                        const status = statusData.data?.status;
+                        if (status === "completed" || status === "pending_review") {
+                          setRewriteLoading(false);
+                          setRewriteDialogOpen(false);
+                          // 刷新页面以加载新内容
+                          window.location.reload();
+                          return;
+                        }
+                        if (status === "failed") {
+                          setRewriteLoading(false);
+                          setRewriteError(statusData.data?.message || "重写失败");
+                          return;
                         }
                         // 继续轮询
                         setTimeout(pollStatus, 3000);
                       } catch (err) {
                         setRewriteLoading(false);
-                        setRewriteError(err instanceof Error ? err.message : "状态查询失败");
+                        if (err instanceof ApiError) {
+                          setRewriteError(err.message || "状态查询失败");
+                        } else {
+                          setRewriteError(err instanceof Error ? err.message : "状态查询失败");
+                        }
                       }
                     };
                     setTimeout(pollStatus, 2000);
                   } catch (err) {
                     setRewriteLoading(false);
-                    setRewriteError(err instanceof Error ? err.message : "重写失败");
+                    if (err instanceof ApiError) {
+                      if (err.status === 401) {
+                        setRewriteError("登录状态已过期，请刷新页面重新登录");
+                      } else if (err.status === 403) {
+                        setRewriteError("没有权限操作此章节");
+                      } else if (err.status === 404) {
+                        setRewriteError("章节不存在");
+                      } else {
+                        setRewriteError(err.message || "重写失败");
+                      }
+                    } else {
+                      setRewriteError(err instanceof Error ? err.message : "重写失败");
+                    }
                   }
                 }}
                 disabled={rewriteLoading}
