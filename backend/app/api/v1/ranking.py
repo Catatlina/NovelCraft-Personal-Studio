@@ -209,11 +209,24 @@ def _build_market_analysis_variables(
     """Build bounded, untrusted catalogue facts; never send source book bodies."""
     from app.prompt_registry import sanitize_untrusted
     category_counts = Counter(str(item.get("category") or "未分类") for item in items)
-    title_samples = [{"rank": item.get("rank_no"),
-                      "title": sanitize_untrusted(str(item.get("title", ""))[:100]),
-                      "category": sanitize_untrusted(str(item.get("category", ""))[:50]),
-                      "metrics": item.get("metrics", {})}
-                     for item in items[:30]]
+    # 增加到 50 本，增加更多字段（作者、字数、阅读数、榜单来源等）
+    title_samples = []
+    for item in items[:50]:
+        metrics = item.get("metrics", {})
+        sample = {
+            "rank": item.get("rank_no"),
+            "title": sanitize_untrusted(str(item.get("title", ""))[:100]),
+            "author": sanitize_untrusted(str(item.get("author", ""))[:50]) if item.get("author") else "",
+            "category": sanitize_untrusted(str(item.get("category", ""))[:50]),
+            "word_count": metrics.get("word_count") or metrics.get("words") or "",
+            "read_count": metrics.get("read_count") or metrics.get("reads") or "",
+            "leaderboard": metrics.get("leaderboard") or item.get("leaderboard") or "",
+            "gender": item.get("gender") or metrics.get("gender") or "",
+            "tags": metrics.get("tags") or [],
+        }
+        # 移除空值字段，减少 token 消耗
+        sample = {k: v for k, v in sample.items() if v not in ("", [], None)}
+        title_samples.append(sample)
     context = dict(analysis_context or {})
     return {
         "sample_size": len(items),
