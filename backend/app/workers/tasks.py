@@ -3479,16 +3479,6 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
                 chapter_number=seq,
                 api_key_ref=api_key_ref,
             )
-            # DEBUG: log V7 result
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"[regenerate_chapter_task] V7 result keys: {list(result.keys())}")
-            logger.warning(f"[regenerate_chapter_task] V7 status: {result.get('status')}")
-            logger.warning(f"[regenerate_chapter_task] V7 v6_content_id: {result.get('v6_content_id')}")
-            logger.warning(f"[regenerate_chapter_task] V7 title: {result.get('title')}")
-            logger.warning(f"[regenerate_chapter_task] V7 has content: {bool(result.get('content'))}")
-            logger.warning(f"[regenerate_chapter_task] V7 blocked_reason: {result.get('blocked_reason')}")
-            logger.warning(f"[regenerate_chapter_task] V7 steps_executed: {result.get('steps_executed')}")
         except Exception as exc:
             failed_db = connect()
             failed_db.execute(
@@ -3499,43 +3489,70 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
             failed_db.close()
             raise
 
-        if result.get("status") == "completed" and result.get("v6_content_id"):
+        # V7 分支：只要生成了内容（有 v6_content_id）就算成功
+        # V7 引擎的 _persist_v7_chapter 已经更新了 title、body 和 status
+        # 我们只需要更新 manual_rewrite 和 manual_review 的状态
+        if result.get("v6_content_id"):
+            v7_status = result.get("status", "unknown")
             updated_db = connect()
             updated_db.execute(
                 """
                 UPDATE contents
-                SET status='pending_review',
-                    meta=meta || %s,
+                SET meta=meta || %s,
                     updated_at=now()
                 WHERE id=%s
                 """,
                 (encode({
-                    "quality_status": "draft_pending_review",
+                    "quality_status": (
+                        "v7_quality_gate_passed" if v7_status == "completed"
+                        else "v7_quality_gate_failed"
+                    ),
                     "canonical_engine": "v7",
+                    # 兼容 manual_review 场景
                     "manual_review": {
                         "status": "regenerated",
                         "reason": reason,
                         "regenerated_at": datetime.now(timezone.utc).isoformat(),
+                        "v7_status": v7_status,
+                    },
+                    # 主动重写场景
+                    "manual_rewrite": {
+                        "status": "completed",
+                        "reason": reason,
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "v7_status": v7_status,
+                        "review_score": result.get("review_score"),
                     },
                 }), chapter_id),
             )
             updated_db.commit()
             updated_db.close()
             return {
-                "status": "pending_review",
+                "status": "completed" if v7_status == "completed" else "needs_review",
                 "chapter_id": chapter_id,
                 "title": result.get("title") or chapter["title"],
                 "seq": seq,
                 "canonical_engine": "v7",
+                "v7_status": v7_status,
             }
 
+        # V7 没有生成内容，重写失败
+        failed_reason = result.get("blocked_reason") or "V7 引擎未能生成章节内容"
         failed_db = connect()
         failed_db.execute(
             "UPDATE contents SET status='needs_rewrite', meta=meta || %s, updated_at=now() WHERE id=%s",
             (encode({
+                # 兼容 manual_review 场景
                 "manual_review": {
                     "status": "regenerate_failed",
-                    "reason": "V7 quality gate did not accept the regenerated chapter",
+                    "reason": failed_reason,
+                },
+                # 主动重写场景
+                "manual_rewrite": {
+                    "status": "failed",
+                    "reason": failed_reason,
+                    "failed_at": datetime.now(timezone.utc).isoformat(),
+                    "v7_status": result.get("status", "unknown"),
                 },
                 "canonical_engine": "v7",
             }), chapter_id),
@@ -3547,6 +3564,7 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
             "chapter_id": chapter_id,
             "seq": seq,
             "canonical_engine": "v7",
+            "failed_reason": failed_reason,
         }
 
     output = complete(
