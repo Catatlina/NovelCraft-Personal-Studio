@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X, ChevronLeft, ChevronRight, Sparkles, Repeat } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 import { EditorAiChat } from "./EditorAiChat";
 import { PacingCurve } from "./PacingCurve";
@@ -87,6 +87,13 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   const [isFullscreen, setFullscreen] = useState(false);
   const [isNightMode, setNightMode] = useState(false);
   const [isFocusMode, setFocusMode] = useState(false);
+
+  // ── 章节重写状态 ──
+  const [rewriteDialogOpen, setRewriteDialogOpen] = useState(false);
+  const [rewriteInstructions, setRewriteInstructions] = useState("");
+  const [rewriteLoading, setRewriteLoading] = useState(false);
+  const [rewriteTaskId, setRewriteTaskId] = useState("");
+  const [rewriteError, setRewriteError] = useState("");
 
   // ── Keyboard shortcut: Escape to exit fullscreen ──
   useEffect(() => {
@@ -197,6 +204,18 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
           </button>
           <button className="btn-sm btn-ghost" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("polish")} style={{ gap: 4 }}>
             <Wand2 size={13} />润色
+          </button>
+          <button
+            className="btn-sm btn-ghost"
+            disabled={editorAiLoading || rewriteLoading || !chapter}
+            onClick={() => {
+              setRewriteInstructions("");
+              setRewriteError("");
+              setRewriteDialogOpen(true);
+            }}
+            style={{ gap: 4 }}
+          >
+            <Repeat size={13} />重新生成
           </button>
           <button onClick={() => void saveChapter(readVisibleEditorText())} disabled={!chapter || editorAiLoading} className="btn-sm btn-primary" style={{ gap: 4 }}>
             <Save size={14} />保存
@@ -587,6 +606,99 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             onToggleFocusMode={() => setFocusMode(!isFocusMode)}
             hideAiPanel={true}
           />
+        </div>
+      )}
+
+      {/* ── 重新生成对话框 ── */}
+      {rewriteDialogOpen && (
+        <div role="dialog" aria-modal="true" className="modal-backdrop" style={{ zIndex: 300 }}>
+          <div className="card" style={{ maxWidth: 500, margin: "15vh auto", padding: 20 }}>
+            <h3 style={{ marginBottom: 12 }}>重新生成章节</h3>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
+              将使用 V7 引擎重新生成本章节。可以输入修改意见（可选），生成后会自动替换原内容。
+            </p>
+            <textarea
+              className="form-input"
+              placeholder="输入修改意见（可选），例如：加强冲突、调整节奏、增加细节..."
+              value={rewriteInstructions}
+              onChange={(e) => setRewriteInstructions(e.target.value)}
+              rows={4}
+              style={{ width: "100%", resize: "vertical", marginBottom: 12 }}
+              disabled={rewriteLoading}
+            />
+            {rewriteError && (
+              <p style={{ color: "var(--danger)", fontSize: 12, marginBottom: 12 }}>{rewriteError}</p>
+            )}
+            {rewriteLoading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
+                <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite" }} />
+                正在重新生成章节，请稍候...
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" onClick={() => { if (!rewriteLoading) setRewriteDialogOpen(false); }} disabled={rewriteLoading}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={async () => {
+                  if (!chapter || rewriteLoading) return;
+                  setRewriteLoading(true);
+                  setRewriteError("");
+                  try {
+                    const response = await fetch(`/api/v1/chapters/${chapter.id}/rewrite`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        instructions: rewriteInstructions,
+                        mode: "full",
+                      }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data?.ok) {
+                      throw new Error(data?.detail?.message || data?.detail || "重写失败");
+                    }
+                    setRewriteTaskId(data.data.task_id || "");
+                    // 开始轮询状态
+                    const pollStatus = async () => {
+                      try {
+                        const statusRes = await fetch(`/api/v1/chapters/${chapter.id}/regeneration`);
+                        const statusData = await statusRes.json();
+                        if (statusData?.ok) {
+                          const status = statusData.data?.status;
+                          if (status === "completed" || status === "pending_review") {
+                            setRewriteLoading(false);
+                            setRewriteDialogOpen(false);
+                            // 刷新页面以加载新内容
+                            window.location.reload();
+                            return;
+                          }
+                          if (status === "failed") {
+                            setRewriteLoading(false);
+                            setRewriteError(statusData.data?.message || "重写失败");
+                            return;
+                          }
+                        }
+                        // 继续轮询
+                        setTimeout(pollStatus, 3000);
+                      } catch (err) {
+                        setRewriteLoading(false);
+                        setRewriteError(err instanceof Error ? err.message : "状态查询失败");
+                      }
+                    };
+                    setTimeout(pollStatus, 2000);
+                  } catch (err) {
+                    setRewriteLoading(false);
+                    setRewriteError(err instanceof Error ? err.message : "重写失败");
+                  }
+                }}
+                disabled={rewriteLoading}
+              >
+                {rewriteLoading ? "生成中..." : "开始生成"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

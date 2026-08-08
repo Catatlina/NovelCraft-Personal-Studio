@@ -899,6 +899,95 @@ async def manual_review_chapter(
     return ok({"chapter_id": chapter_id, "status": "regenerating", "task_id": task.id})
 
 
+class ChapterRewriteRequest(BaseModel):
+    instructions: str = Field(default="", max_length=2000)
+    mode: str = Field(default="full", pattern="^(full|partial)$")
+
+
+@app.post("/api/v1/chapters/{chapter_id}/rewrite")
+@limiter.limit("5/minute")
+async def rewrite_chapter(
+    request: Request,
+    chapter_id: str,
+    payload: ChapterRewriteRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """主动重写已入库的章节。
+
+    触发 V7 引擎重新生成指定章节，支持传入修改意见。
+    重写过程是异步的，通过 /api/v1/chapters/{chapter_id}/regeneration 查询进度。
+    """
+    conn, chapter = load_content_for_user(chapter_id, user, {"owner", "editor"})
+    if chapter["type"] != "chapter":
+        conn.close()
+        raise HTTPException(status_code=400, detail="content is not a chapter")
+    try:
+        _require_v7_chapter_scope(conn, chapter, "manual_rewrite")
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 更新章节状态为 needs_rewrite
+    conn.execute(
+        """UPDATE contents
+           SET status='needs_rewrite',
+               meta=meta || %s,
+               updated_at=now()
+           WHERE id=%s""",
+        (encode({
+            "quality_status": "needs_rewrite",
+            "manual_rewrite": {
+                "status": "regenerating",
+                "requested_by": user["id"],
+                "requested_at": now_iso,
+                "instructions": payload.instructions,
+                "mode": payload.mode,
+            },
+        }), chapter_id),
+    )
+    conn.execute(
+        """INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at)
+           VALUES (%s,'content',%s,'manual_rewrite.requested',%s,now())""",
+        (new_id(), chapter_id, encode({"instructions": payload.instructions, "user_id": user["id"], "mode": payload.mode})),
+    )
+    conn.commit()
+    conn.close()
+
+    # 触发重写任务
+    from .workers.tasks import regenerate_chapter_task
+    task = regenerate_chapter_task.delay(
+        chapter_id,
+        payload.instructions,
+        api_key_ref=stash_byok_key(request.headers.get("X-Api-Key", "")),
+        api_url=request.headers.get("X-Api-Base-Url", ""),
+        model=request.headers.get("X-Model", ""),
+        canonical=True,
+    )
+
+    # 记录 task_id
+    tracking_conn = connect()
+    tracking_conn.execute(
+        "UPDATE contents SET meta=meta || %s, updated_at=now() WHERE id=%s",
+        (encode({
+            "manual_rewrite": {
+                "status": "regenerating",
+                "requested_by": user["id"],
+                "requested_at": now_iso,
+                "instructions": payload.instructions,
+                "mode": payload.mode,
+                "task_id": task.id,
+            },
+        }), chapter_id),
+    )
+    tracking_conn.commit()
+    tracking_conn.close()
+
+    return ok({"chapter_id": chapter_id, "status": "regenerating", "task_id": task.id})
+
+
 @app.get("/api/v1/chapters/{chapter_id}/regeneration")
 def chapter_regeneration_status(
     chapter_id: str,
@@ -910,10 +999,22 @@ def chapter_regeneration_status(
     if chapter["type"] != "chapter":
         raise HTTPException(status_code=400, detail="content is not a chapter")
     meta = chapter.get("meta") if isinstance(chapter.get("meta"), dict) else dict()
+
+    # 优先检查 manual_rewrite（主动重写），然后检查 manual_review（审核拒绝重写）
+    manual_rewrite = meta.get("manual_rewrite") if isinstance(meta.get("manual_rewrite"), dict) else dict()
     manual_review = meta.get("manual_review") if isinstance(meta.get("manual_review"), dict) else dict()
-    task_id = str(manual_review.get("task_id") or "")
+
+    task_id = str(manual_rewrite.get("task_id") or manual_review.get("task_id") or "")
+
+    # 如果是主动重写且已完成
+    if chapter.get("status") == "pending_review" and manual_rewrite.get("status") == "regenerated":
+        return ok({"status": "completed", "chapter": chapter, "task_id": task_id, "source": "manual_rewrite"})
+    # 如果是审核拒绝重写且已完成
     if chapter.get("status") == "pending_review" and manual_review.get("status") == "regenerated":
-        return ok({"status": "pending_review", "chapter": chapter, "task_id": task_id})
+        return ok({"status": "pending_review", "chapter": chapter, "task_id": task_id, "source": "manual_review"})
+
+    if not task_id:
+        raise HTTPException(status_code=404, detail="chapter has no regeneration task")
     if not task_id:
         raise HTTPException(status_code=404, detail="chapter has no regeneration task")
 
