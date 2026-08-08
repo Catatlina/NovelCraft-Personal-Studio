@@ -3479,6 +3479,14 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
                 chapter_number=seq,
                 api_key_ref=api_key_ref,
             )
+            # DEBUG: log V7 result
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"[regenerate_chapter_task] V7 result keys: {list(result.keys())}")
+            logger.warning(f"[regenerate_chapter_task] V7 status: {result.get('status')}")
+            logger.warning(f"[regenerate_chapter_task] V7 v6_content_id: {result.get('v6_content_id')}")
+            logger.warning(f"[regenerate_chapter_task] V7 title: {result.get('title')}")
+            logger.warning(f"[regenerate_chapter_task] V7 has content: {bool(result.get('content'))}")
         except Exception as exc:
             failed_db = connect()
             failed_db.execute(
