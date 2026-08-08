@@ -39,6 +39,19 @@ class StructuralDimensionResult:
     detail: str = ""  # 详细说明
     examples: List[str] = field(default_factory=list)  # 示例
 
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典，用于 JSON 序列化"""
+        return {
+            "name": self.name,
+            "score": self.score,
+            "actual": self.actual,
+            "threshold": self.threshold,
+            "unit": self.unit,
+            "passed": self.passed,
+            "detail": self.detail,
+            "examples": self.examples,
+        }
+
 
 @dataclass
 class StructuralAISmellResult:
@@ -48,6 +61,16 @@ class StructuralAISmellResult:
     passed: bool  # 是否通过
     dimensions: List[StructuralDimensionResult] = field(default_factory=list)
     summary: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典，用于 JSON 序列化"""
+        return {
+            "overall_score": self.overall_score,
+            "grade": self.grade,
+            "passed": self.passed,
+            "dimensions": [d.to_dict() for d in self.dimensions],
+            "summary": self.summary,
+        }
 
 
 # ============== 阈值配置 ==============

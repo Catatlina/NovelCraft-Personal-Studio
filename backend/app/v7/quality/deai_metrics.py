@@ -262,5 +262,5 @@ def analyze_deai_patterns(
         "novel_reviewer_lexicon": novel_reviewer_lexicon,
         # 阶段2：去AI味两层互补 - 模式级检测结果
         # 与词级检查并联，补充检测行文模式和结构
-        "structural_ai_smell": structural_ai_smell_result,
+        "structural_ai_smell": structural_ai_smell_result.to_dict() if structural_ai_smell_result else None,
     }
