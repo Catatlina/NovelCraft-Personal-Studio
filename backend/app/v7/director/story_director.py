@@ -47,6 +47,7 @@ from ..integration.v6_bridge import (
 )
 from ..quality.continuity import validate_transition_contract
 from ..quality.review_evidence import validate_review_evidence
+from ..quality.consistency_checker import ConsistencyChecker, format_consistency_issues
 from ...services.quality_profiles import quality_profile_metadata, select_quality_profile
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
@@ -233,6 +234,8 @@ class StoryDirector:
             provider_config=self.provider_config,
             quality_profile=self.quality_profile,
         )
+        # 一致性检查器
+        self.consistency_checker = ConsistencyChecker(self.generation_engine.ai_gateway)
         # Ordered batches are diagnostic runs: a rejected/held chapter remains
         # provisional context so the run can measure cross-chapter continuity.
         # It is never treated as accepted Novel Brain truth and single-chapter
@@ -886,6 +889,44 @@ class StoryDirector:
         local_repair_count = 0  # P2-1 质量整改：本地修复次数，不计入MAX_REWORKS配额
         force_full_rework = False
 
+        # ── 一致性检查 ──────────────────────────────────────────────
+        consistency_result = None
+        consistency_failed = False
+        if not review_hold:
+            try:
+                gen_context = generation.get("context") or {}
+                consistency_result = await self.consistency_checker.check(
+                    chapter_text=generation.get("text", ""),
+                    chapter_number=chapter_number,
+                    core_settings=plan.get("outline") or plan.get("prompt") or "",
+                    chapter_outline=plan.get("plot_brief") or {},
+                    previous_chapter_tail=gen_context.get("previous_tail", ""),
+                    previous_transition_contract=gen_context.get(
+                        "previous_transition_contract", {}
+                    ),
+                    scene_plan=generation.get("scene_plan") or {},
+                )
+                # 把一致性检查结果加到 review_data 中
+                review_data["consistency_check"] = consistency_result.to_dict()
+                consistency_failed = not consistency_result.passed
+
+                # 把一致性问题加到 issues 中
+                if consistency_result.issues:
+                    consistency_issues = [
+                        {
+                            "dimension": f"一致性-{issue.get('type', '其他')}",
+                            "severity": issue.get("severity", "轻微"),
+                            "description": issue.get("description", ""),
+                            "suggestion": issue.get("suggestion", ""),
+                        }
+                        for issue in consistency_result.issues
+                    ]
+                    existing_issues = review_data.get("issues") or []
+                    review_data["issues"] = existing_issues + consistency_issues
+            except Exception:
+                # 一致性检查失败不阻塞生成
+                pass
+
         # Rework is bounded, but the gate is not fail-open: after the retry
         # budget is exhausted the chapter remains needs_review and never enters
         # the V6 library as a reviewed chapter.
@@ -893,7 +934,10 @@ class StoryDirector:
         while (
             allow_rework
             and not review_hold
-            and not evaluate_review(review_data)["passed"]
+            and (
+                not evaluate_review(review_data)["passed"]
+                or consistency_failed  # 一致性检查不通过也触发重写
+            )
             and rework_count < MAX_REWORKS
             and (local_repair_count < MAX_LOCAL_REPAIRS or force_full_rework)
             and await self.permission_system.can_auto_decide("chapter_rework", 0.9)
@@ -917,7 +961,11 @@ class StoryDirector:
             repair_feedback = "；".join(
                 str(item) for item in (gate.get("quality_repair_contract") or {}).get("required_repair_feedback") or []
             )
-            feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}".strip("；。")
+            # 加上一致性问题
+            consistency_feedback = ""
+            if consistency_failed and consistency_result:
+                consistency_feedback = f"一致性检查未通过（{consistency_result.score}分）：" + format_consistency_issues(consistency_result.issues)
+            feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}。{consistency_feedback}".strip("；。")
             gate_for_rework = evaluate_review(review_data)
             use_local_repair = (
                 not force_full_rework
@@ -1008,6 +1056,41 @@ class StoryDirector:
                 break
             review_data = review.result or {}
             score = float(review_data.get("overall_score") or 0.0)
+
+            # 重写后重新做一致性检查
+            if not review_hold:
+                try:
+                    gen_context = generation.get("context") or {}
+                    consistency_result = await self.consistency_checker.check(
+                        chapter_text=generation.get("text", ""),
+                        chapter_number=chapter_number,
+                        core_settings=plan.get("outline") or plan.get("prompt") or "",
+                        chapter_outline=plan.get("plot_brief") or {},
+                        previous_chapter_tail=gen_context.get("previous_tail", ""),
+                        previous_transition_contract=gen_context.get(
+                            "previous_transition_contract", {}
+                        ),
+                        scene_plan=generation.get("scene_plan") or {},
+                    )
+                    review_data["consistency_check"] = consistency_result.to_dict()
+                    consistency_failed = not consistency_result.passed
+
+                    # 把一致性问题加到 issues 中
+                    if consistency_result.issues:
+                        consistency_issues = [
+                            {
+                                "dimension": f"一致性-{issue.get('type', '其他')}",
+                                "severity": issue.get("severity", "轻微"),
+                                "description": issue.get("description", ""),
+                                "suggestion": issue.get("suggestion", ""),
+                            }
+                            for issue in consistency_result.issues
+                        ]
+                        existing_issues = review_data.get("issues") or []
+                        review_data["issues"] = existing_issues + consistency_issues
+                except Exception:
+                    # 一致性检查失败不阻塞生成
+                    pass
 
         gate = evaluate_review(review_data)
         validation_failures = review_data.get("validation_failures") or []
