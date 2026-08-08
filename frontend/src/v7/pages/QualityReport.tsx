@@ -254,9 +254,11 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
       if (currentChapterId) {
         // 章节级：调用单章角色统计 API
         result = await brainApi.getChapterCharacterStats(currentChapterId);
-      } else {
+      } else if (novelId) {
         // 全本级：调用全本角色统计 API
         result = await brainApi.getCharacterStats(novelId);
+      } else {
+        return;
       }
       setCharacterStats(result);
     } catch (err: any) {
