@@ -579,6 +579,10 @@ class BrainApiClient {
     return this.request(`/v7/quality/novels/${novelId}/character-stats`);
   }
 
+  async getChapterCharacterStats(chapterId: string): Promise<any> {
+    return this.request(`/v7/quality/chapters/${chapterId}/character-stats`);
+  }
+
   async getEmotionalArc(novelId: string, params?: {
     start_chapter?: number;
     end_chapter?: number;

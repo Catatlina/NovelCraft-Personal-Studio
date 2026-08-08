@@ -27,6 +27,8 @@ from ..quality.character_balance import (
     analyze_character_balance,
     CharacterBalanceResult,
     CharacterStats as CharacterBalanceStats,
+    _count_chinese_chars,
+    estimate_character_word_count as _estimate_character_word_count,
 )
 from ..quality.emotional_arc import (
     analyze_emotional_arc,
@@ -468,6 +470,80 @@ async def get_ai_smell(
     )
 
 
+@router.get("/chapters/{chapter_id}/character-stats", response_model=CharacterStatsResponse)
+async def get_chapter_character_stats(
+    chapter_id: str,
+):
+    """
+    获取单章角色出场统计
+    
+    只返回在本章出场的角色，按出现次数降序排列
+    """
+    # 获取章节文本
+    text, novel_id, seq = _get_chapter_text(chapter_id)
+    
+    if not text.strip():
+        return CharacterStatsResponse(
+            novel_id=novel_id,
+            total_characters=0,
+            total_chapters=1,
+            balance_score=0.0,
+            has_warnings=False,
+            high_risk_characters=[],
+            medium_risk_characters=[],
+            low_risk_characters=[],
+            suggestions=[],
+            characters=[],
+            has_data=False,
+        )
+    
+    # 获取角色列表
+    character_list = _get_novel_characters(novel_id)
+    
+    # 统计单章角色出场
+    chapter_word_count = _count_chinese_chars(text)
+    characters = []
+    
+    for name in character_list:
+        mention_count = text.count(name)
+        if mention_count == 0:
+            continue  # 只返回出场的角色
+        
+        # 估算涉及字数
+        word_count = _estimate_character_word_count(text, name)
+        word_ratio = word_count / chapter_word_count if chapter_word_count > 0 else 0.0
+        
+        characters.append(CharacterStats(
+            name=name,
+            appearance_count=1,  # 单章出场次数就是1
+            total_mentions=mention_count,
+            word_count=word_count,
+            word_ratio=word_ratio,
+            first_appearance_chapter=seq,
+            last_appearance_chapter=seq,
+            chapters_since_last=0,
+            forget_risk="low",
+            importance="medium",
+        ))
+    
+    # 按提及次数降序排列
+    characters.sort(key=lambda x: x.total_mentions, reverse=True)
+    
+    return CharacterStatsResponse(
+        novel_id=novel_id,
+        total_characters=len(characters),
+        total_chapters=1,
+        balance_score=100.0,
+        has_warnings=False,
+        high_risk_characters=[],
+        medium_risk_characters=[],
+        low_risk_characters=characters,
+        suggestions=[f"本章共 {len(characters)} 个角色出场"],
+        characters=characters,
+        has_data=True,
+    )
+
+
 @router.get("/novels/{novel_id}/character-stats", response_model=CharacterStatsResponse)
 async def get_character_stats(
     novel_id: str,
@@ -477,7 +553,7 @@ async def get_character_stats(
     """
     获取小说角色出场统计
     
-    返回所有角色的出场次数、字数占比、遗忘风险等
+    返回所有出场过的角色的出场次数、字数占比、遗忘风险等
     """
     # 获取所有章节
     chapters = _get_novel_chapters(novel_id)
@@ -525,20 +601,23 @@ async def get_character_stats(
             importance=stats.importance,
         )
     
-    high_risk = [_convert_stats(s) for s in result.high_risk_characters]
-    medium_risk = [_convert_stats(s) for s in result.medium_risk_characters]
-    low_risk = [_convert_stats(s) for s in result.low_risk_characters]
+    # 只保留出场过的角色（appearance_count > 0）
+    all_stats = [s for s in result.character_stats.values() if s.appearance_count > 0]
+    
+    high_risk = [_convert_stats(s) for s in result.high_risk_characters if s.appearance_count > 0]
+    medium_risk = [_convert_stats(s) for s in result.medium_risk_characters if s.appearance_count > 0]
+    low_risk = [_convert_stats(s) for s in result.low_risk_characters if s.appearance_count > 0]
     
     # 所有角色（按出场次数排序）
     all_characters = sorted(
-        [_convert_stats(s) for s in result.character_stats.values()],
+        [_convert_stats(s) for s in all_stats],
         key=lambda x: x.appearance_count,
         reverse=True,
     )
     
     return CharacterStatsResponse(
         novel_id=novel_id,
-        total_characters=result.total_characters,
+        total_characters=len(all_characters),
         total_chapters=result.total_chapters,
         balance_score=result.balance_score,
         has_warnings=result.has_warnings,

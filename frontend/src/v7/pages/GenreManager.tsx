@@ -104,7 +104,158 @@ const SEVERITY_COLORS: Record<string, string> = {
   info: '#3b82f6',
 };
 
-// ============ 组件 ============
+// ============ 风格卡字段映射 ============
+
+const STYLE_FIELD_LABELS: Record<string, string> = {
+  tone: '基调',
+  pacing: '节奏',
+  dialogue_ratio: '对话占比',
+  payoff_density: '爽点密度',
+  conflict_intensity: '冲突强度',
+  narrative_style: '叙事风格',
+  perspective: '视角',
+  tense: '时态',
+  sentence_length: '句长',
+  vocabulary_level: '词汇难度',
+};
+
+const STYLE_VALUE_LABELS: Record<string, Record<string, string>> = {
+  tone: {
+    strong: '强',
+    medium: '中',
+    soft: '弱',
+    passionate: '激昂',
+    calm: '平静',
+    humorous: '幽默',
+    serious: '严肃',
+  },
+  pacing: {
+    fast: '快',
+    medium: '中',
+    slow: '慢',
+  },
+  payoff_density: {
+    high: '高',
+    medium: '中',
+    low: '低',
+  },
+  conflict_intensity: {
+    high: '强',
+    medium: '中',
+    low: '弱',
+  },
+  narrative_style: {
+    straightforward: '直白',
+    literary: '文艺',
+    colloquial: '口语化',
+  },
+  perspective: {
+    first_person: '第一人称',
+    third_person_limited: '第三人称有限',
+    third_person_omniscient: '第三人称全知',
+  },
+  tense: {
+    past: '过去时',
+    present: '现在时',
+  },
+  sentence_length: {
+    short: '短句',
+    medium: '中句',
+    long: '长句',
+    mixed: '混合',
+  },
+  vocabulary_level: {
+    simple: '简单',
+    medium: '中等',
+    advanced: '高级',
+  },
+};
+
+// ============ 质量门禁字段映射 ============
+
+const QUALITY_FIELD_LABELS: Record<string, string> = {
+  ai_smell_score: 'AI味得分',
+  overall_score: '综合得分',
+  paragraph_rhythm_cv: '段落节奏变异',
+  transition_word_density: '转折词密度',
+  paragraph_opening_repeat: '段落首句雷同',
+  le_word_density: '"了"字密度',
+  summary_sentence_density: '总结句密度',
+  dialogue_omit_ratio: '对话省略比例',
+  abstract_adverb_density: '抽象副词密度',
+  min_chapter_words: '最小章节字数',
+  max_chapter_words: '最大章节字数',
+  min_characters: '最少角色数',
+  max_characters: '最多角色数',
+};
+
+// ============ 辅助函数 ============
+
+function formatStyleValue(value: any): React.ReactNode {
+  if (typeof value !== 'object' || value === null) {
+    return String(value);
+  }
+
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return '无';
+  }
+
+  return (
+    <div className="v7-style-card-fields">
+      {entries.map(([key, val]) => {
+        const label = STYLE_FIELD_LABELS[key] || key;
+        let displayValue: React.ReactNode = String(val);
+        
+        // 检查是否有预设的文本标签
+        if (typeof val === 'string' && STYLE_VALUE_LABELS[key]?.[val]) {
+          displayValue = STYLE_VALUE_LABELS[key][val];
+        }
+        
+        // 百分比处理
+        if (key.includes('ratio') || key.includes('density')) {
+          if (typeof val === 'number') {
+            displayValue = `${Math.round(val * 100)}%`;
+          } else if (typeof val === 'string' && !isNaN(parseFloat(val))) {
+            displayValue = `${Math.round(parseFloat(val) * 100)}%`;
+          }
+        }
+
+        return (
+          <div key={key} className="v7-style-field">
+            <span className="v7-style-field-label">{label}</span>
+            <span className="v7-style-field-value">{displayValue}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatQualityValue(value: any): React.ReactNode {
+  if (typeof value !== 'object' || value === null) {
+    return String(value);
+  }
+
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return '无';
+  }
+
+  return (
+    <div className="v7-quality-fields">
+      {entries.map(([key, val]) => {
+        const label = QUALITY_FIELD_LABELS[key] || key;
+        return (
+          <div key={key} className="v7-quality-field">
+            <span className="v7-quality-field-label">{label}</span>
+            <span className="v7-quality-field-value">{String(val)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function GenreManager({ novelId }: GenreManagerProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -550,7 +701,7 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
                           </div>
                           <div className="v7-rule-value">
                             {typeof rule.rule_value === 'object'
-                              ? JSON.stringify(rule.rule_value)
+                              ? formatStyleValue(rule.rule_value)
                               : String(rule.rule_value)}
                           </div>
                         </div>
@@ -595,7 +746,7 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
                               {rule.severity}
                             </span>
                             {typeof rule.rule_value === 'object'
-                              ? JSON.stringify(rule.rule_value)
+                              ? formatQualityValue(rule.rule_value)
                               : String(rule.rule_value)}
                           </div>
                         </div>

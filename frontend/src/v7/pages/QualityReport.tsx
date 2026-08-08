@@ -245,19 +245,26 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
   // ── 加载角色统计 ────────────────────────────────────────────────────
 
   const loadCharacterStats = useCallback(async () => {
-    if (!novelId) return;
+    if (!novelId && !currentChapterId) return;
 
     setLoadingCharacters(true);
     setCharactersError(null);
     try {
-      const result = await brainApi.getCharacterStats(novelId);
+      let result;
+      if (currentChapterId) {
+        // 章节级：调用单章角色统计 API
+        result = await brainApi.getChapterCharacterStats(currentChapterId);
+      } else {
+        // 全本级：调用全本角色统计 API
+        result = await brainApi.getCharacterStats(novelId);
+      }
       setCharacterStats(result);
     } catch (err: any) {
       setCharactersError(err.message || '加载角色统计失败');
     } finally {
       setLoadingCharacters(false);
     }
-  }, [novelId]);
+  }, [novelId, currentChapterId]);
 
   // ── 加载情感弧线 ────────────────────────────────────────────────────
 

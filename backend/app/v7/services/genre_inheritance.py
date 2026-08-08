@@ -120,6 +120,11 @@ async def resolve_genre_rules(
         rules = list(result.scalars().all())
         
         for rule in rules:
+            # 设置继承来源
+            if genre.id != genre_id:
+                rule.inherited_from = genre.id
+            else:
+                rule.inherited_from = None
             # 子品类覆盖父品类
             resolved[rule.rule_key] = rule
     
@@ -180,6 +185,11 @@ async def resolve_genre_knowledge(
         
         for knowledge in knowledge_list:
             if knowledge.title not in seen_titles:
+                # 设置继承来源
+                if genre.id != genre_id:
+                    knowledge.inherited_from = genre.id
+                else:
+                    knowledge.inherited_from = None
                 seen_titles.add(knowledge.title)
                 all_knowledge.append(knowledge)
     
@@ -236,6 +246,11 @@ async def resolve_genre_prompts(
         prompts = list(result.scalars().all())
         
         for prompt in prompts:
+            # 设置继承来源
+            if genre.id != genre_id:
+                prompt.inherited_from = genre.id
+            else:
+                prompt.inherited_from = None
             # 子品类覆盖父品类
             resolved[prompt.prompt_name] = prompt
     
@@ -278,10 +293,15 @@ async def get_genre_tree(db: AsyncSession) -> list[dict[str, Any]]:
     roots: list[dict[str, Any]] = []
     for genre_id, genre_data in genre_map.items():
         parent_id = genre_data["parent_id"]
-        if parent_id and parent_id in genre_map:
-            genre_map[uuid.UUID(parent_id)]["children"].append(genre_data)
-        else:
-            roots.append(genre_data)
+        if parent_id:
+            try:
+                parent_uuid = uuid.UUID(parent_id)
+                if parent_uuid in genre_map:
+                    genre_map[parent_uuid]["children"].append(genre_data)
+                    continue
+            except ValueError:
+                pass
+        roots.append(genre_data)
     
     return roots
 
