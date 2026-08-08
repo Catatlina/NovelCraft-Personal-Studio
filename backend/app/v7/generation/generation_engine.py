@@ -275,34 +275,34 @@ class ContextAssembler:
 
                 # 提取风格卡
                 style_card = {}
-                for rule in rules:
-                    if rule.rule_type == "style_card":
-                        style_card = rule.rule_value or {}
+                for rule_key, rule_dict in rules.items():
+                    if rule_dict.get("rule_type") == "style_card":
+                        style_card = rule_dict.get("rule_value") or {}
                         break
 
                 # 提取约束
                 constraints = []
-                for rule in rules:
-                    if rule.rule_type in ("forbidden_words", "world_constraint"):
+                for rule_key, rule_dict in rules.items():
+                    if rule_dict.get("rule_type") in ("forbidden_words", "world_constraint"):
                         constraints.append({
-                            "type": rule.rule_type,
-                            "key": rule.rule_key,
-                            "value": rule.rule_value,
-                            "severity": rule.severity,
-                            "description": rule.description,
+                            "type": rule_dict.get("rule_type"),
+                            "key": rule_dict.get("rule_key"),
+                            "value": rule_dict.get("rule_value"),
+                            "severity": rule_dict.get("severity"),
+                            "description": rule_dict.get("description"),
                         })
 
                 # 整理知识条目（按类型分组）
                 knowledge_by_type: dict[str, list[dict[str, Any]]] = {}
                 for item in knowledge:
-                    ktype = item.knowledge_type or "other"
+                    ktype = item.get("knowledge_type") or "other"
                     if ktype not in knowledge_by_type:
                         knowledge_by_type[ktype] = []
                     knowledge_by_type[ktype].append({
-                        "title": item.title,
-                        "content": item.content,
-                        "tags": item.tags or [],
-                        "priority": item.priority,
+                        "title": item.get("title"),
+                        "content": item.get("content"),
+                        "tags": item.get("tags") or [],
+                        "priority": item.get("priority"),
                     })
 
                 # 按优先级排序
