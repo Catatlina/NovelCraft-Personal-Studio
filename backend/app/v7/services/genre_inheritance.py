@@ -78,7 +78,7 @@ async def resolve_genre_rules(
     db: AsyncSession,
     genre_id: uuid.UUID,
     rule_type: str | None = None,
-) -> dict[str, GenreRule]:
+) -> dict[str, dict[str, Any]]:
     """
     解析品类的完整规则集（包含继承）。
     
@@ -90,7 +90,7 @@ async def resolve_genre_rules(
         rule_type: 可选，只返回指定类型的规则
         
     Returns:
-        规则字典，key 为 rule_key，value 为 GenreRule 对象
+        规则字典，key 为 rule_key，value 为规则字典（DTO）
     """
     # 检查缓存
     cache_key = f"rules_{genre_id}_{rule_type or 'all'}"
@@ -104,7 +104,7 @@ async def resolve_genre_rules(
         return {}
     
     # 从父到子遍历，这样子品类的规则会覆盖父品类的
-    resolved: dict[str, GenreRule] = {}
+    resolved: dict[str, dict[str, Any]] = {}
     
     # 反转链，从父到子
     for genre in reversed(chain):
@@ -120,13 +120,23 @@ async def resolve_genre_rules(
         rules = list(result.scalars().all())
         
         for rule in rules:
-            # 设置继承来源
-            if genre.id != genre_id:
-                rule.inherited_from = genre.id
-            else:
-                rule.inherited_from = None
+            # 转换为字典（DTO），避免 detached 问题
+            rule_dict = {
+                "id": str(rule.id),
+                "genre_id": str(rule.genre_id),
+                "rule_type": rule.rule_type,
+                "rule_key": rule.rule_key,
+                "rule_value": rule.rule_value,
+                "severity": rule.severity,
+                "priority": rule.priority,
+                "description": rule.description,
+                "is_active": rule.is_active,
+                "inherited_from": str(genre.id) if genre.id != genre_id else None,
+                "created_at": rule.created_at.isoformat() if rule.created_at else None,
+                "updated_at": rule.updated_at.isoformat() if rule.updated_at else None,
+            }
             # 子品类覆盖父品类
-            resolved[rule.rule_key] = rule
+            resolved[rule.rule_key] = rule_dict
     
     # 存入缓存
     if _cache_enabled:
@@ -139,7 +149,7 @@ async def resolve_genre_knowledge(
     db: AsyncSession,
     genre_id: uuid.UUID,
     knowledge_type: str | None = None,
-) -> list[GenreKnowledge]:
+) -> list[dict[str, Any]]:
     """
     解析品类的完整知识库（包含继承）。
     
@@ -152,7 +162,7 @@ async def resolve_genre_knowledge(
         knowledge_type: 可选，只返回指定类型的知识
         
     Returns:
-        知识条目列表
+        知识条目字典列表（DTO）
     """
     # 检查缓存
     cache_key = f"knowledge_{genre_id}_{knowledge_type or 'all'}"
@@ -165,7 +175,7 @@ async def resolve_genre_knowledge(
     if not chain:
         return []
     
-    all_knowledge: list[GenreKnowledge] = []
+    all_knowledge: list[dict[str, Any]] = []
     seen_titles: set[str] = set()  # 去重（相同标题的，子品类优先）
     
     # 从子到父遍历，这样子品类的知识排在前面
@@ -185,13 +195,23 @@ async def resolve_genre_knowledge(
         
         for knowledge in knowledge_list:
             if knowledge.title not in seen_titles:
-                # 设置继承来源
-                if genre.id != genre_id:
-                    knowledge.inherited_from = genre.id
-                else:
-                    knowledge.inherited_from = None
+                # 转换为字典（DTO），避免 detached 问题
+                knowledge_dict = {
+                    "id": str(knowledge.id),
+                    "genre_id": str(knowledge.genre_id),
+                    "knowledge_type": knowledge.knowledge_type,
+                    "title": knowledge.title,
+                    "content": knowledge.content,
+                    "tags": knowledge.tags,
+                    "priority": knowledge.priority,
+                    "is_active": knowledge.is_active,
+                    "inherited_from": str(genre.id) if genre.id != genre_id else None,
+                    "extra_metadata": knowledge.extra_metadata,
+                    "created_at": knowledge.created_at.isoformat() if knowledge.created_at else None,
+                    "updated_at": knowledge.updated_at.isoformat() if knowledge.updated_at else None,
+                }
                 seen_titles.add(knowledge.title)
-                all_knowledge.append(knowledge)
+                all_knowledge.append(knowledge_dict)
     
     # 存入缓存
     if _cache_enabled:
@@ -204,7 +224,7 @@ async def resolve_genre_prompts(
     db: AsyncSession,
     genre_id: uuid.UUID,
     prompt_type: str | None = None,
-) -> dict[str, GenrePrompt]:
+) -> dict[str, dict[str, Any]]:
     """
     解析品类的完整 Prompt 模板集（包含继承）。
     
@@ -216,7 +236,7 @@ async def resolve_genre_prompts(
         prompt_type: 可选，只返回指定类型的 Prompt
         
     Returns:
-        Prompt 字典，key 为 prompt_name，value 为 GenrePrompt 对象
+        Prompt 字典，key 为 prompt_name，value 为 Prompt 字典（DTO）
     """
     # 检查缓存
     cache_key = f"prompts_{genre_id}_{prompt_type or 'all'}"
@@ -230,7 +250,7 @@ async def resolve_genre_prompts(
         return {}
     
     # 从父到子遍历，这样子品类的 Prompt 会覆盖父品类的
-    resolved: dict[str, GenrePrompt] = {}
+    resolved: dict[str, dict[str, Any]] = {}
     
     # 反转链，从父到子
     for genre in reversed(chain):
@@ -246,13 +266,23 @@ async def resolve_genre_prompts(
         prompts = list(result.scalars().all())
         
         for prompt in prompts:
-            # 设置继承来源
-            if genre.id != genre_id:
-                prompt.inherited_from = genre.id
-            else:
-                prompt.inherited_from = None
+            # 转换为字典（DTO），避免 detached 问题
+            prompt_dict = {
+                "id": str(prompt.id),
+                "genre_id": str(prompt.genre_id),
+                "prompt_type": prompt.prompt_type,
+                "prompt_name": prompt.prompt_name,
+                "version": prompt.version,
+                "content": prompt.content,
+                "description": prompt.description,
+                "is_active": prompt.is_active,
+                "inherited_from": str(genre.id) if genre.id != genre_id else None,
+                "extra_metadata": prompt.extra_metadata,
+                "created_at": prompt.created_at.isoformat() if prompt.created_at else None,
+                "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else None,
+            }
             # 子品类覆盖父品类
-            resolved[prompt.prompt_name] = prompt
+            resolved[prompt.prompt_name] = prompt_dict
     
     # 存入缓存
     if _cache_enabled:

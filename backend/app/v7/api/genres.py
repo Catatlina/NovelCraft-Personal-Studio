@@ -337,11 +337,11 @@ async def list_genre_rules(
     genre_id = _parse_uuid(pack_id, "pack_id")
     
     if include_inherited:
-        # 使用继承解析引擎
+        # 使用继承解析引擎（返回字典列表）
         resolved = await resolve_genre_rules(db, genre_id, rule_type=rule_type)
         rules = list(resolved.values())
     else:
-        # 只返回当前品类自己的规则
+        # 只返回当前品类自己的规则（ORM 对象，需要转换）
         query = select(GenreRule).where(GenreRule.genre_id == genre_id)
         
         if rule_type:
@@ -350,11 +350,12 @@ async def list_genre_rules(
         query = query.order_by(GenreRule.rule_type, GenreRule.rule_key)
         
         result = await db.execute(query)
-        rules = list(result.scalars().all())
+        rule_objects = list(result.scalars().all())
+        rules = [_rule_to_dict(r) for r in rule_objects]
     
     return {
         "total": len(rules),
-        "rules": [_rule_to_dict(r) for r in rules],
+        "rules": rules,
     }
 
 
@@ -496,10 +497,10 @@ async def list_genre_knowledge(
     genre_id = _parse_uuid(pack_id, "pack_id")
     
     if include_inherited:
-        # 使用继承解析引擎
+        # 使用继承解析引擎（返回字典列表）
         knowledge_list = await resolve_genre_knowledge(db, genre_id, knowledge_type=knowledge_type)
     else:
-        # 只返回当前品类自己的知识
+        # 只返回当前品类自己的知识（ORM 对象，需要转换）
         query = select(GenreKnowledge).where(GenreKnowledge.genre_id == genre_id)
         
         if knowledge_type:
@@ -508,11 +509,12 @@ async def list_genre_knowledge(
         query = query.order_by(GenreKnowledge.priority.desc(), GenreKnowledge.created_at.desc())
         
         result = await db.execute(query)
-        knowledge_list = list(result.scalars().all())
+        knowledge_objects = list(result.scalars().all())
+        knowledge_list = [_knowledge_to_dict(k) for k in knowledge_objects]
     
     return {
         "total": len(knowledge_list),
-        "knowledge": [_knowledge_to_dict(k) for k in knowledge_list],
+        "knowledge": knowledge_list,
     }
 
 
@@ -642,11 +644,11 @@ async def list_genre_prompts(
     genre_id = _parse_uuid(pack_id, "pack_id")
     
     if include_inherited:
-        # 使用继承解析引擎
+        # 使用继承解析引擎（返回字典列表）
         resolved = await resolve_genre_prompts(db, genre_id, prompt_type=prompt_type)
         prompts = list(resolved.values())
     else:
-        # 只返回当前品类自己的 Prompt
+        # 只返回当前品类自己的 Prompt（ORM 对象，需要转换）
         query = select(GenrePrompt).where(GenrePrompt.genre_id == genre_id)
         
         if prompt_type:
@@ -655,11 +657,12 @@ async def list_genre_prompts(
         query = query.order_by(GenrePrompt.prompt_type, GenrePrompt.prompt_name)
         
         result = await db.execute(query)
-        prompts = list(result.scalars().all())
+        prompt_objects = list(result.scalars().all())
+        prompts = [_prompt_to_dict(p) for p in prompt_objects]
     
     return {
         "total": len(prompts),
-        "prompts": [_prompt_to_dict(p) for p in prompts],
+        "prompts": prompts,
     }
 
 
