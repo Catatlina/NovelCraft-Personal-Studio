@@ -874,10 +874,51 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
 ═════════════════════════════════════════════════════════════
 """
 
+        # 上一章结尾状态（用于衔接）
+        context_layers = context.get("context_layers") or {}
+        previous_transition = context_layers.get("previous_transition_contract") or {}
+        previous_tail = context_layers.get("previous_tail") or ""
+        transition_block = ""
+        if previous_tail or previous_transition:
+            end_state = previous_transition.get("end_state") or {}
+            open_threads = previous_transition.get("open_threads") or []
+            next_bridge = previous_transition.get("next_chapter_bridge") or previous_tail[-600:]
+
+            threads_text = ""
+            if open_threads:
+                threads_text = "\n未解决的线索：\n" + "\n".join(
+                    f"- {t.get('summary', '')}" for t in open_threads[:5]
+                )
+
+            transition_block = (
+                f"【第二优先级：上一章结尾状态 - 必须从这里继续，不得跳跃！】\n"
+                f"═════════════════════════════════════════════════════════════\n"
+                f"上一章结尾的最后内容（必须直接承接，不得跳场）：\n"
+                f"「{next_bridge}」\n"
+                f"\n"
+                f"上一章梗概：{end_state.get('summary', '')}\n"
+                f"{threads_text}\n"
+                f"\n"
+                f"【硬性要求】本章开头必须直接承接上一章结尾的动作、地点和人物状态！\n"
+                f"除非正文明确写出过渡，否则不得突然切换场景、时间或人物位置！\n"
+                f"═════════════════════════════════════════════════════════════\n\n"
+            )
+
         prompt = (
+            f"【最高优先级：核心设定与硬性约束 - 必须严格遵守，不得擅自修改！】\n"
+            f"═════════════════════════════════════════════════════════════\n"
+            f"以下是本书的核心设定，是所有剧情的基础，绝对不能违反！\n"
+            f"1. 必须严格遵守以下设定，不得擅自修改任何人物、世界观、金手指等核心要素\n"
+            f"2. 所有剧情必须在设定框架内展开，不得出现设定矛盾\n"
+            f"3. 如果发现设定有疑问，以本设定为准，不得自行发挥\n"
+            f"\n"
+            f"{outline or '（无额外设定要求）'}\n"
+            f"\n"
+            f"【再次强调】以上设定是硬性约束，违反任何一条都属于严重错误！\n"
+            f"═════════════════════════════════════════════════════════════\n\n"
+            f"{transition_block}"
             f"你是小说的场景导演。请为第 {chapter_number} 章设计场景结构。\n\n"
             f"{context.get('rendered_context', '')}\n\n"
-            f"本章大纲/要求：{outline or '（无，请依据故事目标自行推进）'}\n"
             f"{brief_block}\n"
             f"目标字数：{target_word_count} 字。\n\n"
             f"{title_tomato_requirement}\n"
@@ -3029,7 +3070,49 @@ class GenerationEngine:
                 f"{writer_prompt_data['content']}\n\n"
             )
 
+        # 上一章结尾状态（用于衔接）
+        context_layers = context.get("context_layers") or {}
+        previous_transition = context_layers.get("previous_transition_contract") or {}
+        previous_tail = context_layers.get("previous_tail") or ""
+        transition_block = ""
+        if previous_tail or previous_transition:
+            end_state = previous_transition.get("end_state") or {}
+            open_threads = previous_transition.get("open_threads") or []
+            next_bridge = previous_transition.get("next_chapter_bridge") or previous_tail[-600:]
+
+            threads_text = ""
+            if open_threads:
+                threads_text = "\n未解决的线索：\n" + "\n".join(
+                    f"- {t.get('summary', '')}" for t in open_threads[:5]
+                )
+
+            transition_block = (
+                f"【第二优先级：上一章结尾状态 - 必须从这里继续，不得跳跃！】\n"
+                f"═════════════════════════════════════════════════════════════\n"
+                f"上一章结尾的最后内容（必须直接承接，不得跳场）：\n"
+                f"「{next_bridge}」\n"
+                f"\n"
+                f"上一章梗概：{end_state.get('summary', '')}\n"
+                f"{threads_text}\n"
+                f"\n"
+                f"【硬性要求】本章开头必须直接承接上一章结尾的动作、地点和人物状态！\n"
+                f"除非正文明确写出过渡，否则不得突然切换场景、时间或人物位置！\n"
+                f"═════════════════════════════════════════════════════════════\n\n"
+            )
+
         return (
+            f"【最高优先级：核心设定与硬性约束 - 必须严格遵守，不得擅自修改！】\n"
+            f"═════════════════════════════════════════════════════════════\n"
+            f"以下是本书的核心设定，是所有剧情的基础，绝对不能违反！\n"
+            f"1. 必须严格遵守以下设定，不得擅自修改任何人物、世界观、金手指等核心要素\n"
+            f"2. 所有剧情必须在设定框架内展开，不得出现设定矛盾\n"
+            f"3. 如果发现设定有疑问，以本设定为准，不得自行发挥\n"
+            f"\n"
+            f"{outline or '（无额外设定要求）'}\n"
+            f"\n"
+            f"【再次强调】以上设定是硬性约束，违反任何一条都属于严重错误！\n"
+            f"═════════════════════════════════════════════════════════════\n\n"
+            f"{transition_block}"
             f"{context.get('rendered_context', '')}\n\n"
             f"====================\n"
             f"现在写第 {chapter_number} 章：《{scene_plan.get('chapter_title')}》\n"
@@ -3049,7 +3132,6 @@ class GenerationEngine:
             "【连续性硬门禁】上一章结尾、交接契约和本章第一场必须处于同一"
             "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"
             f"节拍安排：\n{beat_lines}\n\n"
-            f"额外要求：{outline or '无'}\n\n"
             f"请写出约 {target_word_count} 个汉字的完整章节正文，合理范围为"
             f" {max(600, int(target_word_count * 0.72))}-{max(max(600, int(target_word_count * 0.72)) + 200, int(target_word_count * 1.45))} 字；"
             "完成节拍和章尾钩子后立即收束，不要为了凑字数继续解释或重复描写。"

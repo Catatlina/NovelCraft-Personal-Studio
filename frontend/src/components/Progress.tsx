@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Loader2,
   RefreshCw,
+  SkipForward,
   Sparkles,
 } from "lucide-react";
 import { ApiEnvelope, ApiError, apiRaw } from "../lib/api";
@@ -350,6 +351,8 @@ export function Progress({
       || "",
   );
   const canonicalScore = canonicalGeneration.review_score;
+  const qualityGate = (canonicalGeneration.quality_gate || {}) as Record<string, unknown>;
+  const qualityFailures = (qualityGate.failures || []) as Array<Record<string, unknown>>;
   const canonicalNeedsReview = canonicalStatus === "needs_review"
     || canonicalStatus === "needs_rewrite"
     || run?.status === "needs_review"
@@ -509,6 +512,41 @@ export function Progress({
               {canonicalReason || (canonicalNeedsReview ? "质量门未通过，草稿已保存为待重写。" : "系统正在等待生成确认。")}
               {canonicalScore !== undefined && canonicalScore !== null ? ` 当前质量分：${String(canonicalScore)}。` : ""}
             </span>
+            {canonicalNeedsReview && qualityFailures.length > 0 && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>失败原因：</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                  {qualityFailures.slice(0, 5).map((failure, idx) => {
+                    const dim = String(failure.dimension || "unknown");
+                    const reason = String(failure.reason || "");
+                    const actual = failure.actual;
+                    const minimum = failure.minimum;
+                    let displayText = reason || dim;
+                    if (dim === "overall_score") {
+                      displayText = `质量分不足：${actual} 分（阈值 ${minimum} 分）`;
+                    } else if (dim === "sensitive_content" || dim === "content_policy") {
+                      displayText = `敏感内容检测未通过：${reason || "命中敏感词"}`;
+                    } else if (dim === "blocking_violations") {
+                      displayText = `严重违规：${actual} 项（阈值 0 项）`;
+                    } else if (dim === "payoff_contract") {
+                      displayText = `爽点契约未完成：${reason}`;
+                    } else if (dim === "third_person_narrative") {
+                      displayText = `人称问题：${reason}`;
+                    } else if (dim === "ai_pattern_risk") {
+                      displayText = `AI 腔风险过高：${reason}`;
+                    } else if (dim === "duplicate_paragraph") {
+                      displayText = `段落重复：${reason}`;
+                    } else if (reason) {
+                      displayText = `${dim}：${reason}`;
+                    }
+                    return <li key={idx}>{displayText}</li>;
+                  })}
+                  {qualityFailures.length > 5 && (
+                    <li style={{ opacity: 0.7 }}>... 还有 {qualityFailures.length - 5} 项问题</li>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -562,9 +600,9 @@ export function Progress({
           {nodes.map((node, index) => {
             const active = selectedNode?.node_key === node.node_key;
             return (
-              <button type="button" key={node.node_key} className={`${active ? "active" : ""} ${node.status}`} onClick={() => setSelectedNodeKey(node.node_key)}>
+              <button type="button" key={node.node_key} className={`${active ? "active" : ""} ${node.status}`} onClick={() => setSelectedNodeKey(node.node_key)} title={node.status === "skipped" ? "此步骤由 V7 引擎内部完成，无需单独执行" : undefined}>
                 <span className="node-order">
-                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" || node.status === "needs_review" ? <AlertTriangle size={15} /> : node.status === "pending_approval" || node.status === "waiting_human" ? <Clock3 size={15} /> : <Circle size={13} />}
+                  {node.status === "succeeded" ? <Check size={15} /> : node.status === "running" ? <Loader2 className="spin" size={15} /> : node.status === "failed" || node.status === "pending_budget" || node.status === "pending_provider" || node.status === "needs_review" ? <AlertTriangle size={15} /> : node.status === "pending_approval" || node.status === "waiting_human" ? <Clock3 size={15} /> : node.status === "skipped" ? <SkipForward size={13} /> : <Circle size={13} />}
                 </span>
                 <span className="node-name"><strong>{node.title}</strong><small>{STATUS_LABELS[node.status] || node.status}</small></span>
                 <span className="node-index">{String(index + 1).padStart(2, "0")}</span>
@@ -580,6 +618,12 @@ export function Progress({
                 <div><p className="eyebrow">{selectedNode.node_key}</p><h3>{selectedNode.title}</h3></div>
                 <span className={`node-status ${selectedNode.status}`}>{STATUS_LABELS[selectedNode.status] || selectedNode.status}</span>
               </div>
+              {selectedNode.status === "skipped" && (
+                <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 8, background: "var(--bg-subtle, #f5f5f7)", fontSize: 13, color: "var(--text-secondary, #6b7280)", display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <SkipForward size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>此步骤由 V7 引擎内部完成，无需单独执行。V7 高级生成引擎已在章节生成过程中内置了质量审查、去AI味、连续性检查等功能。</span>
+                </div>
+              )}
               <div className="node-meta">
                 <span><Clock3 size={14} /> 开始 {formatTime(selectedNode.started_at)}</span>
                 <span>完成 {formatTime(selectedNode.finished_at)}</span>
