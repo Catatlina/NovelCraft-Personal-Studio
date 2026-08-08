@@ -361,14 +361,19 @@ def _aggregate_board(pool: list[dict], label: str, cap: int) -> list[dict]:
 
 
 def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = None) -> list[dict]:
-    """Fetch 番茄小说 four real leaderboards, merged into one item list.
+    """Fetch 番茄小说 major leaderboards, merged into one item list.
 
-    Boards (per user-confirmed design 2026-07-30):
-    1. 巅峰榜   — /api/rank/list (real cross-category board, ~7 books)
-    2. 新书榜   — /api/rank/category/list rankMold=1, aggregated across all
-                  categories/genders, sorted by read count
-    3. 推荐榜·聚合 — rankMold=2 (阅读/热门榜) aggregated top N
-    4. 完本榜·聚合 — rankMold=2 items with creationStatus=='1' (完结)
+    Major boards (verified via public API):
+    1. 全站总榜     — /api/rank/list (real cross-category board, peak rank)
+    2. 人气榜       — rankMold=2 (阅读/热门榜) aggregated across all categories
+    3. 新书榜       — rankMold=1 aggregated across all categories
+    4. 完本榜       — rankMold=2 items with creationStatus=='1' (完结)
+    5. 男频人气榜   — rankMold=2, male only
+    6. 女频人气榜   — rankMold=2, female only
+    7. 男频新书榜   — rankMold=1, male only
+    8. 女频新书榜   — rankMold=1, female only
+    9. 男频完本榜   — rankMold=2, male only, completed
+    10. 女频完本榜  — rankMold=2, female only, completed
 
     Each item carries ``leaderboard`` (primary label) and ``leaderboards``
     (all labels the book appears on). No browser scraping, no mock data.
@@ -376,14 +381,43 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
     requested = str(leaderboard or "all").casefold()
     aliases = {
         "main": "peak",
+        "peak": "peak",
         "巅峰榜": "peak",
-        "阅读榜": "recommend",
-        "reading": "recommend",
-        "热销榜": "hotsales",
-        "推荐榜": "recommend",
+        "全站总榜": "peak",
+        "总榜": "peak",
+        "畅销榜": "popular",
+        "bestseller": "popular",
+        "hot": "popular",
+        "热门榜": "popular",
+        "人气榜": "popular",
+        "popular": "popular",
+        "阅读榜": "popular",
+        "reading": "popular",
+        "推荐榜": "popular",
+        "recommend": "popular",
+        "hotsales": "popular",
+        "热销榜": "popular",
         "新书榜": "newbook",
+        "newbook": "newbook",
+        "new": "newbook",
         "完本榜": "completed",
         "finished": "completed",
+        "completed": "completed",
+        "finish": "completed",
+        "male": "male_popular",
+        "男频": "male_popular",
+        "男频榜": "male_popular",
+        "female": "female_popular",
+        "女频": "female_popular",
+        "女频榜": "female_popular",
+        "male_newbook": "male_newbook",
+        "男频新书榜": "male_newbook",
+        "female_newbook": "female_newbook",
+        "女频新书榜": "female_newbook",
+        "male_completed": "male_completed",
+        "男频完本榜": "male_completed",
+        "female_completed": "female_completed",
+        "女频完本榜": "female_completed",
         "monthly": "monthly",
         "月榜": "monthly",
     }
@@ -391,7 +425,12 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
     if requested == "monthly":
         return [{"source": "fanqie", "degraded": True,
                  "error": "番茄当前公开采集器没有可验证的月榜字段，请导入可见浏览器快照"}]
-    if requested not in {"all", "peak", "newbook", "recommend", "hotsales", "completed"}:
+
+    valid_boards = {"all", "peak", "popular", "newbook", "completed",
+                    "male_popular", "female_popular",
+                    "male_newbook", "female_newbook",
+                    "male_completed", "female_completed"}
+    if requested not in valid_boards:
         return [{"source": "fanqie", "degraded": True,
                  "error": f"番茄不支持可验证的榜单类型: {leaderboard}"}]
 
@@ -402,51 +441,91 @@ def fetch_fanqie_ranking(leaderboard: str = "all", max_count: Optional[int] = No
         return [{"source": "fanqie", "degraded": True,
                  "error": "Fanqie unreachable"}]
 
-    per_board = max(20, target // 3)
+    per_board = max(50, min(target, 100))
+    per_cat = 30  # 每个分类抓取30本，确保聚合后有足够样本
 
-    # Phase 1: 巅峰榜 (real direct API)
+    # Phase 1: 全站总榜 (real direct API)
     peak_items = []
-    for it in _fetch_fanqie_rank_list(rv):
-        it["leaderboard"] = "巅峰榜"
+    for it in _fetch_fanqie_rank_list(rv, max_count=20):
+        it["leaderboard"] = "全站总榜"
         peak_items.append(it)
 
-    # Phase 2: per-category fetches — rankMold=1 (新书) + rankMold=2 (热门/阅读)
-    targets = _build_category_targets(meta, "all")
-    per_cat = 10
-    new_pool: list[dict] = []
-    hot_pool: list[dict] = []
+    # Phase 2: per-category fetches — all categories, both genders (one pass)
+    all_targets = _build_category_targets(meta, "all")
+
+    new_pool_all: list[dict] = []
+    hot_pool_all: list[dict] = []
+
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {}
-        for cid, cname, g in targets:
+        for cid, cname, g in all_targets:
             futs[ex.submit(_fetch_fanqie_one_category, cid, cname, g, "1", per_cat)] = "new"
             futs[ex.submit(_fetch_fanqie_one_category, cid, cname, g, "2", per_cat)] = "hot"
-        for fut in as_completed(futs):
-            pool = new_pool if futs[fut] == "new" else hot_pool
-            pool.extend(fut.result() or [])
 
-    newbook = _aggregate_board(new_pool, "新书榜", per_board)
-    recommend = _aggregate_board(hot_pool, "推荐榜·聚合", per_board)
+        for fut in as_completed(futs):
+            pool_type = futs[fut]
+            result = fut.result() or []
+            if pool_type == "new":
+                new_pool_all.extend(result)
+            else:  # hot
+                hot_pool_all.extend(result)
+
+    # Split into male/female pools based on gender field
+    new_pool_male = [i for i in new_pool_all if i.get("gender") == "male"]
+    new_pool_female = [i for i in new_pool_all if i.get("gender") == "female"]
+    hot_pool_male = [i for i in hot_pool_all if i.get("gender") == "male"]
+    hot_pool_female = [i for i in hot_pool_all if i.get("gender") == "female"]
+
+    # Build all boards
+    popular = _aggregate_board(hot_pool_all, "人气榜", per_board)
+    newbook = _aggregate_board(new_pool_all, "新书榜", per_board)
     completed = _aggregate_board(
-        [i for i in hot_pool if str(i.get("creation_status", "")) == "1"],
-        "完本榜·聚合", per_board)
+        [i for i in hot_pool_all if str(i.get("creation_status", "")) == "1"],
+        "完本榜", per_board)
+
+    male_popular = _aggregate_board(hot_pool_male, "男频人气榜", per_board)
+    female_popular = _aggregate_board(hot_pool_female, "女频人气榜", per_board)
+    male_newbook = _aggregate_board(new_pool_male, "男频新书榜", per_board)
+    female_newbook = _aggregate_board(new_pool_female, "女频新书榜", per_board)
+    male_completed = _aggregate_board(
+        [i for i in hot_pool_male if str(i.get("creation_status", "")) == "1"],
+        "男频完本榜", per_board)
+    female_completed = _aggregate_board(
+        [i for i in hot_pool_female if str(i.get("creation_status", "")) == "1"],
+        "女频完本榜", per_board)
 
     selected_boards = {
         "peak": peak_items,
+        "popular": popular,
         "newbook": newbook,
-        "recommend": recommend,
-        "hotsales": recommend,
         "completed": completed,
+        "male_popular": male_popular,
+        "female_popular": female_popular,
+        "male_newbook": male_newbook,
+        "female_newbook": female_newbook,
+        "male_completed": male_completed,
+        "female_completed": female_completed,
     }
+
     if requested != "all":
         selected = selected_boards[requested]
         return selected[:target] if selected else [{"source": "fanqie", "degraded": True,
                                                      "error": f"番茄榜单 {leaderboard} 当前没有可验证样本"}]
 
-    # Merge boards in priority order; a book on multiple boards keeps its first
+    # Merge all boards in priority order; a book on multiple boards keeps its first
     # position and accumulates all labels in ``leaderboards``.
     merged: dict[str, dict] = {}
     order: list[str] = []
-    for board in (peak_items, recommend, newbook, completed):
+
+    # Priority: 全站总榜 > 人气榜 > 新书榜 > 完本榜 > 男频/女频分榜
+    all_boards = [
+        peak_items, popular, newbook, completed,
+        male_popular, female_popular,
+        male_newbook, female_newbook,
+        male_completed, female_completed,
+    ]
+
+    for board in all_boards:
         for it in board:
             bid = it.get("source_book_id", "") or _make_dedup_key(it.get("title", ""), it.get("author", ""))
             if bid in merged:

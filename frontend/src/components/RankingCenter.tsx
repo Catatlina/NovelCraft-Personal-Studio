@@ -455,7 +455,7 @@ export function RankingCenter({ projectId, onBookCreated, onCreate }: { projectI
     for (const it of allOpenItems) {
       for (const lb of (it.metrics?.leaderboards || (it.metrics?.leaderboard ? [it.metrics.leaderboard] : []))) set.add(lb);
     }
-    const preferred = ["巅峰榜", "推荐榜·聚合", "新书榜", "完本榜·聚合"];
+    const preferred = ["全站总榜", "人气榜", "新书榜", "完本榜", "男频人气榜", "女频人气榜", "男频新书榜", "女频新书榜", "男频完本榜", "女频完本榜"];
     return [...preferred.filter(p => set.has(p)), ...[...set].filter(s => !preferred.includes(s)).sort()];
   })();
   const openItems = boardFilter
@@ -544,12 +544,17 @@ export function RankingCenter({ projectId, onBookCreated, onCreate }: { projectI
         <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
           榜单
           <select className="form-input" aria-label="类型榜单" value={typedScan.leaderboard} onChange={event => setTypedScan(value => ({ ...value, leaderboard: event.target.value }))}>
-            <option value="all">全榜</option>
+            <option value="all">全榜（全部榜单）</option>
+            <option value="peak">全站总榜</option>
+            <option value="popular">人气榜</option>
             <option value="newbook">新书榜</option>
-            <option value="reading">阅读榜</option>
-            <option value="hotsales">热销榜</option>
-            <option value="recommend">推荐榜</option>
-            <option value="monthly">月榜</option>
+            <option value="completed">完本榜</option>
+            <option value="male_popular">男频人气榜</option>
+            <option value="female_popular">女频人气榜</option>
+            <option value="male_newbook">男频新书榜</option>
+            <option value="female_newbook">女频新书榜</option>
+            <option value="male_completed">男频完本榜</option>
+            <option value="female_completed">女频完本榜</option>
           </select>
         </label>
         <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
