@@ -528,6 +528,7 @@ async def seed_genres():
         # 1. 导入品类包
         print("=== 导入品类包 ===")
         genre_map = {}  # slug -> GenrePack
+        genre_id_map = {}  # slug -> UUID
         
         for pack_data in GENRE_PACKS:
             slug = pack_data["slug"]
@@ -542,12 +543,13 @@ async def seed_genres():
             if existing:
                 print(f"  跳过已存在: {slug}")
                 genre_map[slug] = existing
+                genre_id_map[slug] = existing.id
                 continue
             
             # 查找父品类
             parent_id = None
-            if parent_slug and parent_slug in genre_map:
-                parent_id = genre_map[parent_slug].id
+            if parent_slug and parent_slug in genre_id_map:
+                parent_id = genre_id_map[parent_slug]
             
             # 创建新品类
             pack = GenrePack(
@@ -558,6 +560,7 @@ async def seed_genres():
             await db.flush()  # 获取 ID
             
             genre_map[slug] = pack
+            genre_id_map[slug] = pack.id
             print(f"  已导入: {slug} ({pack.name})")
         
         await db.commit()
@@ -565,11 +568,11 @@ async def seed_genres():
         # 2. 导入规则
         print("\n=== 导入品类规则 ===")
         for slug, rules in GENRE_RULES.items():
-            if slug not in genre_map:
+            if slug not in genre_id_map:
                 print(f"  跳过未知品类: {slug}")
                 continue
             
-            genre = genre_map[slug]
+            genre_id = genre_id_map[slug]
             count = 0
             
             for rule_data in rules:
@@ -578,7 +581,7 @@ async def seed_genres():
                 # 检查是否已存在
                 result = await db.execute(
                     select(GenreRule).where(
-                        GenreRule.genre_id == genre.id,
+                        GenreRule.genre_id == genre_id,
                         GenreRule.rule_key == rule_key,
                     )
                 )
@@ -588,7 +591,7 @@ async def seed_genres():
                     continue
                 
                 rule = GenreRule(
-                    genre_id=genre.id,
+                    genre_id=genre_id,
                     **rule_data,
                 )
                 db.add(rule)
@@ -602,11 +605,11 @@ async def seed_genres():
         # 3. 导入知识
         print("\n=== 导入品类知识 ===")
         for slug, knowledge_list in GENRE_KNOWLEDGE.items():
-            if slug not in genre_map:
+            if slug not in genre_id_map:
                 print(f"  跳过未知品类: {slug}")
                 continue
             
-            genre = genre_map[slug]
+            genre_id = genre_id_map[slug]
             count = 0
             
             for knowledge_data in knowledge_list:
@@ -615,7 +618,7 @@ async def seed_genres():
                 # 检查是否已存在
                 result = await db.execute(
                     select(GenreKnowledge).where(
-                        GenreKnowledge.genre_id == genre.id,
+                        GenreKnowledge.genre_id == genre_id,
                         GenreKnowledge.title == title,
                     )
                 )
@@ -625,7 +628,7 @@ async def seed_genres():
                     continue
                 
                 knowledge = GenreKnowledge(
-                    genre_id=genre.id,
+                    genre_id=genre_id,
                     **knowledge_data,
                 )
                 db.add(knowledge)
@@ -639,11 +642,11 @@ async def seed_genres():
         # 4. 导入 Prompt 模板
         print("\n=== 导入 Prompt 模板 ===")
         for slug, prompts in GENRE_PROMPTS.items():
-            if slug not in genre_map:
+            if slug not in genre_id_map:
                 print(f"  跳过未知品类: {slug}")
                 continue
             
-            genre = genre_map[slug]
+            genre_id = genre_id_map[slug]
             count = 0
             
             for prompt_data in prompts:
@@ -652,7 +655,7 @@ async def seed_genres():
                 # 检查是否已存在
                 result = await db.execute(
                     select(GenrePrompt).where(
-                        GenrePrompt.genre_id == genre.id,
+                        GenrePrompt.genre_id == genre_id,
                         GenrePrompt.prompt_name == prompt_name,
                     )
                 )
@@ -662,7 +665,7 @@ async def seed_genres():
                     continue
                 
                 prompt = GenrePrompt(
-                    genre_id=genre.id,
+                    genre_id=genre_id,
                     **prompt_data,
                 )
                 db.add(prompt)
