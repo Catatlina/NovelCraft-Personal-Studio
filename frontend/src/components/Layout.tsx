@@ -164,7 +164,7 @@ export function Layout({
       <main className={`app-main${collapsed ? "" : " sidebar-pinned"}`}>
         <header className="app-header">
           <div className="app-header-left">
-            <div className="header-brand" aria-label="NovelCraft 工作台">NovelCraft</div>
+            <div className="header-brand" aria-label="Starlume AI 工作台">Starlume AI</div>
             <span className="header-breadcrumb-divider" aria-hidden="true">/</span>
             <div className="app-header-title">
               <h1>{title}</h1>
