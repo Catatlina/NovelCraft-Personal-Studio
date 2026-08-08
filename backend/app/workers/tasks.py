@@ -3487,6 +3487,8 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
             logger.warning(f"[regenerate_chapter_task] V7 v6_content_id: {result.get('v6_content_id')}")
             logger.warning(f"[regenerate_chapter_task] V7 title: {result.get('title')}")
             logger.warning(f"[regenerate_chapter_task] V7 has content: {bool(result.get('content'))}")
+            logger.warning(f"[regenerate_chapter_task] V7 blocked_reason: {result.get('blocked_reason')}")
+            logger.warning(f"[regenerate_chapter_task] V7 steps_executed: {result.get('steps_executed')}")
         except Exception as exc:
             failed_db = connect()
             failed_db.execute(
