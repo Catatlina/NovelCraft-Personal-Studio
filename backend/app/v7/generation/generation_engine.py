@@ -243,9 +243,9 @@ class ContextAssembler:
         return await asyncio.to_thread(_read)
 
     async def load_genre_context(self) -> dict[str, Any]:
-        """加载品类上下文（风格卡、知识、约束等）。
+        """加载品类上下文（风格卡、知识、约束、Prompt模板等）。
 
-        从品类库加载当前品类的规则、知识、风格卡等信息，
+        从品类库加载当前品类的规则、知识、风格卡、Prompt模板等信息，
         支持继承解析（子品类没有的自动用父品类的）。
         """
         if not self.genre_id:
@@ -259,6 +259,7 @@ class ContextAssembler:
             from ..services.genre_inheritance import (
                 resolve_genre_rules,
                 resolve_genre_knowledge,
+                resolve_genre_prompts,
             )
             from ..db import async_session
 
@@ -268,6 +269,9 @@ class ContextAssembler:
 
                 # 解析知识（含继承）
                 knowledge = await resolve_genre_knowledge(db, self.genre_id)
+
+                # 解析 Prompt 模板（含继承）
+                prompts = await resolve_genre_prompts(db, self.genre_id)
 
                 # 提取风格卡
                 style_card = {}
@@ -307,13 +311,30 @@ class ContextAssembler:
                         key=lambda x: x.get("priority", 0), reverse=True
                     )
 
+                # 整理 Prompt 模板（按类型分组）
+                prompts_by_type: dict[str, list[dict[str, Any]]] = {}
+                for prompt_name, prompt_data in prompts.items():
+                    ptype = prompt_data.get("prompt_type", "other")
+                    if ptype not in prompts_by_type:
+                        prompts_by_type[ptype] = []
+                    prompts_by_type[ptype].append(prompt_data)
+
+                # 提取 writer 类型的主 Prompt（用于章节生成注入）
+                writer_prompt = None
+                if "writer" in prompts_by_type and prompts_by_type["writer"]:
+                    # 取第一个 writer Prompt 作为主写作 Prompt
+                    writer_prompt = prompts_by_type["writer"][0]
+
                 result = {
                     "genre_id": self.genre_id,
                     "style_card": style_card,
                     "constraints": constraints,
                     "knowledge": knowledge_by_type,
+                    "prompts": prompts_by_type,
+                    "writer_prompt": writer_prompt,  # 写作专用 Prompt
                     "total_rules": len(rules),
                     "total_knowledge": len(knowledge),
+                    "total_prompts": len(prompts),
                 }
 
                 self._genre_cache = result
@@ -2967,6 +2988,17 @@ class GenerationEngine:
             f"{b.get('content', '')}"
             for i, b in enumerate(beats)
         )
+
+        # 品类写作 Prompt 注入
+        genre_writer_prompt = ""
+        genre_context = (context.get("context_layers") or {}).get("genre") or {}
+        writer_prompt_data = genre_context.get("writer_prompt")
+        if writer_prompt_data and writer_prompt_data.get("content"):
+            genre_writer_prompt = (
+                f"【品类写作指导 - {writer_prompt_data.get('prompt_name', '通用')} v{writer_prompt_data.get('version', '1.0')}】\n"
+                f"{writer_prompt_data['content']}\n\n"
+            )
+
         return (
             f"{context.get('rendered_context', '')}\n\n"
             f"====================\n"
@@ -2980,6 +3012,7 @@ class GenerationEngine:
             f"情绪曲线：{scene_plan.get('emotional_target', '')}\n"
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
+            f"{genre_writer_prompt}"
             f"【网文质量策略】\n{quality_directive}\n\n"
             f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
             f"【本章爽点契约】\n{json.dumps(scene_plan.get('payoff_contract') or {}, ensure_ascii=False)}\n\n"
