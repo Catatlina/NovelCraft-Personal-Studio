@@ -328,23 +328,70 @@ async def get_quality_review(
     # 调用 AI 味检测
     ai_smell_result = analyze_structural_ai_smell(text)
     
-    # 从 AI 味检测结果映射文笔质量
-    writing_quality_score = ai_smell_result.overall_score
+    # 辅助函数：获取 AI 味维度得分
+    def _get_ai_dim_score(dim_name: str) -> float:
+        for dim in ai_smell_result.dimensions:
+            if dim.name == dim_name:
+                return dim.score
+        return 70.0  # 默认分
+    
+    # 从 AI 味检测结果映射五维评分
+    # 1. 文笔质量：直接用 AI 味总分
+    writing_score = ai_smell_result.overall_score
+    
+    # 2. 节奏：段落节奏变异 + 转折词密度
+    rhythm_score = (_get_ai_dim_score("段落节奏变异") + _get_ai_dim_score("转折词密度")) / 2
+    
+    # 3. 人物：对话省略比例（对话自然 = 人物刻画好）
+    character_score = _get_ai_dim_score("对话省略比例")
+    
+    # 4. 剧情：总结句密度（总结句少 = 剧情在推进）
+    plot_score = _get_ai_dim_score("总结句密度")
+    
+    # 5. 爽感：段落首句雷同 + "了"字密度（首句有变化 + 动作多 = 爽感强）
+    thrill_score = (_get_ai_dim_score("段落首句雷同") + _get_ai_dim_score("\"了\"字密度")) / 2
     
     # 构建五维评分
-    # 注意：其他维度需要更复杂的分析，这里先用可用的数据
     dimensions = [
         DimensionScore(
+            key="thrill",
+            name="爽感",
+            score=round(thrill_score, 1),
+            comment="基于段落变化与动作密度推导",
+            level=_score_to_level(thrill_score),
+        ),
+        DimensionScore(
+            key="rhythm",
+            name="节奏",
+            score=round(rhythm_score, 1),
+            comment="基于段落节奏与转折密度推导",
+            level=_score_to_level(rhythm_score),
+        ),
+        DimensionScore(
+            key="plot",
+            name="剧情",
+            score=round(plot_score, 1),
+            comment="基于叙事推进效率推导",
+            level=_score_to_level(plot_score),
+        ),
+        DimensionScore(
+            key="character",
+            name="人物",
+            score=round(character_score, 1),
+            comment="基于对话自然度推导",
+            level=_score_to_level(character_score),
+        ),
+        DimensionScore(
             key="writing_quality",
-            name="文笔质量",
-            score=writing_quality_score,
+            name="文笔",
+            score=round(writing_score, 1),
             comment=f"AI味检测总分 {ai_smell_result.overall_score:.1f}/100，等级 {ai_smell_result.grade}",
-            level=_score_to_level(writing_quality_score),
+            level=_score_to_level(writing_score),
         ),
     ]
     
-    # 计算总分（目前只有文笔质量）
-    overall_score = writing_quality_score
+    # 计算总分（五维平均分）
+    overall_score = sum(d.score for d in dimensions) / len(dimensions)
     
     # 收集建议
     suggestions = []
@@ -352,11 +399,11 @@ async def get_quality_review(
         if not dim.passed:
             suggestions.append(f"{dim.name}：{dim.detail}")
     
-    summary = f"章节质量评分 {overall_score:.1f}/100，{ai_smell_result.grade} 等级"
+    summary = f"章节质量评分 {overall_score:.1f}/100，{_score_to_level(overall_score)} 等级"
     
     return QualityReviewResponse(
         chapter_id=chapter_id,
-        overall_score=overall_score,
+        overall_score=round(overall_score, 1),
         dimensions=dimensions,
         summary=summary,
         suggestions=suggestions,
