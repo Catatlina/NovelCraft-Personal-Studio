@@ -1,45 +1,79 @@
-"""
-星禾AI工作台 · AI Engine Router — 统一AI调用API
-"""
+"""Project-scoped streaming chat through the canonical AI gateway."""
 
+import asyncio
 import json
-from fastapi import APIRouter, Depends, Request, Body, HTTPException
+import logging
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..core.authz import get_current_user
+from ..core.authz import require_project_membership
 from ..core.errors import public_message
 from ..config import settings
-from .. import gateway as gw
+from ..gateway import complete_stream
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/engine", tags=["AI Engine"])
 
 
 class ChatRequest(BaseModel):
-    messages: list[dict] = Body(...)
-    model: str = "deepseek-chat"
-    temperature: float = 0.7
-    max_tokens: int = 2000
+    project_id: str = Field(min_length=1, max_length=64)
+    messages: list[dict] = Field(min_length=1, max_length=40)
+    temperature: float = Field(default=0.7, ge=0.0, le=1.5)
+    max_tokens: int = Field(default=2000, ge=256, le=8192)
+    client_mutation_id: str | None = Field(default=None, max_length=100)
 
 
 @router.post("/chat")
 async def chat(request: ChatRequest, user=Depends(get_current_user)):
-    """通用AI对话（SSE流式）"""
+    """Project-scoped chat with quota, ledger, and provider-failure semantics."""
+    require_project_membership(request.project_id, user)
+    if any(
+        not isinstance(message, dict)
+        or message.get("role") not in {"system", "user", "assistant"}
+        or not isinstance(message.get("content"), str)
+        or not message["content"].strip()
+        or len(message["content"]) > 12000
+        for message in request.messages
+    ):
+        raise HTTPException(status_code=422, detail="messages contain invalid or oversized entries")
+
     prompt_text = "\n".join(
         f"{m.get('role','user')}: {m.get('content','')}" for m in request.messages
     )
 
     async def stream():
-        yield f"data: {json.dumps({'type':'start','model':request.model})}\n\n"
+        yield f"data: {json.dumps({'type':'start'})}\n\n"
+        iterator = complete_stream(
+            project_id=request.project_id,
+            user_id=user["id"],
+            task_type="engine_chat",
+            prompt_name="engine.chat",
+            variables={
+                "prompt": prompt_text,
+                "_temperature": request.temperature,
+                "_max_tokens": request.max_tokens,
+            },
+            client_mutation_id=request.client_mutation_id,
+        )
         try:
-            for delta in gw._deepseek_stream(prompt_text, request.model, {"temperature": request.temperature, "max_tokens": request.max_tokens}, {"input": 0, "output": 0}):
-                if isinstance(delta, str):
-                    yield f"data: {json.dumps({'type':'delta','content':delta})}\n\n"
-                elif isinstance(delta, dict) and "error" in delta:
-                    yield f"data: {json.dumps({'type':'error','message':delta['error']})}\n\n"
+            while True:
+                def next_chunk():
+                    try:
+                        return True, next(iterator)
+                    except StopIteration:
+                        return False, None
+
+                has_value, delta = await asyncio.to_thread(next_chunk)
+                if not has_value:
+                    break
+                yield f"data: {json.dumps({'type':'delta','content':delta}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type':'done'})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type':'error','message':str(e)})}\n\n"
+        except Exception:
+            logger.exception("engine chat failed")
+            yield f"data: {json.dumps({'type':'error','code':'AI_PROVIDER_FAILED','message':'AI 服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

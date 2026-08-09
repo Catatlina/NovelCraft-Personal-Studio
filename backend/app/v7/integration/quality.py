@@ -59,7 +59,12 @@ CHAPTER_MIRROR_HARD_GATE = False  # 章节镜像检测：默认soft warning
 PAYOFF_VARIETY_HARD_GATE = False  # 爽点类型多样性：默认soft warning
 
 
-def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
+def evaluate_review(
+    review_data: dict[str, Any],
+    *,
+    project_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     """Return the application-level decision for an AI review payload."""
     overall_score = float(review_data.get("overall_score") or 0.0)
     blocking = int(review_data.get("blocking_violations") or 0)
@@ -152,7 +157,12 @@ def evaluate_review(review_data: dict[str, Any]) -> dict[str, Any]:
         chapter_text = review_data.get("chapter_text") or ""
         if chapter_text:
             platform = quality_profile.get("platform", "general") if quality_profile else "general"
-            reader_simulation_result = simulate_reader_first_pass(chapter_text, platform)
+            reader_simulation_result = simulate_reader_first_pass(
+                chapter_text,
+                platform,
+                project_id=project_id,
+                user_id=user_id,
+            )
     
     # 阶段4：首章钩力分析
     # 对首章做专项分析，输出钩力报告

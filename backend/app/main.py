@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .core.security import get_current_user
-from .core.byok import stash_byok_key
+from .core.byok import BYOKUnavailableError, stash_byok_key
 from .core.errors import public_message
 from .db import connect, decode, encode, init_db, new_id, row_to_dict
 from .gateway import (
@@ -131,6 +131,16 @@ async def database_pool_exhausted(_request: Request, exc: psycopg2.pool.PoolErro
     return JSONResponse(status_code=503, content={
         "code": 503,
         "message": "database connection pool exhausted",
+        "data": {"retryable": True},
+    })
+
+
+@app.exception_handler(BYOKUnavailableError)
+async def handle_byok_unavailable(_request: Request, exc: BYOKUnavailableError):
+    logger.error("BYOK request cannot be safely dispatched: %s", exc)
+    return JSONResponse(status_code=503, content={
+        "code": "BYOK_UNAVAILABLE",
+        "message": "用户密钥暂时不可用，请稍后重试",
         "data": {"retryable": True},
     })
 
@@ -822,6 +832,18 @@ async def manual_review_chapter(
         raise
     now_iso = datetime.now(timezone.utc).isoformat()
     if payload.decision == "approve":
+        from .v7.quality.review_gate import reviewed_gate_failures
+        gate_failures = reviewed_gate_failures({
+            "canonical_engine": "v7",
+            **(chapter.get("meta") if isinstance(chapter.get("meta"), dict) else {}),
+        })
+        if gate_failures:
+            conn.rollback()
+            conn.close()
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "V7_REVIEW_GATE_FAILED", "message": "连续性或审阅证据未通过，不能人工批准", "failures": gate_failures},
+            )
         conn.execute(
             """UPDATE contents
                SET status='reviewed',

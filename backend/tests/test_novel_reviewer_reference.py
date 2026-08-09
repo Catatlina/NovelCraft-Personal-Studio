@@ -14,13 +14,13 @@ def test_novel_reviewer_lexicon_is_advisory_and_has_bounded_evidence():
     metrics = analyze_deai_patterns(text)
     lexicon = metrics["novel_reviewer_lexicon"]
 
-    assert lexicon["mode"] == "candidate_only"
+    assert lexicon["mode"] == "grayscale_observation"
     assert lexicon["hard_gate"] is False
     assert lexicon["reference"]["scoring_authority"] == "v7.review.33_dimension"
     evidence = lexicon["categories"]["classic_description"]["evidence"]
     assert evidence
     assert all(item["line"] >= 1 and item["excerpt"] for item in evidence)
-    assert any(item["code"] == "classic_description_stacking" for item in lexicon["candidate_risks"])
+    assert lexicon["candidate_risks"] == []
 
 
 def test_system_and_simulator_terms_are_not_treated_as_ai_flavor_risk():

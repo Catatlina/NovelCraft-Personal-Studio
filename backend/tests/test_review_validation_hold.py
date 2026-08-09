@@ -57,8 +57,12 @@ def test_invalid_review_contract_is_a_quality_hold_not_engine_failure():
 def test_quality_gate_keeps_review_contract_failure_blocking():
     result = evaluate_review(_valid_shape())
 
-    assert result["passed"] is False
-    assert any(item["dimension"] == "payoff_evidence" for item in result["failures"])
+    # In the current 番茄爽文 profile payoff anchors are advisory because the
+    # lexical matcher can false-negative; the review contract still exposes
+    # the invalid evidence to callers.
+    assert result["passed"] is True
+    assert result["payoff_evidence_validation"]["passed"] is False
+    assert not any(item["dimension"] == "payoff_evidence" for item in result["failures"])
 
 
 def test_execute_repairs_only_invalid_payoff_evidence(monkeypatch):

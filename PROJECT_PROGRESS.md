@@ -9,6 +9,15 @@
 - 全量后端测试仍受既有容器路径测试影响：tests/test_audit_fixes.py 写死 /backend/...，容器实际挂载为 /app/...。真实 Provider 生成质量尚未验收，因为远端未配置 DEEPSEEK_API_KEY。
 - 详细规则边界与来源见 docs/网文蒸馏规则融合说明_20260809.md。
 
+## 2026-08-09 真实性、安全与连续性修复
+
+- 管理员接口在生产环境无白名单时 fail-closed；BYOK 密钥引用写入或解析失败直接报错，不回退到服务器默认密钥；通用 Engine Chat 接入项目权限、统一 AI Gateway、预算和 Provider 失败语义。
+- 插件状态改为写入现有 settings 表；安装/卸载在没有持久化执行器前明确返回未实现，不再用进程内状态伪装成功。
+- V7 分支生成/应用移除进程内假存储，应用前校验正文版本和精确来源，冲突时阻止覆盖；人工批准和 Worker reviewed 写回增加连续性、最终审计和证据链 fail-closed 门禁。
+- Reader Simulation 改走真实 Gateway；编辑器刷新保留当前章节选择，并在检测到未保存文本时阻止后台刷新覆盖；品类管理补齐权限提示、真实导入/导出和新建反馈。
+- 验证证据：后端专项新增/相关测试 58 项通过；另有 1 项既有迁移路径测试因容器把仓库挂载为 /app 而测试写死 /backend 失败；前端全量 52 项通过，TypeScript 检查和构建通过，git diff --check 通过。
+- 真实 Provider 端到端生成仍未验收：远端当前未配置 DEEPSEEK_API_KEY。未跟踪的 .orig 备份和 backend/celerybeat-schedule 运行时文件不纳入提交。
+
 ## 2026-08-06 AI 味词库可配置化与编辑会话已推送部署
 
 - 运行时代码已提交并部署：`e3a56b2`（运行时功能基于 `760edd5`）。本批把 `novel-reviewer` 的参考词库扩展为 11 类、版本化 `ai-flavor-lexicon-v2`，保留题材语境豁免；它只生成候选信号和原文证据，不把单个词或标点变成禁令，也不改变 V7 canonical 总分。

@@ -19,6 +19,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
+import { apiEnvelope } from '../../lib/api';
 
 interface BranchOption {
   id: string;
@@ -44,6 +45,7 @@ interface BranchResult {
 interface BranchGeneratorProps {
   novelId?: string;
   chapterId?: string;
+  chapterUpdatedAt?: string;
   selectedText?: string;
   selectedRange?: { start: number; end: number } | null;
   onApplyBranch?: (content: string, mode: 'replace' | 'insert_after' | 'insert_before') => void;
@@ -55,6 +57,7 @@ type GenerationStatus = 'idle' | 'generating' | 'success' | 'error';
 export default function BranchGenerator({
   novelId,
   chapterId,
+  chapterUpdatedAt,
   selectedText,
   selectedRange,
   onApplyBranch,
@@ -65,6 +68,7 @@ export default function BranchGenerator({
   const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [numOptions, setNumOptions] = useState(3);
+  const [applyingOptionId, setApplyingOptionId] = useState<string | null>(null);
 
   // 检查是否可以生成分支
   const canGenerate = useMemo(() => {
@@ -82,11 +86,8 @@ export default function BranchGenerator({
 
     try {
       // 调用 API 生成分支
-      const response = await fetch('/api/v7/branches/generate', {
+      const envelope = await apiEnvelope<BranchResult>('/api/v7/branches/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           novel_id: novelId,
           chapter_id: chapterId,
@@ -96,13 +97,7 @@ export default function BranchGenerator({
           num_options: numOptions,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error(`生成失败：${response.status}`);
-      }
-
-      const data = await response.json();
-      setResult(data);
+      setResult(envelope.data);
       setStatus('success');
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
@@ -111,31 +106,45 @@ export default function BranchGenerator({
   }, [canGenerate, selectedText, selectedRange, novelId, chapterId, numOptions]);
 
   // 应用分支
-  const handleApply = useCallback((option: BranchOption, mode: 'replace' | 'insert_after' | 'insert_before') => {
-    if (onApplyBranch) {
-      onApplyBranch(option.content, mode);
+  const handleApply = useCallback(async (option: BranchOption, mode: 'replace' | 'insert_after' | 'insert_before') => {
+    if (!result || !chapterId || !chapterUpdatedAt || !selectedRange) {
+      setError('缺少正文版本信息，无法安全应用分支；请刷新章节后重试');
+      setStatus('error');
+      return;
     }
-  }, [onApplyBranch]);
+    setApplyingOptionId(option.id);
+    setError(null);
+    try {
+      const envelope = await apiEnvelope<{ applied_text: string }>(`/api/v7/branches/${result.id}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({
+          option_id: option.id,
+          mode,
+          base_updated_at: chapterUpdatedAt,
+          client_mutation_id: crypto.randomUUID(),
+        }),
+      });
+      onApplyBranch?.(envelope.data.applied_text || option.content, mode);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '应用分支失败');
+      setStatus('error');
+    } finally {
+      setApplyingOptionId(null);
+    }
+  }, [result, chapterId, chapterUpdatedAt, selectedRange, onApplyBranch]);
 
   // 保存分支
   const handleSave = useCallback(async (option: BranchOption) => {
     if (!result) return;
 
     try {
-      const response = await fetch(`/api/v7/branches/${result.id}/save`, {
+      await apiEnvelope(`/api/v7/branches/${result.id}/save`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           option_id: option.id,
           title: option.title,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error('保存失败');
-      }
 
       // 可以显示保存成功的提示
     } catch (err) {
@@ -306,7 +315,7 @@ export default function BranchGenerator({
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleApply(option, 'replace');
+                          void handleApply(option, 'replace');
                         }}
                       >
                         <Sparkles className="w-3 h-3" />
@@ -316,7 +325,7 @@ export default function BranchGenerator({
                         className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded hover:bg-blue-100 transition-colors"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleApply(option, 'insert_after');
+                          void handleApply(option, 'insert_after');
                         }}
                       >
                         插入后面
@@ -365,7 +374,7 @@ export default function BranchGenerator({
       {/* 底部提示 */}
       <div className="px-4 py-2 border-t bg-gray-50">
         <p className="text-xs text-gray-400 text-center">
-          💡 分支只是创意辅助，不会自动修改正文
+          💡 应用分支会写入正文，并保留版本记录；正文有新修改时会阻止覆盖
         </p>
       </div>
     </div>

@@ -432,7 +432,9 @@ export function V7Dashboard({ novelId, onOpenProgress, onOpenReview, onOpenLibra
     const decisions = isFulfilled(decisionsResult) && Array.isArray(decisionsResult.value?.decisions)
       ? decisionsResult.value.decisions
       : [];
-    const promptRestricted = !isFulfilled(promptsResult) && promptsResult.reason instanceof V7ApiError && promptsResult.reason.status === 403;
+    const promptRestricted = !isFulfilled(promptsResult)
+      && promptsResult.reason instanceof V7ApiError
+      && [403, 503].includes(promptsResult.reason.status);
 
     setData({
       overview: overviewResult.value,

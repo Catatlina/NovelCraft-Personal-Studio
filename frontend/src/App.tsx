@@ -17,6 +17,7 @@ import { RankingCenter } from "./components/RankingCenter";
 import { NotFoundPage } from "./components/NotFoundPage";
 import { buildAiEditPreview, normalizeParagraphBreaks } from "./lib/editorPreview";
 import { cleanNovelTitle } from "./lib/titleDisplay";
+import { selectRefreshedChapter, shouldSyncEditorText, sortChapterItems } from "./lib/chapterRefresh";
 
 type ApiResponse<T> = { code: number | string; message: string; data: T };
 type Project = { id: string; name: string; description?: string };
@@ -567,6 +568,27 @@ export default function App() {
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);
     setNovel(n);
     void cacheSet(currentNovelCacheKey, n);
+
+    const hasActiveNode = r.nodes.some(node => ["pending", "queued", "running"].includes(node.status));
+    const settled = ["succeeded", "failed", "needs_review", "waiting_human"].includes(r.status) && !hasActiveNode;
+    if (settled) {
+      try {
+        const items = await api<Content[]>(`/api/v1/contents?project_id=${r.project_id}&parent_id=${r.novel_id}`);
+        const chapterItems = sortChapterItems(items.filter(item => item.type === "chapter"));
+        if (chapterItems.length > 0) {
+          void cacheSet(`contents:${r.novel_id}`, chapterItems);
+          const current = selectRefreshedChapter(chapterItems, chapter?.id);
+          const syncEditor = shouldSyncEditorText(chapter, editorTextRef.current, current, body => docToText(body as TipTapDoc));
+          setChapters(chapterItems);
+          setChapter(current);
+          if (current && syncEditor) setEditorText(docToText(current.body));
+          if (current) void loadVersions(current.id);
+        }
+      } catch {
+        // Run state remains authoritative when a post-run chapter refresh is
+        // temporarily unavailable; the next route/reload will retry it.
+      }
+    }
   }
 
   async function openGenerationHistory(item: GenerationHistoryItem) {
@@ -1146,8 +1168,6 @@ export default function App() {
     { id: "progress", label: "创作进度 · 查看 AI 工作流", action: () => setTab("progress") },
     { id: "editor", label: "章节编辑器 · 继续写作", action: () => setTab("editor") },
     { id: "review", label: "审阅与一致性 · 检查小说", action: () => setTab("review") },
-    { id: "quality-analysis", label: "质量分析看板 · 可视化报告", action: () => setTab("quality-analysis") },
-    { id: "genre-manager", label: "品类管理 · 品类库与规则", action: () => setTab("genre-manager") },
     { id: "settings", label: "小说设置 · AI 与创作偏好", action: () => setTab("settings") },
   ];
 

@@ -129,12 +129,12 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
     <div style={{ position: "relative" }}>
       {/* Toolbar */}
       <div style={{ display: "flex", gap: 4, padding: "4px 0", borderBottom: "1px solid var(--border-subtle)", marginBottom: 8 }}>
-        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive("bold") ? "active" : ""}><Bold size={14} /></button>
-        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive("italic") ? "active" : ""}><Italic size={14} /></button>
-        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive("heading") ? "active" : ""}><Heading size={14} /></button>
-        <button disabled={aiBusy} onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={14} /></button>
-        <button disabled={aiBusy} onClick={() => editor.chain().focus().undo().run()}><Undo size={14} /></button>
-        <button disabled={aiBusy} onClick={() => editor.chain().focus().redo().run()}><Redo size={14} /></button>
+        <button type="button" aria-label="加粗" title="加粗" disabled={aiBusy} onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive("bold") ? "active" : ""}><Bold size={14} /></button>
+        <button type="button" aria-label="斜体" title="斜体" disabled={aiBusy} onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive("italic") ? "active" : ""}><Italic size={14} /></button>
+        <button type="button" aria-label="二级标题" title="二级标题" disabled={aiBusy} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive("heading") ? "active" : ""}><Heading size={14} /></button>
+        <button type="button" aria-label="项目符号列表" title="项目符号列表" disabled={aiBusy} onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={14} /></button>
+        <button type="button" aria-label="撤销" title="撤销" disabled={aiBusy} onClick={() => editor.chain().focus().undo().run()}><Undo size={14} /></button>
+        <button type="button" aria-label="重做" title="重做" disabled={aiBusy} onClick={() => editor.chain().focus().redo().run()}><Redo size={14} /></button>
         <button disabled={aiBusy} onClick={() => onAiOp?.("rewrite_chapter")} title="整章重写"><RefreshCcw size={14} />整章重写</button>
       </div>
 

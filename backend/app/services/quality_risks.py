@@ -162,12 +162,18 @@ def build_quality_repair_contract(
 
     if continuity:
         status = str(continuity.get("status") or "").lower()
-        if status in {"flagged", "unchecked"}:
+        passed = continuity.get("passed")
+        if passed is False or status in {"broken", "flagged", "unchecked"}:
             reason = "；".join(str(item.get("content") or item.get("description") or item) for item in (continuity.get("risks") or [])[:3])
+            if not reason:
+                reason = "；".join(
+                    str(item.get("message") or item.get("description") or item)
+                    for item in (continuity.get("issues") or continuity.get("gaps") or [])[:3]
+                )
             risks.append({
                 "category": "continuity",
                 "label": RISK_LABELS["continuity"],
-                "severity": "high" if status == "flagged" else "medium",
+                "severity": "high" if passed is False or status in {"broken", "flagged"} else "medium",
                 "blocking": True,
                 "text": f"跨章连贯性检查{status}：{reason or continuity.get('error') or '缺少可验证证据'}",
                 "description": reason or str(continuity.get("error") or "缺少可验证的连续性证据"),

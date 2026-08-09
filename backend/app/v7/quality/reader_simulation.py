@@ -17,8 +17,15 @@
 - 作为审稿的补充维度，不替代现有质量门禁
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from dataclasses import asdict, dataclass
+import hashlib
+from typing import List, Dict, Any
+
+from ...gateway import complete
+
+
+class ReaderSimulationError(RuntimeError):
+    """The reader simulation could not produce a real, structured result."""
 
 
 @dataclass
@@ -162,7 +169,33 @@ def parse_reader_simulation_result(data: Dict[str, Any]) -> ReaderSimulationResu
     Returns:
         ReaderSimulationResult 对象
     """
-    overall_score = float(data.get("overall_score", 50))
+    if not isinstance(data, dict):
+        raise ReaderSimulationError("reader simulation provider output must be an object")
+
+    def validated_numeric(name: str, maximum: float) -> float:
+        if name not in data:
+            raise ReaderSimulationError(f"reader simulation output missing {name}")
+        try:
+            value = float(data[name])
+        except (TypeError, ValueError) as exc:
+            raise ReaderSimulationError(f"reader simulation output has invalid {name}") from exc
+        if not 0 <= value <= maximum:
+            raise ReaderSimulationError(f"reader simulation output has out-of-range {name}")
+        return value
+
+    def text(name: str) -> str:
+        value = data.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ReaderSimulationError(f"reader simulation output missing {name}")
+        return value.strip()
+
+    def string_list(name: str) -> list[str]:
+        value = data.get(name)
+        if not isinstance(value, list):
+            raise ReaderSimulationError(f"reader simulation output has invalid {name}")
+        return [str(item).strip() for item in value if str(item).strip()][:5]
+
+    overall_score = validated_numeric("overall_score", 100)
     
     # 确定等级
     if overall_score >= 85:
@@ -177,77 +210,87 @@ def parse_reader_simulation_result(data: Dict[str, Any]) -> ReaderSimulationResu
     return ReaderSimulationResult(
         overall_score=overall_score,
         grade=grade,
-        opening_hook_score=float(data.get("opening_hook_score", 5)),
-        opening_hook_comment=str(data.get("opening_hook_comment", "")),
-        continuation_intent_score=float(data.get("continuation_intent_score", 5)),
-        continuation_intent_comment=str(data.get("continuation_intent_comment", "")),
-        empathy_moments=data.get("empathy_moments", []),
-        empathy_score=float(data.get("empathy_score", 5)),
-        ai_smell_sections=data.get("ai_smell_sections", []),
-        ai_smell_severity=str(data.get("ai_smell_severity", "无")),
-        top_suggestion=str(data.get("top_suggestion", "")),
-        suggestion_priority=str(data.get("suggestion_priority", "中")),
+        opening_hook_score=validated_numeric("opening_hook_score", 10),
+        opening_hook_comment=text("opening_hook_comment"),
+        continuation_intent_score=validated_numeric("continuation_intent_score", 10),
+        continuation_intent_comment=text("continuation_intent_comment"),
+        empathy_moments=string_list("empathy_moments"),
+        empathy_score=validated_numeric("empathy_score", 10),
+        ai_smell_sections=string_list("ai_smell_sections"),
+        ai_smell_severity=text("ai_smell_severity"),
+        top_suggestion=text("top_suggestion"),
+        suggestion_priority=text("suggestion_priority"),
         reader_persona="",
         reading_time_estimate="",
-        overall_comment=str(data.get("overall_comment", ""))
+        overall_comment=text("overall_comment")
     )
 
 
-# ============== 模拟函数（占位，实际需要调用AI） ==============
+# ============== 真实 AI 读者模拟 ==============
 
 def simulate_reader_first_pass(
     chapter_text: str,
     platform: str = "general",
-    reader_persona: str = None
+    reader_persona: str = None,
+    *,
+    project_id: str | None = None,
+    user_id: str | None = None,
+    client_mutation_id: str | None = None,
 ) -> Dict[str, Any]:
     """
     模拟读者第一遍阅读的感受
     
-    注意：这是一个占位函数，实际实现需要调用AI gateway。
-    目前返回一个示例结果，用于测试和集成。
+    结果必须来自统一 AI Gateway。缺少项目作用域或 Provider 失败时直接
+    抛错，调用方不能把失败伪装成一份示例评分。
     
     Args:
         chapter_text: 章节正文
         platform: 平台类型，用于选择读者画像
         reader_persona: 自定义读者画像（可选，覆盖platform）
+        project_id: AI 调用和预算记账所需的项目作用域
+        user_id: 可选的预算/审计用户
         
     Returns:
         读者模拟结果（字典格式）
     """
-    # TODO: 实际实现需要调用 AI gateway
-    # 目前返回一个示例结果，用于测试集成
-    
-    persona = reader_persona or get_reader_persona(platform)
-    
-    # 简单的示例结果（实际应该由AI生成）
-    text_length = len(chapter_text)
-    has_dialogue = "「" in chapter_text or "“" in chapter_text
-    
-    # 根据文本特征给出一个简单的示例评分
-    base_score = 60
-    if text_length > 2000:
-        base_score += 10
-    if has_dialogue:
-        base_score += 5
-    
-    example_result = {
-        "opening_hook_score": 7,
-        "opening_hook_comment": "开头还行，能看下去，但不是特别惊艳",
-        "continuation_intent_score": 6,
-        "continuation_intent_comment": "有点好奇后面会发生什么，但也不是特别急",
-        "empathy_moments": ["主角遇到困难的时候有点代入感"],
-        "empathy_score": 6,
-        "ai_smell_sections": [],
-        "ai_smell_severity": "无",
-        "top_suggestion": "建议增加更多冲突，让节奏更快一点",
-        "suggestion_priority": "中",
-        "overall_score": base_score,
-        "overall_comment": "整体还可以，能看，但还不够吸引人"
-    }
-    
+    if not project_id:
+        raise ReaderSimulationError("reader simulation requires project_id for AI accounting")
+    if not isinstance(chapter_text, str) or not chapter_text.strip():
+        raise ReaderSimulationError("reader simulation requires chapter text")
+    if len(chapter_text) > 24000:
+        raise ReaderSimulationError("reader simulation chapter text exceeds the 24000-character limit")
+
+    persona = str(reader_persona or get_reader_persona(platform)).strip()[:3000]
+    mutation_id = client_mutation_id or (
+        "reader-simulation:" + hashlib.sha256(
+            f"{project_id}:{platform}:{persona}:{chapter_text}".encode("utf-8")
+        ).hexdigest()
+    )
+    output = complete(
+        run_id=None,
+        node_key="reader_simulation",
+        project_id=str(project_id),
+        user_id=user_id,
+        task_type="reader_simulation",
+        prompt_name="v7.reader.simulation",
+        variables={
+            "reader_persona": persona,
+            "chapter_text": chapter_text,
+            "platform": platform,
+        },
+        client_mutation_id=mutation_id,
+    )
+    parsed = parse_reader_simulation_result(output)
+    parsed.reader_persona = persona
+    parsed.reading_time_estimate = f"约 {max(1, round(len(chapter_text) / 500))} 分钟"
     return {
-        "result": example_result,
+        "result": asdict(parsed),
         "reader_persona": persona,
-        "text_length": text_length,
-        "note": "这是示例结果，实际使用时需要调用AI生成"
+        "text_length": len(chapter_text),
+        "provenance": {
+            "gateway": "v6.complete",
+            "task_type": "reader_simulation",
+            "prompt_name": "v7.reader.simulation",
+            "client_mutation_id": mutation_id,
+        },
     }

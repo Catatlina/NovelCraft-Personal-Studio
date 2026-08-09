@@ -1041,8 +1041,9 @@ class DeAIPipeline:
         "repeated_phrase",           # P0-1: 恢复重复短语检测
         "repeated_tic",
     }
-    # P0-1 质量整改：降低语义重写触发门槛，low级别也触发
-    SEMANTIC_REWRITE_SEVERITIES = {"low", "medium", "high"}
+    # Low-severity observations remain auditable metrics, but must not trigger
+    # a billable whole-chapter provider rewrite on their own.
+    SEMANTIC_REWRITE_SEVERITIES = {"medium", "high"}
     DETERMINISTIC_HARD_FLAGS = {
         "dash_density",
         "uniform_cadence",

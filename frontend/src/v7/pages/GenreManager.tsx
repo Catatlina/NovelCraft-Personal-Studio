@@ -8,7 +8,7 @@
  * - 视觉层次分明
  * - 真实 API 数据，无 mock
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   ChevronDown,
@@ -23,8 +23,9 @@ import {
   Sparkles,
   Upload,
   Loader2,
+  LockKeyhole,
 } from 'lucide-react';
-import brainApi from '../api/client';
+import brainApi, { V7ApiError } from '../api/client';
 
 interface GenrePack {
   id: string;
@@ -279,12 +280,20 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [accessRestricted, setAccessRestricted] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createDraft, setCreateDraft] = useState({ name: '', slug: '', description: '', scope: 'custom' });
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // ── 加载品类树 ──────────────────────────────────────────────────────
 
   const loadGenreTree = useCallback(async () => {
     setLoadingTree(true);
     setTreeError(null);
+    setAccessRestricted(false);
     try {
       const result = await brainApi.getGenreTree();
       setGenreTree(result.tree || []);
@@ -312,6 +321,7 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
         }
       }
     } catch (err: any) {
+      if (err instanceof V7ApiError && [403, 503].includes(err.status)) setAccessRestricted(true);
       setTreeError(err.message || '加载品类树失败');
     } finally {
       setLoadingTree(false);
@@ -423,6 +433,18 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
     };
   }, [selectedGenre, styleRules, qualityRules, forbiddenRules, knowledgeList, inheritanceChain]);
 
+  if (accessRestricted) {
+    return (
+      <section className="v7-panel v7-access-panel" aria-labelledby="genre-access-title">
+        <div className="v7-access-icon"><LockKeyhole size={22} /></div>
+        <p className="v7-kicker">品类库</p>
+        <h2 id="genre-access-title">需要管理员权限</h2>
+        <p>品类规则、知识库和导入导出属于工程管理数据，当前账号没有访问权限。</p>
+        <button className="v7-btn v7-btn-secondary" onClick={loadGenreTree}>重新检查权限</button>
+      </section>
+    );
+  }
+
   // ── 渲染品类树节点 ──────────────────────────────────────────────────
 
   const renderTreeNode = (node: any, level: number = 0) => {
@@ -495,6 +517,103 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
     </div>
   );
 
+  function openCreateDialog() {
+    setCreateError('');
+    setCreateDraft({ name: '', slug: '', description: '', scope: 'custom' });
+    setCreateOpen(true);
+  }
+
+  async function createGenre() {
+    const name = createDraft.name.trim();
+    const slug = createDraft.slug.trim();
+    if (!name || !slug) {
+      setCreateError('品类名称和 slug 不能为空');
+      return;
+    }
+    setCreateBusy(true);
+    setCreateError('');
+    try {
+      const result = await brainApi.createGenrePack({
+        name,
+        slug,
+        description: createDraft.description.trim() || null,
+        scope: createDraft.scope,
+        is_builtin: false,
+        is_active: true,
+      });
+      setCreateOpen(false);
+      setActionMessage(`已创建品类「${result.pack?.name || name}」。`);
+      await loadGenreTree();
+      if (result.pack?.id) setSelectedGenreId(result.pack.id);
+    } catch (err: any) {
+      setCreateError(err.message || '新建品类失败');
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
+  function exportGenreLibrary() {
+    void (async () => {
+      try {
+        const result = await brainApi.listGenrePacks({ limit: 200 });
+        const payload = {
+          format: 'starlume-genre-library',
+          version: 1,
+          exported_at: new Date().toISOString(),
+          packs: result.packs || [],
+        };
+        const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `starlume-genre-library-${new Date().toISOString().slice(0, 10)}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        setActionMessage(`已导出 ${payload.packs.length} 个品类。`);
+      } catch (err: any) {
+        setActionMessage(`导出失败：${err.message || '品类库读取失败'}`);
+      }
+    })();
+  }
+
+  async function importGenreLibrary(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const packs = Array.isArray(parsed) ? parsed : parsed?.packs;
+      if (!Array.isArray(packs) || packs.length === 0) throw new Error('文件中没有可导入的品类');
+      let created = 0;
+      const failures: string[] = [];
+      for (const pack of packs) {
+        if (!pack || pack.is_builtin || !String(pack.name || '').trim() || !String(pack.slug || '').trim()) continue;
+        try {
+          await brainApi.createGenrePack({
+            name: String(pack.name).trim(),
+            slug: String(pack.slug).trim(),
+            description: pack.description || null,
+            scope: pack.scope || 'custom',
+            is_builtin: false,
+            is_active: pack.is_active !== false,
+            icon_url: pack.icon_url || null,
+            extra_metadata: pack.extra_metadata || {},
+          });
+          created += 1;
+        } catch (err: any) {
+          failures.push(`${pack.name || pack.slug}: ${err.message || '导入失败'}`);
+        }
+      }
+      await loadGenreTree();
+      setActionMessage(
+        failures.length
+          ? `已导入 ${created} 个品类，${failures.length} 个失败：${failures.join('；')}`
+          : `已导入 ${created} 个品类。`,
+      );
+    } catch (err: any) {
+      setActionMessage(`导入失败：${err.message || 'JSON 文件无效'}`);
+    }
+  }
+
   // ── 主渲染 ──────────────────────────────────────────────────────────
 
   return (
@@ -506,20 +625,39 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
           <p className="v7-page-desc">管理小说品类规则、风格卡和知识库</p>
         </div>
         <div className="v7-page-actions">
-          <button className="v7-btn v7-btn-secondary">
+          <input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={importGenreLibrary} />
+          <button className="v7-btn v7-btn-secondary" onClick={() => importInputRef.current?.click()}>
             <Upload size={16} />
             导入
           </button>
-          <button className="v7-btn v7-btn-secondary">
+          <button className="v7-btn v7-btn-secondary" onClick={exportGenreLibrary}>
             <Download size={16} />
             导出
           </button>
-          <button className="v7-btn v7-btn-primary">
+          <button className="v7-btn v7-btn-primary" onClick={openCreateDialog}>
             <Plus size={16} />
             新建品类
           </button>
         </div>
       </div>
+
+      {actionMessage && <div className="v7-inline-notice" role="status">{actionMessage}</div>}
+      {createOpen && (
+        <div className="v7-panel" role="dialog" aria-modal="true" aria-labelledby="create-genre-title" style={{ marginBottom: 16 }}>
+          <div className="v7-panel-head">
+            <h3 id="create-genre-title">新建品类</h3>
+            <button type="button" className="v7-link-button" onClick={() => setCreateOpen(false)}>取消</button>
+          </div>
+          <div className="v7-form-grid">
+            <label>名称<input value={createDraft.name} onChange={e => setCreateDraft(draft => ({ ...draft, name: e.target.value }))} placeholder="例如：都市系统" /></label>
+            <label>slug<input value={createDraft.slug} onChange={e => setCreateDraft(draft => ({ ...draft, slug: e.target.value }))} placeholder="例如：urban-system" /></label>
+            <label>范围<select value={createDraft.scope} onChange={e => setCreateDraft(draft => ({ ...draft, scope: e.target.value }))}><option value="custom">自定义</option><option value="webnovel">通用网文</option><option value="fanqie">番茄小说</option><option value="qidian">起点中文网</option></select></label>
+            <label>描述<textarea value={createDraft.description} onChange={e => setCreateDraft(draft => ({ ...draft, description: e.target.value }))} rows={2} /></label>
+          </div>
+          {createError && <p className="v7-error-text" role="alert">{createError}</p>}
+          <button type="button" className="v7-btn v7-btn-primary" disabled={createBusy} onClick={() => void createGenre()}>{createBusy ? '创建中…' : '创建品类'}</button>
+        </div>
+      )}
 
       <div className="v7-genre-layout">
         {/* ── 左侧：品类树 ── */}
@@ -562,7 +700,7 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
             </div>
 
             <div className="v7-genre-sidebar-footer">
-              <button className="v7-btn v7-btn-primary v7-btn-block">
+              <button className="v7-btn v7-btn-primary v7-btn-block" onClick={openCreateDialog}>
                 <Plus size={14} />
                 新建品类
               </button>

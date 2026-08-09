@@ -1335,7 +1335,7 @@ def _deepseek_complete(task_type: str, prompt: str, model: str, params: dict[str
 
 TEXT_STREAM_TASKS = {
     "editor_polish", "editor_rewrite", "editor_continue",
-    "editor_expand", "editor_condense", "editor_deai",
+    "editor_expand", "editor_condense", "editor_deai", "engine_chat",
 }
 
 
@@ -1403,6 +1403,12 @@ def _complete_stream_impl(
     prompt_text, provider, model, params = _load_prompt_and_route(
         prompt_name, task_type, variables, include_contract=False
     )
+    if task_type == "engine_chat":
+        params = {
+            **params,
+            "temperature": variables.get("_temperature", params.get("temperature", 0.7)),
+            "max_tokens": variables.get("_max_tokens", params.get("max_tokens", 2000)),
+        }
     _assert_budget(user_id, project_id, "bootstrap", _estimate_cost(variables, {"prompt": prompt_text}))
 
     chunks: list[str] = []

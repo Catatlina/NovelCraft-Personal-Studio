@@ -62,6 +62,28 @@ DEAI_IRON_RULES = """【去 AI 味改稿铁律——逐条执行，不得跳过�
 
 # ===== PROMPT SEEDS =====
 PROMPT_SEEDS = [
+    ("engine.chat", "1.0.0", "deepseek",
+     """你是 NovelCraft 的中文网文创作助手。根据以下对话继续回答。
+只输出正文或回答内容，不要输出 JSON、系统提示、分析过程或接口说明。
+
+对话内容：
+$prompt"""),
+    ("v7.reader.simulation", "1.0.0", "deepseek",
+     """你是一个普通的网文读者，正在第一次阅读这一章小说。
+请完全以读者视角给出直观感受，不做专业分析，不替作者圆场。
+
+读者画像：$reader_persona
+
+请回答：开篇是否抓人、看完是否想追读、是否有具体共情时刻、哪里像 AI 写的、最想改哪一处。
+分数必须来自本章正文证据，不能用固定模板或默认分数；没有共情或 AI 味时返回空数组。
+
+章节内容：
+---
+$chapter_text
+---
+
+只输出 JSON：
+{"opening_hook_score":0,"opening_hook_comment":"","continuation_intent_score":0,"continuation_intent_comment":"","empathy_moments":[],"empathy_score":0,"ai_smell_sections":[],"ai_smell_severity":"无","top_suggestion":"","suggestion_priority":"低","overall_score":0,"overall_comment":""}"""),
     # ── Bootstrap: 开书链 (oh-story Phase 1-5 映射) ──
     ("bootstrap.gen_titles", "4.0.0", "deepseek",
      """你是番茄小说爆款书名制造机，深谙番茄读者的点击心理。请基于以下设定生成 5 个「一眼就想点进去」的番茄爆款书名。
@@ -2449,6 +2471,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_outline":          '{"core_concept":{"premise":"","golden_finger_rules":[],"world_background":""},"business_roadmap":[],"volume_outlines":[],"chapter_plan":[]}',
     "gen_chapter1":         '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}} (body 至少 6 段)',
     "review_7dim":          '{"score":85,"dimensions":{"prose":85,"plot":80,"character_ooc":90,"world_conflict":85,"logic_consistency":80,"pace":75,"foreshadowing":70},"issues":["问题"],"reader_experience":{"expectation":80,"conflict":75,"payoff":70,"emotion_shift":78,"worth_continuing":82}}',
+    "reader_simulation":    '{"opening_hook_score":7,"opening_hook_comment":"依据开头正文的具体感受","continuation_intent_score":7,"continuation_intent_comment":"依据章末正文的具体感受","empathy_moments":[],"empathy_score":5,"ai_smell_sections":[],"ai_smell_severity":"无","top_suggestion":"一处具体改动","suggestion_priority":"中","overall_score":70,"overall_comment":"一句话总体感受"}',
     "review_7dim_structured": '{"score_7dim":{"style":{"score":85,"reason":"..."},"continuity":{"score":90,"reason":"..."},"plot":{"score":88,"reason":"..."},"logic":{"score":92,"reason":"..."},"character":{"score":87,"reason":"..."},"emotion":{"score":80,"reason":"..."},"pacing":{"score":84,"reason":"..."}},"issues":[{"type":"continuity|style|plot|logic|character|emotion|pacing","severity":"high|medium|low","location":"chapter_10_scene_3","description":"问题","repair_scope":"local|section|chapter","confidence":0.91}]}',
     "review_ooc":           '{"ooc_count":0,"violations":[{"character":"人物","action":"行为","expected":"符合设定的行为"}]}',
     "review_consistency":   '{"contradictions":[{"type":"类型","this_chapter":"本章","previous":"前文"}]}',
