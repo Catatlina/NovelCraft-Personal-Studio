@@ -21,6 +21,11 @@ from ..v7.quality.webnovel_strategy import (
     resolve_webnovel_strategy,
     strategy_metadata as webnovel_strategy_metadata,
 )
+from ..v7.quality.report_distillation import (
+    report_pack_metadata,
+    render_report_directive,
+    select_report_pack,
+)
 
 
 QUALITY_PROFILE_SCHEMA_VERSION = "webnovel-quality-profile-v1"
@@ -46,8 +51,18 @@ _GENRE_ALIASES = {
     "xuanhuan": "xuanhuan",
     "悬疑": "suspense",
     "灵异": "suspense",
+    "suspense": "suspense",
     "科幻": "science_fiction",
+    "science_fiction": "science_fiction",
     "历史": "history",
+    "history": "history",
+    "游戏": "game",
+    "游戏电竞": "game",
+    "game": "game",
+    "洪荒": "fengshen",
+    "封神": "fengshen",
+    "洪荒封神": "fengshen",
+    "fengshen": "fengshen",
 }
 
 _SUBGENRE_ALIASES = {
@@ -387,6 +402,16 @@ def normalize_genre(value: Any) -> str:
         return "urban"
     if any(token in raw for token in ("玄幻", "仙侠", "修仙", "高武")):
         return "xuanhuan"
+    if any(token in raw for token in ("悬疑", "灵异", "推理")):
+        return "suspense"
+    if any(token in raw for token in ("科幻", "末日")):
+        return "science_fiction"
+    if any(token in raw for token in ("游戏", "电竞", "网游")):
+        return "game"
+    if any(token in raw for token in ("洪荒", "封神")):
+        return "fengshen"
+    if any(token in raw for token in ("历史", "穿越", "三国", "唐宋", "明清")):
+        return "history"
     return "urban" if not raw else raw
 
 
@@ -397,7 +422,10 @@ def normalize_subgenre(value: Any, genre: str = "") -> str:
     for alias, key in _SUBGENRE_ALIASES.items():
         if alias in raw:
             return key
-    return "xuanhuan_upgrade" if normalize_genre(genre) == "xuanhuan" else "urban"
+    normalized_genre = normalize_genre(genre)
+    if normalized_genre in {"history", "suspense", "science_fiction", "game", "fengshen"}:
+        return normalized_genre
+    return "xuanhuan_upgrade" if normalized_genre == "xuanhuan" else "urban"
 
 
 def normalize_style_plugin(value: Any) -> str:
@@ -469,6 +497,10 @@ def select_quality_profile(
         "platform": platform_key,
         "genre": genre_key,
         "subgenre": subgenre_key,
+        # Reality-vs-fiction is an explicit project choice.  The default
+        # 爽文 profile allows ordinary real-world place names, while projects
+        # that require a fully fictional setting can opt into the hard gate.
+        "fictional_setting_required": bool(overrides.get("fictional_setting_required", False)),
         "label": " / ".join(
             item
             for item in (
@@ -598,6 +630,31 @@ def select_quality_profile(
         "max_low_payoff_streak": merged["payoff_policy"].get("max_low_payoff_streak", 2),
         "payoff_phases": ["pressure", "build", "burst", "feedback", "aftershock"],
     }
+    report_pack = select_report_pack(
+        platform=platform_key,
+        genre=genre_key,
+        subgenre=subgenre_key,
+    )
+    merged["report_pack"] = report_pack
+    merged["report_pack_id"] = report_pack.get("pack_id")
+    merged["report_hard_contracts"] = list(report_pack.get("hard_contracts") or [])
+    merged["report_soft_metrics"] = deepcopy(report_pack.get("soft_metrics") or {})
+    merged["report_directive"] = render_report_directive(report_pack)
+    merged["report_validator_targets"] = list(report_pack.get("validator_targets") or [])
+    merged["report_provenance"] = {
+        "source": report_pack.get("source_id"),
+        "refs": list(report_pack.get("report_refs") or []),
+        "hard_gate": False,
+    }
+    merged["ledgers"] = _unique(
+        list(merged.get("ledgers") or []) + list(report_pack.get("ledger_rules") or [])
+    )
+    merged["chapter_rules"] = _unique(
+        list(merged.get("chapter_rules") or []) + list(report_pack.get("hard_contracts") or [])
+    )
+    merged["provenance"] = _unique(
+        list(merged.get("provenance") or []) + [str(report_pack.get("source_id") or "")]
+    )
     return merged
 
 
@@ -607,7 +664,14 @@ def profile_from_context(context: dict[str, Any] | None) -> dict[str, Any]:
     # Explicit project fields are authoritative. A stored profile is a compiled
     # snapshot and may be stale after a plan rewrite; its old subgenre/profile
     # id must not silently change the active writing strategy.
-    for key in ("platform", "genre", "subgenre", "style_plugin", "writing_plugin"):
+    for key in (
+        "platform",
+        "genre",
+        "subgenre",
+        "style_plugin",
+        "writing_plugin",
+        "fictional_setting_required",
+    ):
         value = context.get(key)
         if value not in (None, ""):
             raw[key] = value
@@ -687,7 +751,7 @@ def compile_quality_directive(
         else "可以承接前章后果，但必须兑现前章后果或制造新的可见压力"
     )
     payoff_text = (
-        f"爽点执行：{action_rule}；按压制→蓄力→爆发→反馈→余波推进；"
+        f"爽点策略/执行：{action_rule}；按压制→蓄力→爆发→反馈→余波推进；"
         f"当前阶段爽点强度不低于{payoff_floor}档，不能连续超过{payoff_streak}章只有铺垫没有兑现。"
     )
 
@@ -716,6 +780,7 @@ def compile_quality_directive(
     rhythm_text = (
         "节奏控制：每约800-1200字出现一次局部变化（动作/信息/情绪转折）；"
         "转折前给读者可见的动作、线索或异常，高潮后留下具体余波；"
+        "节拍表写明的过桥、交易、对抗、修炼或揭示必须写成可见过程，不能用一句旁白从准备跳到结果；"
         "人物只能使用自己已经获得的信息，能力/物品/时间/地点必须有来源。"
     )
     if chapter_rules:
@@ -728,10 +793,19 @@ def compile_quality_directive(
     if market_directive or style_plugin:
         style_parts = []
         if market_directive:
-            style_parts.append(f"平台/题材特色：{market_directive}")
+            style_parts.append(f"平台/题材实证软基线：{market_directive}")
         if style_plugin:
-            style_parts.append("风格插件：" + "；".join(str(item) for item in style_plugin[:2]))
+            style_parts.append(
+                "可选风格插件（已启用）："
+                + "；".join(str(item) for item in style_plugin[:2])
+                + "；不机械凑数。"
+            )
+            plugin_rules = profile.get("style_plugin_rules") or []
+            if plugin_rules:
+                style_parts.append("插件执行重点：" + "；".join(str(item) for item in plugin_rules[:10]))
         style_text = "\n" + "\n".join(style_parts)
+
+    report_text = str(profile.get("report_directive") or "").strip()
 
     # 本章爽点契约（如果有的话）
     contract_text = ""
@@ -757,10 +831,23 @@ def compile_quality_directive(
         f"{third_person_generation_contract()}\n"
         f"{content_generation_contract(profile)}"
     )
+    failure_constraints = profile.get("failure_pattern_constraints") or []
+    failure_text = ""
+    if failure_constraints:
+        failure_text = (
+            "历史报告失败模式："
+            + "、".join(
+                str(item.get("id"))
+                for item in failure_constraints[:8]
+                if isinstance(item, dict) and item.get("id")
+            )
+            + "；生成前先规避对应约束，失败后保留可定位证据。"
+        )
 
     lines = [
         f"质量策略核心5条（精简版）：以读者继续阅读为第一目标。",
         base_contract,
+        failure_text,
         opening_text,
         payoff_text,
         feedback_text,
@@ -769,6 +856,8 @@ def compile_quality_directive(
     ]
     if style_text:
         lines.append(style_text.strip())
+    if report_text:
+        lines.append(report_text)
     if contract_text:
         lines.append(contract_text.strip())
 
@@ -783,6 +872,7 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "platform": profile.get("platform"),
         "genre": profile.get("genre"),
         "subgenre": profile.get("subgenre"),
+        "fictional_setting_required": bool(profile.get("fictional_setting_required", False)),
         "style_plugin": profile.get("style_plugin", ""),
         "style_plugin_status": profile.get("style_plugin_status", "not_requested"),
         "style_plugin_label": profile.get("style_plugin_label", ""),
@@ -800,6 +890,12 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         ),
         "ledgers": list(profile.get("ledgers") or []),
         "style_plugin_soft_metrics": deepcopy(profile.get("style_plugin_soft_metrics") or {}),
+        "report_pack": report_pack_metadata(profile.get("report_pack")),
+        "report_pack_id": profile.get("report_pack_id", ""),
+        "report_hard_contracts": list(profile.get("report_hard_contracts") or []),
+        "report_soft_metrics": deepcopy(profile.get("report_soft_metrics") or {}),
+        "report_validator_targets": list(profile.get("report_validator_targets") or []),
+        "report_provenance": deepcopy(profile.get("report_provenance") or {}),
         "provenance": list(profile.get("provenance") or []),
         "knowledge_provenance": knowledge_source_metadata(),
     }
