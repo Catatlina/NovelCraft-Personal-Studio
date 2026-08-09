@@ -17,7 +17,7 @@ def _core_mechanic_contract() -> dict:
         "trigger_and_loop": "触发→选择→行动→收益→代价→状态变化→新冲突",
         "capability_loop": "触发→选择→行动→可见收益→代价→状态变化→新问题",
         "choice_surface": "选择、取舍、放弃或承担风险",
-        "visible_payoff": "事件和对手反应中的收益",
+        "visible_payoff": "事件和对手反应中的收益，对手当场失去先手，旁观者震惊",
         "limits_and_costs": "次数、资源、冷却和因果代价",
         "failure_and_risks": "失败、暴露和反噬",
         "state_writeback": "写回现实状态并产生后果",

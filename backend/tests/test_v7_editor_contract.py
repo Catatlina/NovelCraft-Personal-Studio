@@ -74,14 +74,17 @@ def test_v7_editor_candidate_rejects_first_person_and_urban_real_entity():
         )
     assert pov_error.value.code == "EDITOR_THIRD_PERSON_REQUIRED"
 
-    with pytest.raises(V7EditorError) as policy_error:
-        validate_editor_candidate(
-            "polish",
-            "沈舟推开门，屋里一片漆黑。" * 30,
-            "沈舟推开门，上海一片漆黑。" * 30,
-            quality_profile={"genre": "urban"},
-        )
-    assert policy_error.value.code == "EDITOR_CONTENT_POLICY_FAILED"
+    policy_result = validate_editor_candidate(
+        "polish",
+        "沈舟推开门，屋里一片漆黑。" * 30,
+        "沈舟推开门，上海一片漆黑。" * 30,
+        quality_profile={"genre": "urban"},
+    )
+    assert policy_result["passed"] is True
+    assert any(
+        item["code"] == "real_world_entity"
+        for item in policy_result["content_policy"]["warnings"]
+    )
 
 
 def test_v7_editor_candidate_rejects_duplicate_paragraphs():

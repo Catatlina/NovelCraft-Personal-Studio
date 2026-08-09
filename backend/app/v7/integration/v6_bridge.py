@@ -152,6 +152,24 @@ def _persist_v7_chapter(
         raise ValueError("cannot persist an empty V7 chapter")
     if status not in {"reviewed", "needs_rewrite", "needs_review"}:
         raise ValueError(f"unsupported V7 content status: {status}")
+    extra_meta = dict(extra_meta or {})
+    if status == "reviewed":
+        # Defense in depth: callers may reach this V6 boundary without going
+        # through StoryDirector.  Never let a high score or a stale caller
+        # turn an unverified V7 review into a publishable row.
+        from ..quality.review_gate import reviewed_gate_failures
+        gate_input = {"canonical_engine": "v7", **extra_meta}
+        gate_failures = reviewed_gate_failures(gate_input)
+        if gate_failures:
+            status = "needs_rewrite"
+            quality_status = "v7_quality_gate_failed"
+            quality_gate = {
+                **(quality_gate or {}),
+                "passed": False,
+                "failures": [*((quality_gate or {}).get("failures") or []), *gate_failures],
+            }
+            review_issues = [*(review_issues or []), *gate_failures]
+            extra_meta["reviewed_gate_failures"] = gate_failures
     mapping = ensure_novel_project_link(novel_id, project_id)
     project_id = mapping["project_id"]
 

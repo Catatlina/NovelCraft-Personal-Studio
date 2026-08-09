@@ -92,7 +92,7 @@ def test_generation_directive_places_pov_and_urban_safety_before_writing():
     directive = compile_quality_directive(profile, chapter_number=1)
 
     assert directive.index("最高优先级：第三人称叙述硬约束") < directive.index("开篇阶段")
-    assert "完全架空的现代社会" in directive
+    assert "都市爽文可以使用现实地名" in directive
     assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in directive
     assert profile["narrative_pov"] == "third_person_narrative"
     assert "第三人称限知" in third_person_generation_contract()
@@ -113,7 +113,7 @@ def test_pre_generation_plot_prompt_inherits_the_same_contract():
     )
 
     assert "第三人称叙述硬约束" in prompt
-    assert "完全架空的现代社会" in prompt
+    assert "都市爽文可以使用现实地名" in prompt
     assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in prompt
 
 
@@ -143,16 +143,27 @@ def test_legacy_editor_and_continuation_seeds_keep_the_generation_contract():
         assert "TMD 只能作为脱敏替代" in template
 
 
-def test_urban_content_policy_rejects_known_real_entity_and_profanity_but_keeps_plant_grass():
+def test_urban_content_policy_warns_on_real_entity_and_keeps_plant_grass():
     profile = select_quality_profile(genre="都市")
 
     blocked = analyze_content_policy("上海的公司骂了一句卧槽。", profile)
     allowed = analyze_content_policy("窗外是一片草地，TMD只是脱敏缩写。", profile)
 
-    assert blocked["passed"] is False
-    assert "上海" in blocked["real_world_entity_hits"]
-    assert any(item["code"] == "profanity_or_insult" for item in blocked["failures"])
+    assert blocked["passed"] is True
+    assert any(item["token"] == "上海" for item in blocked["real_world_entity_hits"])
+    assert any(item["code"] == "real_world_entity" for item in blocked["warnings"])
+    assert blocked["profanity_detail"]["total_info"] > 0
     assert allowed["passed"] is True
+
+
+def test_urban_project_can_require_a_fictional_setting():
+    profile = select_quality_profile(genre="都市", overrides={"fictional_setting_required": True})
+
+    report = analyze_content_policy("上海的公司准备上市。", profile)
+
+    assert report["passed"] is False
+    assert report["fictional_setting_required"] is True
+    assert any(item["code"] == "real_world_entity" for item in report["failures"])
 
 
 def test_quality_gate_rejects_pov_and_content_policy_even_with_high_scores():
@@ -181,11 +192,15 @@ def test_quality_gate_rejects_pov_and_content_policy_even_with_high_scores():
 
 def test_rework_uses_local_repair_only_for_expression_level_failures():
     assert StoryDirector._can_use_local_prose_repair({
+        "failures": [{"dimension": "third_person_narrative"}]
+    }) is True
+
+    assert StoryDirector._can_use_local_prose_repair({
         "failures": [
             {"dimension": "third_person_narrative"},
             {"dimension": "ai_pattern_risk"},
         ]
-    }) is True
+    }) is False
 
     assert StoryDirector._can_use_local_prose_repair({
         "failures": [{"dimension": "pacing"}]

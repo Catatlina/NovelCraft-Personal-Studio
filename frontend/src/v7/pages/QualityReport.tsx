@@ -33,6 +33,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Lightbulb,
+  LockKeyhole,
 } from 'lucide-react';
 import {
   Bar,
@@ -52,7 +53,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import brainApi from '../api/client';
+import brainApi, { V7ApiError } from '../api/client';
 
 interface QualityReportProps {
   novelId?: string | null;
@@ -116,6 +117,10 @@ function getAnomalyTone(type: string) {
     case 'depression': return 'indigo' as const;
     default: return 'gray' as const;
   }
+}
+
+function isAdminAccessError(error: unknown): error is V7ApiError {
+  return error instanceof V7ApiError && (error.status === 403 || error.status === 503);
 }
 
 // ============ 子组件 ============
@@ -193,6 +198,7 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
   const [aiSmellError, setAiSmellError] = useState<string | null>(null);
   const [charactersError, setCharactersError] = useState<string | null>(null);
   const [emotionError, setEmotionError] = useState<string | null>(null);
+  const [accessRestricted, setAccessRestricted] = useState(false);
 
   // 当选中的章节变化时更新当前章节
   useEffect(() => {
@@ -219,6 +225,7 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
       const result = await brainApi.getQualityReview(currentChapterId);
       setQualityReview(result);
     } catch (err: any) {
+      if (isAdminAccessError(err)) setAccessRestricted(true);
       setReviewError(err.message || '加载质量审查失败');
     } finally {
       setLoadingReview(false);
@@ -236,6 +243,7 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
       const result = await brainApi.getAiSmell(currentChapterId);
       setAiSmell(result);
     } catch (err: any) {
+      if (isAdminAccessError(err)) setAccessRestricted(true);
       setAiSmellError(err.message || '加载 AI 味检测失败');
     } finally {
       setLoadingAiSmell(false);
@@ -262,6 +270,7 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
       }
       setCharacterStats(result);
     } catch (err: any) {
+      if (isAdminAccessError(err)) setAccessRestricted(true);
       setCharactersError(err.message || '加载角色统计失败');
     } finally {
       setLoadingCharacters(false);
@@ -279,6 +288,7 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
       const result = await brainApi.getEmotionalArc(novelId);
       setEmotionalArc(result);
     } catch (err: any) {
+      if (isAdminAccessError(err)) setAccessRestricted(true);
       setEmotionError(err.message || '加载情感弧线失败');
     } finally {
       setLoadingEmotion(false);
@@ -333,6 +343,7 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
   // ── 刷新当前视图 ────────────────────────────────────────────────────
 
   const refreshCurrent = useCallback(() => {
+    setAccessRestricted(false);
     if (activeView === 'depth') {
       loadQualityReview();
     } else if (activeView === 'ai_smell') {
@@ -348,6 +359,24 @@ export default function QualityReport({ novelId, chapters = [], selectedChapterI
 
   const scoreLevel = getScoreLevel(overview.overallScore);
   const hasReviewData = qualityReview?.has_data && qualityReview.dimensions?.length > 0;
+
+  if (accessRestricted) {
+    return (
+      <section className="v7-panel v7-access-panel" style={{ minHeight: 280, display: 'grid', placeItems: 'center' }}>
+        <div style={{ display: 'grid', justifyItems: 'center', gap: 12, textAlign: 'center', maxWidth: 420 }}>
+          <LockKeyhole size={34} style={{ color: 'var(--warning)' }} />
+          <h2 style={{ margin: 0 }}>需要管理员权限</h2>
+          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+            质量分析属于管理员功能，当前账号或环境未开放访问。
+          </p>
+          <button className="v7-refresh-button" onClick={refreshCurrent}>
+            <RefreshCw size={14} />
+            重新检查权限
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="v7-monitor">

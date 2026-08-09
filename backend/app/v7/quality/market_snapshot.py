@@ -391,6 +391,8 @@ def market_benchmark_directive(benchmark: dict[str, Any] | None) -> str:
         parts.append(f"金手指/核心规则软参考在第{opening['mechanic_reveal_by_chapter']}章前")
     if hints:
         parts.append("前三章方法=" + "；".join(str(item) for item in hints[:3]))
+    if benchmark.get("design_rule"):
+        parts.append(f"金手指四轴候选={benchmark['design_rule']}")
     evidence = benchmark.get("mechanic_evidence") or {}
     for family, item in list(evidence.items())[:2]:
         variants = item.get("variants") if isinstance(item, dict) else {}

@@ -181,6 +181,7 @@ def test_payoff_score_is_explainable_and_does_not_claim_to_be_llm_quality():
         "protagonist_agency",
         "result_visibility",
         "feedback_effectiveness",
+        "feedback_intensity",
         "payoff_intensity",
         "hook_strength",
         "payoff_variety",

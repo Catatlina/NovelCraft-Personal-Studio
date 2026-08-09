@@ -9,38 +9,54 @@ from pydantic import BaseModel, Field
 from app.db import connect, encode, decode, new_id
 from app.core.security import get_current_user
 from app.core.authz import require_project_membership
+from app.config import settings
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+def _admin_allowlist() -> set[str]:
+    return {
+        email.strip().lower()
+        for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    }
+
+
+def _require_configured_admin(user: dict, *, read_only: bool = False) -> dict:
+    """Keep local/test fixtures convenient without failing open in production."""
+    allowed = _admin_allowlist()
+    if not allowed:
+        if settings.environment.lower() not in {"production", "prod"}:
+            return user
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "ADMIN_NOT_CONFIGURED",
+                "message": "管理员白名单未配置，管理接口已关闭",
+                "data": {"retryable": False, "read_only": read_only},
+            },
+        )
+    if user["email"].lower() not in allowed:
+        raise HTTPException(status_code=403, detail="admin access required")
+    return user
 
 
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """Admin-namespace write guard.
 
-    When ``NOVELCRAFT_ADMIN_EMAILS`` is not configured (single-user personal
-    instance), writes are allowed — matching the read guard ``require_admin_reads``
-    so the owner is never locked out. When configured, only whitelisted emails
-    may write.
+    Production never treats an empty allowlist as permission to write. Local
+    and test environments retain the historical convenience behavior.
     """
-    allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
-    if not allowed:
-        return user
-    if user["email"].lower() in allowed:
-        return user
-    raise HTTPException(status_code=403, detail="admin access required")
+    return _require_configured_admin(user)
 
 
 def require_admin_reads(user: dict = Depends(get_current_user)) -> dict:
     """QA-003: admin-namespace read guard.
 
-    When NOVELCRAFT_ADMIN_EMAILS is configured, reads are restricted to those
-    admins like the write endpoints. A single-user personal instance without
-    the variable keeps authenticated read access (the data is non-secret
-    prompt/route configuration), so upgrading does not lock the owner out.
+    In production, reads and writes both require an explicit allowlist. Local
+    and test environments retain authenticated read access for compatibility.
     """
-    allowed = {email.strip().lower() for email in os.getenv("NOVELCRAFT_ADMIN_EMAILS", "").split(",") if email.strip()}
-    if allowed and user["email"].lower() not in allowed:
-        raise HTTPException(status_code=403, detail="admin access required")
-    return user
+    return _require_configured_admin(user, read_only=True)
 
 
 class ProviderSettings(BaseModel):

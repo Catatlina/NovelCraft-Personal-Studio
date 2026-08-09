@@ -296,6 +296,7 @@ def analyze_content_policy(
     quality_profile = quality_profile or {}
     genre = quality_profile.get("genre", "")
     is_urban = genre in {"urban", "都市", "city", "modern"}
+    fictional_setting_required = bool(quality_profile.get("fictional_setting_required", False))
 
     profanity_detail = _classify_profanity(text)
 
@@ -343,13 +344,22 @@ def analyze_content_policy(
             "severity": "low",
         })
 
-    # 现实实体 → 警告（仅都市题材）
+    # 现实实体默认只提醒，爽文可以使用现实地名作为叙事锚点；项目明确
+    # 要求架空设定时才升级为硬失败。政治/敏感实体仍由 sensitive_hits 拦截。
     if real_world_entity_hits:
-        warnings.append({
+        entity_issue = {
             "code": "real_world_entity",
             "message": f"检测到现实世界实体 {len(real_world_entity_hits)} 个，建议使用架空设定",
-            "severity": "low",
-        })
+            "severity": "high" if fictional_setting_required else "low",
+        }
+        if fictional_setting_required:
+            failures.append(entity_issue)
+        else:
+            entity_issue["message"] = (
+                f"检测到现实世界实体 {len(real_world_entity_hits)} 个；当前爽文模式仅提醒，"
+                "可在项目配置中开启架空设定硬约束"
+            )
+            warnings.append(entity_issue)
 
     # 判断是否通过（只有敏感词会导致不通过）
     passed = len(failures) == 0
@@ -371,7 +381,10 @@ def analyze_content_policy(
     return {
         "passed": passed,
         "profile": genre or "default",
-        "urban_fiction_required": is_urban,
+        "fictional_setting_required": fictional_setting_required,
+        # Legacy field retained, but now reports the actual configured gate
+        # instead of implying that every urban profile is fully fictional.
+        "urban_fiction_required": fictional_setting_required,
 
         # 向后兼容字段
         "profanity_hits": profanity_hits,
@@ -399,15 +412,18 @@ def content_generation_contract(quality_profile: dict[str, Any] | None = None) -
     quality_profile = quality_profile or {}
     genre = quality_profile.get("genre", "")
     is_urban = genre in {"urban", "都市", "city", "modern"}
+    fictional_setting_required = bool(quality_profile.get("fictional_setting_required", False))
 
     lines = [
         "【内容安全与合规要求】",
-        "1. 禁止出现政治敏感、色情、暴力、毒品、赌博等违法违规内容",
+        "1. 不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达；禁止政治敏感、毒品、赌博等违法违规内容",
         "2. 角色对话中可以适当使用口语化表达和脏话，符合人物性格和场景",
         "3. 脏话使用应适度，符合人物身份和剧情需要",
     ]
 
-    if is_urban:
-        lines.append("4. 都市题材采用完全架空设定，所有人名、地名、公司、平台、品牌均为虚构，不得使用现实世界实体")
+    if is_urban and fictional_setting_required:
+        lines.append("4. 都市题材采用完全架空的现代社会：所有人名、地名、公司、平台、品牌均为虚构，不得使用现实世界实体")
+    elif is_urban:
+        lines.append("4. 都市爽文可以使用现实地名作为叙事锚点，但不得涉及现实政治、敏感人物或现实事件的危险影射")
 
     return "\n".join(lines)

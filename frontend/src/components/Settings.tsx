@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useState } from "react";
 import { BarChart3, Check, ChevronDown, Database, Eye, EyeOff, KeyRound, Lock, Plus, RotateCcw, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import {
   api,
+  ApiError,
   getApiKey,
   getApiUrl,
   getModel,
@@ -47,6 +48,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [lexicon, setLexicon] = useState<AiFlavorLexicon | null>(null);
   const [lexiconLoading, setLexiconLoading] = useState(false);
   const [lexiconError, setLexiconError] = useState("");
+  const [lexiconRestricted, setLexiconRestricted] = useState(false);
   const [lexiconDirty, setLexiconDirty] = useState(false);
   const [expandedLexiconCategories, setExpandedLexiconCategories] = useState<Record<string, boolean>>({});
   const [newLexiconPhrase, setNewLexiconPhrase] = useState<Record<string, string>>({});
@@ -64,6 +66,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
     let cancelled = false;
     setLexiconLoading(true);
     setLexiconError("");
+    setLexiconRestricted(false);
     api<AiFlavorLexicon>("/api/v1/quality/ai-flavor-lexicon")
       .then(result => {
         if (cancelled) return;
@@ -71,7 +74,12 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
         setLexiconDirty(false);
       })
       .catch(caught => {
-        if (!cancelled) setLexiconError(caught instanceof Error ? caught.message : String(caught));
+        if (!cancelled) {
+          if (caught instanceof ApiError && (caught.status === 403 || caught.status === 503)) {
+            setLexiconRestricted(true);
+          }
+          setLexiconError(caught instanceof Error ? caught.message : String(caught));
+        }
       })
       .finally(() => {
         if (!cancelled) setLexiconLoading(false);
@@ -288,7 +296,8 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
               </div>
 
               {lexiconLoading && <div className="settings-data-loading"><span className="spinner" /> 正在读取词库配置…</div>}
-              {lexiconError && <div className="settings-data-error">读取词库失败：{lexiconError}</div>}
+              {lexiconRestricted && <div className="settings-data-error" role="status">需要管理员权限：AI 味词库属于工程质量规则，当前账号没有访问权限。</div>}
+              {lexiconError && !lexiconRestricted && <div className="settings-data-error">读取词库失败：{lexiconError}</div>}
               {lexicon && !lexiconLoading && (
                 <>
                   <div className="lexicon-toolbar">

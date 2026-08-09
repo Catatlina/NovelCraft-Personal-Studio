@@ -3224,6 +3224,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             current_text,
         )
         canonical_v7 = review is not None
+        review_continuity = (review.get("continuity") if canonical_v7 else None) or continuity
         if review is None:
             # Compatibility-only path for pre-V7 test doubles/rows.  New
             # production chapters are UUID-backed and take the branch above.
@@ -3273,7 +3274,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
                 "pacing": max(85.0, threshold),
                 "writing_quality": max(85.0, threshold),
             },
-            continuity=continuity,
+            continuity=review_continuity,
         )
         # Keep blocking evidence visible to editors and the audit trail.  The
         # label is not a fake pass/fail replacement; it is the exact reason a
@@ -3294,6 +3295,13 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
              encode(issues), review_key),
         )
         passed = (score >= threshold) and length_ok and quality_contract["passed"]
+        if canonical_v7:
+            from app.v7.quality.review_gate import can_mark_reviewed
+            passed = passed and can_mark_reviewed({
+                **review,
+                "continuity": review_continuity,
+                "final_continuity_audit": review.get("final_continuity_audit") or {"continuity": review_continuity},
+            })
         review_meta = {
             "review_score": score,
             "review_issues": issues,
@@ -4018,6 +4026,27 @@ def purge_stale_autosaves() -> dict:
     entity are always kept; semantic branches (ai_edit/ai_generate/
     initial_idea/offline_conflict/before_restore) are never touched."""
     db = connect()
+    # ``versions.parent_version_id`` is a real self-referencing FK.  A stale
+    # autosave may still be the parent of a newer semantic or manual version,
+    # so detach those surviving children before deleting the old row instead
+    # of letting the periodic cleanup fail with a foreign-key violation.
+    db.execute(
+        """
+        UPDATE versions
+        SET parent_version_id = NULL
+        WHERE parent_version_id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY entity_id ORDER BY created_at DESC
+                ) AS rn
+                FROM versions
+                WHERE label IN ('manual_save', 'offline_save')
+                  AND created_at < now() - interval '7 days'
+            ) ranked
+            WHERE ranked.rn > 10
+        )
+        """
+    )
     db.execute(
         """DELETE FROM versions WHERE id IN (
              SELECT id FROM (

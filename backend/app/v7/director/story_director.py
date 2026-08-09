@@ -850,6 +850,7 @@ class StoryDirector:
 
         review = await self.review_engine.run(review_input(generation))
         review_data = review.result or {}
+        review_data["chapter_text"] = generation.get("text", "")
         review_hold = False
         if not review.success:
             # Provider output/schema failures must not strand a generated
@@ -935,14 +936,14 @@ class StoryDirector:
             allow_rework
             and not review_hold
             and (
-                not evaluate_review(review_data)["passed"]
+                not evaluate_review(review_data, project_id=self.project_id, user_id=self.user_id)["passed"]
                 or consistency_failed  # 一致性检查不通过也触发重写
             )
             and rework_count < MAX_REWORKS
             and (local_repair_count < MAX_LOCAL_REPAIRS or force_full_rework)
             and await self.permission_system.can_auto_decide("chapter_rework", 0.9)
         ):
-            gate = evaluate_review(review_data)
+            gate = evaluate_review(review_data, project_id=self.project_id, user_id=self.user_id)
             issues = review_data.get("issues") or []
             failures = "；".join(
                 _format_quality_failure(item)
@@ -966,7 +967,7 @@ class StoryDirector:
             if consistency_failed and consistency_result:
                 consistency_feedback = f"一致性检查未通过（{consistency_result.score}分）：" + format_consistency_issues(consistency_result.issues)
             feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}。{consistency_feedback}".strip("；。")
-            gate_for_rework = evaluate_review(review_data)
+            gate_for_rework = evaluate_review(review_data, project_id=self.project_id, user_id=self.user_id)
             use_local_repair = (
                 not force_full_rework
                 and local_repair_count < MAX_LOCAL_REPAIRS
@@ -1055,6 +1056,7 @@ class StoryDirector:
                 score = 0.0
                 break
             review_data = review.result or {}
+            review_data["chapter_text"] = generation.get("text", "")
             score = float(review_data.get("overall_score") or 0.0)
 
             # 重写后重新做一致性检查
@@ -1092,7 +1094,7 @@ class StoryDirector:
                     # 一致性检查失败不阻塞生成
                     pass
 
-        gate = evaluate_review(review_data)
+        gate = evaluate_review(review_data, project_id=self.project_id, user_id=self.user_id)
         validation_failures = review_data.get("validation_failures") or []
         if validation_failures:
             for failure in validation_failures:

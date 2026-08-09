@@ -5,8 +5,11 @@ All features are plugins that can be installed, enabled, disabled, or uninstalle
 
 Plugin sources: builtin, github, marketplace.
 """
+import json
 from dataclasses import dataclass, field
 from typing import Callable
+
+from app.db import connect
 
 
 @dataclass
@@ -77,40 +80,79 @@ register(ModuleManifest("community-hm-content", "短视频脚本(社区)", "热�
 
 def get_enabled_modules(category: str = "") -> list[ModuleManifest]:
     """Return all enabled + installed modules, optionally filtered by category."""
-    return [m for m in MODULES.values() if m.enabled and m.installed and (not category or m.category == category)]
+    return [
+        m
+        for group in get_all_modules(category).values()
+        for m in group
+        if m.enabled and m.installed
+    ]
+
+
+def _persistent_states() -> dict[str, dict[str, bool]]:
+    """Read the durable global module state from the existing settings table."""
+    db = connect()
+    try:
+        rows = db.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'module_state:%'"
+        ).fetchall()
+    finally:
+        db.close()
+    states: dict[str, dict[str, bool]] = {}
+    for row in rows:
+        module_id = str(row["key"])[len("module_state:"):]
+        try:
+            payload = json.loads(row["value"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("enabled"), bool):
+            states[module_id] = {"enabled": payload["enabled"], "installed": True}
+    return states
 
 
 def get_all_modules() -> dict[str, list[ModuleManifest]]:
     """Return modules grouped by category."""
+    states = _persistent_states()
     cats: dict[str, list[ModuleManifest]] = {}
     for m in MODULES.values():
+        state = states.get(m.id)
+        if state:
+            m.enabled = state["enabled"]
+            m.installed = state["installed"]
         cats.setdefault(m.category, []).append(m)
     return cats
 
 
 def install_module(module_id: str) -> bool:
-    """Install a module from GitHub/marketplace."""
-    m = MODULES.get(module_id)
-    if not m or m.installed:
-        return False
-    # TODO: clone repo, install deps, register routes
-    m.installed = True
-    m.enabled = True
-    return True
+    """Dynamic package installation is intentionally unavailable."""
+    return False
 
 
 def uninstall_module(module_id: str) -> bool:
-    m = MODULES.get(module_id)
-    if not m or m.source == "builtin":
-        return False  # builtin modules cannot be uninstalled
-    m.installed = False
-    m.enabled = False
-    return True
+    """Dynamic package removal is intentionally unavailable."""
+    return False
 
 
 def toggle_module(module_id: str, enabled: bool) -> bool:
     m = MODULES.get(module_id)
     if not m or not m.installed:
         return False
+    db = connect()
+    try:
+        db.execute(
+            """
+            INSERT INTO settings (key, value, description)
+            VALUES (%s, %s, %s)
+            ON CONFLICT(key) DO UPDATE
+            SET value = EXCLUDED.value, updated_at = now()
+            """,
+            (
+                f"module_state:{module_id}",
+                json.dumps({"enabled": bool(enabled), "installed": True}, ensure_ascii=False),
+                "Durable plugin/module lifecycle state",
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
     m.enabled = enabled
     return True

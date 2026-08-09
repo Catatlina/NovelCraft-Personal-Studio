@@ -541,6 +541,13 @@ class BrainApiClient {
     return this.request(`/v7/genres/packs/${packId}`);
   }
 
+  async createGenrePack(data: Record<string, unknown>): Promise<{ pack: any }> {
+    return this.request('/v7/genres/packs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async listGenreRules(
     packId: string,
     params?: { rule_type?: string; include_inherited?: boolean }

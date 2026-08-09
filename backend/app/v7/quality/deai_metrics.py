@@ -13,6 +13,7 @@ from typing import Any
 
 from ...services.text_quality import duplicate_paragraph_stats
 from .novel_reviewer_reference import analyze_novel_reviewer_lexicon
+from .report_distillation import analyze_report_metrics, empty_report_metrics
 from .structural_ai_smell import analyze_structural_ai_smell
 
 
@@ -148,6 +149,7 @@ def analyze_deai_patterns(
             "tic_metrics": {"hits": 0, "density_per_1000": 0.0, "breakdown": {}, "dominant": "", "dominant_count": 0, "repeated": False},
             "duplicate_paragraphs": duplicate_paragraph_stats(""),
             "novel_reviewer_lexicon": analyze_novel_reviewer_lexicon("", profile=profile),
+            "report_metrics": empty_report_metrics(),
             "structural_ai_smell": None,
         }
 
@@ -166,6 +168,7 @@ def analyze_deai_patterns(
     tic_metrics = _tic_metrics(text, profile)
     duplicate_paragraphs = duplicate_paragraph_stats(text)
     novel_reviewer_lexicon = analyze_novel_reviewer_lexicon(text, profile=profile)
+    report_metrics = analyze_report_metrics(text, profile=profile)
     
     # 阶段2：去AI味两层互补 - 模式级检测
     # 与词级检查并联，补充检测行文模式和结构
@@ -260,6 +263,7 @@ def analyze_deai_patterns(
         "tic_metrics": tic_metrics,
         "duplicate_paragraphs": duplicate_paragraphs,
         "novel_reviewer_lexicon": novel_reviewer_lexicon,
+        "report_metrics": report_metrics,
         # 阶段2：去AI味两层互补 - 模式级检测结果
         # 与词级检查并联，补充检测行文模式和结构
         "structural_ai_smell": structural_ai_smell_result.to_dict() if structural_ai_smell_result else None,
