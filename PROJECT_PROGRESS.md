@@ -6,7 +6,7 @@
 - 品类契约已接入 V7 quality profile、chapter rules 和 Writer 指令；品类知识进入账本字段；章长、段落长度、短段率等统计仅作为 report_metrics 软审计，不作为发布硬门禁。
 - R 段原文、标题样本、网站水印/域名广告、具体作品仿写和未经清洗的粗口统计均排除在运行时之外。规则优先级为本书事实账本 > 章节爽点契约 > 品类机制 > 平台基线 > 统计软指标。
 - 验证证据：相关回归 34/34、最终增量回归 18/18、前端 TypeScript 检查与构建、生产 smoke、生产浏览器主导航 8/8 均通过；浏览器错误日志为空；API/Worker/Beat 已重启加载新规则。
-- 全量后端测试仍受既有容器路径测试影响：tests/test_audit_fixes.py 写死 /backend/...，容器实际挂载为 /app/...。真实 Provider 生成质量尚未验收，因为远端未配置 DEEPSEEK_API_KEY。
+- 全量后端测试仍受既有容器路径测试影响：tests/test_audit_fixes.py 写死 /backend/...，容器实际挂载为 /app/...。本次生产 smoke 未注入 DEEPSEEK_API_KEY，因此未执行真实 Provider 生成质量验收；健康检查中的 Provider 配置状态不等同于生成质量验收。
 - 详细规则边界与来源见 docs/网文蒸馏规则融合说明_20260809.md。
 
 ## 2026-08-09 真实性、安全与连续性修复
@@ -16,7 +16,14 @@
 - V7 分支生成/应用移除进程内假存储，应用前校验正文版本和精确来源，冲突时阻止覆盖；人工批准和 Worker reviewed 写回增加连续性、最终审计和证据链 fail-closed 门禁。
 - Reader Simulation 改走真实 Gateway；编辑器刷新保留当前章节选择，并在检测到未保存文本时阻止后台刷新覆盖；品类管理补齐权限提示、真实导入/导出和新建反馈。
 - 验证证据：后端专项新增/相关测试 58 项通过；另有 1 项既有迁移路径测试因容器把仓库挂载为 /app 而测试写死 /backend 失败；前端全量 52 项通过，TypeScript 检查和构建通过，git diff --check 通过。
-- 真实 Provider 端到端生成仍未验收：远端当前未配置 DEEPSEEK_API_KEY。未跟踪的 .orig 备份和 backend/celerybeat-schedule 运行时文件不纳入提交。
+- 真实 Provider 端到端生成仍未验收：本次 smoke 未注入 DEEPSEEK_API_KEY。未跟踪的 .orig 备份和 backend/celerybeat-schedule 运行时文件不纳入提交。
+
+## 2026-08-10 生产部署验收
+
+- GitHub PR #9 已 squash 合并；生产服务器 `/opt/NovelCraft-Personal-Studio` 已快进到 `main@3b3be37`。
+- 部署前数据库备份：`backups/pre-deploy-3b3be37-20260809-235442.sql.gz`；Alembic 迁移执行成功；API、Worker、Beat、Frontend、PostgreSQL、Redis 均已重建/启动，Flower 按生产配置关闭。
+- 公网验收：`https://starlume.xyjin.xyz/api/v1/healthz` 返回 200；生产 smoke **15/15**；浏览器主导航 **9/9**；浏览器错误日志 **0**。
+- 本次 smoke 未注入 Provider Key，未产生真实 Provider 生成费用，也不能据此宣称真实生成质量已验收。
 
 ## 2026-08-06 AI 味词库可配置化与编辑会话已推送部署
 
