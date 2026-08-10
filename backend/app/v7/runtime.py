@@ -283,6 +283,21 @@ def _load_quality_profile(novel_id: str) -> dict[str, Any]:
         conn.close()
 
 
+def _load_genre_id(novel_id: str) -> str | None:
+    """Read the selected real genre pack id from novel metadata."""
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT meta FROM contents WHERE id=%s AND type='novel'",
+            (novel_id,),
+        ).fetchone()
+        meta = decode((row or {}).get("meta"), {}) or {}
+        genre_id = str(meta.get("genre_id") or "").strip()
+        return genre_id or None
+    finally:
+        conn.close()
+
+
 async def generate_v7_chapter(
     novel_id: str,
     project_id: str,
@@ -333,6 +348,7 @@ async def generate_v7_chapter(
     else:
         effective_prompt = _default_story_prompt(novel_id, resolved_number, outline)
     quality_profile = await asyncio.to_thread(_load_quality_profile, novel_id)
+    genre_id = await asyncio.to_thread(_load_genre_id, novel_id)
     provider_config = {
         key: value
         for key, value in {
@@ -358,6 +374,7 @@ async def generate_v7_chapter(
             user_id=user_id,
             provider_config=provider_config,
             quality_profile=quality_profile,
+            genre_id=genre_id,
             generation_metadata={
                 key: value
                 for key, value in {
@@ -376,6 +393,7 @@ async def generate_v7_chapter(
         result["chapter_number"] = resolved_number
         result["v7_context_seed"] = seed
         result["quality_profile"] = quality_profile_metadata(quality_profile)
+        result["genre_id"] = genre_id
         if batch_id:
             result["batch_id"] = batch_id
             result["batch_ordinal"] = batch_ordinal

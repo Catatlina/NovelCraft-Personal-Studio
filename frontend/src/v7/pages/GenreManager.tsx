@@ -286,6 +286,10 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState('');
   const [createDraft, setCreateDraft] = useState({ name: '', slug: '', description: '', scope: 'custom' });
+  const [editOpen, setEditOpen] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editDraft, setEditDraft] = useState({ name: '', slug: '', description: '', scope: 'custom', is_active: true });
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // ── 加载品类树 ──────────────────────────────────────────────────────
@@ -312,13 +316,15 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
       const flat = flatten(result.tree || []);
       setAllGenres(flat);
 
-      // 默认选中第一个根节点
-      if (flat.length > 0 && !selectedGenreId) {
-        const firstRoot = result.tree?.[0];
-        if (firstRoot) {
-          setSelectedGenreId(firstRoot.id);
-          setExpandedNodes(prev => new Set(prev).add(firstRoot.id));
-        }
+      // 首次加载默认选中第一个根节点；刷新后保留当前选择，若品类已
+      // 被删除/停用则切换到仍存在的第一个品类。
+      const firstRoot = result.tree?.[0];
+      setSelectedGenreId(current => {
+        if (current && flat.some(item => item.id === current)) return current;
+        return firstRoot?.id || flat[0]?.id || null;
+      });
+      if (firstRoot) {
+        setExpandedNodes(prev => new Set(prev).add(firstRoot.id));
       }
     } catch (err: any) {
       if (err instanceof V7ApiError && [403, 503].includes(err.status)) setAccessRestricted(true);
@@ -326,7 +332,7 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
     } finally {
       setLoadingTree(false);
     }
-  }, [selectedGenreId]);
+  }, []);
 
   useEffect(() => {
     loadGenreTree();
@@ -523,6 +529,66 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
     setCreateOpen(true);
   }
 
+  function openEditDialog() {
+    if (!selectedGenre) return;
+    if (selectedGenre.is_builtin) {
+      setActionMessage('内置品类由系统维护，不能直接编辑；请新建自定义品类。');
+      return;
+    }
+    setEditError('');
+    setEditDraft({
+      name: selectedGenre.name || '',
+      slug: selectedGenre.slug || '',
+      description: selectedGenre.description || '',
+      scope: selectedGenre.scope || 'custom',
+      is_active: selectedGenre.is_active !== false,
+    });
+    setEditOpen(true);
+  }
+
+  async function updateGenre() {
+    if (!selectedGenre) return;
+    const name = editDraft.name.trim();
+    const slug = editDraft.slug.trim();
+    if (!name || !slug) {
+      setEditError('品类名称和 slug 不能为空');
+      return;
+    }
+    setEditBusy(true);
+    setEditError('');
+    try {
+      const result = await brainApi.updateGenrePack(selectedGenre.id, {
+        name,
+        slug,
+        description: editDraft.description.trim() || null,
+        scope: editDraft.scope,
+        is_active: editDraft.is_active,
+      });
+      setEditOpen(false);
+      setActionMessage(`已更新品类「${result.pack?.name || name}」。`);
+      await Promise.all([
+        loadGenreTree(),
+        loadGenreDetail(selectedGenre.id),
+      ]);
+    } catch (err: any) {
+      setEditError(err.message || '编辑品类失败');
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function refreshSelectedGenre() {
+    if (!selectedGenreId) {
+      await loadGenreTree();
+      return;
+    }
+    await Promise.all([
+      loadGenreTree(),
+      loadGenreDetail(selectedGenreId),
+    ]);
+    setActionMessage('品类详情已刷新。');
+  }
+
   async function createGenre() {
     const name = createDraft.name.trim();
     const slug = createDraft.slug.trim();
@@ -658,6 +724,23 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
           <button type="button" className="v7-btn v7-btn-primary" disabled={createBusy} onClick={() => void createGenre()}>{createBusy ? '创建中…' : '创建品类'}</button>
         </div>
       )}
+      {editOpen && selectedGenre && (
+        <div className="v7-panel" role="dialog" aria-modal="true" aria-labelledby="edit-genre-title" style={{ marginBottom: 16 }}>
+          <div className="v7-panel-head">
+            <h3 id="edit-genre-title">编辑品类 · {selectedGenre.name}</h3>
+            <button type="button" className="v7-link-button" onClick={() => setEditOpen(false)}>取消</button>
+          </div>
+          <div className="v7-form-grid">
+            <label>名称<input value={editDraft.name} onChange={e => setEditDraft(draft => ({ ...draft, name: e.target.value }))} /></label>
+            <label>slug<input value={editDraft.slug} onChange={e => setEditDraft(draft => ({ ...draft, slug: e.target.value }))} /></label>
+            <label>范围<select value={editDraft.scope} onChange={e => setEditDraft(draft => ({ ...draft, scope: e.target.value }))}><option value="custom">自定义</option><option value="webnovel">通用网文</option><option value="fanqie">番茄小说</option><option value="qidian">起点中文网</option></select></label>
+            <label>状态<select value={editDraft.is_active ? 'active' : 'inactive'} onChange={e => setEditDraft(draft => ({ ...draft, is_active: e.target.value === 'active' }))}><option value="active">启用</option><option value="inactive">停用</option></select></label>
+            <label>描述<textarea value={editDraft.description} onChange={e => setEditDraft(draft => ({ ...draft, description: e.target.value }))} rows={2} /></label>
+          </div>
+          {editError && <p className="v7-error-text" role="alert">{editError}</p>}
+          <button type="button" className="v7-btn v7-btn-primary" disabled={editBusy} onClick={() => void updateGenre()}>{editBusy ? '保存中…' : '保存修改'}</button>
+        </div>
+      )}
 
       <div className="v7-genre-layout">
         {/* ── 左侧：品类树 ── */}
@@ -750,11 +833,11 @@ export default function GenreManager({ novelId }: GenreManagerProps) {
                     </div>
                   </div>
                   <div className="v7-genre-detail-actions">
-                    <button className="v7-btn v7-btn-secondary">
+                    <button className="v7-btn v7-btn-secondary" onClick={() => void refreshSelectedGenre()} disabled={loadingTree || loadingDetail}>
                       <RefreshCw size={14} />
                       刷新
                     </button>
-                    <button className="v7-btn v7-btn-secondary">
+                    <button className="v7-btn v7-btn-secondary" onClick={openEditDialog}>
                       编辑
                     </button>
                   </div>

@@ -1,16 +1,19 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+import pytest
+
 from app.v7.generation.generation_engine import (
     AIGatewayError,
     DeAIPipeline,
     GenerationEngine,
     SceneDirector,
     ensure_unique_chapter_title,
+    validate_tomato_chapter_title,
 )
 
 
-def test_repeated_chapter_title_gets_an_existing_plot_event_suffix():
+def test_repeated_chapter_title_gets_a_short_plot_hook():
     title = ensure_unique_chapter_title(
         "语音里的求救",
         previous_titles=["语音里的求救", "旧手机"],
@@ -18,7 +21,7 @@ def test_repeated_chapter_title_gets_an_existing_plot_event_suffix():
         hints=["走廊尽头的钟声再次响起"],
     )
 
-    assert title == "语音里的求救·走廊尽头的钟声再次响起"
+    assert title == "走廊尽头的钟声再次响起"
     assert title != "语音里的求救"
 
     compact = ensure_unique_chapter_title(
@@ -27,7 +30,12 @@ def test_repeated_chapter_title_gets_an_existing_plot_event_suffix():
         chapter_number=24,
         hints=["语音中传来一个陌生男人的声音"],
     )
-    assert compact == "语音里的求救·一个陌生男人"
+    assert compact == "一个陌生男人"
+
+
+def test_tomato_title_gate_rejects_summary_titles_and_accepts_reader_hooks():
+    assert validate_tomato_chapter_title("江心岛迷雾·周衡在逃脱后，发现手机屏")[0] is False
+    assert validate_tomato_chapter_title("密室现身")[0] is True
 
 
 def test_deterministic_opening_repair_preserves_paragraphs_and_reaches_target():
@@ -52,7 +60,7 @@ def test_deterministic_opening_repair_preserves_paragraphs_and_reaches_target():
     assert repaired.count("陆沉") < source.count("陆沉")
 
 
-def test_deai_opening_provider_failure_uses_lossless_deterministic_fallback():
+def test_deai_opening_provider_failure_keeps_fallback_but_blocks_quality_gate():
     paragraphs = [
         f"陆沉在第{i}次试剑时记住了一个细节，剑锋擦过石面，留下了一道新痕。"
         for i in range(18)
@@ -81,14 +89,23 @@ def test_deai_opening_provider_failure_uses_lossless_deterministic_fallback():
 
     result = asyncio.run(DeAIPipeline(Gateway()).process(source))
 
-    assert result["quality_gate"]["passed"] is True
+    assert result["quality_gate"]["passed"] is False
     assert result["quality_gate"]["mode"] == "deterministic_fallback"
+    assert result["quality_gate"]["code"] == "opening_repair_provider_failed"
     assert result["quality_gate"]["after_ratio"] < 0.30
     assert any(
         layer["layer"] == "deterministic_paragraph_opening_repair"
         and layer["applied"] is True
         for layer in result["layers_applied"]
     )
+
+
+def test_scene_plan_contract_rejects_empty_or_incomplete_provider_plan():
+    with pytest.raises(AIGatewayError, match="beats must contain 4-6"):
+        SceneDirector.validate_scene_plan_contract(
+            {"chapter_title": "门后是什么", "chapter_type": "suspense", "beats": []},
+            target_word_count=3000,
+        )
 
 
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():

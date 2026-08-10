@@ -15,7 +15,7 @@ from typing import Any
 
 from ..generation.generation_engine import AIGateway, AIGatewayError
 
-CONSISTENCY_CHECK_VERSION = "1.0.0"
+CONSISTENCY_CHECK_VERSION = "1.1.0"
 CONSISTENCY_PASS_SCORE = 80.0  # 默认通过阈值
 MAX_CONSISTENCY_REWORKS = 2  # 一致性检查最多重写次数（和质量门重写分开计数？还是合并？先合并）
 
@@ -64,6 +64,9 @@ class ConsistencyChecker:
         previous_chapter_tail: str = "",
         previous_transition_contract: dict[str, Any] | None = None,
         scene_plan: dict[str, Any] | None = None,
+        active_rules: list[dict[str, Any]] | dict[str, Any] | None = None,
+        chapter_title: str = "",
+        previous_chapter_title: str = "",
     ) -> ConsistencyCheckResult:
         """执行一致性检查。
 
@@ -88,6 +91,9 @@ class ConsistencyChecker:
             previous_chapter_tail=previous_chapter_tail,
             previous_transition_contract=previous_transition_contract or {},
             scene_plan=scene_plan or {},
+            active_rules=active_rules or [],
+            chapter_title=chapter_title,
+            previous_chapter_title=previous_chapter_title,
         )
 
         try:
@@ -98,10 +104,18 @@ class ConsistencyChecker:
                 prompt_name="v7.consistency_check",
             )
         except AIGatewayError as e:
-            # LLM 调用失败，返回默认通过（不阻塞生成）
+            # Provider failure is an unverified review, never a pass.  The
+            # director persists the draft as needs_review/needs_rewrite.
             return ConsistencyCheckResult(
-                passed=True,
-                score=100.0,
+                passed=False,
+                score=0.0,
+                issues=[{
+                    "type": "审阅执行",
+                    "severity": "严重",
+                    "location": "一致性检查调用",
+                    "description": f"一致性检查调用失败，结果未验证：{str(e)}",
+                    "suggestion": "修复 AI Provider 后重新执行一致性检查",
+                }],
                 summary=f"一致性检查调用失败，跳过检查：{str(e)}",
                 raw_response="",
             )
@@ -119,6 +133,9 @@ class ConsistencyChecker:
         previous_chapter_tail: str,
         previous_transition_contract: dict[str, Any],
         scene_plan: dict[str, Any],
+        active_rules: list[dict[str, Any]] | dict[str, Any],
+        chapter_title: str,
+        previous_chapter_title: str,
     ) -> str:
         """构建一致性检查 Prompt。"""
         # 准备上一章结尾状态
@@ -145,6 +162,14 @@ class ConsistencyChecker:
         core_settings_truncated = core_settings[:3000] if core_settings else ""
         chapter_outline_truncated = chapter_outline[:2000] if chapter_outline else ""
         chapter_text_truncated = chapter_text[:12000] if chapter_text else ""
+        if isinstance(active_rules, dict):
+            active_rules_text = json.dumps(active_rules, ensure_ascii=False)[:3000]
+        else:
+            active_rules_text = "\n".join(
+                f"- {item.get('name') or item.get('key') or '规则'}：{item.get('description') or item.get('instruction') or item}"
+                if isinstance(item, dict) else f"- {item}"
+                for item in active_rules[:12]
+            )
 
         return f"""你是一个专业的小说一致性审查员。请严格检查第 {chapter_number} 章是否与设定、大纲、上一章衔接一致。
 
@@ -160,6 +185,13 @@ class ConsistencyChecker:
 
 上一章梗概：{end_state.get('summary', '')}{threads_text}
 
+【章节标题】
+上一章：{previous_chapter_title or end_state.get('title', '') or '（未知）'}
+本章：{chapter_title or '（未知）'}
+
+【不可随意改变的规则账本】
+{active_rules_text or '（无额外规则）'}
+
 【本章正文】
 {chapter_text_truncated}
 
@@ -168,6 +200,8 @@ class ConsistencyChecker:
 2. 设定一致性：修为等级、金手指规则、人物性格、世界观设定是否符合？有没有 OOC 或设定矛盾？
 3. 大纲一致性：细纲的节拍点是否都写到了？有没有偏离主线？章末钩子是否到位？
 4. 逻辑自洽：有没有前后矛盾或逻辑漏洞？人物行为是否合理？
+5. 跨章语义：本章开头是否从上一章最后动作/地点/人物状态自然接起？如果标题沿用同一情节基名，却直接切到另一地点、另一组人物或另一条因果链，必须判定为严重问题。
+6. 规则账本：能力触发条件、冷却、代价、物品状态和人物位置是否被无依据地重置？
 
 【输出格式】
 请严格输出 JSON，不要输出任何其他文字：
@@ -183,6 +217,8 @@ class ConsistencyChecker:
       "suggestion": "修改建议"
     }}
   ],
+  "opening_anchor": {{"matched": true/false, "evidence": "..."}},
+  "parallel_version": {{"suspected": true/false, "evidence": "..."}},
   "summary": "总体评价（一句话）"
 }}
 
@@ -202,9 +238,16 @@ class ConsistencyChecker:
         json_str = self._extract_json(response)
         if not json_str:
             return ConsistencyCheckResult(
-                passed=True,
-                score=100.0,
-                summary="无法解析检查结果，跳过检查",
+                passed=False,
+                score=0.0,
+                issues=[{
+                    "type": "审阅执行",
+                    "severity": "严重",
+                    "location": "一致性检查响应",
+                    "description": "无法解析一致性检查 JSON，结果未验证",
+                    "suggestion": "修复 Provider 输出格式后重新执行",
+                }],
+                summary="无法解析检查结果，不能放行",
                 raw_response=response,
             )
 
@@ -212,16 +255,68 @@ class ConsistencyChecker:
             data = json.loads(json_str)
         except json.JSONDecodeError:
             return ConsistencyCheckResult(
-                passed=True,
-                score=100.0,
-                summary="JSON 解析失败，跳过检查",
+                passed=False,
+                score=0.0,
+                issues=[{
+                    "type": "审阅执行",
+                    "severity": "严重",
+                    "location": "一致性检查响应",
+                    "description": "一致性检查 JSON 解析失败，结果未验证",
+                    "suggestion": "修复 Provider 输出格式后重新执行",
+                }],
+                summary="JSON 解析失败，不能放行",
                 raw_response=response,
             )
 
         # 提取字段
-        score = float(data.get("consistency_score", 100.0))
-        passed = bool(data.get("passed", score >= CONSISTENCY_PASS_SCORE))
+        if not isinstance(data, dict) or "consistency_score" not in data or "passed" not in data:
+            return ConsistencyCheckResult(
+                passed=False,
+                score=0.0,
+                issues=[{
+                    "type": "审阅执行",
+                    "severity": "严重",
+                    "location": "一致性检查响应",
+                    "description": "一致性检查缺少必需字段 consistency_score/passed",
+                    "suggestion": "按契约返回完整 JSON 后重新执行",
+                }],
+                summary="一致性检查契约不完整，不能放行",
+                raw_response=response,
+            )
+        try:
+            score = float(data["consistency_score"])
+        except (TypeError, ValueError):
+            score = -1.0
+        if score < 0 or score > 100:
+            return ConsistencyCheckResult(
+                passed=False,
+                score=0.0,
+                issues=[{
+                    "type": "审阅执行",
+                    "severity": "严重",
+                    "location": "consistency_score",
+                    "description": "一致性评分不在 0-100 范围内",
+                    "suggestion": "返回有效的一致性评分",
+                }],
+                summary="一致性评分无效，不能放行",
+                raw_response=response,
+            )
+        passed = bool(data["passed"]) and score >= CONSISTENCY_PASS_SCORE
         issues = data.get("issues", [])
+        if not isinstance(issues, list):
+            return ConsistencyCheckResult(
+                passed=False,
+                score=0.0,
+                issues=[{
+                    "type": "审阅执行",
+                    "severity": "严重",
+                    "location": "issues",
+                    "description": "一致性检查 issues 字段不是数组",
+                    "suggestion": "按契约返回 issues 数组后重新执行",
+                }],
+                summary="一致性检查契约不完整，不能放行",
+                raw_response=response,
+            )
         summary = str(data.get("summary", ""))
 
         # 验证 issues 格式
@@ -236,6 +331,9 @@ class ConsistencyChecker:
                 "description": str(issue.get("description", "")),
                 "suggestion": str(issue.get("suggestion", "")),
             })
+
+        if any(item["severity"] in {"严重", "高", "high", "critical"} for item in valid_issues):
+            passed = False
 
         return ConsistencyCheckResult(
             passed=passed,

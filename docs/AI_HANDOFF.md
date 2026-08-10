@@ -2,6 +2,14 @@
 > 更新时间：2026-08-06
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-10 当前交接：生成质量旁路收紧（本地待发布）
+
+- V7 已补齐几条质量旁路：Provider 去 AI 失败不再伪装成通过；场景计划必须有 4–6 个 beat 和五阶段爽点节拍；配置的 `genre_id` 无法加载真实品类包时直接失败；实时审阅第 2 章起必须验证上一章契约和正文开头锚点；正文镜像升级为硬门禁。
+- 具体入口：`backend/app/v7/generation/generation_engine.py`、`backend/app/v7/review_service.py`、`backend/app/v7/quality/review_evidence.py`、`backend/app/v7/integration/quality.py`、`backend/app/main.py`；回归保护在 `backend/tests/test_v7_generation_quality_prompts.py`、`backend/tests/test_v7_review_contract.py` 和既有 V7 质量集合。
+- 本地证据：质量专项 93 passed；前端 54 passed；`npm run lint`、`npm run build`、Python compile、`python3 scripts/verify_delivery_claims.py`、`bash scripts/ai_development_gate.sh` 均通过。
+- 全量后端本机未通过：`backend/.venv/bin/pytest -q` 为 862 passed、138 skipped、150 failed、54 errors；失败主要落在 PostgreSQL `localhost:5432` 不可用引起的注册/真实数据库夹具 503，不能宣称全量回归通过。生产部署与公网复测尚未完成。
+- 发布前不要删除或覆盖工作树中已有的 genre_id、爽文网感研究、质量页面和 V7 连续性改动；它们属于同一当前批次，提交时需整体审查 diff 后再推送。
+
 ## 2026-08-10 当前工作树新增链路：爽文网感研究（未部署）
 
 - 本地工作树已同步到 `origin/main@6583024` 后继续开发；本批没有提交、推送或部署。

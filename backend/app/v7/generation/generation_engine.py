@@ -80,17 +80,57 @@ def _chapter_title_key(value: Any) -> str:
 
 
 def _title_hint_fragment(value: Any) -> str:
-    """Extract a short event-shaped title suffix from a plot hint."""
+    """Extract a short event-shaped title from a plot hint.
+
+    A plot hint is often a sentence.  It must never be appended verbatim to a
+    chapter title because that turns the title into a summary (for example
+    ``江心岛迷雾·周衡在逃脱后，发现手机屏``).  Keep only the first event
+    clause, remove narration scaffolding, and prefer a compact hook phrase.
+    """
     text = str(value or "").strip()
     text = re.sub(r"^(?:本章|章末|钩子|结果)\s*[：:]?", "", text)
     text = re.split(r"[。！？；\n]", text, maxsplit=1)[0]
+    comma_clauses = re.split(r"[，,]", text)
+    if len(comma_clauses) > 1 and re.search(r"发现|收到|看见|听见|进入|遭遇|面对", comma_clauses[1]):
+        text = comma_clauses[1]
+    else:
+        text = comma_clauses[0]
     text = re.sub(r"[“”\"'「」《》]", "", text)
-    text = re.sub(r"^(?:主角)?(?:发现|收到|看见|听见|进入|遭遇|面对)\s*", "", text)
+    text = re.sub(
+        r"^(?:[^，。！？：:]{0,10})?(?:发现|收到|看见|听见|进入|遭遇|面对|决定|开始)\s*",
+        "",
+        text,
+    )
     text = re.sub(r"^(?:语音|消息|短信)(?:中|里)?(?:传来|出现|提示)\s*", "", text)
+    text = re.sub(r"^(?:主角|人物|他|她)[的地]", "", text)
+    text = text.replace("突然", "")
     text = re.sub(r"(?:的)?(?:声音|消息|警告)$", "", text)
     text = text.strip(" ：:，,、—-")
-    text = text[:12].rstrip("的了着在与和或从向")
-    return text.strip(" ：:，,、—-")
+    if len(text) > 12:
+        tail = re.split(r"的", text)[-1].strip(" ：:，,、—-")
+        if 2 <= len(tail) <= 12:
+            text = tail
+    return text[:12].rstrip("的了着在与和或从向").strip(" ：:，,、—-")
+
+
+def validate_tomato_chapter_title(value: Any) -> tuple[bool, str]:
+    """Validate the reader-facing short-title contract used by Tomato novels."""
+    text = re.sub(r"\s+", "", str(value or "")).strip()
+    if not text:
+        return False, "标题为空"
+    if len(text) < 2:
+        return False, "标题少于 2 个字"
+    if len(text) > 12:
+        return False, "标题超过 12 个字"
+    if re.search(r"第\s*\d+\s*章|本章|这一章|读者将|读者会", text):
+        return False, "标题包含章节或元叙述"
+    if re.search(r"主角在|人物在|他在|她在|将要|正在", text):
+        return False, "标题仍是剧情摘要句式"
+    if len(text) >= 8 and re.search(r"发现|收到|看见|听见|进入|遭遇|面对|决定|然后|之后|以后|突然|屏幕", text):
+        return False, "标题包含过长的动作摘要"
+    if len(text) >= 9 and re.search(r"[，,。！？；;：:]", text):
+        return False, "标题包含完整句子标点"
+    return True, "ok"
 
 
 def ensure_unique_chapter_title(
@@ -100,19 +140,16 @@ def ensure_unique_chapter_title(
     chapter_number: int = 0,
     hints: list[Any] | None = None,
 ) -> str:
-    """Keep provider chapter titles readable and unique within the novel.
+    """Return a unique, short, reader-facing Tomato chapter title.
 
-    The plot model remains responsible for creative naming. This guard only
-    intervenes when it repeats a recent title, using an already-planned event
-    or hook as a compact suffix; it never bans punctuation or a natural title
-    form globally.
+    The provider still supplies the creative title.  This deterministic guard
+    is the final contract: it removes chapter-summary output, keeps titles in
+    the 2-12 character range, and uses planned hooks only as compact fallback
+    candidates when the provider repeats or violates the title shape.
     """
     def clean_title(value: Any) -> str:
         text = str(value or "").strip()
         text = re.sub(r"^第\s*\d+\s*章\s*[：:、\s]*", "", text)
-        # Planning models sometimes return a sentence instead of a title:
-        # "主角在旧宅中发现一张旧照". Strip only the meta/action lead; do
-        # not ban natural punctuation or ordinary event wording.
         text = re.sub(
             r"^(?:本章|这一章|主角|人物|他|她)?"
             r"(?:在[^，。！？：:]{0,20})?"
@@ -122,7 +159,10 @@ def ensure_unique_chapter_title(
         )
         text = re.sub(r"^(?:本章|这一章)(?:将|要)?\s*", "", text)
         text = re.sub(r"[（(][^）)]{0,20}[）)]$", "", text).strip()
-        return text.strip(" ：:，,、—-")[:20]
+        text = text.strip(" ：:，,、—-")
+        if len(text) > 12:
+            text = _title_hint_fragment(text)
+        return text[:12].rstrip("的了着在与和或从向").strip(" ：:，,、—-")
 
     base = clean_title(title) or f"第{chapter_number}章"
     previous_keys = {
@@ -130,21 +170,24 @@ def ensure_unique_chapter_title(
         for item in (previous_titles or [])
         if _chapter_title_key(item)
     }
-    if _chapter_title_key(base) not in previous_keys:
+    is_valid, _ = validate_tomato_chapter_title(base)
+    if is_valid and _chapter_title_key(base) not in previous_keys:
         return base[:40]
 
     for hint in hints or []:
         fragment = clean_title(_title_hint_fragment(hint))
-        if len(_chapter_title_key(fragment)) < 2:
+        fragment_valid, _ = validate_tomato_chapter_title(fragment)
+        if not fragment_valid or _chapter_title_key(fragment) in previous_keys:
             continue
-        candidate = f"{base}·{fragment}"
-        if _chapter_title_key(candidate) not in previous_keys:
-            return candidate[:40]
+        return fragment[:12]
 
-    # Last-resort uniqueness is preferable to silently presenting several
-    # chapters under one label when a provider repeats an unhelpful title.
-    suffix = f"第{chapter_number}章" if chapter_number else "新线索"
-    return f"{base}·{suffix}"[:40]
+    # Do not fall back to "第 N 章" or append a sentence.  These compact
+    # reader-facing hooks keep the title contract valid even when the provider
+    # returns no usable title or no distinct hint.
+    for fallback in ("新线索", "新危机", "局势突变", "暗线启动", "反击开始"):
+        if _chapter_title_key(fallback) not in previous_keys:
+            return fallback
+    return f"新局{chapter_number or ''}"[:12]
 
 
 class AIGatewayError(RuntimeError):
@@ -326,6 +369,11 @@ class ContextAssembler:
                     # 取第一个 writer Prompt 作为主写作 Prompt
                     writer_prompt = prompts_by_type["writer"][0]
 
+                if not rules and not knowledge and not prompts:
+                    raise AIGatewayError(
+                        f"genre context is empty for configured genre_id={self.genre_id}"
+                    )
+
                 result = {
                     "genre_id": self.genre_id,
                     "style_card": style_card,
@@ -342,9 +390,13 @@ class ContextAssembler:
                 return result
 
         except Exception as e:
-            # 品类加载失败不影响主流程
-            logger.warning(f"加载品类上下文失败: {e}")
-            return {}
+            # A configured real genre is part of the generation contract.  A
+            # silent empty-context fallback changes the book's category and
+            # makes a successful-looking chapter impossible to audit.
+            logger.error("加载品类上下文失败，停止生成: %s", type(e).__name__)
+            if isinstance(e, AIGatewayError):
+                raise
+            raise AIGatewayError("genre context unavailable; generation stopped") from e
 
     async def load_previous_chapters(
         self,
@@ -717,6 +769,86 @@ class SceneDirector:
         self.gateway = gateway
 
     @staticmethod
+    def validate_scene_plan_contract(
+        plan: Any,
+        *,
+        target_word_count: int,
+    ) -> dict[str, Any]:
+        """Fail closed when the planner does not return a usable beat sheet.
+
+        The writer can produce fluent prose from a malformed plan, but it
+        cannot reliably preserve a payoff arc or chapter objective in that
+        case.  Treating ``beats: []`` as a valid plan was one of the ways a
+        weak provider response reached the prose stage.
+        """
+        if not isinstance(plan, dict):
+            raise AIGatewayError("scene plan contract invalid: expected an object")
+        title = str(plan.get("chapter_title") or "").strip()
+        if not title:
+            raise AIGatewayError("scene plan contract invalid: chapter_title is empty")
+        beats = plan.get("beats")
+        if not isinstance(beats, list) or not 4 <= len(beats) <= 6:
+            raise AIGatewayError(
+                "scene plan contract invalid: beats must contain 4-6 items"
+            )
+        phases: set[str] = set()
+        beat_errors: list[str] = []
+        for index, beat in enumerate(beats, start=1):
+            if not isinstance(beat, dict):
+                beat_errors.append(f"beat_{index}_not_object")
+                continue
+            if not str(beat.get("name") or "").strip():
+                beat_errors.append(f"beat_{index}_name_missing")
+            if not str(beat.get("content") or "").strip():
+                beat_errors.append(f"beat_{index}_content_missing")
+            try:
+                words = int(beat.get("target_words") or 0)
+            except (TypeError, ValueError):
+                words = 0
+            if words <= 0:
+                beat_errors.append(f"beat_{index}_target_words_invalid")
+            phase_values = beat.get("payoff_phases")
+            if not isinstance(phase_values, list):
+                phase_values = [beat.get("payoff_phase")]
+            phases.update(
+                str(value).strip().lower()
+                for value in phase_values
+                if str(value or "").strip()
+            )
+        if beat_errors:
+            raise AIGatewayError(
+                "scene plan contract invalid: " + ", ".join(beat_errors[:8])
+            )
+        required_phases = {"pressure", "build", "burst", "feedback", "aftershock"}
+        missing_phases = sorted(required_phases - phases)
+        if missing_phases:
+            raise AIGatewayError(
+                "scene plan contract invalid: missing payoff phases "
+                + ", ".join(missing_phases)
+            )
+        chapter_type = str(plan.get("chapter_type") or "").strip().lower()
+        if chapter_type not in {"normal", "aftermath", "relationship", "suspense"}:
+            raise AIGatewayError(
+                "scene plan contract invalid: chapter_type is unsupported"
+            )
+        planned_words = sum(
+            int(beat.get("target_words") or 0)
+            for beat in beats
+            if isinstance(beat, dict)
+        )
+        target = max(1, int(target_word_count or 0))
+        if planned_words < int(target * 0.35) or planned_words > int(target * 2.0):
+            raise AIGatewayError(
+                "scene plan contract invalid: beat targets are outside the safe range"
+            )
+        return {
+            "passed": True,
+            "beat_count": len(beats),
+            "planned_words": planned_words,
+            "payoff_phases": sorted(phases),
+        }
+
+    @staticmethod
     def _adopt_plot_brief(
         chapter_number: int,
         target_word_count: int,
@@ -817,6 +949,10 @@ class SceneDirector:
             previous_titles=previous_titles,
         )
         if adopted is not None:
+            self.validate_scene_plan_contract(
+                adopted,
+                target_word_count=target_word_count,
+            )
             return adopted
 
         brief_block = ""
@@ -984,12 +1120,10 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             chapter_number=chapter_number,
             hints=[plan.get("hook"), plan.get("scene_goal"), plan.get("conflict")],
         )
-        plan.setdefault("beats", [])
         plan["chapter_number"] = chapter_number
         plan["chapter_type"] = str(plan.get("chapter_type") or "normal").strip().lower()
-        if plan["chapter_type"] not in {"normal", "aftermath", "relationship", "suspense"}:
-            plan["chapter_type"] = "normal"
         plan["target_word_count"] = target_word_count
+        self.validate_scene_plan_contract(plan, target_word_count=target_word_count)
         plan["_usage"] = result["usage"]
         return plan
 
@@ -1071,11 +1205,10 @@ class DeAIPipeline:
     ) -> dict[str, Any]:
         """Decide whether a safe rule-only result can stand in for semantic rewrite.
 
-        A malformed/oversized provider candidate is not itself proof that the
-        chapter is bad. The deterministic pass may already have removed the
-        actual high-risk patterns. Keep that distinction visible: a clean
-        fallback is accepted with a warning; a fallback that still contains a
-        hard signal remains blocked.
+        A malformed/oversized provider candidate is a failed quality step even
+        when the deterministic pass produced readable text.  Keeping that text
+        is useful for diagnosis and retry, but it must never become a passed
+        chapter merely because the fallback looks clean.
         """
         blocking_flags = [
             str(flag.get("code"))
@@ -1085,7 +1218,7 @@ class DeAIPipeline:
             and str(flag.get("severity") or "").lower() in {"medium", "high"}
         ]
         risk_score = int(metrics.get("risk_score") or 0)
-        passed = not blocking_flags and risk_score < 70
+        passed = False
         gate = {
             "passed": passed,
             "mode": "deterministic_fallback",
@@ -1093,10 +1226,8 @@ class DeAIPipeline:
             "warning": message,
             "risk_score": risk_score,
         }
-        if passed:
-            gate["code"] = "semantic_rewrite_unavailable"
-        else:
-            gate["code"] = "rewrite_candidate_rejected"
+        gate["code"] = "rewrite_candidate_rejected" if blocking_flags else "semantic_rewrite_unavailable"
+        if not passed:
             gate["blocking_flags"] = sorted(set(blocking_flags))
         return gate
 
@@ -1627,8 +1758,9 @@ class DeAIPipeline:
                     after_metrics = analyze_deai_patterns(text, profile=quality_profile)
                     opening_repair_gate = {
                         **fallback_evidence,
-                        "passed": True,
+                        "passed": False,
                         "mode": "deterministic_fallback",
+                        "code": "opening_repair_provider_failed",
                         "provider_error": str(exc),
                     }
                 else:
@@ -2403,6 +2535,7 @@ class GenerationEngine:
         project_id: str | None = None,
         provider_config: dict[str, str] | None = None,
         quality_profile: dict[str, Any] | None = None,
+        genre_id: str | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -2412,6 +2545,7 @@ class GenerationEngine:
         self.project_id = project_id
         self.provider_config = provider_config or {}
         self.quality_profile = quality_profile or select_quality_profile()
+        self.genre_id = genre_id
 
         self.ai_gateway = AIGateway(
             tracer,
@@ -2420,7 +2554,7 @@ class GenerationEngine:
             project_id=project_id,
             provider_config=self.provider_config,
         )
-        self.context_assembler = ContextAssembler(brain, project_id)
+        self.context_assembler = ContextAssembler(brain, project_id, genre_id)
         self.scene_director = SceneDirector(brain, self.ai_gateway)
         self.deai_pipeline = DeAIPipeline(self.ai_gateway)
 
@@ -2748,7 +2882,8 @@ class GenerationEngine:
                         "content_policy": raw_content_policy,
                     },
                     "quality_gate": {
-                        "passed": True,
+                        "passed": False,
+                        "code": "generation_preflight_failed",
                         "skipped": True,
                         "reason": "generation_preflight_failed; semantic humanization skipped",
                     },
@@ -2797,8 +2932,7 @@ class GenerationEngine:
             final_text,
             previous_text=str(context_layers.get("previous_full_text") or ""),
         )
-        # P1-3 质量整改：chapter_mirror 从 hard gate 降为 soft warning
-        # 只有当 CHAPTER_MIRROR_HARD_GATE 为 True 时才拦截
+        # 正文镜像是重复章/平行版本的硬门禁；不能让它进入完成状态。
         if not mirror_stats.get("passed") and CHAPTER_MIRROR_HARD_GATE:
             generation_failures.append({
                 "code": "chapter_mirror",
@@ -2877,8 +3011,8 @@ class GenerationEngine:
                 "message": "爽点节拍没有覆盖：" + "、".join(payoff_beat_validation.get("missing_phases") or []),
                 "evidence": payoff_beat_validation,
             })
-        # P1-3 质量整改：payoff_variety 从 hard gate 降为 soft warning
-        # 只有当 PAYOFF_VARIETY_HARD_GATE 为 True 时才拦截
+        # 爽点类型轮换仍保留为可观测 warning，只有完整占满轮换窗口时
+        # 才由配置开关升级为 hard gate。
         if payoff_contract_required and not payoff_variety.get("passed") and PAYOFF_VARIETY_HARD_GATE:
             generation_failures.append({
                 "code": "payoff_type_repetition",
@@ -2893,6 +3027,15 @@ class GenerationEngine:
             recent_types=scene_plan.get("recent_payoff_types") or [],
             recent_history=scene_plan.get("recent_payoff_history") or [],
         )
+        chapter_title_value = scene_plan.get("chapter_title") or ""
+        chapter_title_passed, chapter_title_reason = validate_tomato_chapter_title(chapter_title_value)
+        if not chapter_title_passed:
+            generation_failures.append({
+                "code": "tomato_chapter_title_invalid",
+                "severity": "high",
+                "message": chapter_title_reason,
+                "title": chapter_title_value,
+            })
         generation_quality = {
             "schema_version": "generation-quality-v1",
             "passed": not generation_failures,
@@ -2910,6 +3053,13 @@ class GenerationEngine:
             "payoff_score": payoff_score,
             "chapter_mirror": mirror_stats,
             "quality_profile": quality_profile_metadata(self.quality_profile),
+            "chapter_title": {
+                "value": chapter_title_value,
+                "passed": chapter_title_passed,
+                "reason": chapter_title_reason,
+                "max_chars": 12,
+                "style": "tomato_reader_hook",
+            },
             "web_research": {
                 "status": (context.get("context_layers") or {}).get("web_research", {}).get("status", "disabled"),
                 "cache_status": (context.get("context_layers") or {}).get("web_research", {}).get("cache_status"),
@@ -2948,6 +3098,8 @@ class GenerationEngine:
                 "previous_transition_contract": context["context_layers"].get(
                     "previous_transition_contract", {}
                 ),
+                "genre_id": (context["context_layers"].get("genre") or {}).get("genre_id") or getattr(self, "genre_id", None),
+                "genre": context["context_layers"].get("genre", {}),
                 "constraints": context["context_layers"].get("constraints", []),
                 "style_card": context["context_layers"].get("style_card", {}),
                 "active_rules": context["context_layers"].get("active_rules", []),
@@ -2963,6 +3115,7 @@ class GenerationEngine:
             "chapter_mirror": mirror_stats,
             "pov_metrics": final_pov_metrics,
             "content_policy": final_content_policy,
+            "title_quality": generation_quality.get("chapter_title"),
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "deai": {
                 "layers_applied": deai_result["layers_applied"],
@@ -2971,7 +3124,11 @@ class GenerationEngine:
                 "humanize_changes": deai_result.get("humanize_changes", []),
                 "ai_patterns_removed": deai_result.get("ai_patterns_removed", []),
                 "metrics": deai_result.get("metrics", {}),
-                "quality_gate": deai_result.get("quality_gate") or {"passed": True},
+                "quality_gate": deai_result.get("quality_gate") or {
+                    "passed": False,
+                    "code": "deai_quality_gate_missing",
+                    "message": "去 AI 味质量门禁缺失，结果未验证",
+                },
             },
             "usage": usage,
         }
@@ -3041,7 +3198,11 @@ class GenerationEngine:
                 "severity": "high",
                 "message": f"修复后正文 {word_count} 字，超过最大阈值 {maximum_chars} 字",
             })
-        quality_gate = deai_result.get("quality_gate") or {}
+        quality_gate = deai_result.get("quality_gate") or {
+            "passed": False,
+            "code": "deai_quality_gate_missing",
+            "message": "去 AI 味质量门禁缺失，结果未验证",
+        }
         if quality_gate.get("passed") is False:
             failures.append({
                 "code": str(quality_gate.get("code") or "deai_quality_gate_failed"),

@@ -886,6 +886,16 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
 .review-empty h3 { font-size: 21px; }
 .review-empty p { max-width: 560px; margin-top: 9px; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
 .review-summary-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 18px; }
+.review-auxiliary { padding: 22px 25px; }
+.review-auxiliary:hover { transform: none; }
+.review-auxiliary .section-heading { align-items: flex-start; }
+.review-auxiliary .section-heading > div > p:last-child { margin-top: 7px; }
+.review-auxiliary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.review-auxiliary-grid article { min-width: 0; padding: 15px; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 12px; }
+.review-auxiliary-grid article > span { display: block; color: var(--text-muted); font-size: 10px; }
+.review-auxiliary-grid strong { display: block; margin-top: 7px; font-size: 24px; font-variant-numeric: tabular-nums; }
+.review-auxiliary-grid p { min-height: 35px; margin-top: 6px; color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.review-auxiliary-grid small { display: block; margin-top: 6px; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 .review-provenance { padding: 22px 25px; }
 .review-provenance .section-heading > span { color: var(--text-muted); font-size: 11px; }
 .review-provenance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -1339,6 +1349,7 @@ details.card[open] > summary.card-head .expand-icon { transform: rotate(180deg);
   .review-heading { align-items: flex-start; }
   .review-heading h2 { font-size: 34px; }
   .review-summary-grid, .review-detail-grid, .narrative-grid { grid-template-columns: 1fr; }
+  .review-auxiliary-grid { grid-template-columns: 1fr; }
   .review-provenance-grid { grid-template-columns: 1fr 1fr; }
   .review-score-card { min-height: 190px; padding: 22px; gap: 19px; }
   .review-score-ring { width: 108px; height: 108px; }

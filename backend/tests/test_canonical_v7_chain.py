@@ -187,7 +187,7 @@ def test_chapter_title_normalizer_removes_meta_summary_lead():
         hints=["主角在旧宅中发现一张旧照"],
     )
 
-    assert title == "旧宅回声·一张旧照"
+    assert title == "一张旧照"
     assert "主角" not in title
     assert "发现" not in title
 
