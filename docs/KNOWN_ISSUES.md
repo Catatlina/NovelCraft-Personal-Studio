@@ -1,20 +1,27 @@
 # Starlume AI 当前已知问题
 
-## 2026-08-10 KI-034 生成质量旁路已收紧，待生产复测
+## 2026-08-10 KI-034 生成质量旁路整改已部署
+
+- 状态：**可用**（代码门禁和生产链已通过；真实正文质量仍需独立验收）。
+- 生产版本：`main@70688f9`；`nc_v7_genre_packs` 迁移成功，旧 V7 引导表的 UUID/启用状态/元数据默认值兼容已补齐。
+- 证据：CI backend/frontend/frontend-test/security/E2E 全通过；生产 smoke 15/15；生产浏览器 v2 1 passed、兼容版 3 passed；healthz 的 database/Redis/Worker 正常。
+- 未闭合：本次 smoke 未注入 Provider Key，真实 Provider 生成、两本书各 20 章连续性长跑和人工盲评仍未开始。
+
+## 2026-08-10 KI-034 生成质量旁路已收紧（历史记录，生产复测见上）
 
 - 状态：**可用**（本地质量链），生产当前版本待发布复测。
 - 已处理：Provider 去 AI 失败、局部修复失败、空/残缺场景计划、空品类上下文、实时审阅模型高分绕过跨章正文校验、正文镜像放行和不完整连续性证据等旁路。
 - 本地证据：质量专项 93 passed；前端 54 passed；TypeScript、构建、交付声明和 AI 真实性门禁通过。
-- 未闭合：本机 PostgreSQL 未启动，后端全量为 862 passed、138 skipped、150 failed、54 errors；生产部署后需要 healthz/smoke/浏览器验证，并用真实 Provider 样本确认新门禁不误伤正常爽文。
-- 下一步：提交推送后重建生产 API/Worker/Frontend，执行公网 smoke、登录态页面检查和至少一章真实生成/失败语义复测；再决定是否进行 20 章长跑。
+- 未闭合：本机 PostgreSQL 未启动，后端全量为 862 passed、138 skipped、150 failed、54 errors；生产 smoke 和浏览器复测已完成，但真实 Provider 样本仍未执行。
+- 下一步：使用真实 Provider 执行至少一章失败/成功语义复测，再决定是否进行两本书各 20 章长跑。
 
-## 2026-08-10 KI-032 实时网感研究已接线但服务器缺少 Tavily Key
+## 2026-08-10 KI-032 实时网感研究已接线，生产配置已存在但质量未验收
 
 - 状态：**已接线**。
 - 代码范围：作品创建/导入、榜单成书、小说设置、`contents.meta`、worker context、V7 quality profile、`GenerationEngine`、V7 event log、Docker/env 示例均已接入；研究失败 fail-closed，不返回 mock 或静态替代正文。
 - 验证：研究服务 6/6、相关 V7/质量 25/25、Redis 依赖回归 30/30、前端 3/3、构建/编译/差异检查通过。
-- 阻断：远端 `/opt/NovelCraft-Personal-Studio` 当前为 `6583024`，只读检查显示 `TAVILY_API_KEY` 未配置；本批尚未 push/deploy。没有真实 Tavily 搜索和 Provider 正文样本，不能标记“可用/已验收”。
-- 下一步：配置服务器 Key 后部署；先验证 healthz 的 `web_research_key_configured=true`，再用一章确认 live/cached、`web_research.completed`、AI ledger 和正文 Prompt 证据，最后跑两本书各 20 章并做人工爽感/连续性复核。
+- 阻断：生产 healthz 已确认 `web_research_provider=tavily` 且 Key 已配置，但本次 smoke 未注入 Provider/Tavily 调用，不具备真实联网正文质量证据。
+- 下一步：用真实 Provider 执行一章，确认 live/cached、`web_research.completed`、AI ledger 和正文 Prompt 证据，最后跑两本书各 20 章并做人工爽感/连续性复核。
 
 ## 2026-08-10 KI-033 本机全量后端集成回归受 PostgreSQL 环境阻断
 

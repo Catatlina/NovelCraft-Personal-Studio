@@ -1,13 +1,22 @@
 # Starlume AI — 真实进度
 
-## 2026-08-10 生成质量旁路收紧（本地回归通过，待发布）
+## 2026-08-10 生成质量整改、品类链路与生产部署已验收 [实测]
+
+- 生成质量旁路收紧、真实 `genre_id` 品类包链路和生产迁移兼容修复已合并到 `main@70688f9` 并部署到 `/opt/NovelCraft-Personal-Studio`；线上已有未跟踪/修改文件均保留，未执行清理覆盖。
+- `nc_v7_genre_packs` 已迁移到 head。针对旧 V7 引导表没有落数据库默认值的情况，迁移现在显式写入 UUID、`is_active=true` 和扩展元数据，并补齐四张品类表的数据库默认值。
+- 部署前备份：`backups/pre-deploy-c2abf99-20260810-221427.sql.gz`，gzip 校验通过，大小 232,420,223 bytes。
+- CI run `31398290193` 的 backend、frontend、frontend-test、security、E2E 全部通过；E2E 为 18 passed、9 skipped、0 failed。生产 `healthz` 返回 200，数据库/Redis/Worker 正常，queue depth 为 0。
+- 生产 smoke 15/15 通过；生产浏览器走查 v2 为 1 passed，覆盖注册、八个主页面、V7 质量页、Cost Monitor、Prompt provenance 和无 mock 数据断言；兼容版生产走查 3/3 通过。
+- 当前边界：本次 smoke 与浏览器走查未注入 Provider Key，不把自动门禁或页面通过等同于真实正文质量人工验收；真实 Provider 章节长跑、两本书各 20 章和人工盲评仍按独立门禁处理。
+
+## 2026-08-10 生成质量旁路收紧（历史整改记录，生产证据见上）
 
 - 收紧 V7 失败语义：语义去 AI Provider 失败、局部段首修复 Provider 失败、生成前置门禁失败、缺失去 AI 质量门禁均不再写成 `passed=true`；保留诊断稿，但只能进入重试/待复核。
 - 场景规划新增 Provider 输出结构硬校验：必须返回 4–6 个有效 beat、正字数预算和压制→蓄力→爆发→反馈→余波五阶段；空计划、缺阶段或预算异常直接停止生成。配置了 `genre_id` 但品类包加载失败/为空时同样停止，不再静默使用空品类上下文。
 - 实时 V7 审阅补正文级跨章校验：第 2 章起没有上一章契约不能因模型高分通过；标题基名复用且正文开头无承接锚点时命中 `parallel_version_candidate`。正文镜像检测升级为硬门禁；证据投影要求连续性真实通过。
 - 质量真实性门禁新增上述确定性校验和报告统计的最小 allowlist；`verify_delivery_claims.py` 与 `ai_development_gate.sh` 均通过。
 - 本地证据：后端生成/审阅/连续性/质量专项 93 passed；前端 54 passed；TypeScript 检查、生产构建、Python compile、`git diff --check` 通过。后端全量仍未绿：862 passed、138 skipped、150 failed、54 errors，主要因本机 PostgreSQL `localhost:5432` 未启动导致注册/真实数据库夹具 503，不能当作全量通过。
-- 当前边界：本批代码尚未 commit/push/deploy；发布后仍需用生产 healthz、smoke、浏览器入口和真实 Provider 章节验证，不能把自动门禁替代人工爽感/连续性验收。
+- 当前边界：[实测] 自动门禁、生产部署和页面 smoke 已验收；真实 Provider 章节样本、人工爽感/连续性验收仍未开始，不能用自动分数替代人工质量门禁。
 
 ## 2026-08-10 跨章连续性硬门禁修复（本地未推送）
 
