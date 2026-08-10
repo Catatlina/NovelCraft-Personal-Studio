@@ -1,5 +1,11 @@
 # Starlume AI — 真实进度
 
+## 2026-08-10 生产 V7 审阅 JSON 截断修复
+
+- 两本设定导入长跑已确认是真实 DeepSeek 生成；第一轮干净批次的第 1 章暴露出 V7 33 维审阅输出在 `tokens_output=5000` 边界截断，导致审核契约不完整。系统按 fail-closed 拦截，未把不完整报告当成通过。
+- 已在本地修复审阅 Prompt：版本 `1.4.1`，输出预算提升至 8000，并对 33 项 evidence/repair、issues 和 strengths 增加长度上限；新增回归测试。
+- 旧批次未删除，已请求取消并保留为失败证据；代码发布后将重新创建两本各 10 章的独立批次，按 `reviewed + v7_quality_gate_passed + continuity clean` 验收。
+
 ## 2026-08-10 生产 V7 品类上下文会话工厂修复
 
 - 两本设定仅导入长跑在生产第 1 章触发真实 DeepSeek 调用后，被 V7 品类上下文装配的运行时 ImportError 阻断：生成器错误引用不存在的 `app.v7.db.async_session`，没有章节被写成成功。

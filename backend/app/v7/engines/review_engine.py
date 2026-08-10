@@ -50,7 +50,14 @@ REVIEW_DIMENSIONS: tuple[str, ...] = (
     "constraint_compliance",
 )
 
-REVIEW_PROMPT_VERSION = "1.4.0"
+REVIEW_PROMPT_VERSION = "1.4.1"
+
+# A 33-item evidence report is materially larger than the seven macro scores.
+# 5000 output tokens is not enough for a Chinese response that includes every
+# audit item's evidence and repair action; DeepSeek can return a truncated
+# JSON document at that boundary. Keep the response bounded by concise-field
+# instructions below, but leave enough output budget to close the JSON object.
+REVIEW_MAX_OUTPUT_TOKENS = 8000
 
 DIMENSION_LABELS: dict[str, str] = {
     "consistency": "设定一致性（与已确立的人物/世界/情节状态是否冲突）",
@@ -380,6 +387,9 @@ class ReviewEngine(BaseEngine):
             "除非设定/正文已有证据支持新增特征。"
             "33个审计项必须全部出现；每项都要给 score、evidence、repair。"
             "如果某项确实不适用，也要给出 score，并在 evidence 说明不适用的理由。"
+            "为保证 JSON 完整：每项 evidence 和 repair 各不超过 40 个汉字；issues 最多 5 条、"
+            "每条 description/suggestion/excerpt 各不超过 80 个汉字；strengths 最多 5 条；"
+            "payoff_evidence 最多 3 条。不要输出重复分析、思维过程或 JSON 以外的文字。"
             "如果提供了本章爽点契约，必须从正文逐字摘取至少一条 payoff_evidence；"
             "anchor 必须能在正文中定位，不能用概括或虚构证据。"
             "叙述视角必须是第三人称：引号、短信、书信和直接引用里的‘我’不计入，"
@@ -398,7 +408,7 @@ class ReviewEngine(BaseEngine):
                     + third_person_generation_contract()
                     + content_generation_contract(data.get("quality_profile") or {})
                 ),
-                max_tokens=5000,
+                max_tokens=REVIEW_MAX_OUTPUT_TOKENS,
                 temperature=0.0,
                 prompt_name="v7.review.33_dimension",
                 prompt_version=REVIEW_PROMPT_VERSION,

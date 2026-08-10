@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 
 from app.v7.engines.base import EngineResult
-from app.v7.engines.review_engine import REVIEW_DIMENSIONS, ReviewEngine
+from app.v7.engines.review_engine import (
+    REVIEW_DIMENSIONS,
+    REVIEW_MAX_OUTPUT_TOKENS,
+    ReviewEngine,
+)
 from app.v7.integration.quality import evaluate_review
 from app.v7.quality.audit_dimensions import AUDIT_DIMENSIONS
 
@@ -135,3 +139,64 @@ def test_execute_repairs_only_invalid_payoff_evidence(monkeypatch):
     assert result.result["payoff_evidence_validation"]["passed"] is True
     assert result.result["payoff_evidence"][0]["anchor"] == "石门当场退开"
     assert engine.ai_gateway.calls == 2
+
+
+def test_execute_allocates_enough_output_for_complete_33_dimension_json():
+    chapter_text = "沈砚抬手按住石门，石门当场退开，队伍里有人倒吸一口凉气。"
+
+    class FakeGateway:
+        def __init__(self):
+            self.review_max_tokens = None
+
+        async def generate_json(self, _prompt, **kwargs):
+            self.review_max_tokens = kwargs.get("max_tokens")
+            return {
+                "data": {
+                    "dimension_scores": {key: 90 for key in REVIEW_DIMENSIONS},
+                    "overall_score": 90,
+                    "reader_experience": {
+                        "expectation": 90,
+                        "conflict": 90,
+                        "payoff": 90,
+                        "emotion_shift": 90,
+                        "worth_continuing": 90,
+                    },
+                    "audit_dimensions": {
+                        item.key: {"score": 90, "evidence": "evidence", "repair": "none"}
+                        for item in AUDIT_DIMENSIONS
+                    },
+                    "payoff_evidence": [{
+                        "type": "能力展示",
+                        "anchor": "石门当场退开",
+                        "result": "石门退开",
+                        "reaction": "队伍震惊",
+                    }],
+                },
+                "usage": {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"},
+            }
+
+    engine = object.__new__(ReviewEngine)
+    engine.ai_gateway = FakeGateway()
+    engine.record_usage = lambda usage: None
+    plan = EngineResult(success=True, result={
+        "chapter_number": 2,
+        "chapter_text": chapter_text,
+        "constraints_to_check": [],
+        "known_characters": [],
+        "known_plot": [],
+        "previous_chapter_tail": "",
+        "previous_transition_contract": {},
+        "chapter_plan": {},
+        "scene_plan": {},
+        "deai_metrics": {},
+        "pov_metrics": {},
+        "content_policy": {},
+        "generation_quality": {},
+        "quality_profile": {},
+        "payoff_contract": {},
+    })
+
+    result = asyncio.run(engine.execute(plan))
+
+    assert result.success is True
+    assert engine.ai_gateway.review_max_tokens == REVIEW_MAX_OUTPUT_TOKENS
