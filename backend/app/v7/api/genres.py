@@ -23,11 +23,11 @@ from ..services.genre_inheritance import (
     clear_inheritance_cache,
 )
 from ...api.v1.config import require_admin, require_admin_reads
+from ...core.security import get_current_user
 
 router = APIRouter(
     prefix="",
     tags=["v7-genres"],
-    dependencies=[Depends(require_admin_reads)],
 )
 
 
@@ -124,6 +124,7 @@ def _prompt_to_dict(prompt: GenrePrompt) -> dict[str, Any]:
 
 @router.get("/tree", response_model=dict)
 async def get_genre_tree_api(
+    _user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """获取完整的品类树结构。"""
@@ -134,7 +135,7 @@ async def get_genre_tree_api(
 # ── 品类包 CRUD ───────────────────────────────────────────────────────────
 
 
-@router.get("/packs", response_model=dict)
+@router.get("/packs", response_model=dict, dependencies=[Depends(require_admin_reads)])
 async def list_genre_packs(
     scope: str | None = Query(None, description="按范围过滤"),
     is_active: bool | None = Query(None, description="是否只返回启用的"),
@@ -177,7 +178,7 @@ async def list_genre_packs(
     }
 
 
-@router.get("/packs/{pack_id}", response_model=dict)
+@router.get("/packs/{pack_id}", response_model=dict, dependencies=[Depends(require_admin_reads)])
 async def get_genre_pack(
     pack_id: str,
     db: AsyncSession = Depends(get_db),
@@ -326,7 +327,7 @@ async def delete_genre_pack(
 # ── 规则 CRUD ─────────────────────────────────────────────────────────────
 
 
-@router.get("/packs/{pack_id}/rules", response_model=dict)
+@router.get("/packs/{pack_id}/rules", response_model=dict, dependencies=[Depends(require_admin_reads)])
 async def list_genre_rules(
     pack_id: str,
     rule_type: str | None = Query(None, description="按规则类型过滤"),
@@ -486,7 +487,7 @@ async def delete_genre_rule(
 # ── 知识 CRUD ─────────────────────────────────────────────────────────────
 
 
-@router.get("/packs/{pack_id}/knowledge", response_model=dict)
+@router.get("/packs/{pack_id}/knowledge", response_model=dict, dependencies=[Depends(require_admin_reads)])
 async def list_genre_knowledge(
     pack_id: str,
     knowledge_type: str | None = Query(None, description="按知识类型过滤"),
@@ -633,7 +634,7 @@ async def delete_genre_knowledge(
 # ── Prompt CRUD ───────────────────────────────────────────────────────────
 
 
-@router.get("/packs/{pack_id}/prompts", response_model=dict)
+@router.get("/packs/{pack_id}/prompts", response_model=dict, dependencies=[Depends(require_admin_reads)])
 async def list_genre_prompts(
     pack_id: str,
     prompt_type: str | None = Query(None, description="按 Prompt 类型过滤"),
@@ -793,7 +794,7 @@ async def delete_genre_prompt(
 # ── 继承链查询 ────────────────────────────────────────────────────────────
 
 
-@router.get("/packs/{pack_id}/chain", response_model=dict)
+@router.get("/packs/{pack_id}/chain", response_model=dict, dependencies=[Depends(require_admin_reads)])
 async def get_genre_inheritance_chain(
     pack_id: str,
     db: AsyncSession = Depends(get_db),

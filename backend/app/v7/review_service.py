@@ -21,7 +21,7 @@ from .brain.novel_brain import NovelBrain
 from .db import AsyncSessionLocal, async_engine
 from .engines.review_engine import REVIEW_PROMPT_VERSION, ReviewEngine
 from .events.event_bus import EventBus
-from .quality.continuity import validate_transition_contract
+from .quality.continuity import validate_prose_continuity, validate_transition_contract
 from .quality.novel_reviewer_reference import (
     build_editorial_review_view,
     novel_reviewer_reference_metadata,
@@ -84,6 +84,7 @@ def _chapter_context(content: dict[str, Any], text: str) -> tuple[dict[str, Any]
     chapter_number = _chapter_number(content)
     current_meta = _meta(content.get("meta"))
     previous_tail = ""
+    previous_title = ""
     previous_contract: dict[str, Any] = {}
     chapter_plan: dict[str, Any] = {}
     conn = connect()
@@ -101,6 +102,7 @@ def _chapter_context(content: dict[str, Any], text: str) -> tuple[dict[str, Any]
                 (novel_id, chapter_number),
             ).fetchone()
             if previous:
+                previous_title = str(previous.get("title") or "").strip()
                 previous_meta = _meta(previous.get("meta"))
                 previous_text = extract_body_text(previous.get("body") or "")
                 previous_tail = previous_text[-1200:]
@@ -121,6 +123,13 @@ def _chapter_context(content: dict[str, Any], text: str) -> tuple[dict[str, Any]
     context = {
         "chapter_text": text,
         "chapter_number": chapter_number,
+        "chapter_title": str(
+            content.get("title")
+            or current_meta.get("chapter_title")
+            or (current_meta.get("scene_plan") or {}).get("chapter_title")
+            or ""
+        ).strip(),
+        "previous_chapter_title": previous_title,
         "previous_chapter_tail": previous_tail,
         "previous_transition_contract": previous_contract,
         "chapter_plan": chapter_plan or current_meta.get("outline") or {},
@@ -168,6 +177,15 @@ def _continuity_evidence(
                 "suggestion": item.get("repair") or "补足触发、承接、后果和章末桥接证据",
             })
 
+    chapter_number = int(context.get("chapter_number") or 1)
+    previous_contract = context.get("previous_transition_contract") or {}
+    current_title = str(
+        context.get("chapter_title")
+        or current_meta.get("chapter_title")
+        or (current_meta.get("scene_plan") or {}).get("chapter_title")
+        or ""
+    ).strip()
+    previous_title = str(context.get("previous_chapter_title") or "").strip()
     contract = current_meta.get("transition_contract")
     deterministic: dict[str, Any]
     if isinstance(contract, dict) and contract:
@@ -176,8 +194,8 @@ def _continuity_evidence(
         if contract_matches_text:
             deterministic = validate_transition_contract(
                 contract,
-                chapter_number=int(context.get("chapter_number") or 1),
-                previous_contract=context.get("previous_transition_contract") or {},
+                chapter_number=chapter_number,
+                previous_contract=previous_contract,
                 state_conflicts=(contract.get("state_conflicts") or []),
             )
         else:
@@ -185,42 +203,68 @@ def _continuity_evidence(
                 "schema_version": "continuity-v1",
                 "status": "not_checked",
                 "checked": False,
+                "passed": False if chapter_number > 1 else True,
                 "reason": "当前正文尚未保存与之匹配的 V7 转场契约",
             }
     else:
         deterministic = {
             "schema_version": "continuity-v1",
-            "status": "not_checked",
+            "status": "not_checked" if chapter_number > 1 else "not_applicable",
             "checked": False,
+            "passed": False if chapter_number > 1 else True,
             "reason": "当前草稿没有可验证的 V7 转场契约",
         }
+
+    prose = validate_prose_continuity(
+        chapter_number=chapter_number,
+        current_text=chapter_text,
+        current_title=current_title,
+        previous_title=previous_title,
+        current_contract=contract if isinstance(contract, dict) else {},
+        previous_contract=previous_contract,
+    )
 
     deterministic_checked = bool(
         deterministic.get("checked") is True
         or isinstance(deterministic.get("checked"), list)
     )
     model_checked = bool(model_score is not None and evidence)
-    checked = deterministic_checked or model_checked
     deterministic_passed = deterministic.get("passed") is True
-    if not checked:
+    deterministic_required = chapter_number > 1
+    prose_passed = prose.get("passed") is True
+    if deterministic_required and not deterministic_checked:
         status = "not_checked"
-    elif deterministic.get("checked") is False:
-        status = "continuous" if model_score is not None and model_score >= 85 else "warning"
-    elif deterministic_passed and (model_score is None or model_score >= 85):
-        status = "continuous"
-    elif deterministic.get("blocking_count", 0) > 0 or (model_score is not None and model_score < 60):
+    elif not deterministic_passed or not prose_passed:
         status = "broken"
-    else:
+    elif model_score is not None and model_score < 60:
+        status = "broken"
+    elif model_score is not None and model_score < 85:
         status = "warning"
+    elif deterministic_passed and prose_passed:
+        status = "continuous"
+    else:
+        status = "not_checked"
+
+    checked = deterministic_checked or model_checked or not deterministic_required
+    passed = bool(
+        prose_passed
+        and (deterministic_passed if deterministic_required else True)
+        and (model_score is not None and model_score >= 85 if model_checked else not deterministic_required)
+    )
+    combined_gaps = [*gaps]
+    combined_gaps.extend(deterministic.get("issues") or [])
+    combined_gaps.extend(prose.get("issues") or [])
 
     return {
         "status": status,
         "checked": checked,
+        "passed": passed,
         "source": CANONICAL_REVIEW_PROMPT,
         "model_score": model_score,
         "narrative_flow": "；".join(evidence) or "V7 审阅器已完成跨章因果、时间线和章末桥接检查。",
-        "gaps": gaps,
+        "gaps": combined_gaps,
         "deterministic_contract": deterministic,
+        "prose_continuity": prose,
     }
 
 

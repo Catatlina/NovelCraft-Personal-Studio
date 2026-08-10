@@ -73,6 +73,73 @@ def test_cached_v7_review_rejects_a_different_text_hash():
     ) is None
 
 
+def test_live_review_cannot_pass_chapter_two_from_model_score_alone():
+    from app.v7.review_service import _continuity_evidence
+
+    result = _continuity_evidence(
+        _review_fixture(),
+        context={
+            "chapter_number": 2,
+            "previous_transition_contract": {},
+            "previous_chapter_title": "门后的声音",
+            "chapter_title": "门后的声音·真相",
+        },
+        current_meta={},
+        chapter_text="沈夜推开门，屋里没有人。",
+    )
+
+    assert result["status"] == "not_checked"
+    assert result["passed"] is False
+    assert result["deterministic_contract"]["passed"] is False
+
+
+def test_live_review_blocks_parallel_title_without_opening_anchor():
+    from app.v7.review_service import _continuity_evidence
+
+    previous_contract = {
+        "schema_version": "v1",
+        "chapter_number": 1,
+        "end_state": {
+            "title": "江心岛迷雾",
+            "last_tail": "船灯在江面上摇晃。",
+            "summary": "周衡停在江边。",
+        },
+        "next_chapter_bridge": "船灯在江面上摇晃。",
+        "state_delta": {},
+        "open_threads": [],
+    }
+    current_contract = {
+        "schema_version": "v1",
+        "chapter_number": 2,
+        "start_state": {
+            "previous_transition_contract": previous_contract,
+            "previous_tail": previous_contract["end_state"]["last_tail"],
+        },
+        "end_state": {
+            "last_tail": "仓库七号的门锁弹开了。",
+            "summary": "周衡进入仓库。",
+        },
+        "next_chapter_bridge": "仓库七号的门锁弹开了。",
+        "state_delta": {},
+        "open_threads": [],
+    }
+    result = _continuity_evidence(
+        _review_fixture(),
+        context={
+            "chapter_number": 2,
+            "previous_transition_contract": previous_contract,
+            "previous_chapter_title": "江心岛迷雾",
+            "chapter_title": "江心岛迷雾·周衡发现仓库",
+        },
+        current_meta={"transition_contract": current_contract},
+        chapter_text="仓库七号的门锁弹开了。",
+    )
+
+    assert result["status"] == "broken"
+    assert result["passed"] is False
+    assert any(item["code"] == "parallel_version_candidate" for item in result["gaps"])
+
+
 def test_review_provenance_rejects_an_old_prompt_version_for_same_text():
     from app.v7.review_service import _review_provenance_matches, text_hash
 

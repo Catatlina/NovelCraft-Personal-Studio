@@ -485,6 +485,28 @@ def create_novel(project_id: str, payload: NovelCreate, user: dict = Depends(get
     title = "待命名作品"
     body = {"type": "doc", "content": []}
     meta = payload.model_dump()
+    genre_id = str(meta.get("genre_id") or "").strip()
+    if genre_id:
+        try:
+            genre_id = str(uuid.UUID(genre_id))
+        except ValueError:
+            conn.close()
+            raise HTTPException(status_code=422, detail="genre_id must be a valid genre pack id")
+        genre_pack = row_to_dict(conn.execute(
+            "SELECT id, name, slug, is_active FROM v7_genre_packs WHERE id = %s",
+            (genre_id,),
+        ).fetchone())
+        if genre_pack is None:
+            conn.close()
+            raise HTTPException(status_code=422, detail="selected genre pack does not exist")
+        if not genre_pack.get("is_active", True):
+            conn.close()
+            raise HTTPException(status_code=422, detail="selected genre pack is inactive")
+        # Keep the id authoritative while also preserving a readable snapshot
+        # for older planning nodes and audit/debug views.
+        meta["genre_id"] = str(genre_pack["id"])
+        meta["genre_name"] = genre_pack.get("name") or meta.get("genre")
+        meta["genre_slug"] = genre_pack.get("slug") or ""
     conn.execute(
         """
         INSERT INTO contents (id, project_id, type, title, body, meta, status)
@@ -2174,7 +2196,11 @@ def ai_edit(
             )
         output = {
             "text": candidate_text,
-            "deai_quality_gate": v7_result.get("quality_gate") or {"passed": True},
+            "deai_quality_gate": v7_result.get("quality_gate") or {
+                "passed": False,
+                "code": "deai_quality_gate_missing",
+                "message": "去 AI 味质量门禁缺失，结果未验证",
+            },
             "deai_warnings": [],
             "editor_provenance": {
                 **(v7_result.get("editor_provenance") or {}),
@@ -2213,7 +2239,11 @@ def ai_edit(
             deai_result.setdefault("warnings", []).append("候选与当前章节缺少内容证据，已保留原文")
         output = {
             "text": candidate_text,
-            "deai_quality_gate": deai_result.get("quality_gate") or {"passed": True},
+            "deai_quality_gate": deai_result.get("quality_gate") or {
+                "passed": False,
+                "code": "deai_quality_gate_missing",
+                "message": "去 AI 味质量门禁缺失，结果未验证",
+            },
             "deai_warnings": deai_result.get("warnings") or [],
             "editor_provenance": provenance,
             "canonical_engine": "v6_compat",

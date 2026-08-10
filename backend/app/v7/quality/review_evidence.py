@@ -152,12 +152,20 @@ def build_review_evidence(
     reader_missing = [key for key in READER_EXPERIENCE_KEYS if not _is_score(reader_scores.get(key))]
     audit = _audit_component(review)
     continuity = _continuity(review)
+    deterministic_contract = (
+        continuity.get("deterministic_contract")
+        or continuity.get("deterministic")
+        or {}
+    )
     continuity_checked = bool(
         continuity.get("checked") is True
         and (
+            continuity.get("passed") is True
+            or deterministic_contract.get("passed") is True
+        )
+        and (
             _text(continuity.get("narrative_flow"))
-            or isinstance(continuity.get("deterministic_contract"), dict)
-            or isinstance(continuity.get("deterministic"), dict)
+            or isinstance(deterministic_contract, dict)
         )
     )
     continuity_component = {
@@ -166,9 +174,7 @@ def build_review_evidence(
         "score": continuity.get("model_score"),
         "narrative_flow": _text(continuity.get("narrative_flow")),
         "gaps": list(continuity.get("gaps") or continuity.get("issues") or []),
-        "deterministic_contract": continuity.get("deterministic_contract")
-        or continuity.get("deterministic")
-        or {},
+        "deterministic_contract": deterministic_contract,
         "complete": continuity_checked,
     }
     provenance = _provenance_component(review)

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, CircleHelp, Route, Sparkles, Users } from "lucide-react";
 import { ApiError, api } from "../lib/api";
+import { QualityAuxiliaryMetrics } from "../v7/pages/QualityAuxiliaryMetrics";
 
 type ReviewPayload = {
   score?: number;
@@ -144,17 +145,6 @@ function scoreValue(value: unknown): number | null {
   return Math.max(0, Math.min(100, value));
 }
 
-function average(values: number[]): number | null {
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-}
-
-function statusScore(status?: string): number | null {
-  if (status === "pass" || status === "continuous" || status === "completed" || status === "succeeded") return 100;
-  if (status === "warning") return 70;
-  if (status === "fail" || status === "broken" || status === "failed") return 0;
-  return null;
-}
-
 function displayScore(value: number | null): string {
   if (value === null) return "—";
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -165,6 +155,7 @@ function uniqueItems(items: string[]): string[] {
 }
 
 export function Review({
+  novelId,
   chapter,
   review = {},
   characters = [],
@@ -174,6 +165,7 @@ export function Review({
   onOpenEditor,
   onRepairApplied,
 }: {
+  novelId?: string | null;
   chapter?: { id?: string; title?: string; body?: unknown; meta?: Record<string, unknown>; updated_at?: string } | null;
   review?: ReviewPayload;
   characters?: Array<{ id?: string; title?: string; name?: string; body?: string }>;
@@ -200,21 +192,13 @@ export function Review({
   const dimensionScores = review.dimension_scores || review.dimensions || consistency.dimension_scores || {};
   const numericDimensionScores = Object.values(dimensionScores).map(scoreValue).filter((value): value is number => value !== null);
   const auditScores = Object.values(auditItems).map(item => scoreValue(item.score)).filter((value): value is number => value !== null);
-  const checkScores = Object.values(checks).map(check => statusScore(check.status)).filter((value): value is number => value !== null);
-  const directScore = [review.overall_score, review.score, review.self_score, consistency.overall_score]
-    .map(scoreValue)
-    .find((value): value is number => value !== null) ?? null;
-  const score = directScore ?? average(numericDimensionScores) ?? average(auditScores) ?? average(checkScores);
-  const scoreSource = directScore !== null
-    ? "provider"
-    : numericDimensionScores.length
-      ? "dimension_scores"
-      : auditScores.length
-        ? (auditReport?.source === "macro_projection" ? "projected_audit" : "audit_report")
-        : checkScores.length ? "checks" : "none";
-  const scoreEvidence = directScore !== null
-    ? Math.max(numericDimensionScores.length, auditScores.length, Object.keys(checks).length)
-    : numericDimensionScores.length || auditScores.length || checkScores.length;
+  // Only the V7 reviewer's overall_score is the headline score. Dimensions,
+  // AI-smell, emotion, and character metrics remain auxiliary evidence and
+  // must never be averaged into a synthetic score.
+  const isV7Review = review.canonical_engine === "v7" || review.provenance?.engine === "v7";
+  const score = isV7Review ? scoreValue(review.overall_score) : null;
+  const scoreSource = score === null ? "none" : "v7_review";
+  const scoreEvidence = score === null ? 0 : 1;
   const continuity = review.final_continuity_audit?.continuity ?? review.continuity;
   const issues = uniqueItems([
     ...cleanItems(review.issues),
@@ -353,6 +337,10 @@ export function Review({
         </section>
       )}
 
+      {(novelId || chapter?.id) && (
+        <QualityAuxiliaryMetrics novelId={novelId} chapterId={chapter?.id} />
+      )}
+
       {!hasEvidence ? (
         <section className="review-empty starlume-card">
           <span><CircleHelp size={24} /></span>
@@ -369,8 +357,8 @@ export function Review({
               <div>
                 <p className="eyebrow">综合质量</p>
                 <h3>{score === null ? "暂无综合评分" : score >= 80 ? "基础质量达标" : "仍需继续打磨"}</h3>
-                <p>{scoreSource === "provider" ? "来自 V7 审阅器返回的 overall_score。" : scoreSource === "none" ? "审阅尚未返回可计算的评分证据。" : `按${scoreSource === "checks" ? "检查状态" : "现有审计证据"}折算，非人工评分。`}</p>
-                {scoreEvidence > 0 && <small className="review-evidence-note">已纳入 {scoreEvidence} 项证据</small>}
+                <p>{scoreSource === "v7_review" ? "主分来自 V7 审阅器返回的 overall_score。" : "V7 审阅尚未返回主分；其他指标不会被折算成综合分。"}</p>
+                {scoreEvidence > 0 && <small className="review-evidence-note">V7 主审阅分</small>}
               </div>
             </article>
             <article className="review-continuity-card starlume-card">

@@ -548,6 +548,13 @@ class BrainApiClient {
     });
   }
 
+  async updateGenrePack(packId: string, data: Record<string, unknown>): Promise<{ pack: any }> {
+    return this.request(`/v7/genres/packs/${packId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   async listGenreRules(
     packId: string,
     params?: { rule_type?: string; include_inherited?: boolean }

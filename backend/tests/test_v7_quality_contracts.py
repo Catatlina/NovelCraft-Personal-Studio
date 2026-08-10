@@ -1,6 +1,9 @@
 from app.v7.integration.v6_bridge import build_transition_contract
 from app.v7.quality.audit_dimensions import AUDIT_DIMENSIONS, normalize_audit_report
-from app.v7.quality.continuity import validate_transition_contract
+from app.v7.quality.continuity import (
+    validate_prose_continuity,
+    validate_transition_contract,
+)
 from app.v7.quality.deai_metrics import analyze_deai_patterns
 from app.v7.quality.rule_learning import RuleLearningStore, _fingerprint, validate_rule_payload
 from app.v7.integration.quality import evaluate_review
@@ -79,6 +82,80 @@ def test_transition_contract_passes_with_structured_state_delta():
     )
     assert result["passed"] is True
     assert current["state_delta"]["causal_events"][0]["key"] == "door"
+
+
+def test_prose_continuity_rejects_parallel_version_without_opening_anchor():
+    previous = build_transition_contract(
+        chapter_number=10,
+        title="江心岛迷雾",
+        text="船还在江面上，周衡按住栏杆，听见远处的汽笛声。",
+        summary="周衡被困在江面上，等待下一步信号。",
+        word_count=20,
+        review_score=90,
+        dimension_scores={"consistency": 90},
+        memory_items=[{"category": "plot_events", "key": "江面等待", "summary": "周衡仍在江面上"}],
+    )
+    current = build_transition_contract(
+        chapter_number=11,
+        title="江心岛迷雾·周衡发现仓库内有一间密室",
+        text="仓库七号里，陌生人正在等他。墙上的灯忽明忽暗。",
+        summary="周衡在仓库发现密室。",
+        word_count=20,
+        review_score=90,
+        dimension_scores={"consistency": 90},
+        previous_context={
+            "previous_tail": previous["end_state"]["last_tail"],
+            "previous_transition_contract": previous,
+            "previous_titles": [previous["end_state"]["title"]],
+        },
+        memory_items=[{"category": "plot_events", "key": "仓库密室", "summary": "仓库里出现密室"}],
+    )
+
+    result = validate_prose_continuity(
+        chapter_number=11,
+        current_text=current["end_state"]["last_tail"],
+        current_title=current["end_state"]["title"],
+        previous_title=previous["end_state"]["title"],
+        current_contract=current,
+        previous_contract=previous,
+    )
+
+    assert result["passed"] is False
+    assert any(item["code"] == "parallel_version_candidate" for item in result["issues"])
+
+
+def test_prose_continuity_allows_rephrased_opening_with_anchor():
+    previous = build_transition_contract(
+        chapter_number=1,
+        title="第一章",
+        text="他按住门把手，门后传来三下敲击声。",
+        summary="门后出现异常声音。",
+        word_count=12,
+        review_score=90,
+        dimension_scores={"consistency": 90},
+    )
+    current = build_transition_contract(
+        chapter_number=2,
+        title="第二章",
+        text="冰凉的门把手贴着掌心，门后的三下敲击又响了一遍。",
+        summary="主角确认门后有人。",
+        word_count=15,
+        review_score=90,
+        dimension_scores={"consistency": 90},
+        previous_context={"previous_transition_contract": previous},
+    )
+
+    result = validate_prose_continuity(
+        chapter_number=2,
+        current_text=current["end_state"]["last_tail"],
+        current_title=current["end_state"]["title"],
+        previous_title=previous["end_state"]["title"],
+        current_contract=current,
+        previous_contract=previous,
+    )
+
+    assert result["passed"] is True
+    assert result["evidence"]["opening_anchor_overlap"] > 0.03
 
 
 def test_transition_contract_persists_state_conflicts_for_runtime_gate():

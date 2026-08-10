@@ -7,7 +7,9 @@
  */
 import { expect, type Page, test } from "@playwright/test";
 
-const BASE = process.env.BASE_URL || "https://novel.xyjin.xyz";
+// CI runs this production-shaped walkthrough against Playwright's local stack;
+// explicit BASE_URL remains available for an intentional live-site check.
+const BASE = process.env.BASE_URL || (process.env.CI ? "http://127.0.0.1:5273" : "https://novel.xyjin.xyz");
 
 test("生产走查：八页面可达 + V7 Cost/Prompt 真实渲染", async ({ page, request }) => {
   // 1. 注册（浏览器）

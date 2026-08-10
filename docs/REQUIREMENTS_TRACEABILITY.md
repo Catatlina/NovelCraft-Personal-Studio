@@ -1,5 +1,15 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-10 生成质量旁路收紧（本地待发布）
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| Provider/质量失败不得伪装通过 | 可用 | V7 DeAI、编辑器包装和生成前置门禁均 fail-closed；质量专项回归通过 | 生产真实 Provider 失败注入复测 |
+| 场景计划不能以空 beat/缺阶段进入正文 | 可用 | `SceneDirector.validate_scene_plan_contract`；4–6 beat、字数预算、五阶段校验；专项回归通过 | 生产真实 Provider 计划样本 |
+| 实时审阅必须验证跨章正文连续性 | 可用 | `review_service._continuity_evidence` 加入 transition contract + prose continuity；模型高分不能替代第 2 章起的确定性证据 | 生产登录态章节实测 |
+| 正文镜像/平行版本不得进入完成状态 | 可用 | `CHAPTER_MIRROR_HARD_GATE=True`；标题基名+开头锚点检测命中即质量失败 | 生产两本书长跑和人工复核 |
+| 品类上下文加载失败不得静默降级 | 可用 | 已配置 `genre_id` 时空品类包直接停止生成；不再使用空上下文冒充成功 | 生产真实品类包生成 |
+
 ## 2026-08-10 爽文网感研究链（本地未部署）
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |

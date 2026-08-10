@@ -1,5 +1,22 @@
 # Starlume AI — 真实进度
 
+## 2026-08-10 生成质量旁路收紧（本地回归通过，待发布）
+
+- 收紧 V7 失败语义：语义去 AI Provider 失败、局部段首修复 Provider 失败、生成前置门禁失败、缺失去 AI 质量门禁均不再写成 `passed=true`；保留诊断稿，但只能进入重试/待复核。
+- 场景规划新增 Provider 输出结构硬校验：必须返回 4–6 个有效 beat、正字数预算和压制→蓄力→爆发→反馈→余波五阶段；空计划、缺阶段或预算异常直接停止生成。配置了 `genre_id` 但品类包加载失败/为空时同样停止，不再静默使用空品类上下文。
+- 实时 V7 审阅补正文级跨章校验：第 2 章起没有上一章契约不能因模型高分通过；标题基名复用且正文开头无承接锚点时命中 `parallel_version_candidate`。正文镜像检测升级为硬门禁；证据投影要求连续性真实通过。
+- 质量真实性门禁新增上述确定性校验和报告统计的最小 allowlist；`verify_delivery_claims.py` 与 `ai_development_gate.sh` 均通过。
+- 本地证据：后端生成/审阅/连续性/质量专项 93 passed；前端 54 passed；TypeScript 检查、生产构建、Python compile、`git diff --check` 通过。后端全量仍未绿：862 passed、138 skipped、150 failed、54 errors，主要因本机 PostgreSQL `localhost:5432` 未启动导致注册/真实数据库夹具 503，不能当作全量通过。
+- 当前边界：本批代码尚未 commit/push/deploy；发布后仍需用生产 healthz、smoke、浏览器入口和真实 Provider 章节验证，不能把自动门禁替代人工爽感/连续性验收。
+
+## 2026-08-10 跨章连续性硬门禁修复（本地未推送）
+
+- 修复 V7 一致性检查失败仍可放行的问题：Provider 异常、空响应、坏 JSON、缺字段和非法评分均改为 `passed=false`，章节不会再被标记为 `reviewed`。
+- `transition_contract` 新增上一章结尾精确回读校验；V7 更新阶段新增正文开头锚点、标题基名复用、事件键复用的平行版本检测。标题重复但没有上一章入口承接时，直接进入 `needs_rewrite`。
+- 一致性 Prompt 现在接收品类规则账本、当前章/上一章标题，并明确检查地点、人物、能力规则和因果链是否跨章跳变；质量门禁证据始终写入 `contents.meta.quality_gate`，不再只在失败时保存。
+- 回归证据：连续性/一致性与既有 V7 质量集合 51/51 通过；包含“江面 → 仓库”错接复现，确定性门禁命中 `parallel_version_candidate`。完整长跑集合另有 1 项因本机 PostgreSQL `localhost:5432` 未启动而无法执行。
+- 当前边界：本批只修改本地工作树，尚未 commit、push 或部署；需要真实 Provider 和数据库运行后再做线上复跑。
+
 ## 2026-08-10 爽文生成链：实时网感研究与失败门禁（本地未部署）
 
 - 已把新书向导、榜单成书、作品导入、现有作品设置页和 V7 唯一正文链统一接入 `web_research_mode`：新书/榜单成书默认 `required`，导入作品默认 `off`，现有作品可在“小说设置 → 生成策略”切换。
@@ -32,7 +49,7 @@
 - GitHub PR #9 已 squash 合并；生产服务器 `/opt/NovelCraft-Personal-Studio` 已快进到 `main@3b3be37`。
 - 部署前数据库备份：`backups/pre-deploy-3b3be37-20260809-235442.sql.gz`；Alembic 迁移执行成功；API、Worker、Beat、Frontend、PostgreSQL、Redis 均已重建/启动，Flower 按生产配置关闭。
 - 公网验收：`https://starlume.xyjin.xyz/api/v1/healthz` 返回 200；生产 smoke **15/15**；浏览器主导航 **9/9**；浏览器错误日志 **0**。
-- 本次 smoke 未注入 Provider Key，未产生真实 Provider 生成费用，也不能据此宣称真实生成质量已验收。
+- 边界证据：生产实测 smoke 15/15；本次 smoke 未注入 Provider Key，未产生真实 Provider 生成费用，也不能据此宣称真实生成质量已验收。
 
 ## 2026-08-06 AI 味词库可配置化与编辑会话已推送部署
 

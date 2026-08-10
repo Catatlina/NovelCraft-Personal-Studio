@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, BookOpen, Copy, Feather, FileUp, Link2, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { api, apiRaw, getApiKey } from "../lib/api";
+import brainApi from "../v7/api/client";
 
-const GENRES = ["都市", "科幻", "玄幻", "仙侠", "悬疑", "历史", "游戏", "轻小说", "短篇", "其他"];
-const SUBGENRES: Record<string, string[]> = {
-  都市: ["都市神豪", "都市商战", "都市重生", "都市异能", "都市高武", "都市脑洞", "都市系统"],
-  玄幻: ["传统升级流", "凡人流", "苟道流", "系统流", "长生流", "史诗玄幻", "宿命流", "设定流", "家族修仙"],
-  仙侠: ["传统升级流", "凡人流", "苟道流", "系统流", "长生流", "史诗玄幻", "宿命流", "设定流", "家族修仙"],
+type GenrePackOption = {
+  id: string;
+  name: string;
+  slug?: string;
+  parent_id?: string | null;
+  parentName?: string;
+  scope?: string;
+  is_active?: boolean;
 };
 const WORD_PRESETS = [
   { value: 100000, label: "短篇", hint: "约 10 万字" },
@@ -29,6 +33,8 @@ const STYLE_PRESETS = [
 export function Wizard({
   idea,
   setIdea,
+  genreId,
+  setGenreId,
   genre,
   setGenre,
   platform,
@@ -49,6 +55,8 @@ export function Wizard({
 }: {
   idea: string;
   setIdea: (value: string) => void;
+  genreId: string;
+  setGenreId: (value: string) => void;
   genre: string;
   setGenre: (value: string) => void;
   platform: string;
@@ -82,13 +90,69 @@ export function Wizard({
     similarity?: { verdict?: string; max_similarity?: number };
     copyright_warning?: string;
   } | null>(null);
+  const [genreOptions, setGenreOptions] = useState<GenrePackOption[]>([]);
+  const [genreLoading, setGenreLoading] = useState(true);
+  const [genreLoadError, setGenreLoadError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const subgenreOptions = SUBGENRES[genre] || [];
-  const longLifeEligible = ["凡人流", "苟道流", "系统流", "长生流"].includes(subgenre);
+  const selectedGenre = genreOptions.find(item => item.id === genreId);
+  const longLifeEligible = ["凡人流", "苟道流", "系统流", "长生流"].includes(subgenre)
+    || /凡人流|苟道流|系统流|长生流/.test(selectedGenre?.name || "");
+  const isXianhuanGenre = /玄幻|仙侠/.test(`${genre} ${selectedGenre?.name || ""}`);
   const [customStyleMode, setCustomStyleMode] = useState(() => Boolean(style.trim() && !STYLE_PRESETS.some(item => item.value === style)));
   const selectedStylePreset = customStyleMode
     ? CUSTOM_STYLE_VALUE
     : (STYLE_PRESETS.some(item => item.value === style) ? style : STYLE_PRESETS[0].value);
+
+  useEffect(() => {
+    let active = true;
+    setGenreLoading(true);
+    setGenreLoadError("");
+    brainApi.getGenreTree().then(result => {
+      if (!active) return;
+      const flatten = (nodes: any[], parentName = ""): GenrePackOption[] => nodes.flatMap(node => {
+        const current = {
+          id: String(node.id),
+          name: String(node.name || node.slug || "未命名品类"),
+          slug: node.slug,
+          parent_id: node.parent_id ?? null,
+          parentName: parentName || undefined,
+          scope: node.scope,
+          is_active: node.is_active,
+        } satisfies GenrePackOption;
+        return [current, ...flatten(node.children || [], current.name)];
+      });
+      const options = flatten(result.tree || []).filter(item => item.is_active !== false);
+      setGenreOptions(options);
+      const preferred = options.find(item => item.id === genreId)
+        || options.find(item => item.name === genre || item.slug === genre)
+        || options[0];
+      if (preferred && preferred.id !== genreId) {
+        setGenreId(preferred.id);
+        setGenre(preferred.parentName || preferred.name);
+        setSubgenre(preferred.parentName ? preferred.name : "");
+      }
+      setGenreLoading(false);
+    }).catch((error: any) => {
+      if (!active) return;
+      setGenreLoadError(error?.message || "真实品类包加载失败，请刷新后重试");
+      setGenreLoading(false);
+    });
+    return () => { active = false; };
+    // The wizard reads the current draft once when it mounts; subsequent
+    // selection changes are handled by handleGenreChange below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleGenreChange(nextId: string) {
+    const next = genreOptions.find(item => item.id === nextId);
+    setGenreId(nextId);
+    if (next) {
+      setGenre(next.parentName || next.name);
+      setSubgenre(next.parentName ? next.name : "");
+    }
+    setStylePlugin("");
+    clearError("genre");
+  }
 
   function handleImitFile(file: File | undefined) {
     if (!file) return;
@@ -162,7 +226,7 @@ export function Wizard({
     const nextErrors: Record<string, string> = {};
     if (!projectId) nextErrors.project = "项目尚未准备好，请等待项目列表加载完成后再开始生成。";
     if (idea.trim().length < 4) nextErrors.idea = "请至少用 4 个字描述你的故事";
-    if (!genre.trim()) nextErrors.genre = "请选择小说题材";
+    if (!genreId.trim()) nextErrors.genre = genreLoadError || "请选择一个真实品类包";
     if (customStyleMode && !style.trim()) nextErrors.style = "请填写自定义写作风格，或改选一个预设";
     if (targetWords < 10000) nextErrors.targetWords = "目标字数不能少于 10,000";
     if (targetWords > 3000000) nextErrors.targetWords = "目标字数不能超过 300 万";
@@ -245,15 +309,21 @@ export function Wizard({
           </div>
           <div className="wizard-fields-grid">
             <label className="wizard-field">
-              <span>小说题材</span>
+              <span>品类包 <small>真实 V7 品类</small></span>
               <select
-                value={genre}
-                onChange={event => { setGenre(event.target.value); setSubgenre(""); setStylePlugin(""); clearError("genre"); }}
+                value={genreId}
+                onChange={event => handleGenreChange(event.target.value)}
+                disabled={genreLoading || genreOptions.length === 0}
                 aria-invalid={Boolean(errors.genre)}
               >
-                <option value="">选择题材</option>
-                {GENRES.map(item => <option key={item} value={item}>{item}</option>)}
+                <option value="">{genreLoading ? "正在加载真实品类包…" : "选择品类包"}</option>
+                {genreOptions.map(item => (
+                  <option key={item.id} value={item.id}>
+                    {item.parentName ? `${item.parentName} · ${item.name}` : item.name}
+                  </option>
+                ))}
               </select>
+              {genreLoadError && <small className="field-error">{genreLoadError}</small>}
               {errors.genre && <small className="field-error">{errors.genre}</small>}
             </label>
             <label className="wizard-field">
@@ -264,17 +334,15 @@ export function Wizard({
               </select>
             </label>
             <label className="wizard-field">
-              <span>细分流派 <small>可选</small></span>
-              <select value={subgenre} onChange={event => {
-                const next = event.target.value;
-                setSubgenre(next);
-                if (!["凡人流", "苟道流", "系统流", "长生流"].includes(next)) setStylePlugin("");
-              }} aria-label="细分流派">
-                <option value="">自动匹配</option>
-                {subgenreOptions.map(item => <option key={item} value={item}>{item}</option>)}
-              </select>
+              <span>细分品类 <small>由品类包带入</small></span>
+              <input
+                value={selectedGenre ? (selectedGenre.parentName ? selectedGenre.name : "根品类") : "未选择"}
+                readOnly
+                aria-label="细分品类"
+              />
+              <small>{selectedGenre ? "该字段来自真实品类包，不再使用硬编码流派列表。" : "请选择真实品类包。"}</small>
             </label>
-            {(genre === "玄幻" || genre === "仙侠") && (
+            {isXianhuanGenre && (
               <label className="wizard-field">
                 <span>风格插件 <small>可选</small></span>
                 <select value={stylePlugin} onChange={event => setStylePlugin(event.target.value)} aria-label="玄幻仙侠风格插件">

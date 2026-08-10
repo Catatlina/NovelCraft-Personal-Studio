@@ -45,9 +45,14 @@ from ..integration.v6_bridge import (
     persist_review_hold_v7_draft,
     persist_rejected_v7_draft,
 )
-from ..quality.continuity import validate_transition_contract
+from ..quality.continuity import validate_prose_continuity, validate_transition_contract
 from ..quality.review_evidence import validate_review_evidence
-from ..quality.consistency_checker import ConsistencyChecker, format_consistency_issues
+from ..quality.consistency_checker import (
+    CONSISTENCY_PASS_SCORE,
+    ConsistencyCheckResult,
+    ConsistencyChecker,
+    format_consistency_issues,
+)
 from ...services.quality_profiles import quality_profile_metadata, select_quality_profile
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
@@ -197,6 +202,7 @@ class StoryDirector:
         provider_config: dict[str, str] | None = None,
         generation_metadata: dict[str, Any] | None = None,
         quality_profile: dict[str, Any] | None = None,
+        genre_id: str | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -216,6 +222,7 @@ class StoryDirector:
             project_id=project_id,
             provider_config=self.provider_config,
             quality_profile=self.quality_profile,
+            genre_id=genre_id,
         )
         self.memory_engine = MemoryEngine(
             db, novel_id, brain, tracer, event_bus,
@@ -233,6 +240,7 @@ class StoryDirector:
             project_id=project_id,
             provider_config=self.provider_config,
             quality_profile=self.quality_profile,
+            genre_id=genre_id,
         )
         # 一致性检查器
         self.consistency_checker = ConsistencyChecker(self.generation_engine.ai_gateway)
@@ -831,13 +839,18 @@ class StoryDirector:
     ) -> dict[str, Any]:
         def review_input(current: dict[str, Any]) -> dict[str, Any]:
             metrics = (current.get("deai") or {}).get("metrics") or {}
+            context = current.get("context") or {}
+            previous_titles = context.get("previous_titles") or []
             return {
                 "chapter_text": current["text"],
                 "chapter_number": chapter_number,
-                "previous_chapter_tail": current.get("context", {}).get("previous_tail", ""),
-                "previous_transition_contract": current.get("context", {}).get(
+                "previous_chapter_tail": context.get("previous_tail", ""),
+                "previous_transition_contract": context.get(
                     "previous_transition_contract", {}
                 ),
+                "active_rules": context.get("active_rules") or [],
+                "chapter_title": current.get("title") or "",
+                "previous_chapter_title": previous_titles[-1] if previous_titles else "",
                 "chapter_plan": plan.get("plot_brief") or {},
                 "scene_plan": current.get("scene_plan") or {},
                 "deai_metrics": metrics.get("after") or metrics,
@@ -906,6 +919,9 @@ class StoryDirector:
                         "previous_transition_contract", {}
                     ),
                     scene_plan=generation.get("scene_plan") or {},
+                    active_rules=gen_context.get("active_rules") or [],
+                    chapter_title=generation.get("title") or "",
+                    previous_chapter_title=(gen_context.get("previous_titles") or [""])[-1],
                 )
                 # 把一致性检查结果加到 review_data 中
                 review_data["consistency_check"] = consistency_result.to_dict()
@@ -924,9 +940,21 @@ class StoryDirector:
                     ]
                     existing_issues = review_data.get("issues") or []
                     review_data["issues"] = existing_issues + consistency_issues
-            except Exception:
-                # 一致性检查失败不阻塞生成
-                pass
+            except Exception as exc:  # noqa: BLE001 - convert to a visible gate failure
+                consistency_result = ConsistencyCheckResult(
+                    passed=False,
+                    score=0.0,
+                    issues=[{
+                        "type": "审阅执行",
+                        "severity": "严重",
+                        "location": "一致性检查",
+                        "description": f"一致性检查异常，结果未验证：{type(exc).__name__}",
+                        "suggestion": "修复一致性检查链路后重新执行",
+                    }],
+                    summary="一致性检查异常，不能放行",
+                )
+                review_data["consistency_check"] = consistency_result.to_dict()
+                consistency_failed = True
 
         # Rework is bounded, but the gate is not fail-open: after the retry
         # budget is exhausted the chapter remains needs_review and never enters
@@ -1073,6 +1101,9 @@ class StoryDirector:
                             "previous_transition_contract", {}
                         ),
                         scene_plan=generation.get("scene_plan") or {},
+                        active_rules=gen_context.get("active_rules") or [],
+                        chapter_title=generation.get("title") or "",
+                        previous_chapter_title=(gen_context.get("previous_titles") or [""])[-1],
                     )
                     review_data["consistency_check"] = consistency_result.to_dict()
                     consistency_failed = not consistency_result.passed
@@ -1090,9 +1121,21 @@ class StoryDirector:
                         ]
                         existing_issues = review_data.get("issues") or []
                         review_data["issues"] = existing_issues + consistency_issues
-                except Exception:
-                    # 一致性检查失败不阻塞生成
-                    pass
+                except Exception as exc:  # noqa: BLE001 - convert to a visible gate failure
+                    consistency_result = ConsistencyCheckResult(
+                        passed=False,
+                        score=0.0,
+                        issues=[{
+                            "type": "审阅执行",
+                            "severity": "严重",
+                            "location": "一致性检查",
+                            "description": f"一致性检查异常，结果未验证：{type(exc).__name__}",
+                            "suggestion": "修复一致性检查链路后重新执行",
+                        }],
+                        summary="一致性检查异常，不能放行",
+                    )
+                    review_data["consistency_check"] = consistency_result.to_dict()
+                    consistency_failed = True
 
         gate = evaluate_review(review_data, project_id=self.project_id, user_id=self.user_id)
         validation_failures = review_data.get("validation_failures") or []
@@ -1106,6 +1149,17 @@ class StoryDirector:
                     "minimum": "valid",
                     "reason": str(failure.get("message") or "审稿契约校验失败"),
                 })
+            gate["passed"] = False
+        if consistency_failed:
+            gate["failures"].append({
+                "dimension": "cross_chapter_consistency",
+                "actual": consistency_result.score if consistency_result else "unverified",
+                "minimum": CONSISTENCY_PASS_SCORE if consistency_result else "verified",
+                "reason": (
+                    (consistency_result.summary if consistency_result else "一致性检查未执行")
+                    or "跨章一致性未通过"
+                ),
+            })
             gate["passed"] = False
         blocking = gate["blocking_violations"]
         passed = gate["passed"]
@@ -1136,6 +1190,17 @@ class StoryDirector:
                 for item in validation_failures
                 if isinstance(item, dict)
             )
+        if consistency_failed:
+            issues.append({
+                "dimension": "cross_chapter_consistency",
+                "severity": "high",
+                "description": (
+                    consistency_result.summary
+                    if consistency_result
+                    else "一致性检查未执行，结果未验证"
+                ),
+                "suggestion": "修复跨章承接或一致性检查链路后重新提交",
+            })
         review_data["issues"] = issues
 
         if not passed:
@@ -1169,6 +1234,7 @@ class StoryDirector:
             "quality_gate": gate,
             "review_hold": review_hold,
             "review_validation": validation_failures,
+            "consistency_check": review_data.get("consistency_check") or {},
             "pov_metrics": review_data.get("pov_metrics") or generation.get("pov_metrics") or {},
             "content_policy": review_data.get("content_policy") or generation.get("content_policy") or {},
             "payoff_contract": review_data.get("payoff_contract") or generation.get("payoff_contract") or {},
@@ -1246,6 +1312,39 @@ class StoryDirector:
             ),
             state_conflicts=memory_data.get("conflicts") or [],
         )
+        previous_contract = (generation.get("context") or {}).get(
+            "previous_transition_contract", {}
+        ) or {}
+        previous_titles = (generation.get("context") or {}).get("previous_titles") or []
+        prose_continuity = validate_prose_continuity(
+            chapter_number=chapter_number,
+            current_text=generation.get("text") or "",
+            current_title=generation.get("title") or "",
+            previous_title=previous_titles[-1] if previous_titles else "",
+            current_contract=transition_contract,
+            previous_contract=previous_contract,
+        )
+        continuity["prose_continuity"] = prose_continuity
+        if not prose_continuity.get("passed"):
+            continuity["passed"] = False
+            continuity["issues"] = [
+                *(continuity.get("issues") or []),
+                *(prose_continuity.get("issues") or []),
+            ]
+        consistency_evidence = observation.get("consistency_check") or {}
+        if consistency_evidence.get("passed") is not True and chapter_number > 1:
+            continuity["passed"] = False
+            continuity["issues"] = [
+                *(continuity.get("issues") or []),
+                {
+                    "code": "consistency_unverified",
+                    "severity": "high",
+                    "message": str(
+                        consistency_evidence.get("summary")
+                        or "跨章一致性检查未通过或未验证"
+                    ),
+                },
+            ]
         continuity.update({
             "status": "continuous" if continuity.get("passed") else "broken",
             "checked": True,
@@ -1450,6 +1549,7 @@ class StoryDirector:
             "extra_meta": {
                 **self.generation_metadata,
                 "audit_report": observation.get("audit_report") or {},
+                "quality_gate": observation.get("quality_gate") or {},
                 "continuity": continuity,
                 "final_continuity_audit": {"continuity": continuity},
                 "review_provenance": observation.get("review_provenance") or {},

@@ -4,6 +4,14 @@ import { Review } from "./Review";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("../lib/api", () => ({ api: mocks.api, ApiError: class extends Error {} }));
+vi.mock("../v7/api/client", () => ({
+  default: {
+    getAiSmell: vi.fn().mockResolvedValue({ has_data: false }),
+    getEmotionalArc: vi.fn().mockResolvedValue({ has_data: false }),
+    getChapterCharacterStats: vi.fn().mockResolvedValue({ has_data: false }),
+    getCharacterStats: vi.fn().mockResolvedValue({ has_data: false }),
+  },
+}));
 
 const chapter = {
   id: "chapter-1",
@@ -80,6 +88,7 @@ describe("审阅修复预览门禁", () => {
       <Review
         chapter={chapter}
         review={{
+          canonical_engine: "v7",
           overall_score: 82,
           dimension_scores: { consistency: 90, pacing: 74 },
           audit_report: {
@@ -100,7 +109,7 @@ describe("审阅修复预览门禁", () => {
     );
 
     expect(screen.getByText("82")).toBeTruthy();
-    expect(screen.getByText("来自 V7 审阅器返回的 overall_score。")).toBeTruthy();
+    expect(screen.getByText("主分来自 V7 审阅器返回的 overall_score。")).toBeTruthy();
     expect(screen.getByText("2/33 项有分数")).toBeTruthy();
     expect(screen.getByText("兼容")).toBeTruthy();
     fireEvent.click(screen.getByText("情节与因果"));
@@ -109,10 +118,10 @@ describe("审阅修复预览门禁", () => {
   });
 
   it("没有模型分数时只按现有检查证据折算，不补造默认高分", () => {
-    render(<Review chapter={chapter} review={{ checks: { continuity: { status: "warning", issues: ["缺少桥接"] } } }} />);
+    render(<Review chapter={{ ...chapter, id: undefined }} review={{ checks: { continuity: { status: "warning", issues: ["缺少桥接"] } } }} />);
 
-    expect(screen.getByText("70")).toBeTruthy();
-    expect(screen.getByText("按检查状态折算，非人工评分。")).toBeTruthy();
+    expect(screen.getByText("暂无综合评分")).toBeTruthy();
+    expect(screen.getByText("V7 审阅尚未返回主分；其他指标不会被折算成综合分。")).toBeTruthy();
     expect(screen.getByText("需留意")).toBeTruthy();
   });
 });

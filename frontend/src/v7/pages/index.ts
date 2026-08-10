@@ -14,4 +14,4 @@ export { default as DecisionLog } from './DecisionLog';
 export { default as CostMonitor } from './CostMonitor';
 export { default as PromptManager } from './PromptManager';
 export { default as GenreManager } from './GenreManager';
-export { default as QualityReport } from './QualityReport';
+export { QualityAuxiliaryMetrics } from './QualityAuxiliaryMetrics';
