@@ -69,6 +69,7 @@ class BaseEngine(ABC):
         project_id: str | None = None,
         provider_config: dict[str, str] | None = None,
         quality_profile: dict[str, Any] | None = None,
+        genre_id: str | None = None,
     ):
         self.db = db
         self.novel_id = novel_id
@@ -76,6 +77,7 @@ class BaseEngine(ABC):
         self.tracer = tracer
         self.event_bus = event_bus
         self.project_id = project_id
+        self.genre_id = genre_id
         # The canonical V7 runtime may receive a short-lived BYOK override
         # from a V6-compatible HTTP entrypoint.  Empty values intentionally
         # fall back to the worker environment in AIGateway.

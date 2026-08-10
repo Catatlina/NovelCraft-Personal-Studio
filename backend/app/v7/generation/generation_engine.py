@@ -369,9 +369,9 @@ class ContextAssembler:
                     # 取第一个 writer Prompt 作为主写作 Prompt
                     writer_prompt = prompts_by_type["writer"][0]
 
-                if not rules and not knowledge and not prompts:
+                if not rules or not knowledge or not prompts or not writer_prompt:
                     raise AIGatewayError(
-                        f"genre context is empty for configured genre_id={self.genre_id}"
+                        f"genre context is incomplete for configured genre_id={self.genre_id}"
                     )
 
                 result = {

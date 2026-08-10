@@ -240,6 +240,7 @@ class StoryDirector:
             project_id=project_id,
             provider_config=self.provider_config,
             quality_profile=self.quality_profile,
+            genre_id=genre_id,
         )
         # 一致性检查器
         self.consistency_checker = ConsistencyChecker(self.generation_engine.ai_gateway)
