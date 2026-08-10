@@ -108,6 +108,52 @@ def test_scene_plan_contract_rejects_empty_or_incomplete_provider_plan():
         )
 
 
+def test_scene_plan_repairs_semantically_incomplete_provider_plan():
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, _prompt, **_kwargs):
+            self.calls += 1
+            usage = {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"}
+            phases = ["pressure", "build", "burst", "feedback", "aftershock"]
+            if self.calls == 1:
+                return {
+                    "data": {
+                        "chapter_title": "旧门",
+                        "chapter_type": "normal",
+                        "beats": [
+                            {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase}
+                            for i, phase in enumerate(phases[:-1])
+                        ],
+                    },
+                    "usage": usage,
+                }
+            return {
+                "data": {
+                    "chapter_title": "旧门后的答案",
+                    "chapter_type": "normal",
+                    "beats": [
+                        {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase}
+                        for i, phase in enumerate(phases)
+                    ],
+                },
+                "usage": usage,
+            }
+
+    gateway = Gateway()
+    result = asyncio.run(SceneDirector(None, gateway).plan_scene(
+        1,
+        {"rendered_context": ""},
+        target_word_count=3000,
+        quality_profile={},
+    ))
+
+    assert gateway.calls == 2
+    assert result["chapter_title"] == "旧门后的答案"
+    assert result["_usage"]["tokens_output"] == 10
+
+
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     prompt = GenerationEngine._build_generation_prompt(
         None,

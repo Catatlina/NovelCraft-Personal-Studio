@@ -1110,6 +1110,50 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             prompt_version="1.3.0",
         )
         plan = result["data"]
+        usage = dict(result.get("usage") or {})
+        try:
+            self.validate_scene_plan_contract(
+                plan,
+                target_word_count=target_word_count,
+            )
+        except AIGatewayError as contract_error:
+            # Provider JSON can be syntactically valid while omitting one of
+            # the commercial beat phases. Give the same real Provider one
+            # bounded repair opportunity; never invent a phase locally or let
+            # a malformed plan reach the writer.
+            repair_prompt = (
+                "下面的场景计划 JSON 没有通过结构契约校验。请只修复结构并输出完整 JSON，"
+                "不要写解释，不要改动已经存在的剧情事实。必须保留 4-6 个 beats，"
+                "每个 beat 有 name、content、target_words，并通过 payoff_phase 或 payoff_phases"
+                "完整覆盖 pressure、build、burst、feedback、aftershock 五阶段；"
+                "chapter_type 必须是 normal、aftermath、relationship、suspense 之一。\n"
+                f"校验错误：{contract_error}\n"
+                f"原始计划：{json.dumps(plan, ensure_ascii=False)}\n"
+                "只输出修复后的计划 JSON。"
+            )
+            repaired = await self.gateway.generate_json(
+                repair_prompt,
+                system_prompt="你是严格的场景计划校对员，只输出合法 JSON。",
+                max_tokens=2200,
+                temperature=0.0,
+                prompt_name="v7.generation.scene_plan.repair",
+                prompt_version="1.0.0",
+            )
+            repair_usage = repaired.get("usage") or {}
+            usage = {
+                "tokens_input": int(usage.get("tokens_input") or 0)
+                + int(repair_usage.get("tokens_input") or 0),
+                "tokens_output": int(usage.get("tokens_output") or 0)
+                + int(repair_usage.get("tokens_output") or 0),
+                "cost": float(usage.get("cost") or 0.0)
+                + float(repair_usage.get("cost") or 0.0),
+                "model": repair_usage.get("model") or usage.get("model"),
+            }
+            plan = repaired["data"]
+            self.validate_scene_plan_contract(
+                plan,
+                target_word_count=target_word_count,
+            )
         # The planner can choose the focal character, never the product-wide
         # narrative mode.  This prevents a learned/project POV field from
         # silently re-enabling first-person prose.
@@ -1124,7 +1168,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         plan["chapter_type"] = str(plan.get("chapter_type") or "normal").strip().lower()
         plan["target_word_count"] = target_word_count
         self.validate_scene_plan_contract(plan, target_word_count=target_word_count)
-        plan["_usage"] = result["usage"]
+        plan["_usage"] = usage
         return plan
 
 
