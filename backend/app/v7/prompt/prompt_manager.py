@@ -14,6 +14,7 @@ import json
 import uuid
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.prompt import PromptVersion, PromptExecution
@@ -178,19 +179,34 @@ class PromptVersionManager:
                 }
 
         previous = await self.version_repo.get_default(prompt_name)
-        version = await self.version_repo.create_version(
-            prompt_name,
-            template,
-            new_hash,
-            model=model,
-            parameters=parameters,
-            output_schema=output_schema,
-            version_label=version_label,
-            description=description,
-            change_notes=change_notes,
-            is_default=make_default,
-            created_by=created_by,
-        )
+        try:
+            version = await self.version_repo.create_version(
+                prompt_name,
+                template,
+                new_hash,
+                model=model,
+                parameters=parameters,
+                output_schema=output_schema,
+                version_label=version_label,
+                description=description,
+                change_notes=change_notes,
+                is_default=make_default,
+                created_by=created_by,
+            )
+        except IntegrityError:
+            # Runtime prompt identities are global and may be first touched by
+            # two novels at the same time. The pre-read above is not a lock;
+            # if another transaction wins the unique insert, reuse its exact
+            # version after rolling back this failed transaction.
+            await self.db.rollback()
+            winner = await self.version_repo.get_by_hash(prompt_name, new_hash)
+            if winner is None:
+                raise
+            return {
+                "created": False,
+                "changed": False,
+                "version": self._version_to_dict(winner, include_template=True),
+            }
 
         return {
             "created": True,

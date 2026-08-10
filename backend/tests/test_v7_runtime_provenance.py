@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.services.ai_runtime import execution_key, prompt_hash
 from app.v7.generation.generation_engine import AIGateway
+from app.v7.prompt.prompt_manager import PromptVersionManager
 
 
 def test_shared_execution_key_is_stable_and_attempts_are_distinct():
@@ -91,3 +94,64 @@ async def test_v7_success_closes_prompt_and_shared_ledger(monkeypatch):
     assert params["prompt_name"] == "v7.generation.chapter"
     assert params["prompt_hash"] == kwargs["input_variables"]["rendered_prompt_hash"]
     assert db.flushed == 1
+
+
+@pytest.mark.asyncio
+async def test_prompt_registration_reuses_concurrent_winner_after_unique_conflict():
+    winner = SimpleNamespace(
+        id=uuid.uuid4(),
+        prompt_name="v7.review.33_dimension",
+        version=5,
+        version_label="1.4.1",
+        model="deepseek-chat",
+        parameters={},
+        output_schema=None,
+        prompt_hash="hash",
+        description=None,
+        change_notes=None,
+        is_active=True,
+        is_default=True,
+        created_by="runtime",
+        extra_metadata={},
+        created_at=None,
+        template="runtime-managed:v7.review.33_dimension:1.4.1",
+        golden_cases=[],
+    )
+
+    class Db:
+        def __init__(self):
+            self.rollbacks = 0
+
+        async def rollback(self):
+            self.rollbacks += 1
+
+    class Repo:
+        def __init__(self):
+            self.lookup_count = 0
+
+        async def get_by_hash(self, _name, _hash):
+            self.lookup_count += 1
+            return None if self.lookup_count == 1 else winner
+
+        async def get_default(self, _name):
+            return None
+
+        async def create_version(self, *_args, **_kwargs):
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+    db = Db()
+    manager = object.__new__(PromptVersionManager)
+    manager.db = db
+    manager.version_repo = Repo()
+
+    result = await manager.register_version(
+        "v7.review.33_dimension",
+        winner.template,
+        model=winner.model,
+        parameters=winner.parameters,
+        version_label=winner.version_label,
+    )
+
+    assert result["created"] is False
+    assert result["version"]["id"] == str(winner.id)
+    assert db.rollbacks == 1
