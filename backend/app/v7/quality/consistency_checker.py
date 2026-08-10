@@ -60,7 +60,7 @@ class ConsistencyChecker:
         chapter_text: str,
         chapter_number: int,
         core_settings: str = "",
-        chapter_outline: str = "",
+        chapter_outline: Any = "",
         previous_chapter_tail: str = "",
         previous_transition_contract: dict[str, Any] | None = None,
         scene_plan: dict[str, Any] | None = None,
@@ -120,7 +120,10 @@ class ConsistencyChecker:
                 raw_response="",
             )
 
-        # 解析结果
+        # AIGateway.generate returns a usage envelope whose provider text is
+        # stored under ``text``.  Older test doubles returned a bare string;
+        # _parse_response accepts both so the real provider path and existing
+        # seams share one strict parser.
         return self._parse_response(response, chapter_text)
 
     def _build_check_prompt(
@@ -129,7 +132,7 @@ class ConsistencyChecker:
         chapter_text: str,
         chapter_number: int,
         core_settings: str,
-        chapter_outline: str,
+        chapter_outline: Any,
         previous_chapter_tail: str,
         previous_transition_contract: dict[str, Any],
         scene_plan: dict[str, Any],
@@ -158,9 +161,16 @@ class ConsistencyChecker:
                 for i, b in enumerate(beats[:10])
             )
 
-        # 截断长文本，避免 token 过多
+        # 截断长文本，避免 token 过多.  The caller supplies structured
+        # plot_brief data, while the prompt contract is text; serialise it
+        # explicitly instead of slicing a dict (which used to abort every
+        # consistency check before the provider call).
+        if isinstance(chapter_outline, (dict, list)):
+            chapter_outline_text = json.dumps(chapter_outline, ensure_ascii=False)
+        else:
+            chapter_outline_text = str(chapter_outline or "")
         core_settings_truncated = core_settings[:3000] if core_settings else ""
-        chapter_outline_truncated = chapter_outline[:2000] if chapter_outline else ""
+        chapter_outline_truncated = chapter_outline_text[:2000]
         chapter_text_truncated = chapter_text[:12000] if chapter_text else ""
         if isinstance(active_rules, dict):
             active_rules_text = json.dumps(active_rules, ensure_ascii=False)[:3000]
@@ -231,11 +241,16 @@ class ConsistencyChecker:
 注意：只检查事实性的不一致，不评价文笔好坏。如果没有明显问题，就给高分通过。"""
 
     def _parse_response(
-        self, response: str, chapter_text: str
+        self, response: Any, chapter_text: str
     ) -> ConsistencyCheckResult:
         """解析 LLM 响应。"""
+        if isinstance(response, dict):
+            response_text = response.get("text") or response.get("content") or ""
+        else:
+            response_text = response or ""
+        response_text = str(response_text)
         # 尝试提取 JSON
-        json_str = self._extract_json(response)
+        json_str = self._extract_json(response_text)
         if not json_str:
             return ConsistencyCheckResult(
                 passed=False,
@@ -248,7 +263,7 @@ class ConsistencyChecker:
                     "suggestion": "修复 Provider 输出格式后重新执行",
                 }],
                 summary="无法解析检查结果，不能放行",
-                raw_response=response,
+                raw_response=response_text,
             )
 
         try:
@@ -265,7 +280,7 @@ class ConsistencyChecker:
                     "suggestion": "修复 Provider 输出格式后重新执行",
                 }],
                 summary="JSON 解析失败，不能放行",
-                raw_response=response,
+                raw_response=response_text,
             )
 
         # 提取字段
@@ -281,7 +296,7 @@ class ConsistencyChecker:
                     "suggestion": "按契约返回完整 JSON 后重新执行",
                 }],
                 summary="一致性检查契约不完整，不能放行",
-                raw_response=response,
+                raw_response=response_text,
             )
         try:
             score = float(data["consistency_score"])
@@ -299,7 +314,7 @@ class ConsistencyChecker:
                     "suggestion": "返回有效的一致性评分",
                 }],
                 summary="一致性评分无效，不能放行",
-                raw_response=response,
+                raw_response=response_text,
             )
         passed = bool(data["passed"]) and score >= CONSISTENCY_PASS_SCORE
         issues = data.get("issues", [])
@@ -315,7 +330,7 @@ class ConsistencyChecker:
                     "suggestion": "按契约返回 issues 数组后重新执行",
                 }],
                 summary="一致性检查契约不完整，不能放行",
-                raw_response=response,
+                raw_response=response_text,
             )
         summary = str(data.get("summary", ""))
 
@@ -340,7 +355,7 @@ class ConsistencyChecker:
             score=score,
             issues=valid_issues,
             summary=summary,
-            raw_response=response,
+            raw_response=response_text,
         )
 
     @staticmethod
