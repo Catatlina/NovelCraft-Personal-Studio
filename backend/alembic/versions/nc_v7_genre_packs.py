@@ -34,6 +34,10 @@ def upgrade() -> None:
         CREATE INDEX IF NOT EXISTS idx_genre_packs_parent_id ON v7_genre_packs(parent_id);
         CREATE INDEX IF NOT EXISTS idx_genre_packs_scope ON v7_genre_packs(scope);
         CREATE INDEX IF NOT EXISTS idx_genre_packs_is_builtin ON v7_genre_packs(is_builtin);
+        -- Production may already contain this table from the pre-migration V7
+        -- bootstrap, where the ORM default was not present in PostgreSQL.
+        ALTER TABLE v7_genre_packs
+            ALTER COLUMN is_active SET DEFAULT TRUE;
 
         CREATE TABLE IF NOT EXISTS v7_genre_rules (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -95,20 +99,20 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO v7_genre_packs
-            (id, name, slug, description, scope, is_builtin, extra_metadata)
+            (id, name, slug, description, scope, is_builtin, is_active, extra_metadata)
         VALUES
-            ('00000000-0000-7000-8000-000000000001', '都市', 'urban', '现代城市、现实关系与高密度冲突', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000002', '玄幻', 'xuanhuan', '力量体系、升级目标与强反馈冒险', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000003', '仙侠', 'xianxia', '修行、因果、宗门与资源竞争', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000004', '悬疑', 'suspense', '线索、压力、反转与可验证推理', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000005', '科幻', 'science-fiction', '规则、未知风险与技术选择', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000006', '历史', 'history', '时代约束、身份博弈与现实目标', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000007', '游戏', 'game', '任务、数值反馈与副本推进', 'fanqie', TRUE, '{"platform":"fanqie"}'),
-            ('00000000-0000-7000-8000-000000000008', '言情', 'romance', '关系推进、情感选择与即时反馈', 'fanqie', TRUE, '{"platform":"fanqie"}')
+            ('00000000-0000-7000-8000-000000000001', '都市', 'urban', '现代城市、现实关系与高密度冲突', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000002', '玄幻', 'xuanhuan', '力量体系、升级目标与强反馈冒险', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000003', '仙侠', 'xianxia', '修行、因果、宗门与资源竞争', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000004', '悬疑', 'suspense', '线索、压力、反转与可验证推理', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000005', '科幻', 'science-fiction', '规则、未知风险与技术选择', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000006', '历史', 'history', '时代约束、身份博弈与现实目标', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000007', '游戏', 'game', '任务、数值反馈与副本推进', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'),
+            ('00000000-0000-7000-8000-000000000008', '言情', 'romance', '关系推进、情感选择与即时反馈', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}')
         ON CONFLICT (slug) DO NOTHING;
 
-        INSERT INTO v7_genre_packs (name, slug, parent_id, description, scope, is_builtin, extra_metadata)
-        SELECT child.name, child.slug, parent.id, child.description, 'fanqie', TRUE, '{"platform":"fanqie"}'
+        INSERT INTO v7_genre_packs (name, slug, parent_id, description, scope, is_builtin, is_active, extra_metadata)
+        SELECT child.name, child.slug, parent.id, child.description, 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'
         FROM (VALUES
             ('都市系统', 'urban-system', 'urban', '系统任务、现实资源与身份反差'),
             ('都市脑洞', 'urban-brain', 'urban', '现实场景中的异常设定与快速兑现'),
