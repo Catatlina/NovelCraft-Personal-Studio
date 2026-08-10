@@ -56,6 +56,9 @@ def upgrade() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_genre_rules_genre_id ON v7_genre_rules(genre_id);
         CREATE INDEX IF NOT EXISTS idx_genre_rules_rule_type ON v7_genre_rules(rule_type);
+        ALTER TABLE v7_genre_rules
+            ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+            ALTER COLUMN is_active SET DEFAULT TRUE;
 
         CREATE TABLE IF NOT EXISTS v7_genre_knowledge (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -73,6 +76,9 @@ def upgrade() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_genre_knowledge_genre_id ON v7_genre_knowledge(genre_id);
         CREATE INDEX IF NOT EXISTS idx_genre_knowledge_type ON v7_genre_knowledge(knowledge_type);
+        ALTER TABLE v7_genre_knowledge
+            ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+            ALTER COLUMN is_active SET DEFAULT TRUE;
 
         CREATE TABLE IF NOT EXISTS v7_genre_prompts (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -91,6 +97,9 @@ def upgrade() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_genre_prompts_genre_id ON v7_genre_prompts(genre_id);
         CREATE INDEX IF NOT EXISTS idx_genre_prompts_type ON v7_genre_prompts(prompt_type);
+        ALTER TABLE v7_genre_prompts
+            ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+            ALTER COLUMN is_active SET DEFAULT TRUE;
         """
     )
 
@@ -142,31 +151,36 @@ def upgrade() -> None:
             ('game', '{"tone":"任务明确、反馈直接、推进迅速","pace":"fast","opening":"尽快出现任务目标与可见奖励","payoff_density":"high"}'::jsonb),
             ('romance', '{"tone":"直接、鲜明、关系变化可见","pace":"fast","opening":"前三百字出现关系张力","payoff_density":"high"}'::jsonb)
         )
-        INSERT INTO v7_genre_rules (genre_id, rule_type, rule_key, rule_value, severity, priority, description)
-        SELECT p.id, 'style_card', 'core_style', style.value, 'info', 100, '内置品类的基础写作气质与节奏规则'
+        INSERT INTO v7_genre_rules
+            (id, genre_id, rule_type, rule_key, rule_value, severity, priority, description, is_active)
+        SELECT gen_random_uuid(), p.id, 'style_card', 'core_style', style.value, 'info', 100,
+               '内置品类的基础写作气质与节奏规则', TRUE
         FROM style JOIN v7_genre_packs p ON p.slug = style.slug
         ON CONFLICT (genre_id, rule_key) DO NOTHING;
 
-        INSERT INTO v7_genre_rules (genre_id, rule_type, rule_key, rule_value, severity, priority, description)
-        SELECT p.id, 'payoff', 'chapter_payoff_contract',
+        INSERT INTO v7_genre_rules
+            (id, genre_id, rule_type, rule_key, rule_value, severity, priority, description, is_active)
+        SELECT gen_random_uuid(), p.id, 'payoff', 'chapter_payoff_contract',
                '{"must_have":"可见结果","must_show":"人物或旁观者反馈","must_leave":"下一章压力","avoid":"空泛总结和无代价碾压"}'::jsonb,
-               'warning', 90, '每章爽点必须有铺垫、可见结果、反馈、代价或新压力'
+               'warning', 90, '每章爽点必须有铺垫、可见结果、反馈、代价或新压力', TRUE
         FROM v7_genre_packs p
         WHERE p.is_builtin AND p.parent_id IS NULL
         ON CONFLICT (genre_id, rule_key) DO NOTHING;
 
-        INSERT INTO v7_genre_knowledge (genre_id, knowledge_type, title, content, tags, priority)
-        SELECT p.id, 'writing_method', p.slug || chr(58) || 'core-rhythm',
+        INSERT INTO v7_genre_knowledge
+            (id, genre_id, knowledge_type, title, content, tags, priority, is_active, extra_metadata)
+        SELECT gen_random_uuid(), p.id, 'writing_method', p.slug || chr(58) || 'core-rhythm',
                '正文以具体行动推进，不用空泛议论代替剧情。每章至少完成一个可见目标，并在章末留下可追读的新压力。',
-               jsonb_build_array(p.slug, 'fast-pace', 'visible-payoff'), 100
+               jsonb_build_array(p.slug, 'fast-pace', 'visible-payoff'), 100, TRUE, '{}'::jsonb
         FROM v7_genre_packs p
         WHERE p.is_builtin AND p.parent_id IS NULL
         ON CONFLICT DO NOTHING;
 
-        INSERT INTO v7_genre_prompts (genre_id, prompt_type, prompt_name, version, content, description)
-        SELECT p.id, 'writer', p.slug || '.writer.core', '1.0',
+        INSERT INTO v7_genre_prompts
+            (id, genre_id, prompt_type, prompt_name, version, content, description, is_active, extra_metadata)
+        SELECT gen_random_uuid(), p.id, 'writer', p.slug || '.writer.core', '1.0',
                '你正在写番茄快节奏网文。遵守本品类规则：前三百字进入具体主题；用人物行动、对话和可见结果推进；爽点必须有铺垫、反馈与下一压力；不要写提纲、总结或作者说明。',
-               '内置品类包的正文生成补充规则'
+               '内置品类包的正文生成补充规则', TRUE, '{}'::jsonb
         FROM v7_genre_packs p
         WHERE p.is_builtin AND p.parent_id IS NULL
         ON CONFLICT (genre_id, prompt_name) DO NOTHING;
