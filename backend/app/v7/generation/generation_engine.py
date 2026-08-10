@@ -949,11 +949,19 @@ class SceneDirector:
             previous_titles=previous_titles,
         )
         if adopted is not None:
-            self.validate_scene_plan_contract(
-                adopted,
-                target_word_count=target_word_count,
-            )
-            return adopted
+            try:
+                self.validate_scene_plan_contract(
+                    adopted,
+                    target_word_count=target_word_count,
+                )
+                return adopted
+            except AIGatewayError:
+                # Plot assessment and scene planning are separate Provider
+                # contracts. If the assessment has usable story content but
+                # incomplete commercial phase labels, let the scene planner
+                # rebuild a complete beat sheet instead of failing the whole
+                # chapter before the repair-capable planning path runs.
+                adopted = None
 
         brief_block = ""
         if plot_brief:

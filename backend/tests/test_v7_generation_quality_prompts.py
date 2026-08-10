@@ -154,6 +154,49 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
     assert result["_usage"]["tokens_output"] == 10
 
 
+def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, _prompt, **_kwargs):
+            self.calls += 1
+            phases = ["pressure", "build", "burst", "feedback", "aftershock"]
+            return {
+                "data": {
+                    "chapter_title": "补上的余波",
+                    "chapter_type": "normal",
+                    "beats": [
+                        {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase}
+                        for i, phase in enumerate(phases)
+                    ],
+                },
+                "usage": {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"},
+            }
+
+    gateway = Gateway()
+    incomplete_brief = {
+        "chapter_title_hint": "旧门",
+        "suggested_beats": [
+            {"name": "压境", "content": "有人逼近", "target_words": 600, "payoff_phase": "pressure"},
+            {"name": "试探", "content": "主角试探", "target_words": 600, "payoff_phase": "build"},
+            {"name": "反击", "content": "主角反击", "target_words": 600, "payoff_phase": "burst"},
+            {"name": "反馈", "content": "对手退让", "target_words": 600, "payoff_phase": "feedback"},
+        ],
+    }
+
+    result = asyncio.run(SceneDirector(None, gateway).plan_scene(
+        1,
+        {"rendered_context": ""},
+        target_word_count=3000,
+        plot_brief=incomplete_brief,
+        quality_profile={},
+    ))
+
+    assert gateway.calls == 1
+    assert result["chapter_title"] == "补上的余波"
+
+
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     prompt = GenerationEngine._build_generation_prompt(
         None,
