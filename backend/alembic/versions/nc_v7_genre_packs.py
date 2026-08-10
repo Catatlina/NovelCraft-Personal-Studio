@@ -150,7 +150,7 @@ def upgrade() -> None:
         ON CONFLICT (genre_id, rule_key) DO NOTHING;
 
         INSERT INTO v7_genre_knowledge (genre_id, knowledge_type, title, content, tags, priority)
-        SELECT p.id, 'writing_method', p.slug || ':core-rhythm',
+        SELECT p.id, 'writing_method', p.slug || chr(58) || 'core-rhythm',
                '正文以具体行动推进，不用空泛议论代替剧情。每章至少完成一个可见目标，并在章末留下可追读的新压力。',
                jsonb_build_array(p.slug, 'fast-pace', 'visible-payoff'), 100
         FROM v7_genre_packs p
