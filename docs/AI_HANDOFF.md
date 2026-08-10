@@ -1,13 +1,21 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-06
+> 更新时间：2026-08-10
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
-## 2026-08-10 当前交接：生成质量旁路收紧（本地待发布）
+## 2026-08-10 最新生产交接：生成质量整改已部署
+
+- 当前运行版本：`main@70688f9`，生产目录 `/opt/NovelCraft-Personal-Studio`；部署时保留服务器已有 `.orig`、`genre_presets.py`、`init_genre_library.py` 和 `celerybeat-schedule`，未做清理覆盖。
+- `nc_v7_genre_packs` 已迁移到 head。迁移兼容了旧 V7 引导表缺少数据库默认值的情况：父/子品类、规则、知识、提示词种子均显式写入 UUID 和启用状态，四张表补齐默认值。
+- 备份证据：`backups/pre-deploy-c2abf99-20260810-221427.sql.gz`，gzip 校验通过，232,420,223 bytes。CI run `31398290193` backend/frontend/frontend-test/security/E2E 全通过，E2E 18 passed、9 skipped、0 failed。
+- 生产证据：公网 `healthz` 200；`database=ok`、`redis=ok`、`worker=ok: 1 online`；`scripts/prod_smoke.py` 15/15；生产浏览器 v2 1 passed、兼容版 3 passed；八个主页面和 V7 Cost/Prompt 真实页面均可达且未命中 mock 标记。
+- 质量边界：本次 smoke 没有注入 Provider Key，因此未宣称真实正文质量、两本书各 20 章长跑或人工盲评已验收；下一步应使用真实账号和真实 Provider 按独立长跑门禁复核。
+
+## 2026-08-10 当前交接：生成质量旁路收紧（已部署，边界见上）
 
 - V7 已补齐几条质量旁路：Provider 去 AI 失败不再伪装成通过；场景计划必须有 4–6 个 beat 和五阶段爽点节拍；配置的 `genre_id` 无法加载真实品类包时直接失败；实时审阅第 2 章起必须验证上一章契约和正文开头锚点；正文镜像升级为硬门禁。
 - 具体入口：`backend/app/v7/generation/generation_engine.py`、`backend/app/v7/review_service.py`、`backend/app/v7/quality/review_evidence.py`、`backend/app/v7/integration/quality.py`、`backend/app/main.py`；回归保护在 `backend/tests/test_v7_generation_quality_prompts.py`、`backend/tests/test_v7_review_contract.py` 和既有 V7 质量集合。
 - 本地证据：质量专项 93 passed；前端 54 passed；`npm run lint`、`npm run build`、Python compile、`python3 scripts/verify_delivery_claims.py`、`bash scripts/ai_development_gate.sh` 均通过。
-- 全量后端本机未通过：`backend/.venv/bin/pytest -q` 为 862 passed、138 skipped、150 failed、54 errors；失败主要落在 PostgreSQL `localhost:5432` 不可用引起的注册/真实数据库夹具 503，不能宣称全量回归通过。生产部署与公网复测尚未完成。
+- 全量后端本机未通过：`backend/.venv/bin/pytest -q` 为 862 passed、138 skipped、150 failed、54 errors；失败主要落在 PostgreSQL `localhost:5432` 不可用引起的注册/真实数据库夹具 503，不能宣称全量回归通过。生产部署与公网复测已完成，真实 Provider 章节质量复测仍未完成。
 - 发布前不要删除或覆盖工作树中已有的 genre_id、爽文网感研究、质量页面和 V7 连续性改动；它们属于同一当前批次，提交时需整体审查 diff 后再推送。
 
 ## 2026-08-10 当前工作树新增链路：爽文网感研究（未部署）
