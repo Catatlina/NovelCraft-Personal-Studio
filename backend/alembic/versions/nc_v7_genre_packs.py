@@ -111,8 +111,10 @@ def upgrade() -> None:
             ('00000000-0000-7000-8000-000000000008', '言情', 'romance', '关系推进、情感选择与即时反馈', 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}')
         ON CONFLICT (slug) DO NOTHING;
 
-        INSERT INTO v7_genre_packs (name, slug, parent_id, description, scope, is_builtin, is_active, extra_metadata)
-        SELECT child.name, child.slug, parent.id, child.description, 'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'
+        INSERT INTO v7_genre_packs
+            (id, name, slug, parent_id, description, scope, is_builtin, is_active, extra_metadata)
+        SELECT gen_random_uuid(), child.name, child.slug, parent.id, child.description,
+               'fanqie', TRUE, TRUE, '{"platform":"fanqie"}'
         FROM (VALUES
             ('都市系统', 'urban-system', 'urban', '系统任务、现实资源与身份反差'),
             ('都市脑洞', 'urban-brain', 'urban', '现实场景中的异常设定与快速兑现'),
