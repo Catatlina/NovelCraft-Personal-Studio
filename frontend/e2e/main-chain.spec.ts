@@ -283,7 +283,7 @@ test("小说主线③：创作进度运行中真实节点浏览器证据（prote
   await page.getByRole("textbox", { name: /用几句话描述你的故事/ }).fill(
     "一位城市档案修复师发现，被删除的旧报纸会在午夜预告第二天的失踪案。",
   );
-  await page.getByRole("combobox", { name: "小说题材" }).selectOption("悬疑");
+  await page.getByRole("combobox", { name: "品类包 真实 V7 品类" }).selectOption({ label: "悬疑" });
   await page.getByRole("button", { name: /短篇/ }).click();
   await page.getByRole("button", { name: "开始生成小说" }).click();
 
@@ -314,7 +314,7 @@ test("小说主线⑤：真实 AI 向导→人工定名→首章→审阅→导�
   await page.getByRole("textbox", { name: /用几句话描述你的故事/ }).fill(
     "一位城市档案修复师发现，被删除的旧报纸会在午夜预告第二天的失踪案。",
   );
-  await page.getByRole("combobox", { name: "小说题材" }).selectOption("悬疑");
+  await page.getByRole("combobox", { name: "品类包 真实 V7 品类" }).selectOption({ label: "悬疑" });
   await page.getByRole("button", { name: /短篇/ }).click();
   await page.getByRole("button", { name: "开始生成小说" }).click();
 

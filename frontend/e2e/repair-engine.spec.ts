@@ -61,7 +61,7 @@ async function startWizardRun(page: Page) {
   await page.getByRole("textbox", { name: /用几句话描述你的故事/ }).fill(
     "一位城市档案修复师发现，被删除的旧报纸会在午夜预告第二天的失踪案。",
   );
-  await page.getByRole("combobox", { name: "小说题材" }).selectOption("悬疑");
+  await page.getByRole("combobox", { name: "品类包 真实 V7 品类" }).selectOption({ label: "悬疑" });
   await page.getByRole("button", { name: /短篇/ }).click();
   await page.getByRole("button", { name: "开始生成小说" }).click();
 }
