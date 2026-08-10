@@ -1,5 +1,16 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-10 爽文网感研究链（本地未部署）
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 生成目标以爽、快节奏、读者兴奋为主 | 可用 | 新书默认爽感快节奏风格；V7 既有五阶段爽点契约继续作为结构硬门禁；研究卡注入场景规划和正文 Writer | 真实 Provider 章节样本与人工爽感盲评 |
+| 生成前联网提炼网感灵感 | 已接线 | `WebResearchService` → Tavily `/search` → 真实 AI 原创灵感卡 → V7 Context/Scene/Writer；无 Key/搜索失败直接失败 | 服务器配置 Tavily Key、真实一章验收 |
+| 研究结果缓存、审计和来源可追溯 | 可用 | 复用 `v7_event_logs`；查询哈希、TTL、卡片、来源域名、成功/失败事件；不存完整网页正文 | 生产数据库迁移/事件回放验证 |
+| 现有作品可切换研究策略 | 可用 | `GET/PUT /api/v1/novels/{novel_id}/generation-settings`；版本快照和 `audit_logs`；Settings 页面有读取/保存测试 | 生产登录态浏览器点击验证 |
+| Docker/环境变量可配置 | 已接线 | compose、`.env.example`、`.env.production.example`、healthz 状态字段已补齐 | 生产注入 Key 后重建并检查容器环境 |
+| 真实联网生成质量验收 | 未开始 | 本地仅完成失败/成功协议 mock 的单元契约；远端无 Tavily Key | 一章实跑、两本各 20 章长跑、上下章连续性和人工评审 |
+
 ## 2026-08-06 Demo 视觉骨架落地（未部署）
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |

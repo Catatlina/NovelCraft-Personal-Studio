@@ -27,6 +27,7 @@ from .gateway import (
     complete,
 )
 from .config import settings
+from .v7.quality.web_research import normalize_web_research_mode
 from .core.authz import ensure_project_member, ok
 from .schemas import (
     AiEditRequest,
@@ -35,6 +36,7 @@ from .schemas import (
     ContentUpdate,
     HumanConfirm,
     NovelCreate,
+    NovelGenerationSettingsUpdate,
     ShortStoryCreate,
     TitleRegenerateRequest,
     VersionRestore,
@@ -387,7 +389,11 @@ def healthz() -> ApiResponse:
     checks = {"status": "ok", "ai_provider": settings.ai_provider,
               # BUG-07: lets the UI warn before a keyless bootstrap fails.
               # Boolean only — never the key material.
-              "ai_key_configured": bool(settings.deepseek_api_key)}
+              "ai_key_configured": bool(settings.deepseek_api_key),
+              "web_research_provider": settings.web_research_provider,
+              "web_research_key_configured": bool(
+                  settings.web_research_provider == "tavily" and settings.tavily_api_key
+              )}
     try:
         conn = connect()
         conn.execute("SELECT 1").fetchone()
@@ -509,6 +515,9 @@ class WorkImportRequest(BaseModel):
     subgenre: str = Field(default="", max_length=80)
     style: str = Field(default="克制、悬疑、强画面感", max_length=160)
     target_words: int = Field(default=1000000, ge=1000, le=3000000)
+    # Imported manuscripts are protected source material; live research stays
+    # off until the user explicitly enables it for this book.
+    web_research_mode: str = Field(default="off", pattern="^(off|required)$")
 
 
 @app.post("/api/v1/projects/{project_id}/import")
@@ -530,6 +539,7 @@ def import_work(project_id: str, payload: WorkImportRequest, user: dict = Depend
         "subgenre": payload.subgenre,
         "style": payload.style,
         "target_words": payload.target_words,
+        "web_research_mode": payload.web_research_mode,
         "creative_bible": payload.text,
         "outline": payload.text,
         "imported": True,
@@ -559,6 +569,67 @@ def import_work(project_id: str, payload: WorkImportRequest, user: dict = Depend
     novel = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id = %s", (novel_id,)).fetchone()))
     conn.close()
     return ok(novel)
+
+
+def _generation_settings_payload(novel_id: str, meta: dict[str, Any]) -> dict[str, Any]:
+    mode = normalize_web_research_mode(meta.get("web_research_mode"))
+    return {
+        "novel_id": novel_id,
+        "web_research_mode": mode,
+        "provider": settings.web_research_provider,
+        "provider_configured": bool(
+            settings.web_research_provider == "tavily" and settings.tavily_api_key
+        ),
+        "cache_ttl_seconds": settings.web_research_cache_ttl_seconds,
+    }
+
+
+@app.get("/api/v1/novels/{novel_id}/generation-settings")
+def get_generation_settings(novel_id: str, user: dict = Depends(get_current_user)) -> ApiResponse:
+    conn, novel = load_content_for_user(novel_id, user)
+    try:
+        if novel.get("type") != "novel":
+            raise HTTPException(status_code=422, detail="content is not a novel")
+        meta = decode(novel.get("meta"), {})
+        return ok(_generation_settings_payload(novel_id, meta if isinstance(meta, dict) else {}))
+    finally:
+        conn.close()
+
+
+@app.put("/api/v1/novels/{novel_id}/generation-settings")
+def update_generation_settings(
+    novel_id: str,
+    payload: NovelGenerationSettingsUpdate,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    conn, novel = load_content_for_user(novel_id, user, {"owner", "editor"})
+    try:
+        if novel.get("type") != "novel":
+            raise HTTPException(status_code=422, detail="content is not a novel")
+        mode = normalize_web_research_mode(payload.web_research_mode)
+        row = conn.execute("SELECT * FROM contents WHERE id = %s FOR UPDATE", (novel_id,)).fetchone()
+        meta = decode(row.get("meta"), {})
+        meta = dict(meta) if isinstance(meta, dict) else {}
+        snapshot = {"title": row.get("title"), "body": decode(row.get("body"), {}), "meta": meta}
+        conn.execute(
+            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id) "
+            "VALUES (%s, 'content', %s, 'before_generation_settings', %s, 'generation_settings', %s)",
+            (new_id("ver"), novel_id, encode(snapshot), user["id"]),
+        )
+        meta["web_research_mode"] = mode
+        conn.execute(
+            "UPDATE contents SET meta=%s, updated_at=now() WHERE id=%s",
+            (encode(meta), novel_id),
+        )
+        conn.execute(
+            "INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at) "
+            "VALUES (%s, 'content', %s, 'generation_settings.updated', %s, now())",
+            (new_id("audit"), novel_id, encode({"web_research_mode": mode, "actor_id": user["id"]})),
+        )
+        conn.commit()
+        return ok(_generation_settings_payload(novel_id, meta))
+    finally:
+        conn.close()
 
 
 @app.get("/api/v1/contents")

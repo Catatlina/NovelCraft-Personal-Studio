@@ -65,4 +65,36 @@ describe("AI 味词库设置", () => {
       expect.objectContaining({ method: "PUT" }),
     ));
   });
+
+  it("读取并保存当前小说的实时网感生成策略", async () => {
+    apiMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === "/api/v1/novels/novel-1/generation-settings") {
+        if (options?.method === "PUT") return {
+          novel_id: "novel-1",
+          web_research_mode: "required",
+          provider: "tavily",
+          provider_configured: true,
+          cache_ttl_seconds: 21600,
+        } as never;
+        return {
+          novel_id: "novel-1",
+          web_research_mode: "off",
+          provider: "tavily",
+          provider_configured: true,
+          cache_ttl_seconds: 21600,
+        } as never;
+      }
+      return lexicon as never;
+    });
+
+    render(<Settings novelId="novel-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "生成策略" }));
+    await waitFor(() => expect(screen.getByLabelText("实时网感研究")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("实时网感研究"), { target: { value: "required" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存生成策略" }));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith(
+      "/api/v1/novels/novel-1/generation-settings",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+  });
 });

@@ -1,5 +1,20 @@
 # Starlume AI 当前已知问题
 
+## 2026-08-10 KI-032 实时网感研究已接线但服务器缺少 Tavily Key
+
+- 状态：**已接线**。
+- 代码范围：作品创建/导入、榜单成书、小说设置、`contents.meta`、worker context、V7 quality profile、`GenerationEngine`、V7 event log、Docker/env 示例均已接入；研究失败 fail-closed，不返回 mock 或静态替代正文。
+- 验证：研究服务 6/6、相关 V7/质量 25/25、Redis 依赖回归 30/30、前端 3/3、构建/编译/差异检查通过。
+- 阻断：远端 `/opt/NovelCraft-Personal-Studio` 当前为 `6583024`，只读检查显示 `TAVILY_API_KEY` 未配置；本批尚未 push/deploy。没有真实 Tavily 搜索和 Provider 正文样本，不能标记“可用/已验收”。
+- 下一步：配置服务器 Key 后部署；先验证 healthz 的 `web_research_key_configured=true`，再用一章确认 live/cached、`web_research.completed`、AI ledger 和正文 Prompt 证据，最后跑两本书各 20 章并做人工爽感/连续性复核。
+
+## 2026-08-10 KI-033 本机全量后端集成回归受 PostgreSQL 环境阻断
+
+- 状态：**已接线**（测试环境问题，不是本批功能判定）。
+- Redis 依赖的目标回归已在临时本地 Redis 上通过 30/30；实时研究与质量相关回归通过。
+- 全量 `backend/.venv/bin/pytest -q` 未完成：本机 PostgreSQL `localhost:5432` 未启动，已出现 116 failed、49 errors 后中止；这些失败集中在真实数据库/认证/迁移集成夹具，不能把它们算作本批功能失败或全绿。
+- 另外 `verify_ai_truthfulness.py` 和强制 `ai_development_gate.sh` 当前命中仓库既有 `report_distillation.py:426` AST 告警；本批没有修改该告警，也没有用 `GATE_ALLOW_WARNINGS=1` 冒充通过。
+
 ## 2026-08-06 Demo 视觉改造批次（工作树，未部署）
 
 - 状态：**本地可用，生产待发布**。

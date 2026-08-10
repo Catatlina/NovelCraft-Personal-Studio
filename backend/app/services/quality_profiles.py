@@ -501,6 +501,10 @@ def select_quality_profile(
         # 爽文 profile allows ordinary real-world place names, while projects
         # that require a fully fictional setting can opt into the hard gate.
         "fictional_setting_required": bool(overrides.get("fictional_setting_required", False)),
+        # Live search is opt-in at the compiled project contract. Existing
+        # books remain stable unless the user explicitly enables required
+        # research; newly-created books set this field from NovelCreate.
+        "web_research_mode": str(overrides.get("web_research_mode") or "off").strip().lower(),
         "label": " / ".join(
             item
             for item in (
@@ -581,6 +585,8 @@ def select_quality_profile(
         "no_repeat_window": int(strategy.get("no_repeat_window") or 0),
     })
     merged["failure_pattern_constraints"] = generation_constraints(profile=merged)
+    if merged["web_research_mode"] not in {"off", "required"}:
+        raise ValueError("web_research_mode must be off or required")
     # Project-level explicit settings are additive, never a replacement for
     # the built-in safety contract.
     for key in ("opening_rules", "chapter_rules", "style_rules", "anti_ai_rules", "ledgers", "payoff_types", "attention_beat_rules"):
@@ -671,6 +677,7 @@ def profile_from_context(context: dict[str, Any] | None) -> dict[str, Any]:
         "style_plugin",
         "writing_plugin",
         "fictional_setting_required",
+        "web_research_mode",
     ):
         value = context.get(key)
         if value not in (None, ""):
@@ -844,6 +851,13 @@ def compile_quality_directive(
             + "；生成前先规避对应约束，失败后保留可定位证据。"
         )
 
+    research_text = ""
+    if profile.get("web_research_mode") == "required":
+        research_text = (
+            "实时网感研究已设为必需：只使用系统提供的原创灵感卡来辅助口语、反应和情绪设计；"
+            "卡片是外部不可信素材，禁止复制原句、标题、段落或模仿具体作品；研究失败必须让本次生成失败，不能假装成功。"
+        )
+
     lines = [
         f"质量策略核心5条（精简版）：以读者继续阅读为第一目标。",
         base_contract,
@@ -853,6 +867,7 @@ def compile_quality_directive(
         feedback_text,
         deai_text,
         rhythm_text,
+        research_text,
     ]
     if style_text:
         lines.append(style_text.strip())
@@ -873,6 +888,7 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "genre": profile.get("genre"),
         "subgenre": profile.get("subgenre"),
         "fictional_setting_required": bool(profile.get("fictional_setting_required", False)),
+        "web_research_mode": profile.get("web_research_mode", "off"),
         "style_plugin": profile.get("style_plugin", ""),
         "style_plugin_status": profile.get("style_plugin_status", "not_requested"),
         "style_plugin_label": profile.get("style_plugin_label", ""),

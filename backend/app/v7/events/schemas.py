@@ -61,6 +61,25 @@ class HumanInterventionPayload(BaseEventPayload):
     action: str | None = None
 
 
+class WebResearchCompletedPayload(BaseEventPayload):
+    schema_version: str = "web-research-v1"
+    mode: str = "required"
+    status: str = "live"
+    provider: str = "tavily"
+    query_hash: str
+    cards: list[dict[str, Any]] = Field(default_factory=list)
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WebResearchFailedPayload(BaseEventPayload):
+    schema_version: str = "web-research-v1"
+    mode: str = "required"
+    provider: str = "tavily"
+    query_hash: str
+    error_type: str
+    error: str
+
+
 EVENT_PAYLOAD_MODELS: dict[str, type[BaseEventPayload]] = {
     "chapter_generated": ChapterGeneratedPayload,
     "generation_completed": GenerationCompletedPayload,
@@ -68,6 +87,8 @@ EVENT_PAYLOAD_MODELS: dict[str, type[BaseEventPayload]] = {
     "constraint_violated": ConstraintViolatedPayload,
     "memory_conflict_detected": MemoryConflictPayload,
     "human_intervention": HumanInterventionPayload,
+    "web_research.completed": WebResearchCompletedPayload,
+    "web_research.failed": WebResearchFailedPayload,
 }
 
 

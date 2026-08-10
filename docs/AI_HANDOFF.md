@@ -2,6 +2,15 @@
 > 更新时间：2026-08-06
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-10 当前工作树新增链路：爽文网感研究（未部署）
+
+- 本地工作树已同步到 `origin/main@6583024` 后继续开发；本批没有提交、推送或部署。
+- 新书/榜单成书默认开启 `web_research_mode=required`，导入原稿默认关闭；现有小说可在设置页切换。该字段从作品 meta → worker run context → V7 quality profile → GenerationEngine 全程保持权威，不靠前端单独记忆。
+- `backend/app/v7/quality/web_research.py` 使用 Tavily `/search`，限制为两条查询、短摘要、来源域名和 TTL 缓存；真实 AI 将搜索结果转换为原创灵感卡后才进入场景规划和正文 Prompt。结果/失败均写入 V7 event log，失败不生成降级正文。
+- 代码级证据：`backend/tests/test_web_research.py` 6/6；相关 V7/质量 25/25；Redis 依赖回归 30/30；前端组件 3/3；`npm run build`、Python compile、`git diff --check` 和应用路由导入通过。
+- 未验收边界：远端服务器只读检查为 `6583024`，未配置 `TAVILY_API_KEY`，因此没有真实搜索/Provider 双调用长跑证据。部署前必须配置 Key，并用真实 Provider 运行至少一章，再做 20 章爽感、上下章连续性和人工可读性验收。
+- 全量后端回归本机无法完成：Redis 依赖测试已在临时 Redis 上通过；其余大批集成测试因本机 PostgreSQL `localhost:5432` 未启动失败/等待，不能作为本批代码回归结论。真实性脚本当前命中既有 `report_distillation.py:426` AST 告警，未使用 warning 放行。
+
 ## 2026-08-06 本地 Demo 视觉骨架落地（未部署）
 
 - 本批不是只换色板：主应用页头新增 NovelCraft 工作台面包屑；侧边主导航保持原顺序和入口不变。

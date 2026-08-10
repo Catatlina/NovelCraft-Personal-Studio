@@ -16,6 +16,7 @@ const WORD_PRESETS = [
 ];
 
 const CUSTOM_STYLE_VALUE = "__custom__";
+type WebResearchMode = "off" | "required";
 const STYLE_PRESETS = [
   { value: "第三人称、克制、悬疑、强画面感", label: "悬疑压迫 · 强画面", hint: "线索递进，信息留白，章末留钩" },
   { value: "第三人称、冲突前置、节奏明快、爽点密集、少解释", label: "网文爽感 · 快节奏", hint: "开局见冲突，行动推动情节" },
@@ -40,6 +41,8 @@ export function Wizard({
   setStyle,
   targetWords,
   setTargetWords,
+  webResearchMode,
+  setWebResearchMode,
   busy,
   startBootstrap,
   projectId,
@@ -58,6 +61,8 @@ export function Wizard({
   setStyle: (value: string) => void;
   targetWords: number;
   setTargetWords: (value: number) => void;
+  webResearchMode: WebResearchMode;
+  setWebResearchMode: (value: WebResearchMode) => void;
   busy: boolean;
   startBootstrap: () => void;
   projectId?: string;
@@ -312,6 +317,23 @@ export function Wizard({
                 <small>{STYLE_PRESETS.find(item => item.value === selectedStylePreset)?.hint || "会写入生成约束，影响节奏、对白和叙述表达。"}</small>
               )}
               {errors.style && <small className="field-error">{errors.style}</small>}
+            </label>
+            <label className="wizard-field">
+              <span>实时网感研究 <small>爽文增强</small></span>
+              <select
+                value={webResearchMode}
+                onChange={event => setWebResearchMode(event.target.value as WebResearchMode)}
+                aria-label="实时网感研究"
+              >
+                <option value="required">生成前联网找网感（推荐）</option>
+                <option value="off">关闭联网研究</option>
+              </select>
+              <small>
+                {webResearchMode === "required"
+                  ? "用实时读者讨论提炼原创灵感卡；服务器未配置搜索 Key 或搜索失败会明确报错，不会降级假装成功。"
+                  : "只使用项目内规则，不调用外部搜索。"
+                }
+              </small>
             </label>
           </div>
 

@@ -103,6 +103,7 @@ class CreateBookRequest(BaseModel):
     auto_start: bool = True
     target_words: int = Field(default=800_000, ge=10_000, le=5_000_000)
     style: str = "商业网文、节奏紧凑、人物驱动"
+    web_research_mode: Literal["off", "required"] = "required"
 
 
 class RankingImportItem(BaseModel):
@@ -1124,7 +1125,8 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
     selected_subgenre = str(topic.get("sub_category") or topic_meta.get("sub_category") or "")
     novel_id = new_id(); meta = {"idea": topic["premise"], "genre": topic["genre"],
         "platform": selected_platform, "subgenre": selected_subgenre, "style": payload.style,
-        "target_words": payload.target_words, "suggested_title": topic["title"], "source_type": "ranking_topic",
+        "target_words": payload.target_words, "web_research_mode": payload.web_research_mode,
+        "suggested_title": topic["title"], "source_type": "ranking_topic",
         "source_ref_id": topic_id, "analysis_id": topic["analysis_id"], "snapshot_id": snapshot_id,
         "workflow_scope": "planning_and_chapter1"}
     db.execute("""INSERT INTO contents (id,project_id,type,title,body,meta,status,owner_id,generation_key)

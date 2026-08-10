@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useState } from "react";
-import { BarChart3, Check, ChevronDown, Database, Eye, EyeOff, KeyRound, Lock, Plus, RotateCcw, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
+import { BarChart3, Check, ChevronDown, Database, Eye, EyeOff, Globe2, KeyRound, Lock, Plus, RotateCcw, Save, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import {
   api,
   ApiError,
@@ -13,7 +13,7 @@ import {
 import { Badge } from "../components/ui";
 import { version as appVersion } from "../../package.json";
 
-type SettingsTab = "ai" | "quality" | "data" | "account";
+type SettingsTab = "ai" | "writing" | "quality" | "data" | "account";
 type Stats = { ai_calls: number; contents: number; db_size: string };
 type LexiconPhrase = { phrase: string; enabled: boolean; note: string };
 type LexiconCategory = { key: string; label: string; description: string; enabled: boolean; phrases: LexiconPhrase[] };
@@ -32,7 +32,15 @@ type AiFlavorLexicon = {
   categories: LexiconCategory[];
 };
 
-export function Settings({ projectId = "" }: { projectId?: string }) {
+type GenerationSettings = {
+  novel_id: string;
+  web_research_mode: "off" | "required";
+  provider: string;
+  provider_configured: boolean;
+  cache_ttl_seconds: number;
+};
+
+export function Settings({ projectId = "", novelId = "" }: { projectId?: string; novelId?: string }) {
   const [tab, setTab] = useState<SettingsTab>("ai");
   const [apiKey, setApiKeyValue] = useState(getApiKey);
   const [apiUrl, setApiUrlValue] = useState(getApiUrl);
@@ -52,6 +60,8 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
   const [lexiconDirty, setLexiconDirty] = useState(false);
   const [expandedLexiconCategories, setExpandedLexiconCategories] = useState<Record<string, boolean>>({});
   const [newLexiconPhrase, setNewLexiconPhrase] = useState<Record<string, string>>({});
+  const [generationSettings, setGenerationSettings] = useState<GenerationSettings | null>(null);
+  const [generationSettingsLoading, setGenerationSettingsLoading] = useState(false);
 
   useEffect(() => {
     if (tab !== "data") return;
@@ -60,6 +70,21 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
       .then(setStats)
       .catch(caught => setStatsError(caught instanceof Error ? caught.message : String(caught)));
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== "writing" || !novelId) {
+      if (!novelId) setGenerationSettings(null);
+      return;
+    }
+    let cancelled = false;
+    setGenerationSettingsLoading(true);
+    setNotice(null);
+    api<GenerationSettings>(`/api/v1/novels/${novelId}/generation-settings`)
+      .then(result => { if (!cancelled) setGenerationSettings(result); })
+      .catch(caught => { if (!cancelled) setNotice({ kind: "error", text: `生成策略读取失败：${caught instanceof Error ? caught.message : String(caught)}` }); })
+      .finally(() => { if (!cancelled) setGenerationSettingsLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab, novelId]);
 
   useEffect(() => {
     if (tab !== "quality") return;
@@ -151,6 +176,24 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
       setNotice({ kind: "success", text: "AI 味词库已保存，后续生成与审阅会读取新配置。" });
     } catch (caught) {
       setNotice({ kind: "error", text: `词库保存失败：${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveGenerationSettings() {
+    if (!novelId || !generationSettings) return;
+    setBusy("generation-settings");
+    setNotice(null);
+    try {
+      const saved = await api<GenerationSettings>(`/api/v1/novels/${novelId}/generation-settings`, {
+        method: "PUT",
+        body: JSON.stringify({ web_research_mode: generationSettings.web_research_mode }),
+      });
+      setGenerationSettings(saved);
+      setNotice({ kind: "success", text: "本书生成策略已保存；下一次生成章节会按新策略执行。" });
+    } catch (caught) {
+      setNotice({ kind: "error", text: `生成策略保存失败：${caught instanceof Error ? caught.message : String(caught)}` });
     } finally {
       setBusy("");
     }
@@ -259,6 +302,7 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="小说设置分类">
           <button type="button" className={tab === "ai" ? "active" : ""} onClick={() => setTab("ai")}><KeyRound size={18} /><span>AI 连接</span></button>
+          <button type="button" className={tab === "writing" ? "active" : ""} onClick={() => setTab("writing")}><Globe2 size={18} /><span>生成策略</span></button>
           <button type="button" className={tab === "quality" ? "active" : ""} onClick={() => setTab("quality")}><SlidersHorizontal size={18} /><span>质量规则</span></button>
           <button type="button" className={tab === "data" ? "active" : ""} onClick={() => setTab("data")}><Database size={18} /><span>创作数据</span></button>
           <button type="button" className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><Lock size={18} /><span>账号安全</span></button>
@@ -284,6 +328,43 @@ export function Settings({ projectId = "" }: { projectId?: string }) {
                 <div><strong>{apiKey ? "当前会话已配置个人 Key" : "当前会话未配置个人 Key"}</strong><p>未配置时会使用服务器全局 Provider；如果两处都未配置，创作向导会明确阻止启动。</p></div>
               </div>
               <button type="button" className="settings-save" disabled={!configDirty} onClick={saveAiConfig}><Save size={17} /> {configDirty ? "保存 AI 配置" : "配置已保存"}</button>
+            </section>
+          )}
+
+          {tab === "writing" && (
+            <section className="settings-section">
+              <div>
+                <p className="eyebrow">WEB-NOVEL ENGINE</p>
+                <h3>生成策略</h3>
+                <p>决定本书生成章节时是否实时搜索读者讨论和网感信号，再转成原创灵感卡参与爽点规划。</p>
+              </div>
+              {!novelId && <div className="settings-data-error" role="status">请先在作品选择器中选中一本小说。</div>}
+              {generationSettingsLoading && <div className="settings-data-loading"><span className="spinner" /> 正在读取本书策略…</div>}
+              {generationSettings && !generationSettingsLoading && (
+                <>
+                  <label className="settings-field">
+                    <span>实时网感研究</span>
+                    <select
+                      value={generationSettings.web_research_mode}
+                      onChange={event => setGenerationSettings(current => current ? { ...current, web_research_mode: event.target.value as "off" | "required" } : current)}
+                    >
+                      <option value="required">开启：生成前联网找网感（推荐）</option>
+                      <option value="off">关闭：只使用项目内规则</option>
+                    </select>
+                  </label>
+                  <div className="settings-callout">
+                    <Globe2 size={18} />
+                    <div>
+                      <strong>{generationSettings.provider_configured ? "服务器已配置实时搜索" : "服务器未配置实时搜索 Key"}</strong>
+                      <p>{generationSettings.provider_configured
+                        ? `当前提供方：${generationSettings.provider}；研究结果会缓存约 ${Math.round(generationSettings.cache_ttl_seconds / 3600)} 小时，并写入 V7 审计记录。`
+                        : "开启后如果服务器没有 TAVILY_API_KEY，生成会明确失败，不会退回静态假数据。请先配置服务器环境变量。"
+                      }</p>
+                    </div>
+                  </div>
+                  <button type="button" className="settings-save" disabled={busy === "generation-settings"} onClick={() => void saveGenerationSettings()}><Save size={17} /> {busy === "generation-settings" ? "正在保存…" : "保存生成策略"}</button>
+                </>
+              )}
             </section>
           )}
 

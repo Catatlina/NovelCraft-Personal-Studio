@@ -51,6 +51,7 @@ from ...services.quality_profiles import (
 )
 from ..quality.deai_metrics import analyze_deai_patterns
 from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
+from ..quality.web_research import WebResearchService, render_web_research_guidance
 from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
 # P1-3 质量整改：导入质量门控灰度开关
@@ -634,6 +635,11 @@ class ContextAssembler:
                 )
             )
 
+        web_research = layers.get("web_research") or {}
+        research_guidance = render_web_research_guidance(web_research)
+        if research_guidance:
+            blocks.append("【实时网感灵感卡（仅供原创灵感）】\n" + research_guidance)
+
         quality_learning = layers.get("quality_learning") or []
         if quality_learning:
             blocks.append(
@@ -674,6 +680,7 @@ class ContextAssembler:
             "style_card": layers.get("style_card", {}),
             "active_rules": layers.get("active_rules", []),
             "quality_learning": layers.get("quality_learning", []),
+            "web_research": layers.get("web_research", {}),
         }
         anchor = cls.render(anchor_layers)
         state_blob = cls.render(
@@ -2486,6 +2493,49 @@ class GenerationEngine:
 
         # Step: plan scene (real AI)
         async with self.tracer.trace_step(
+            "generation.web_research",
+            "web_research",
+            input_summary=f"Collect live web-novel inspiration for chapter {chapter_number}",
+        ) as step:
+            research = await WebResearchService(
+                # Some deterministic unit harnesses construct the engine via
+                # __new__ and intentionally omit database identity.  The
+                # disabled research path never reads it; preserve that test
+                # seam without weakening required live research.
+                novel_id=getattr(self, "novel_id", uuid.UUID(int=0)),
+                event_bus=self.event_bus,
+                ai_gateway=self.ai_gateway,
+            ).collect(
+                chapter_number=chapter_number,
+                quality_profile=self.quality_profile,
+                plot_brief=plot_brief,
+                outline=outline or prompt,
+            )
+            context["context_layers"]["web_research"] = research
+            # Keep lightweight deterministic harnesses compatible; production
+            # ContextAssembler always exposes both methods.
+            if hasattr(self.context_assembler, "render"):
+                context["rendered_context"] = self.context_assembler.render(context["context_layers"])
+                max_chars = int(context.get("token_budget", 5400) * 1.6)
+                context["truncated"] = len(context["rendered_context"]) > max_chars
+                if context["truncated"] and hasattr(self.context_assembler, "_fit_context"):
+                    context["rendered_context"] = self.context_assembler._fit_context(
+                        context["context_layers"], max_chars
+                    )
+                context["rendered_chars"] = len(context["rendered_context"])
+            add_usage(step, research.get("usage") or {})
+            step.set_output(
+                f"{research.get('status')} cards={len(research.get('cards') or [])}",
+                data={
+                    "status": research.get("status"),
+                    "cache_status": research.get("cache_status"),
+                    "card_count": len(research.get("cards") or []),
+                    "source_count": len(research.get("sources") or []),
+                },
+            )
+
+        # Step: plan scene (real AI)
+        async with self.tracer.trace_step(
             "generation.plan_scene",
             "scene_planning",
             input_summary="Plan scene structure with AI",
@@ -2860,6 +2910,12 @@ class GenerationEngine:
             "payoff_score": payoff_score,
             "chapter_mirror": mirror_stats,
             "quality_profile": quality_profile_metadata(self.quality_profile),
+            "web_research": {
+                "status": (context.get("context_layers") or {}).get("web_research", {}).get("status", "disabled"),
+                "cache_status": (context.get("context_layers") or {}).get("web_research", {}).get("cache_status"),
+                "card_count": len((context.get("context_layers") or {}).get("web_research", {}).get("cards") or []),
+                "source_count": len((context.get("context_layers") or {}).get("web_research", {}).get("sources") or []),
+            },
         }
 
         await self.event_bus.publish(
@@ -2897,6 +2953,7 @@ class GenerationEngine:
                 "active_rules": context["context_layers"].get("active_rules", []),
                 "recent_payoff_types": context["context_layers"].get("recent_payoff_types", []),
                 "recent_payoff_history": context["context_layers"].get("recent_payoff_history", []),
+                "web_research": context["context_layers"].get("web_research", {}),
             },
             "scene_plan": scene_plan,
             "payoff_contract": payoff_contract,
@@ -3073,6 +3130,8 @@ class GenerationEngine:
 
         # 上一章结尾状态（用于衔接）
         context_layers = context.get("context_layers") or {}
+        research_guidance = render_web_research_guidance(context_layers.get("web_research"))
+        research_prompt = f"【实时网感灵感卡】\n{research_guidance}\n\n" if research_guidance else ""
         previous_transition = context_layers.get("previous_transition_contract") or {}
         previous_tail = context_layers.get("previous_tail") or ""
         transition_block = ""
@@ -3127,6 +3186,7 @@ class GenerationEngine:
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
             f"{genre_writer_prompt}"
+            f"{research_prompt}"
             f"【网文质量策略】\n{quality_directive}\n\n"
             f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
             f"【本章爽点契约】\n{json.dumps(scene_plan.get('payoff_contract') or {}, ensure_ascii=False)}\n\n"

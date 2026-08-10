@@ -112,6 +112,10 @@ docker-compose.yml
 | `DEEPSEEK_API_KEY` | DeepSeek API Key | 环境变量 |
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | 环境变量，默认 `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | DeepSeek 默认模型 | 环境变量，默认 `deepseek-chat` |
+| `TAVILY_API_KEY` | 服务端实时网感搜索 Key；开启作品的 `web_research_mode=required` 后必需 | 环境变量，不返回前端 |
+| `TAVILY_BASE_URL` | Tavily 地址，生产必须为 `https://api.tavily.com` | 环境变量，默认官方地址 |
+| `NOVELCRAFT_WEB_RESEARCH_PROVIDER` | 实时研究提供方 | 环境变量，默认 `tavily` |
+| `NOVELCRAFT_WEB_RESEARCH_CACHE_TTL_SECONDS` | 网感研究缓存时长 | 环境变量，默认 `21600` |
 | `CLAUDE_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | 其他真实 Provider Key | 环境变量或浏览器 BYOK |
 | `NOVELCRAFT_CREDENTIALS_KEY` | 平台连接凭据 Fernet 加密密钥 | 环境变量；生产必填 |
 | `CLAUDE_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | 各 Provider API Key | 环境变量 |

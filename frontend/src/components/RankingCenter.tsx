@@ -384,7 +384,7 @@ export function RankingCenter({ projectId, onBookCreated, onCreate }: { projectI
     setBusy(`book:${topic.id}`); setMessage("");
     try {
       const result = await apiRaw<Wrapped<{ novel_id: string; run_id?: string; status: string; warning?: string }>>(`/api/v1/ranking/topics/${topic.id}/generate-book`, {
-        method: "POST", body: JSON.stringify({ auto_start: true, target_words: 800000, style: "克制、有画面感、适合网文平台阅读" }),
+        method: "POST", body: JSON.stringify({ auto_start: true, target_words: 800000, style: "冲突前置、节奏紧凑、爽点密集、少解释" , web_research_mode: "required" }),
       });
       await onBookCreated(result.data.novel_id, result.data.run_id);
       setMessage(result.data.run_id ? "小说已进入书库并启动自动生成" : `小说已进入书库，工作流待恢复：${result.data.warning || "队列不可用"}`);

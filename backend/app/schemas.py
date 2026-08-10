@@ -6,6 +6,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+WebResearchMode = Literal["off", "required"]
+
+
 class ApiResponse(BaseModel):
     code: int | str = 0
     message: str = "ok"
@@ -22,8 +25,13 @@ class NovelCreate(BaseModel):
     platform: str = Field(default="fanqie", max_length=40)
     subgenre: str = Field(default="", max_length=80)
     style_plugin: str = Field(default="", max_length=80)
-    style: str = Field(default="克制、悬疑、强画面感", max_length=160)
+    style: str = Field(default="冲突前置、节奏明快、爽点密集、少解释", max_length=160)
     target_words: int = Field(default=1000000, ge=1000, le=3000000)
+    web_research_mode: WebResearchMode = "required"
+
+
+class NovelGenerationSettingsUpdate(BaseModel):
+    web_research_mode: WebResearchMode
 
 
 class ShortStoryCreate(BaseModel):
@@ -81,7 +89,7 @@ class ContentMetaRegistry(BaseModel):
 
 
 CONTENT_TYPE_REGISTRY: dict[str, ContentMetaRegistry] = {
-    "novel": ContentMetaRegistry(type="novel", required_fields=["idea","genre","style"], optional_fields=["target_words","synopsis","selected_title","style_plugin"]),
+    "novel": ContentMetaRegistry(type="novel", required_fields=["idea","genre","style"], optional_fields=["target_words","synopsis","selected_title","style_plugin","web_research_mode"]),
     "chapter": ContentMetaRegistry(type="chapter", required_fields=["seq"], optional_fields=["needs_rewrite","quality_score"]),
     "volume": ContentMetaRegistry(type="volume", required_fields=["volume_number"], optional_fields=["summary"]),
     "short_story": ContentMetaRegistry(type="short_story", required_fields=["idea","template"], optional_fields=["genre","style","max_words","short_score"]),

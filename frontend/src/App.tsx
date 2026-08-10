@@ -167,8 +167,9 @@ export default function App() {
   const [platform, setPlatform] = useState("fanqie");
   const [subgenre, setSubgenre] = useState("");
   const [stylePlugin, setStylePlugin] = useState("");
-  const [style, setStyle] = useState("第三人称、克制、悬疑、强画面感");
+  const [style, setStyle] = useState("第三人称、冲突前置、节奏明快、爽点密集、少解释");
   const [targetWords, setTargetWords] = useState(800000);
+  const [webResearchMode, setWebResearchMode] = useState<"off" | "required">("required");
   const [editorText, setEditorText] = useState("");
   const [selection, setSelection] = useState("");
   const [busy, setBusy] = useState(false);
@@ -612,7 +613,7 @@ export default function App() {
     if (!project) return;
     setBusy(true); setError("");
     try {
-      const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, platform, subgenre, style_plugin: stylePlugin, style, target_words: targetWords }) });
+      const c = await api<Content>(`/api/v1/projects/${project.id}/novels`, { method: "POST", body: JSON.stringify({ idea, genre, platform, subgenre, style_plugin: stylePlugin, style, target_words: targetWords, web_research_mode: webResearchMode }) });
       setNovel(c);
       void cacheSet(currentNovelCacheKey, c);
       const s = await api<{ run_id: string }>(`/api/v1/novels/${c.id}/bootstrap`, { method: "POST", body: JSON.stringify({ auto_confirm_title: false }) });
@@ -1234,7 +1235,7 @@ export default function App() {
           }}
         />
       )}
-      {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, platform, setPlatform, subgenre, setSubgenre, stylePlugin, setStylePlugin, style, setStyle, targetWords, setTargetWords, busy, startBootstrap, projectId: project?.id }} />}
+      {tab === "wizard" && <Wizard {...{ idea, setIdea, genre, setGenre, platform, setPlatform, subgenre, setSubgenre, stylePlugin, setStylePlugin, style, setStyle, targetWords, setTargetWords, webResearchMode, setWebResearchMode, busy, startBootstrap, projectId: project?.id }} />}
       {tab === "progress" && <Progress
         run={run}
         novel={novel}
@@ -1281,7 +1282,7 @@ export default function App() {
             <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText: updateEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
           </React.Suspense>
       </div>}
-      {tab === "settings" && <Settings projectId={project?.id || ""} />}
+      {tab === "settings" && <Settings projectId={project?.id || ""} novelId={novel?.id} />}
       {tab === "v7" && <V7Dashboard
         novelId={novel?.id ?? null}
         onOpenProgress={() => setTab("progress")}

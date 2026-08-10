@@ -29,6 +29,8 @@ describe("创作向导写作风格", () => {
         setStyle={setStyle}
         targetWords={100000}
         setTargetWords={vi.fn()}
+        webResearchMode="required"
+        setWebResearchMode={vi.fn()}
         busy={false}
         startBootstrap={vi.fn()}
       />,

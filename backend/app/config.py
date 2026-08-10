@@ -15,6 +15,15 @@ class Settings:
     # generally-available deepseek-chat as the safe default.
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     request_timeout_seconds: int = int(os.getenv("NOVELCRAFT_REQUEST_TIMEOUT_SECONDS", "180"))
+    # Live web research is an explicit server capability.  A book opts in via
+    # ``web_research_mode=required``; missing credentials or a provider error
+    # must fail that generation instead of silently producing a degraded draft.
+    web_research_provider: str = os.getenv("NOVELCRAFT_WEB_RESEARCH_PROVIDER", "tavily").strip().lower()
+    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "").strip()
+    tavily_base_url: str = os.getenv("TAVILY_BASE_URL", "https://api.tavily.com").strip().rstrip("/")
+    web_research_timeout_seconds: int = int(os.getenv("NOVELCRAFT_WEB_RESEARCH_TIMEOUT_SECONDS", "20"))
+    web_research_cache_ttl_seconds: int = int(os.getenv("NOVELCRAFT_WEB_RESEARCH_CACHE_TTL_SECONDS", "21600"))
+    web_research_max_results: int = int(os.getenv("NOVELCRAFT_WEB_RESEARCH_MAX_RESULTS", "5"))
     # DEPRECATED (P1-T2): the per-project "bootstrap" budget is no longer
     # enforced. Monthly spend is derived from the active plan's
     # ``monthly_budget_cny`` in ``gateway._assert_budget``. Kept only for
