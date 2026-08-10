@@ -30,3 +30,15 @@ def test_selected_genre_reaches_the_canonical_v7_generation_engine():
     assert "self.genre_id = genre_id" in base
     assert "self.generation_engine = GenerationEngine(" in director
     assert "            genre_id=genre_id," in director
+
+
+def test_wizard_genre_tree_is_authenticated_but_genre_management_stays_admin_only():
+    source = (ROOT / "app/v7/api/genres.py").read_text(encoding="utf-8")
+
+    # Authors need the built-in tree to create a novel. CRUD/list/detail
+    # endpoints remain explicitly admin-read protected; removing the old
+    # router-wide guard must not turn the manager API into a public API.
+    assert "_user: dict = Depends(get_current_user)" in source
+    assert '@router.get("/tree", response_model=dict)' in source
+    assert 'response_model=dict, dependencies=[Depends(require_admin_reads)]' in source
+    assert 'router = APIRouter(\n    prefix="",\n    tags=["v7-genres"],\n)' in source
