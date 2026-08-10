@@ -305,9 +305,9 @@ class ContextAssembler:
                 resolve_genre_knowledge,
                 resolve_genre_prompts,
             )
-            from ..db import async_session
+            from ..db import AsyncSessionLocal
 
-            async with async_session() as db:
+            async with AsyncSessionLocal() as db:
                 # 解析规则（含继承）
                 rules = await resolve_genre_rules(db, self.genre_id)
 

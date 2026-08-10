@@ -32,6 +32,14 @@ def test_selected_genre_reaches_the_canonical_v7_generation_engine():
     assert "            genre_id=genre_id," in director
 
 
+def test_generation_context_uses_the_real_async_session_factory():
+    source = (ROOT / "app/v7/generation/generation_engine.py").read_text(encoding="utf-8")
+
+    assert "from ..db import AsyncSessionLocal" in source
+    assert "async with AsyncSessionLocal() as db:" in source
+    assert "from ..db import async_session" not in source
+
+
 def test_wizard_genre_tree_is_authenticated_but_genre_management_stays_admin_only():
     source = (ROOT / "app/v7/api/genres.py").read_text(encoding="utf-8")
 
