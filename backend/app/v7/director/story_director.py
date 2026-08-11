@@ -49,6 +49,7 @@ from ..quality.continuity import validate_prose_continuity, validate_transition_
 from ..quality.review_evidence import validate_review_evidence
 from ..quality.writing_methodology import (
     build_writing_workflow_contract,
+    normalize_causal_audit,
     transition_workflow_status,
     validate_writing_workflow,
 )
@@ -1012,7 +1013,19 @@ class StoryDirector:
             consistency_feedback = ""
             if consistency_failed and consistency_result:
                 consistency_feedback = f"一致性检查未通过（{consistency_result.score}分）：" + format_consistency_issues(consistency_result.issues)
-            feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}。{consistency_feedback}".strip("；。")
+            causal_audit = normalize_causal_audit(review_data.get("causal_audit"))
+            causal_feedback = ""
+            if causal_audit.get("repair_boundaries") or causal_audit.get("red_issues"):
+                causal_feedback = (
+                    "因果审查修复边界（只改受影响的事件单元，保留其他事实/结果/未决问题）："
+                    + "、".join(causal_audit.get("repair_boundaries") or [])
+                    + "；红色问题："
+                    + "；".join(
+                        item.get("gap") or item.get("fact") or "未定位"
+                        for item in causal_audit.get("red_issues") or []
+                    )
+                )
+            feedback = f"质量门禁未通过：{failures}。{issue_text}。{repair_feedback}。{consistency_feedback}。{causal_feedback}".strip("；。")
             gate_for_rework = evaluate_review(review_data, project_id=self.project_id, user_id=self.user_id)
             use_local_repair = (
                 not force_full_rework
@@ -1243,6 +1256,7 @@ class StoryDirector:
             "strengths": review_data.get("strengths", []),
             "constraint_violations": review_data.get("constraint_violations", []),
             "audit_report": review_data.get("audit_report", {}),
+            "causal_audit": normalize_causal_audit(review_data.get("causal_audit")),
             "review_provenance": review_data.get("provenance", {}),
             "review_evidence": review_data.get("review_evidence") or {},
             "blocking_violations": blocking,
@@ -1463,12 +1477,14 @@ class StoryDirector:
             },
             scene_plan=scene_plan,
             chapter_text=generation.get("text") or "",
+            writing_workflow=workflow_seed,
             review={
                 "causal_passed": bool(continuity.get("passed")) and bool(
                     (consistency_evidence or {}).get("passed", True)
                 ),
                 "style_passed": bool(observation.get("passed_review")),
                 "review_score": observation.get("review_score"),
+                "causal_audit": observation.get("causal_audit") or {},
             },
         )
         if not methodology_workflow["review"]["causal_passed"]:
@@ -1607,6 +1623,7 @@ class StoryDirector:
                     "overall_score": observation.get("review_score", 0),
                     "dimension_scores": observation.get("dimension_scores") or {},
                     "audit_report": observation.get("audit_report") or {},
+                    "causal_audit": observation.get("causal_audit") or {},
                     "reader_experience": observation.get("reader_experience") or {},
                     "issues": observation.get("issues") or [],
                     "strengths": observation.get("strengths") or [],

@@ -23,6 +23,7 @@ from ..quality.review_evidence import validate_review_evidence
 from ..quality.world_constraint import get_constraint_pack
 from ..quality.reader_simulation import simulate_reader_first_pass
 from ..quality.hook_analysis import analyze_hook_power
+from ..quality.writing_methodology import normalize_causal_audit
 
 QUALITY_PASS_SCORE = 85.0
 QUALITY_REWORK_SCORE = 80.0
@@ -121,6 +122,20 @@ def evaluate_review(
                 }
             )
     quality_profile = review_data.get("quality_profile") or {}
+    causal_audit = normalize_causal_audit(review_data.get("causal_audit"))
+    if causal_audit.get("red_issues") or causal_audit.get("conclusion") in {
+        "return_scene",
+        "return_skeleton",
+    }:
+        failures.append({
+            "dimension": "causal_audit",
+            "actual": causal_audit.get("conclusion") or "return_scene",
+            "minimum": "pass",
+            "reason": "；".join(
+                item.get("gap") or item.get("fact") or "红色因果问题"
+                for item in causal_audit.get("red_issues") or []
+            ) or "因果审查要求返回场景或返回骨架修复",
+        })
     payoff_contract = review_data.get("payoff_contract") or {}
     payoff_validation = review_data.get("payoff_validation") or {}
     
@@ -322,6 +337,7 @@ def evaluate_review(
         "payoff_evidence_validation": payoff_evidence,
         "review_evidence": review_evidence,
         "quality_profile": quality_profile,
+        "causal_audit": causal_audit,
         # Reader experience is advisory; it must not replace the continuity
         # and writing hard gates above.  It is nevertheless returned with the
         # decision so weak expectation/payoff is visible to rework and UI.

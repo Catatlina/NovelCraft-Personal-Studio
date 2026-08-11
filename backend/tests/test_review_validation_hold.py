@@ -69,6 +69,17 @@ def test_quality_gate_keeps_review_contract_failure_blocking():
     assert not any(item["dimension"] == "payoff_evidence" for item in result["failures"])
 
 
+def test_quality_gate_blocks_red_causal_audit_even_with_high_scores():
+    review = _valid_shape()
+    review["causal_audit"] = {
+        "conclusion": "return_scene",
+        "red_issues": [{"location": "第2段", "gap": "人物使用未获得的信息"}],
+    }
+    result = evaluate_review(review)
+    assert result["passed"] is False
+    assert any(item["dimension"] == "causal_audit" for item in result["failures"])
+
+
 def test_execute_repairs_only_invalid_payoff_evidence(monkeypatch):
     chapter_text = "沈砚抬手按住石门，石门当场退开，队伍里有人倒吸一口凉气。"
 

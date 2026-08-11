@@ -39,7 +39,10 @@ from ..quality.review_evidence import (
     build_review_evidence,
     validate_review_evidence,
 )
-from ..quality.writing_methodology import render_writing_methodology_contract
+from ..quality.writing_methodology import (
+    normalize_causal_audit,
+    render_writing_methodology_contract,
+)
 
 REVIEW_DIMENSIONS: tuple[str, ...] = (
     "consistency",
@@ -371,6 +374,13 @@ class ReviewEngine(BaseEngine):
             '"description":"问题","suggestion":"改法","excerpt":"原文片段"}],\n'
             '  "constraint_violations": [{"name":"约束名","description":"如何违反的",'
             '"severity":"low|medium|high"}],\n'
+            '  "causal_audit": {"conclusion":"pass|return_scene|return_skeleton",'
+            '"red_issues":[{"location":"正文位置","fact":"事件/状态","gap":"断裂",'
+            '"repair":"只修复该事件单元"}],'
+            '"orange_issues":[{"location":"正文位置","fact":"事件/状态","gap":"风险",'
+            '"repair":"补足依据/代价"}],'
+            '"yellow_issues":[{"location":"正文位置","fact":"事件/状态","gap":"表达风险",'
+            '"repair":"局部改写"}],"preserved_facts":[],"repair_boundaries":[]},\n'
             '  "strengths": ["优点"],\n'
             '  "confidence": 0.85,\n'
             '  "reason": "总体评价一句话"\n'
@@ -402,6 +412,10 @@ class ReviewEngine(BaseEngine):
             "不能用现实城市、公司、平台或公众人物替代。"
             "审稿必须额外判断：每个关键事件是否满足事件、知情边界、现在发生的动机、代价、下一影响五列；"
             "若缺失，归入 causality/plot_logic 的具体问题，并指出断裂位置；不要用高分掩盖因果账本缺失。"
+            "另请输出 causal_audit：红色=逆因果、知情越界、物件瞬移或规则冲突；"
+            "橙色=巧合救场、工具人、无代价成功或外部钩子硬接；黄色=解释腔、完美问答或主角中心化。"
+            "只要红色问题存在，conclusion 必须是 return_scene；如果事件骨架本身缺少触发/选择/可见结果，必须是 return_skeleton。"
+            "repair_boundaries 只能列出需要重写的事件单元，不能建议整章同义词替换；保持未受影响的事实、物件、结果和未决问题不变。"
             f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
             f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
             f"pacing/writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
@@ -430,6 +444,7 @@ class ReviewEngine(BaseEngine):
 
         self.record_usage(ai["usage"])
         raw = ai["data"]
+        raw["causal_audit"] = normalize_causal_audit(raw.get("causal_audit"))
 
         # A malformed payoff_evidence field is a review-contract defect, not
         # automatically a prose defect.  Ask the Provider for a bounded,
@@ -613,6 +628,7 @@ class ReviewEngine(BaseEngine):
             "payoff_evidence": payoff_evidence,
             "payoff_evidence_validation": payoff_evidence_validation,
             "payoff_evidence_repair": payoff_evidence_repair,
+            "causal_audit": raw["causal_audit"],
             "writing_workflow": data.get("writing_workflow") or {},
         }
         review_result["review_reference"] = novel_reviewer_reference_metadata()

@@ -30,6 +30,23 @@ _AI_PHRASES = (
     "故事才刚刚开始",
 )
 
+# A narrative can contain a real plan, but an ordered checklist inside the
+# narrator's prose is a strong signal that the scene has been rendered from a
+# prompt outline instead of lived through by a viewpoint character.  Treat a
+# sequence as a contextual signal only: one marker is normal, two or more
+# coordinated markers in a chapter-sized text need a semantic rewrite pass.
+_EXPOSITORY_MARKERS = (
+    "第一步",
+    "第二步",
+    "第三步",
+    "首先",
+    "其次",
+    "最后",
+    "一是",
+    "二是",
+    "三是",
+)
+
 # These are observations, not forbidden words.  A character can legitimately
 # smile or take a breath; the signal is only raised when the same small action
 # is repeated across a chapter and starts replacing actual character reaction.
@@ -126,6 +143,23 @@ def _tic_metrics(text: str, profile: dict[str, Any] | None = None) -> dict[str, 
     }
 
 
+def _expository_scaffold(text: str) -> dict[str, Any]:
+    """Detect ordered checklist language leaking into narrative prose."""
+    hits: list[str] = []
+    for marker in _EXPOSITORY_MARKERS:
+        hits.extend([marker] * text.count(marker))
+    distinct = list(dict.fromkeys(hits))
+    step_markers = {"第一步", "第二步", "第三步", "一是", "二是", "三是"}
+    triggered = len(distinct) >= 2 and (
+        bool(set(distinct) & step_markers) or len(hits) >= 3
+    )
+    return {
+        "hit_count": len(hits),
+        "markers": distinct[:8],
+        "triggered": triggered,
+    }
+
+
 def analyze_deai_patterns(
     text: str,
     *,
@@ -144,6 +178,7 @@ def analyze_deai_patterns(
             "dash_density_per_1000": 0.0,
             "ellipsis_count": 0,
             "ai_phrase_hits": 0,
+            "expository_scaffold": {"hit_count": 0, "markers": [], "triggered": False},
             "repeated_phrases": [],
             "repeated_paragraph_opening": {"opening": "", "count": 0, "ratio": 0.0},
             "tic_metrics": {"hits": 0, "density_per_1000": 0.0, "breakdown": {}, "dominant": "", "dominant_count": 0, "repeated": False},
@@ -163,6 +198,7 @@ def analyze_deai_patterns(
     dash_count = len(re.findall(r"——|--|—", text))
     ellipsis_count = len(re.findall(r"……|\.\.\.|…{2,}", text))
     ai_phrase_hits = sum(text.count(phrase) for phrase in _AI_PHRASES)
+    expository_scaffold = _expository_scaffold(text)
     repeated = _repeated_phrases(text)
     repeated_opening = _repeated_paragraph_opening(text)
     tic_metrics = _tic_metrics(text, profile)
@@ -206,6 +242,16 @@ def analyze_deai_patterns(
         })
     if ai_phrase_hits:
         flags.append({"code": "ai_phrase", "severity": "medium", "message": f"命中 {ai_phrase_hits} 个高风险套话"})
+    if size >= 800 and expository_scaffold["triggered"]:
+        flags.append({
+            "code": "expository_scaffold",
+            "severity": "medium",
+            "message": (
+                "叙述中出现有序清单式表达，容易把人物思路写成作者提纲："
+                + "、".join(expository_scaffold["markers"][:4])
+            ),
+            "evidence": expository_scaffold,
+        })
     if repeated:
         flags.append({"code": "repeated_phrase", "severity": "low", "message": "存在跨句重复短语，需要确认是否为刻意回环"})
     if tic_metrics["repeated"]:
@@ -247,7 +293,12 @@ def analyze_deai_patterns(
         # chapter, for example, can legitimately score low on dialogue
         # omission. Require multiple independent signals before paying for a
         # semantic rewrite or blocking a draft.
-        if len(failed_dimensions) >= 2 and structural_ai_smell_result.overall_score < 75:
+        # Two independent failed dimensions already justify a semantic
+        # rewrite.  The previous overall-score cutoff let chapters like the
+        # Zhuque calibration sample (86.9 overall, but repeated openings plus
+        # abstract adverbs) pass as clean even though the structure was
+        # visibly formulaic.
+        if len(failed_dimensions) >= 2:
             flags.append({
                 "code": "structural_ai_smell",
                 "severity": "medium",
@@ -294,6 +345,7 @@ def analyze_deai_patterns(
         "ellipsis_count": ellipsis_count,
         "ellipsis_density_per_1000": round(ellipsis_density, 3),
         "ai_phrase_hits": ai_phrase_hits,
+        "expository_scaffold": expository_scaffold,
         "repeated_phrases": repeated,
         "repeated_paragraph_opening": repeated_opening,
         "tic_metrics": tic_metrics,

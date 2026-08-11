@@ -2163,7 +2163,10 @@ def create_run(project_id: str, novel_id: str,
     """Create a workflow run through the complete planning-to-audit pipeline.
 
     A preselected title locks only the title gate. It never bypasses source
-    decomposition, creative-bible planning, or quality controls.
+    decomposition, creative-bible planning, or quality controls. Ranking
+    flows may set ``auto_confirm_title`` so their selected leaderboard title
+    continues automatically; the normal inspiration flow leaves the gate for
+    a human decision.
     """
     db = connect()
     if idempotency_key:
@@ -2191,6 +2194,9 @@ def create_run(project_id: str, novel_id: str,
         context["suggested_title"] = selected_title
     if auto_confirm_title:
         context["auto_confirm_title"] = True
+        if selected_title:
+            context["selected_title"] = selected_title
+            context["title_locked"] = True
 
     run_id = new_id()
     db.execute(

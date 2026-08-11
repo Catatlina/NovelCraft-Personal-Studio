@@ -63,6 +63,8 @@ from ..quality.readability_contract import (
     render_readability_plan,
 )
 from ..quality.writing_methodology import (
+    build_behavior_sample_query,
+    build_model_adaptation_record,
     build_writing_workflow_contract,
     render_writing_methodology_contract,
     validate_writing_workflow,
@@ -274,10 +276,12 @@ class ContextAssembler:
         brain: NovelBrain,
         project_id: str | None = None,
         genre_id: str | None = None,
+        novel_id: str | None = None,
     ):
         self.brain = brain
         self.project_id = project_id
         self.genre_id = genre_id
+        self.novel_id = novel_id
         self._genre_cache: dict[str, Any] | None = None
 
     async def load_style_card(self) -> dict[str, Any]:
@@ -305,6 +309,81 @@ class ContextAssembler:
                 conn.close()
 
         return await asyncio.to_thread(_read)
+
+    async def load_behavior_samples(
+        self,
+        query: str | None,
+        *,
+        limit: int = 2,
+    ) -> list[dict[str, Any]]:
+        """Load behavior annotations from this novel only.
+
+        Samples are optional knowledge, but once a project has declared them
+        retrieval failures are real failures.  Returning an invented/default
+        sample here would make a generation trace look healthy while silently
+        changing the novel's writing behavior.  A studio project can contain
+        multiple novels, so ``source_novel_id`` is a required second scope.
+        """
+        if not self.project_id or not self.novel_id:
+            return []
+        query_text = str(query or "").strip() or "行为 选择 信息 结果 代价"
+
+        def _count() -> int:
+            from ...db import connect
+
+            conn = connect()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM knowledge_items "
+                    "WHERE project_id=%s AND kind='behavior_sample' AND is_deleted=FALSE "
+                    "AND meta->>'source_novel_id'=%s",
+                    (self.project_id, self.novel_id),
+                ).fetchone()
+                return int((row or {}).get("count") or 0)
+            finally:
+                conn.close()
+
+        try:
+            available = await asyncio.to_thread(_count)
+            if available == 0:
+                return []
+            from ...services import knowledge_hub
+
+            rows = await asyncio.to_thread(
+                knowledge_hub.search,
+                query_text,
+                self.project_id,
+                ["behavior_sample"],
+                min(max(1, int(limit)), 3),
+                {"source_novel_id": self.novel_id},
+            )
+        except Exception as exc:
+            raise AIGatewayError(
+                f"behavior sample retrieval unavailable: {type(exc).__name__}"
+            ) from exc
+
+        samples: list[dict[str, Any]] = []
+        for row in rows[:3]:
+            meta = row.get("meta") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except json.JSONDecodeError:
+                    meta = {}
+            annotation = meta.get("behavior_annotation") or row.get("body") or ""
+            samples.append({
+                "id": str(row.get("id") or ""),
+                "title": row.get("title") or "",
+                "annotation": str(annotation)[:1800],
+                "scene_type": meta.get("scene_type") or "",
+                "viewpoint": meta.get("viewpoint") or "",
+                "pressure": meta.get("pressure") or "",
+                "result_type": meta.get("result_type") or "",
+                "tags": meta.get("tags") or [],
+                "source_project": meta.get("source_project") or self.project_id,
+                "source_novel_id": meta.get("source_novel_id") or self.novel_id,
+            })
+        return samples
 
     async def load_genre_context(self) -> dict[str, Any]:
         """加载品类上下文（风格卡、知识、约束、Prompt模板等）。
@@ -447,6 +526,7 @@ class ContextAssembler:
         scene_type: str = "normal",
         token_budget: int = 5400,
         include_rejected: bool = False,
+        behavior_query: str | None = None,
     ) -> dict[str, Any]:
         """Assemble layered context: state / goals / constraints / recap.
 
@@ -484,6 +564,7 @@ class ContextAssembler:
 
         # 加载品类上下文（第8层）
         genre_context = await self.load_genre_context()
+        behavior_samples = await self.load_behavior_samples(behavior_query)
 
         previous = await self.load_previous_chapters(
             chapter_number,
@@ -610,6 +691,8 @@ class ContextAssembler:
             "active_rules": active_rules,
             "quality_learning": quality_learning,
             "genre": genre_context,  # 第8层：品类上下文
+            "behavior_samples": behavior_samples,
+            "project_id": self.project_id,
         }
 
         rendered = self.render(layers)
@@ -750,6 +833,19 @@ class ContextAssembler:
                 )
             )
 
+        behavior_samples = layers.get("behavior_samples") or []
+        if behavior_samples:
+            blocks.append(
+                "【行为级黄金样本（只学习行为，不复制正文）】\n"
+                "只学习人物目标、信息缺口、选择压力、因果推进和结果成本；禁止复制原句、句长、标点、段落结构或专有名词。\n"
+                + "\n".join(
+                    f"- {item.get('title')}: 场景={item.get('scene_type') or '未标注'}；"
+                    f"视角={item.get('viewpoint') or '未标注'}；压力={item.get('pressure') or '未标注'}；"
+                    f"行为标注：{item.get('annotation') or ''}"
+                    for item in behavior_samples[:3]
+                )
+            )
+
         recap = layers.get("recap", [])
         if recap:
             blocks.append("【前情提要】\n" + "\n".join(recap))
@@ -789,6 +885,7 @@ class ContextAssembler:
             "active_rules": layers.get("active_rules", []),
             "quality_learning": layers.get("quality_learning", []),
             "web_research": layers.get("web_research", {}),
+            "behavior_samples": layers.get("behavior_samples", []),
         }
         anchor = cls.render(anchor_layers)
         state_blob = cls.render(
@@ -819,6 +916,14 @@ class ContextAssembler:
 
 class SceneDirector:
     """Plans the chapter beat sheet with a real AI call."""
+
+    SCENE_PLAN_PAYOFF_PHASES = (
+        "pressure",
+        "build",
+        "burst",
+        "feedback",
+        "aftershock",
+    )
 
     def __init__(self, brain: NovelBrain, gateway: "AIGateway"):
         self.brain = brain
@@ -903,6 +1008,102 @@ class SceneDirector:
             "planned_words": planned_words,
             "payoff_phases": sorted(phases),
         }
+
+    @classmethod
+    def _project_provider_declared_payoff_phases(
+        cls,
+        plan: Any,
+    ) -> dict[str, Any] | None:
+        """Project an explicit plan-level payoff arc onto beat labels.
+
+        Some provider responses carry the complete five-phase arc in
+        ``payoff_contract.payoff_arc`` but omit one label from the individual
+        beats.  The writer needs both representations.  This repair only
+        copies phases the provider already declared and requires concrete
+        result, feedback, cost and next-pressure fields before touching the
+        beat sheet; it never invents story content or a missing phase.
+        """
+        if not isinstance(plan, dict):
+            return None
+        beats = plan.get("beats")
+        if not isinstance(beats, list) or not beats:
+            return None
+
+        contract = plan.get("payoff_contract")
+        if not isinstance(contract, dict):
+            return None
+        declared_arc = contract.get("payoff_arc") or contract.get("payoff_phases")
+        if isinstance(declared_arc, str):
+            declared_arc = re.split(r"[,，、|>/→\s]+", declared_arc)
+        if not isinstance(declared_arc, list):
+            return None
+        declared = {
+            str(value).strip().lower()
+            for value in declared_arc
+            if str(value or "").strip()
+        }
+        required = set(cls.SCENE_PLAN_PAYOFF_PHASES)
+        if not required.issubset(declared):
+            return None
+        if any(
+            not str(contract.get(field) or "").strip()
+            for field in (
+                "visible_result",
+                "payoff_feedback",
+                "cost",
+                "next_pressure",
+            )
+        ):
+            return None
+
+        covered: set[str] = set()
+        normalised_beats: list[list[str]] = []
+        for beat in beats:
+            if not isinstance(beat, dict):
+                normalised_beats.append([])
+                continue
+            values = beat.get("payoff_phases")
+            if not isinstance(values, list):
+                values = [beat.get("payoff_phase")]
+            phases = [
+                str(value).strip().lower()
+                for value in values
+                if str(value or "").strip()
+            ]
+            normalised_beats.append(phases)
+            covered.update(phases)
+
+        missing = [phase for phase in cls.SCENE_PLAN_PAYOFF_PHASES if phase not in covered]
+        if not missing:
+            return None
+
+        last_index = len(beats) - 1
+        target_indexes = {
+            "pressure": 0,
+            "build": min(1, last_index),
+            "burst": min(2, last_index),
+            "feedback": max(last_index - 1, 0),
+            "aftershock": last_index,
+        }
+        applied: list[dict[str, Any]] = []
+        for phase in missing:
+            index = target_indexes[phase]
+            if not isinstance(beats[index], dict):
+                return None
+            phases = normalised_beats[index]
+            if phase not in phases:
+                phases.append(phase)
+            beats[index]["payoff_phases"] = list(dict.fromkeys(phases))
+            beats[index].pop("payoff_phase", None)
+            applied.append({"phase": phase, "beat_index": index})
+
+        plan["payoff_phases"] = list(cls.SCENE_PLAN_PAYOFF_PHASES)
+        plan["payoff_phase_projection"] = {
+            "source": "payoff_contract.payoff_arc",
+            "declared": list(cls.SCENE_PLAN_PAYOFF_PHASES),
+            "applied": applied,
+        }
+        return plan
 
     @staticmethod
     def _adopt_plot_brief(
@@ -1033,6 +1234,7 @@ class SceneDirector:
             previous_titles=previous_titles,
         )
         if adopted is not None:
+            self._project_provider_declared_payoff_phases(adopted)
             try:
                 self.validate_scene_plan_contract(
                     adopted,
@@ -1225,6 +1427,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         )
         plan = result["data"]
         usage = dict(result.get("usage") or {})
+        self._project_provider_declared_payoff_phases(plan)
         try:
             self.validate_scene_plan_contract(
                 plan,
@@ -1233,8 +1436,10 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         except AIGatewayError as contract_error:
             # Provider JSON can be syntactically valid while omitting one of
             # the commercial beat phases. Give the same real Provider one
-            # bounded repair opportunity; never invent a phase locally or let
-            # a malformed plan reach the writer.
+            # bounded repair opportunity. A plan-level arc projection above
+            # only copies phases the provider explicitly declared; it never
+            # invents a phase locally or lets a malformed plan reach the
+            # writer.
             repair_prompt = (
                 "下面的场景计划 JSON 没有通过结构契约校验。请只修复结构并输出完整 JSON，"
                 "不要写解释，不要改动已经存在的剧情事实。必须保留 4-6 个 beats，"
@@ -1264,6 +1469,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "model": repair_usage.get("model") or usage.get("model"),
             }
             plan = repaired["data"]
+            self._project_provider_declared_payoff_phases(plan)
             self.validate_scene_plan_contract(
                 plan,
                 target_word_count=target_word_count,
@@ -1298,6 +1504,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         plan["opening_plan"] = effective_opening_plan
         plan["readability_plan"] = readability_plan
         plan["target_word_count"] = target_word_count
+        self._project_provider_declared_payoff_phases(plan)
         self.validate_scene_plan_contract(plan, target_word_count=target_word_count)
         plan["_usage"] = usage
         return plan
@@ -1357,6 +1564,7 @@ class DeAIPipeline:
         "repeated_phrase",           # P0-1: 恢复重复短语检测
         "repeated_tic",
         "structural_ai_smell",
+        "expository_scaffold",
     }
     # Low-severity observations remain auditable metrics, but must not trigger
     # a billable whole-chapter provider rewrite on their own.
@@ -1369,6 +1577,7 @@ class DeAIPipeline:
         "ai_phrase",
         "repeated_tic",
         "structural_ai_smell",
+        "expository_scaffold",
     }
 
     def __init__(self, gateway: "AIGateway | None" = None):
@@ -2085,6 +2294,40 @@ class DeAIPipeline:
                 "applied": False,
                 "reason": "语义改写后仍有多项独立结构信号未消除",
                 "evidence": structural_flags[0].get("evidence") or {},
+            })
+        residual_naturalness_flags = [
+            flag for flag in after_metrics.get("flags") or []
+            if isinstance(flag, dict)
+            and flag.get("code") in self.SEMANTIC_REWRITE_FLAGS
+            and str(flag.get("severity") or "").lower()
+            in self.SEMANTIC_REWRITE_SEVERITIES
+            and flag.get("code") != "structural_ai_smell"
+        ]
+        if residual_naturalness_flags:
+            residual_codes = sorted({str(flag.get("code")) for flag in residual_naturalness_flags})
+            residual_evidence = {
+                "codes": residual_codes,
+                "flags": residual_naturalness_flags,
+            }
+            if opening_repair_gate.get("passed", True):
+                opening_repair_gate = {
+                    **opening_repair_gate,
+                    "passed": False,
+                    "code": "naturalness_signal_persisted",
+                    "message": "语义改写后仍有结构性表达信号未消除",
+                    "naturalness_signals": residual_evidence,
+                }
+            else:
+                opening_repair_gate = {
+                    **opening_repair_gate,
+                    "naturalness_signals": residual_evidence,
+                }
+            layers.append({
+                "layer": "naturalness_signal_gate",
+                "changes": 0,
+                "applied": False,
+                "reason": "语义改写后仍保留中高风险表达结构",
+                "evidence": residual_evidence,
             })
         layers.append(
             {
@@ -2891,7 +3134,12 @@ class GenerationEngine:
             project_id=project_id,
             provider_config=self.provider_config,
         )
-        self.context_assembler = ContextAssembler(brain, project_id, genre_id)
+        self.context_assembler = ContextAssembler(
+            brain,
+            project_id,
+            genre_id,
+            novel_id=str(novel_id),
+        )
         self.scene_director = SceneDirector(brain, self.ai_gateway)
         self.deai_pipeline = DeAIPipeline(self.ai_gateway)
 
@@ -2952,6 +3200,7 @@ class GenerationEngine:
             context = await self.context_assembler.assemble_context(
                 chapter_number,
                 include_rejected=bool(getattr(self, "include_rejected_context", False)),
+                behavior_query=build_behavior_sample_query(plot_brief),
             )
             step.set_output(
                 f"context {context['rendered_chars']} chars, "
@@ -3023,6 +3272,16 @@ class GenerationEngine:
             plot_brief=workflow_input,
         )
         context.setdefault("context_layers", {})["writing_workflow"] = writing_workflow
+
+        # The methodology is a generation input.  Failing here prevents a
+        # prose call from producing text that we already know cannot be traced
+        # back to confirmed facts and a five-column causal ledger.
+        methodology_validation = validate_writing_workflow(writing_workflow)
+        if methodology_required and not methodology_validation.get("passed"):
+            raise AIGatewayError(
+                "writing methodology preflight failed: "
+                + "; ".join(methodology_validation.get("missing") or ["unknown"])
+            )
 
         opening_plan = select_opening_plan(
             chapter_number,
@@ -3130,6 +3389,9 @@ class GenerationEngine:
                     "避免总结性旁白与说教结尾、避免翻译腔。直接输出正文，不要标题、"
                     "不要任何解释或markdown标记。标点不设禁用清单，按人物语气和"
                     "场景功能使用；只避免整章高密度、连续重复的模板化符号。"
+                    "后台的设定、节拍表和质量契约只用于你选材，绝不能在正文中复述成检查表、"
+                    "操作说明或作者讲解；默认不用‘第一步/第二步/第三步’等清单串联叙事，"
+                    "除非人物确实在制定计划且这句话会改变下一步行动。"
                     + third_person_generation_contract()
                     + content_generation_contract(self.quality_profile)
                 ),
@@ -3207,6 +3469,7 @@ class GenerationEngine:
                         "你是一位专业中文网络小说作者，正在续写同一章的后半部分。"
                         "直接接着写正文，不要重复已有内容，不要写标题或说明。"
                         "保持自然分段和人物语气；标点按语义使用，不要批量堆叠同一符号。"
+                        "不要把节拍表改写成步骤清单或解释性旁白。"
                         + third_person_generation_contract()
                         + content_generation_contract(self.quality_profile)
                     ),
@@ -3398,6 +3661,17 @@ class GenerationEngine:
 
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
+        model_adaptation = build_model_adaptation_record(
+            provider=getattr(self.ai_gateway, "provider", None),
+            model=usage.get("model") or getattr(self.ai_gateway, "default_model", None),
+            prompt_version="1.6.0",
+            temperature=0.85,
+            max_tokens=generation_max_tokens,
+            behavior_sample_count=len(context_layers.get("behavior_samples") or []),
+        )
+        writing_workflow["model_adaptation"] = model_adaptation
+        writing_workflow.setdefault("fact_card", {})["model_adaptation"] = model_adaptation
+        context_layers["model_adaptation"] = model_adaptation
         generation_failures = [*preflight_failures, *continuation_failures]
         methodology_validation = validate_writing_workflow(writing_workflow)
         if methodology_required and not methodology_validation.get("passed"):
@@ -3923,6 +4197,8 @@ class GenerationEngine:
             "同时保持第三人称限知清晰，不能把人名全换成‘他/她’来制造另一种重复。"
             "章末必须把钩子落实为动作、发现或新的选择，不得用总结/说教代替；"
             "情绪要有起伏，避免每段都用同一种‘提出问题-解释-总结’结构；"
+            "后台节拍和质量规则不得原样进入正文；默认不用‘第一步/第二步/第三步’、‘首先/其次/最后’组织叙述，"
+            "除非这是人物真实计划且只保留必要片段；不要把因果账本写成作者解释，让读者从动作、对白和后果自己拼出结论；"
             "不要为了‘去AI味’禁用任何单个词或标点，判断标准是整章分布、语境和阅读体验。"
         )
 

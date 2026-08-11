@@ -126,6 +126,12 @@ def test_search_filters_vectors_by_embedding_backend():
     assert "COALESCE(ki.meta->>'embedding_backend', 'hash') = %s" in source
 
 
+def test_behavior_sample_search_supports_novel_scope():
+    source = KNOWLEDGE_HUB_SOURCE.read_text(encoding="utf-8")
+    assert "meta_filters: dict[str, str] | None = None" in source
+    assert "meta->>%s=%s" in source
+
+
 def test_rebuild_records_backend_provenance():
     source = KNOWLEDGE_HUB_SOURCE.read_text(encoding="utf-8")
     assert "embedding_backend" in source

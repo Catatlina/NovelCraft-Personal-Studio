@@ -163,3 +163,26 @@ def test_create_run_with_selected_title_still_runs_full_planning(monkeypatch):
     context = json.loads(run_insert[6])
     assert context["suggested_title"] == "榜单原创书名"
     assert "selected_title" not in context
+
+
+def test_create_run_auto_confirm_locks_selected_title(monkeypatch):
+    from app.workers import tasks
+
+    db = _RunDb()
+    dispatched = []
+    monkeypatch.setattr(tasks, "connect", lambda: db)
+    monkeypatch.setattr(tasks.execute_bootstrap, "delay", lambda *args: dispatched.append(args))
+
+    tasks.create_run(
+        "project-id",
+        "novel-id",
+        selected_title="榜单原创书名",
+        auto_confirm_title=True,
+    )
+
+    run_insert = next(params for sql, params in db.statements if sql.startswith("INSERT INTO workflow_runs"))
+    context = json.loads(run_insert[6])
+    assert context["suggested_title"] == "榜单原创书名"
+    assert context["selected_title"] == "榜单原创书名"
+    assert context["title_locked"] is True
+    assert context["auto_confirm_title"] is True

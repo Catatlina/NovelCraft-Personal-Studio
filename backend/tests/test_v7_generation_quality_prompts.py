@@ -293,6 +293,18 @@ def test_structural_ai_smell_triggers_semantic_rewrite_instead_of_remaining_advi
     }
 
 
+def test_report_like_ordered_narrative_scaffold_triggers_rewrite():
+    text = "\n\n".join([
+        "林越掀开灰烬，确认这里有人来过。第一步，找到水。第二步，确认自己在哪。第三步，找到能问路的人。",
+        "林越把木牌攥进掌心，首先确认刻痕还新，其次看向庙外，最后决定沿着烟柱走。",
+        "风从破墙里灌进来，灰烬贴着鞋面打转。",
+        "他把手机塞回口袋，烟柱在西边没有散。",
+    ] * 7)
+    metrics = analyze_deai_patterns(text, profile={"platform": "fanqie"})
+    assert metrics["expository_scaffold"]["triggered"] is True
+    assert any(flag["code"] == "expository_scaffold" for flag in metrics["flags"])
+
+
 def test_deterministic_opening_repair_preserves_paragraphs_and_reaches_target():
     paragraphs = [
         f"陆沉在第{i}次试剑时记住了一个细节，剑锋擦过石面，留下了一道新痕。"
@@ -407,6 +419,50 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
     assert gateway.calls == 2
     assert result["chapter_title"] == "旧门后的答案"
     assert result["_usage"]["tokens_output"] == 10
+
+
+def test_scene_plan_projects_explicit_payoff_arc_without_inventing_content():
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, *_args, **_kwargs):
+            self.calls += 1
+            return {
+                "data": {
+                    "chapter_title": "余波来了",
+                    "chapter_type": "normal",
+                    "beats": [
+                        {"name": "压境", "content": "敌人封住退路", "target_words": 750, "payoff_phase": "pressure"},
+                        {"name": "试探", "content": "主角试探规则", "target_words": 750, "payoff_phase": "build"},
+                        {"name": "反击", "content": "主角兑现选择", "target_words": 750, "payoff_phase": "burst"},
+                        {"name": "反馈", "content": "对手被迫退让", "target_words": 750, "payoff_phase": "feedback"},
+                    ],
+                    "payoff_contract": {
+                        "visible_result": "对手当场退让",
+                        "payoff_feedback": "旁观者确认局势变化",
+                        "cost": "主角暴露一张底牌",
+                        "next_pressure": "新的追兵立即出现",
+                        "payoff_arc": ["pressure", "build", "burst", "feedback", "aftershock"],
+                    },
+                },
+                "usage": {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"},
+            }
+
+    gateway = Gateway()
+    result = asyncio.run(SceneDirector(None, gateway).plan_scene(
+        1,
+        {"rendered_context": ""},
+        target_word_count=3000,
+        quality_profile={},
+    ))
+
+    assert gateway.calls == 1
+    assert result["beats"][3]["content"] == "对手被迫退让"
+    assert result["beats"][3]["payoff_phases"] == ["feedback", "aftershock"]
+    assert result["payoff_phase_projection"]["applied"] == [
+        {"phase": "aftershock", "beat_index": 3}
+    ]
 
 
 def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():

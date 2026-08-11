@@ -56,8 +56,8 @@ class _BookDb:
             return _Cursor({"role": self.role})
         if "SELECT * FROM topic_candidates WHERE id=" in compact:
             return _Cursor(dict(self.topic))
-        if "SELECT id FROM workflow_runs WHERE novel_id=" in compact:
-            return _Cursor({"id": self.run_id} if self.run_id else None)
+        if "SELECT id, status FROM workflow_runs WHERE novel_id=" in compact:
+            return _Cursor({"id": self.run_id, "status": "succeeded"} if self.run_id else None)
         if compact.startswith("UPDATE topic_candidates SET") and "novel_id=" in compact:
             self.topic["novel_id"] = params[0]
             self.topic["status"] = "generating"
@@ -176,6 +176,7 @@ def test_auto_start_false_then_true_creates_exactly_one_run(monkeypatch):
     assert third["data"]["status"] == "already_created"
     assert len(calls) == 1
     assert calls[0][1]["selected_title"] == "雾城修理铺"
+    assert calls[0][1]["auto_confirm_title"] is True
     assert sum(sql.startswith("INSERT INTO contents") for sql, _ in db.statements) == 1
 
 
