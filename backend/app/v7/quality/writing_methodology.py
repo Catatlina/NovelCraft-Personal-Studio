@@ -148,7 +148,7 @@ def build_fact_card(
         or context_layers.get("characters")
         or context_layers.get("relationships")
     )
-    return {
+    fact_card = {
         "schema_version": FACT_CARD_SCHEMA_VERSION,
         "chapter_number": int(chapter_number),
         "previous_chapter": {
@@ -185,6 +185,20 @@ def build_fact_card(
             "project_scoped": bool(context_layers.get("project_id")),
         },
     }
+    inherited = workflow.get("fact_card")
+    if isinstance(inherited, dict) and inherited.get("schema_version") == FACT_CARD_SCHEMA_VERSION:
+        # StoryDirector rebuilds the workflow after review. Preserve the exact
+        # project sample provenance and confirmed inputs from generation rather
+        # than silently dropping them during the persistence update step.
+        fact_card["confirmed_facts"] = inherited.get("confirmed_facts") or fact_card["confirmed_facts"]
+        fact_card["character_boundaries"] = inherited.get("character_boundaries") or fact_card["character_boundaries"]
+        fact_card["scene_constraints"] = inherited.get("scene_constraints") or fact_card["scene_constraints"]
+        fact_card["object_ledger"] = inherited.get("object_ledger") or fact_card["object_ledger"]
+        fact_card["resource_ledger"] = inherited.get("resource_ledger") or fact_card["resource_ledger"]
+        fact_card["behavior_samples"] = inherited.get("behavior_samples") or fact_card["behavior_samples"]
+        fact_card["model_adaptation"] = inherited.get("model_adaptation") or fact_card["model_adaptation"]
+        fact_card["provenance"] = inherited.get("provenance") or fact_card["provenance"]
+    return fact_card
 
 
 def validate_fact_card(card: dict[str, Any] | None) -> dict[str, Any]:
@@ -350,12 +364,14 @@ def build_writing_workflow_contract(
     chapter_text: str | None = None,
     review: dict[str, Any] | None = None,
     external_evaluation: dict[str, Any] | None = None,
+    writing_workflow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one contract from existing V7 planning and review artifacts."""
     context_layers = context_layers if isinstance(context_layers, dict) else {}
     plot_brief = plot_brief if isinstance(plot_brief, dict) else {}
     scene_plan = scene_plan if isinstance(scene_plan, dict) else {}
     review = review if isinstance(review, dict) else {}
+    writing_workflow = writing_workflow if isinstance(writing_workflow, dict) else {}
     source = {**plot_brief, **scene_plan}
     payoff = source.get("payoff_contract") or {}
     previous = context_layers.get("previous_transition_contract") or {}
@@ -409,8 +425,12 @@ def build_writing_workflow_contract(
             chapter_number,
             context_layers=context_layers,
             source=source,
+            writing_workflow=writing_workflow,
         ),
-        "model_adaptation": source.get("model_adaptation") or context_layers.get("model_adaptation") or {},
+        "model_adaptation": source.get("model_adaptation")
+        or context_layers.get("model_adaptation")
+        or writing_workflow.get("model_adaptation")
+        or {},
         "current_state": current_state,
         "state_delta": source.get("state_delta") or {},
         "open_threads": _list(source.get("open_threads") or previous.get("open_threads")),

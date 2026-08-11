@@ -321,8 +321,9 @@ class ContextAssembler:
         sample here would make a generation trace look healthy while silently
         changing the project's writing behavior.
         """
-        if not self.project_id or not str(query or "").strip():
+        if not self.project_id:
             return []
+        query_text = str(query or "").strip() or "行为 选择 信息 结果 代价"
 
         def _count() -> int:
             from ...db import connect
@@ -346,7 +347,7 @@ class ContextAssembler:
 
             rows = await asyncio.to_thread(
                 knowledge_hub.search,
-                str(query),
+                query_text,
                 self.project_id,
                 ["behavior_sample"],
                 min(max(1, int(limit)), 3),

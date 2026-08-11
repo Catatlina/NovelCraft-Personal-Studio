@@ -1477,6 +1477,7 @@ class StoryDirector:
             },
             scene_plan=scene_plan,
             chapter_text=generation.get("text") or "",
+            writing_workflow=workflow_seed,
             review={
                 "causal_passed": bool(continuity.get("passed")) and bool(
                     (consistency_evidence or {}).get("passed", True)

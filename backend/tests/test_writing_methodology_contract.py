@@ -134,3 +134,16 @@ def test_model_adaptation_record_is_explicit():
     assert record["schema_version"] == "model-adaptation-v1"
     assert record["parameters"]["temperature"] == 0.85
     assert record["behavior_sample_count"] == 2
+
+
+def test_workflow_rebuild_preserves_generation_sample_and_model_provenance():
+    seed = build_writing_workflow_contract(2, plot_brief=_ready_brief())
+    seed["fact_card"]["behavior_samples"] = [{"id": "sample-1", "annotation": "主动选择"}]
+    seed["model_adaptation"] = {"schema_version": "model-adaptation-v1", "model": "deepseek-chat"}
+    rebuilt = build_writing_workflow_contract(
+        2,
+        plot_brief=_ready_brief(),
+        writing_workflow=seed,
+    )
+    assert rebuilt["fact_card"]["behavior_samples"][0]["id"] == "sample-1"
+    assert rebuilt["model_adaptation"]["model"] == "deepseek-chat"
