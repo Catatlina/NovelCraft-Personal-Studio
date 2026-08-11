@@ -251,6 +251,8 @@ def render_writing_methodology_contract(workflow: dict[str, Any] | None) -> str:
     if not ledger_lines:
         ledger_lines.append("- （缺失：生成前必须先补齐五列因果账本）")
     state = workflow.get("current_state") or {}
+    known_facts = state.get("knowledge") or []
+    known_facts_text = "；".join(_text(item) for item in known_facts[:12]) if known_facts else "暂无已确认的知情事实"
     return (
         f"【通用写作方法论 v{WRITING_METHODOLOGY_VERSION}｜工作流 {workflow.get('status') or 'input_pending'}】\n"
         "生成必须遵守：事件先于解释；人物只使用已知信息；物件、时间、地点和资源不能无因跳变。\n"
@@ -263,6 +265,10 @@ def render_writing_methodology_contract(workflow: dict[str, Any] | None) -> str:
         + "\n".join(ledger_lines)
         + "\n当前状态锚点："
         + json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+        + "\n知情边界："
+        + known_facts_text
+        + "\n未知信息禁止被人物直接当成已知；新事实必须先通过本章可见事件、对白或证据让具体人物获得。"
+        + "因果账本的‘谁知道’必须写具体人物/群体和获得信息的时点，不得用‘大家都知道’覆盖未建立的知情关系。"
         + "\n写完后必须能指出：状态改变了什么、改变由哪一个可见事件触发、主角付出了什么。"
         "不强行套短句比例、感官比例、段落比例或固定反转；不靠错别字和批量删‘的/了’制造人工感。"
     )
