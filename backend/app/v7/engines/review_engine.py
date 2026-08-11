@@ -39,6 +39,7 @@ from ..quality.review_evidence import (
     build_review_evidence,
     validate_review_evidence,
 )
+from ..quality.writing_methodology import render_writing_methodology_contract
 
 REVIEW_DIMENSIONS: tuple[str, ...] = (
     "consistency",
@@ -235,6 +236,7 @@ class ReviewEngine(BaseEngine):
             "generation_quality": input_data.get("generation_quality") or {},
             "quality_profile": quality_profile,
             "payoff_contract": input_data.get("payoff_contract") or {},
+            "writing_workflow": input_data.get("writing_workflow") or {},
             "chapter_text": chapter_text,
         }
 
@@ -330,6 +332,7 @@ class ReviewEngine(BaseEngine):
                 "content_policy": data.get("content_policy") or {},
                 "quality_profile": data.get("quality_profile") or {},
                 "payoff_contract": data.get("payoff_contract") or {},
+                "writing_workflow": data.get("writing_workflow") or {},
             },
             ensure_ascii=False,
         )
@@ -337,6 +340,7 @@ class ReviewEngine(BaseEngine):
             (data.get("deai_metrics") or {}).get("novel_reviewer_lexicon") or {},
             ensure_ascii=False,
         )
+        methodology_block = render_writing_methodology_contract(data.get("writing_workflow") or {})
 
         prompt = (
             "请对下面这章小说正文做专业审稿，先给 7 个宏观维度打分，"
@@ -345,6 +349,7 @@ class ReviewEngine(BaseEngine):
             f"【必须遵守的约束】\n{constraint_block}\n\n"
             f"【跨章连续性证据】\n{continuity_block}\n\n"
             f"【本章计划与确定性表达指标】\n{plan_block}\n\n"
+            f"{methodology_block}\n\n"
             f"【novel-reviewer AI味候选信号（仅供复核，不是门禁）】\n{lexicon_block}\n\n"
             f"{third_person_generation_contract()}\n"
             f"{content_generation_contract(data.get('quality_profile') or {})}\n\n"
@@ -395,6 +400,8 @@ class ReviewEngine(BaseEngine):
             "叙述视角必须是第三人称：引号、短信、书信和直接引用里的‘我’不计入，"
             "其余叙述里的第一人称命中即判为严重问题；都市题材还必须使用完全架空的实体名称，"
             "不能用现实城市、公司、平台或公众人物替代。"
+            "审稿必须额外判断：每个关键事件是否满足事件、知情边界、现在发生的动机、代价、下一影响五列；"
+            "若缺失，归入 causality/plot_logic 的具体问题，并指出断裂位置；不要用高分掩盖因果账本缺失。"
             f"overall_score 必须是 7 个维度分数的加权结果，不要凭空给分。"
             f"低于 {QUALITY_PASS_SCORE:.0f} 分，或 consistency/character_voice/plot_logic/"
             f"pacing/writing_quality/constraint_compliance 任一低于 85 分，均不得标记为通过。"
@@ -606,6 +613,7 @@ class ReviewEngine(BaseEngine):
             "payoff_evidence": payoff_evidence,
             "payoff_evidence_validation": payoff_evidence_validation,
             "payoff_evidence_repair": payoff_evidence_repair,
+            "writing_workflow": data.get("writing_workflow") or {},
         }
         review_result["review_reference"] = novel_reviewer_reference_metadata()
         review_result["editorial_review"] = build_editorial_review_view(review_result)

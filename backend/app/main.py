@@ -343,6 +343,17 @@ class ChapterReviewRequest(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class ExternalEvaluationRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=100)
+    scope: str = Field(min_length=1, max_length=200)
+    input_hash: str = Field(min_length=64, max_length=128)
+    status: str = Field(default="completed", max_length=40)
+    human_score: float | None = Field(default=None, ge=0, le=100)
+    suspected_ai_score: float | None = Field(default=None, ge=0, le=100)
+    scores: dict[str, Any] = Field(default_factory=dict)
+    flagged_segments: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def load_content_for_user(content_id: str, user: dict, roles: set[str] | None = None) -> tuple[Any, dict]:
     conn = connect()
     content = row_to_dict(conn.execute("SELECT * FROM contents WHERE id = %s", (content_id,)).fetchone())
@@ -1012,6 +1023,96 @@ async def manual_review_chapter(
     tracking_conn.commit()
     tracking_conn.close()
     return ok({"chapter_id": chapter_id, "status": "regenerating", "task_id": task.id})
+
+
+@app.post("/api/v1/chapters/{chapter_id}/external-evaluation")
+@limiter.limit("20/minute")
+async def register_external_evaluation(
+    request: Request,
+    chapter_id: str,
+    payload: ExternalEvaluationRequest,
+    user: dict = Depends(get_current_user),
+) -> ApiResponse:
+    """Bind a real external detector/editor report to the exact chapter text.
+
+    The endpoint records evidence only. It never calls a detector and never
+    manufactures an AI/human score when the external report is absent.
+    """
+    conn, chapter = load_content_for_user(chapter_id, user, {"owner", "editor"})
+    if chapter["type"] != "chapter":
+        conn.close()
+        raise HTTPException(status_code=400, detail="content is not a chapter")
+    try:
+        _require_v7_chapter_scope(conn, chapter, "external_evaluation")
+        body = decode(chapter.get("body"), {})
+        if isinstance(body, dict):
+            chapter_text = "\n".join(
+                str(item.get("text") or "")
+                for item in (body.get("content") or [])
+                if isinstance(item, dict)
+            ).strip()
+        else:
+            chapter_text = str(body or "").strip()
+        from .v7.quality.writing_methodology import (
+            register_external_evaluation,
+            transition_workflow_status,
+        )
+        raw_payload = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+        try:
+            evaluation = register_external_evaluation(chapter_text, raw_payload)
+        except ValueError as exc:
+            conn.rollback()
+            raise HTTPException(status_code=409, detail={
+                "code": "EXTERNAL_EVALUATION_INVALID",
+                "message": str(exc),
+            }) from exc
+        meta = decode(chapter.get("meta"), {})
+        meta = meta if isinstance(meta, dict) else {}
+        workflow = meta.get("writing_workflow")
+        workflow = dict(workflow) if isinstance(workflow, dict) else {
+            "schema_version": "writing-workflow-v1",
+            "methodology_version": "1.0.0",
+            "status": "external_pending",
+            "legacy_evaluation_binding": True,
+        }
+        workflow["external_evaluation"] = evaluation
+        next_status = "external_90_plus" if evaluation["status"] == "external_90_plus" else "external_pending"
+        try:
+            if next_status == "external_90_plus" and workflow.get("status") != "external_pending":
+                transition_workflow_status(workflow, "external_pending")
+            transition_workflow_status(workflow, next_status)
+        except ValueError as exc:
+            conn.rollback()
+            raise HTTPException(status_code=409, detail={
+                "code": "WRITING_WORKFLOW_TRANSITION_INVALID",
+                "message": str(exc),
+            }) from exc
+        meta_update = {
+            "external_evaluation": evaluation,
+            "writing_workflow": workflow,
+        }
+        conn.execute(
+            "UPDATE contents SET meta=meta || %s, updated_at=now() WHERE id=%s",
+            (encode(meta_update), chapter_id),
+        )
+        conn.execute(
+            "INSERT INTO versions (id, entity_type, entity_id, label, snapshot, reason, author_id) "
+            "VALUES (%s, 'content', %s, 'external_evaluation', %s, 'external_evaluation_registered', %s)",
+            (new_id("ver"), chapter_id, encode({"meta": meta_update}), user["id"]),
+        )
+        conn.execute(
+            "INSERT INTO audit_logs (id, entity_type, entity_id, action, details, created_at) "
+            "VALUES (%s, 'content', %s, 'external_evaluation.registered', %s, now())",
+            (new_id(), chapter_id, encode({"provider": evaluation["provider"], "scope": evaluation["scope"], "input_hash": evaluation["input_hash"], "user_id": user["id"]})),
+        )
+        conn.commit()
+        updated = parse_content(dict(conn.execute("SELECT * FROM contents WHERE id=%s", (chapter_id,)).fetchone()))
+        return ok({"chapter": updated, "external_evaluation": evaluation, "status": workflow["status"]})
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 class ChapterRewriteRequest(BaseModel):

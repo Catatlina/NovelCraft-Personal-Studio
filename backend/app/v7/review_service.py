@@ -140,6 +140,7 @@ def _chapter_context(content: dict[str, Any], text: str) -> tuple[dict[str, Any]
         "generation_quality": current_meta.get("generation_quality") or {},
         "quality_profile": current_meta.get("quality_profile") or {},
         "payoff_contract": current_meta.get("payoff_contract") or {},
+        "writing_workflow": current_meta.get("writing_workflow") or {},
     }
     return context, current_meta
 

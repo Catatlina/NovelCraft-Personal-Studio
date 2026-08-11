@@ -47,6 +47,11 @@ from ..integration.v6_bridge import (
 )
 from ..quality.continuity import validate_prose_continuity, validate_transition_contract
 from ..quality.review_evidence import validate_review_evidence
+from ..quality.writing_methodology import (
+    build_writing_workflow_contract,
+    transition_workflow_status,
+    validate_writing_workflow,
+)
 from ..quality.consistency_checker import (
     CONSISTENCY_PASS_SCORE,
     ConsistencyCheckResult,
@@ -394,6 +399,7 @@ class StoryDirector:
                     outline=plan["outline"],
                     target_word_count=plan["target_word_count"],
                     plot_brief=plan.get("plot_brief"),
+                    writing_workflow=plan.get("writing_workflow"),
                 )
                 step.set_output(
                     f"{generation['word_count']} chars "
@@ -475,6 +481,8 @@ class StoryDirector:
                 },
                 "transition_contract": update_result.get("transition_contract", {}),
                 "continuity": update_result.get("continuity", {}),
+                "writing_workflow": generation.get("writing_workflow") or {},
+                "external_evaluation": (generation.get("writing_workflow") or {}).get("external_evaluation") or {},
                 "final_continuity_audit": {
                     "continuity": update_result.get("continuity", {}),
                 },
@@ -604,6 +612,10 @@ class StoryDirector:
             "suggested_beats": assessment_data.get("suggested_beats") or [],
             "chapter_title_hint": assessment_data.get("chapter_title_hint"),
             "payoff_contract": assessment_data.get("payoff_contract") or {},
+            "writing_workflow": build_writing_workflow_contract(
+                chapter_number,
+                plot_brief=assessment_data,
+            ),
             "gaps": gaps,
             "blockers": blockers,
             "retryable_planning_failure": retryable_planning_failure,
@@ -807,7 +819,12 @@ class StoryDirector:
                 "opening_anchor": assessment.get("opening_anchor") or (assessment.get("plot_result") or {}).get("opening_anchor"),
                 "hook": (assessment.get("plot_result") or {}).get("hook") or "",
                 "payoff_contract": assessment.get("payoff_contract") or (assessment.get("plot_result") or {}).get("payoff_contract") or {},
+                "chapter_contract": (assessment.get("plot_result") or {}).get("chapter_contract") or {},
+                "causal_ledger": (assessment.get("plot_result") or {}).get("causal_ledger") or [],
+                "state_delta": (assessment.get("plot_result") or {}).get("state_delta") or {},
+                "writing_workflow": assessment.get("writing_workflow") or {},
             },
+            "writing_workflow": assessment.get("writing_workflow") or {},
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "status": "planned",
         }
@@ -859,6 +876,7 @@ class StoryDirector:
                 "generation_quality": current.get("generation_quality") or {},
                 "quality_profile": current.get("quality_profile") or quality_profile_metadata(self.quality_profile),
                 "payoff_contract": current.get("payoff_contract") or (plan.get("plot_brief") or {}).get("payoff_contract") or {},
+                "writing_workflow": current.get("writing_workflow") or plan.get("writing_workflow") or (plan.get("plot_brief") or {}).get("writing_workflow") or {},
             }
 
         review = await self.review_engine.run(review_input(generation))
@@ -1432,6 +1450,36 @@ class StoryDirector:
                 ],
             ]
 
+        workflow_seed = generation.get("writing_workflow") or {}
+        scene_plan = generation.get("scene_plan") or {}
+        methodology_workflow = build_writing_workflow_contract(
+            chapter_number,
+            context_layers=generation.get("context") or {},
+            plot_brief={
+                **scene_plan,
+                "chapter_contract": workflow_seed.get("chapter_contract") or scene_plan.get("chapter_contract") or {},
+                "causal_ledger": workflow_seed.get("causal_ledger") or scene_plan.get("causal_ledger") or [],
+                "state_delta": workflow_seed.get("state_delta") or scene_plan.get("state_delta") or {},
+            },
+            scene_plan=scene_plan,
+            chapter_text=generation.get("text") or "",
+            review={
+                "causal_passed": bool(continuity.get("passed")) and bool(
+                    (consistency_evidence or {}).get("passed", True)
+                ),
+                "style_passed": bool(observation.get("passed_review")),
+                "review_score": observation.get("review_score"),
+            },
+        )
+        if not methodology_workflow["review"]["causal_passed"]:
+            transition_workflow_status(methodology_workflow, "blocked")
+        elif observation.get("passed_review"):
+            transition_workflow_status(methodology_workflow, "external_pending")
+        else:
+            transition_workflow_status(methodology_workflow, "causal_passed")
+        methodology_workflow["validation"] = validate_writing_workflow(methodology_workflow)
+        generation["writing_workflow"] = methodology_workflow
+
         payoff_score = generation.get("payoff_score") or {}
         payoff_score_value = (
             payoff_score.get("score") if isinstance(payoff_score, dict) else payoff_score
@@ -1574,6 +1622,8 @@ class StoryDirector:
                 "payoff_validation": generation.get("payoff_validation") or {},
                 "payoff_evidence": observation.get("payoff_evidence") or [],
                 "review_validation": observation.get("review_validation") or [],
+                "writing_workflow": methodology_workflow,
+                "external_evaluation": methodology_workflow.get("external_evaluation") or {},
             },
         }
         if not observation["passed_review"]:
@@ -1604,6 +1654,7 @@ class StoryDirector:
                 "payoff_contract": generation.get("payoff_contract") or {},
                 "quality_gate": observation.get("quality_gate") or {},
                 "review_evidence": observation.get("review_evidence") or {},
+                "writing_workflow": methodology_workflow,
                 "quality_learning": quality_learning,
                 "rework_count": observation["rework_count"],
                 "run_id": str(run_id),
@@ -1621,6 +1672,8 @@ class StoryDirector:
             "v6_content": v6_result,
             "transition_contract": transition_contract,
             "continuity": continuity,
+            "writing_workflow": methodology_workflow,
+            "external_evaluation": methodology_workflow.get("external_evaluation") or {},
             "rule_learning": rule_learning,
             "quality_learning": quality_learning,
             "chapter_summary": summary,
