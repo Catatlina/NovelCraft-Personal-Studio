@@ -101,7 +101,7 @@ def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     rendered = render_readability_plan(first)
     assert "生成前可读性预案" in rendered
     assert "事件先发生" in rendered
-    assert "不要把每个人的反应都写成整齐的震惊" in rendered
+    assert "避免把每个人的反应都写成整齐的震惊" in rendered
 
 
 def test_opening_gate_blocks_recent_mode_reuse_but_allows_explicit_body_contract():

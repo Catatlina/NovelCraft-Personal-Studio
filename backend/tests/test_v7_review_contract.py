@@ -141,14 +141,15 @@ def test_live_review_blocks_parallel_title_without_opening_anchor():
 
 
 def test_review_provenance_rejects_an_old_prompt_version_for_same_text():
+    from app.v7.engines.review_engine import REVIEW_PROMPT_VERSION
     from app.v7.review_service import _review_provenance_matches, text_hash
 
     text = "同一段正文"
     assert _review_provenance_matches(
-        {"text_hash": text_hash(text), "prompt_version": "1.4.0"}, text
+        {"text_hash": text_hash(text), "prompt_version": REVIEW_PROMPT_VERSION}, text
     ) is True
     assert _review_provenance_matches(
-        {"text_hash": text_hash(text), "prompt_version": "1.2.0"}, text
+        {"text_hash": text_hash(text), "prompt_version": "1.4.0"}, text
     ) is False
 
 
