@@ -1,5 +1,25 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-11 v0.9.2 出版准备层（代码级可用，未部署）
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| statistics_v1 确定性章节统计 | 代码级可用 | `app/v7/quality/statistics_v1.py`；UTF-8字节偏移/四级切分/双哈希/异常标点；11单元测试通过；同一输入字节级一致 | 生产迁移后真实章节统计快照验证 |
+| 七道发布门禁引擎 | 代码级可用 | `app/v7/quality/publishing_gates.py`；content_quality/continuity/payoff_density/readability/platform_compliance(三子门禁)/ai_disclosure/external_risk；18单元测试通过 | 真实Provider生成章节跑门禁、publish_ready通过率统计 |
+| 发布状态机（draft→quality_candidate→publish_ready→published） | 代码级可用 | `app/v7/services/publishing_service.py`；合法转换校验；旧reviewed保持兼容；12状态机测试通过 | 生产状态转换实测、前端状态展示 |
+| 多平台发布变体（B方案） | 代码级可用 | publication_variants表；platform_profile_revision/metadata_revision/content_revision/publication_status；正文可共用冲突时专属修订 | 真实多平台变体创建、平台专属正文修订验证 |
+| AI披露五态政策阻断 | 代码级可用 | ai_disclosure_records表；allowed/allowed_with_human_editing/required_disclosure/unknown/prohibited；披露文案生成放v1.1 | 真实平台政策配置、披露确认流程验证 |
+| ChapterContext五类上下文融合 | 代码级可用 | `app/v7/services/chapter_context.py`；GenrePack+StyleCard+CharacterVoiceCard+StoryState双快照+CausalContract+Platform；超预算停止不静默切掉；12单元测试通过 | 接入生成引擎、真实上下文token预算验证 |
+| 局部修复引擎（替换整章去AI重写） | 代码级可用 | `app/v7/quality/local_repair.py`；风险句定位→1-3处局部修复→复审，最多3轮；AI修复函数可注入；5单元测试通过 | 接入真实Provider AI修复、修复后质量复测 |
+| 发布准备API（18端点） | 代码级可用 | `app/api/v1/publishing.py`；已在main.py注册；统计/门禁/平台配置/变体/披露/人工编辑/局部修复/就绪检查 | 生产API冒烟测试、前端对接 |
+| 平台规则policy_status门禁 | 代码级可用 | platform_publication_profiles表；policy_status=confirmed|stale|unknown；stale/unknown不能publish_ready；内置番茄/起点/晋江示例(stale) | 用户手动确认平台规则流程验证 |
+| external_flagged发布页展示 | 代码级可用 | external_risk门禁默认非阻断（仅prohibited时阻断）；命中时写warning要求展示；publish-readiness端点返回external_ai_flagged | 前端发布确认页展示验证 |
+| 前端发布准备页面 | 未开始 | API已就绪，前端组件未开发 | 前端开发、用户操作流程验收 |
+| 20章真实Provider长跑验收 | 未开始 | 代码和测试通过，未真实生成 | 创建新书、20章生成、每章七门禁、验收报告 |
+| 生产部署 | 未开始 | 分支agent/publishing-v0.9.2未提交推送 | Git提交→推送→SSH部署→alembic迁移→容器重启→prod_smoke |
+
+本节为v0.9.2开发中状态；代码存在+单元测试通过≠生产可用，必须完成部署和真实长跑后才能升级状态。
+
 ## 2026-08-10 最新生产证据
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |

@@ -1,5 +1,19 @@
 # Starlume AI 当前已知问题
 
+## 2026-08-11 KI-041 v0.9.2 出版准备层开发中（代码级可用，未部署）
+
+- 状态：**代码级可用**（7个新文件+1迁移+main.py修改，58单元测试通过，未提交/未部署/未生产迁移）。
+- 分支：`agent/publishing-v0.9.2`（从 main@8a0dfc7 新建）。
+- 已完成：statistics_v1确定性统计、Alembic迁移(6表+1字段)、七道发布门禁引擎、发布准备服务(状态机)、ChapterContext五类融合、局部修复引擎、18个API端点(已注册)、58单元测试。
+- 已知限制：
+  - 内置平台示例配置 policy_status=stale，默认情况下 platform_compliance 子门禁不通过，publish_ready 会被阻断——符合规范（stale/unknown不能publish_ready），用户必须手动确认平台规则。
+  - external_risk 门禁的 is_blocking 是动态的（仅 prohibited 时 True），保存到 quality_gate_results 时反映运行时状态。
+  - 局部修复引擎默认只做规则级修复，AI修复函数(ai_repair_fn)需调用方注入，未接入真实Provider。
+  - content_quality 门禁在无已有V7审阅分时使用启发式评分（上限95），不是真实AI评分。
+  - 前端发布准备页面未开发，API已就绪。
+  - AI披露文案生成放v1.1，当前只做状态记录和发布阻断。
+- 未闭合：Git提交/推送/部署、生产Alembic迁移、20章真实Provider长跑验收、前端页面。
+
 ## 2026-08-10 KI-040 一致性检查输入/输出接口错位（已修复，生产复跑已验收）
 
 - 状态：**已验收**（代码已部署，远端两本设定包各完成 10 章真实 Provider 长跑）。

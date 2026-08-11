@@ -2,6 +2,49 @@
 > 更新时间：2026-08-11
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-11 v0.9.2 出版准备层开发（进行中，分支 agent/publishing-v0.9.2）
+
+### 已完成代码（未提交、未部署）
+
+- **statistics_v1 确定性统计层**：`backend/app/v7/quality/statistics_v1.py`（9.3KB）。UTF-8字节偏移、章节/段落/句子/对话四级切分、双哈希（content_sha256 + normalized_sha256）、异常标点检测。同一输入字节级一致输出。测试 11/11 通过。
+- **Alembic 迁移**：`backend/alembic/versions/nc_v092_publishing_preparation.py`（13.7KB）。新建6表（platform_publication_profiles、publication_variants、chapter_statistics_snapshots、quality_gate_results、ai_disclosure_records、human_editing_records）+ contents.publishing_status 字段。内置番茄/起点/晋江示例配置（policy_status=stale）。down_revision=nc_v7_genre_packs。
+- **七道发布门禁引擎**：`backend/app/v7/quality/publishing_gates.py`（19.3KB）。content_quality(60分阈值)、continuity(致命错误=0)、payoff_density(每章≥1兑现+章末悬念)、readability(无致命异常标点)、platform_compliance(三子门禁：platform_rules/metadata_completeness/metadata_quality)、ai_disclosure(五态政策判定)、external_risk(默认非阻断，仅prohibited时阻断)。quality_candidate=七项均已输出；overall_publish_ready=所有blocking门禁通过。
+- **发布准备服务**：`backend/app/v7/services/publishing_service.py`（15.7KB）。状态机 draft→quality_candidate→publish_ready→published（+rejected），合法转换校验；统计快照保存、门禁结果批量保存、平台配置CRUD、发布变体CRUD、AI披露创建/确认、人工编辑记录、run_publishing_gates_for_chapter整合入口。
+- **ChapterContext 五类上下文融合**：`backend/app/v7/services/chapter_context.py`（13.7KB）。GenrePack + StyleCard + CharacterVoiceCard(含human_confirmed) + StoryState双快照(start/end) + CausalContract(五列因果账本) + PlatformContext + BudgetState。超预算直接停止不静默切掉；因果契约必填字段缺失标记生成失败。
+- **局部修复引擎**：`backend/app/v7/quality/local_repair.py`（约11KB）。替换旧"整章去AI重写"。风险句定位(AI味模板词/不通顺/标点异常/超长句>120字)→1-3处局部规则修复→复审，最多3轮。AI修复函数可注入(ai_repair_fn)，无则只做规则修复。风险句>50%或平均分>80且>10处才建议整章重写兜底。
+- **发布准备API路由**：`backend/app/api/v1/publishing.py`（13.8KB）。18个端点：统计计算/保存、门禁定义/运行/结果、平台配置列表/创建、变体创建/详情/列表/状态更新、AI披露创建/确认、人工编辑记录、局部修复检测/运行、章节出版状态更新、发布就绪综合检查。已在 main.py 注册（import + include_router）。
+- **单元测试**：`backend/tests/test_publishing_v092.py`（13KB）。58个测试用例全部通过，覆盖statistics_v1(11)、publishing_gates(18)、local_repair(5)、chapter_context(12)、状态机(12)。
+
+### v0.9.2 冻结规范（用户确认）
+
+1. **元数据质量**：不增加第八门禁，作为 platform_compliance 的三子门禁之一（platform_rules / metadata_completeness / metadata_quality）。publish_ready 必须要求元数据子门禁通过。
+2. **多平台发布**：B方案，一个基础小说 + 多个平台发布变体（番茄/起点/晋江）。每个变体保存 platform_profile_revision / metadata_revision / content_revision / publication_status。正文可共用，冲突时创建平台专属修订版。
+3. **AI披露**：v1做状态记录和发布阻断，披露文案生成放v1.1。五态：allowed(正常) / allowed_with_human_editing(必须人工确认+真实编辑记录) / required_disclosure(必须生成并确认披露) / unknown(不能publish_ready) / prohibited(可草稿生成，不能publish_ready)。
+4. **状态机**：旧reviewed保持兼容；新quality_candidate(七项均已输出，不要求全通过) / publish_ready(所有blocking门禁通过) / published(用户确认)。核心原则：生成完成≠reviewed，内部审核通过≠publish_ready，publish_ready≠自动发布。
+5. **平台规则**：PlatformPublicationProfile 必须带 policy_status(confirmed|stale|unknown) / policy_version / last_verified_at。stale或unknown时不能进入publish_ready。番茄/起点具体字数规则只是示例配置，不写死代码。
+6. **external_flagged**：不阻断publish_ready的前提是平台政策允许；必须在发布确认页明显展示，不能静默隐藏。
+
+### 未完成
+
+- Git 提交、推送、远端部署（VPS 43.156.17.78）
+- Alembic 迁移在生产执行
+- 20章真实 Provider 长跑验收
+- 前端发布准备页面（API已就绪，前端未开发）
+- AI披露文案生成（v1.1）
+
+### 验证命令与结果
+
+```bash
+cd backend && python3 tests/test_publishing_v092.py
+# 58 passed, 0 failed
+```
+
+### 证据等级
+
+- 代码存在 + 模块导入成功 + 58单元测试通过 = **代码级可用**
+- 未提交/未部署/未生产迁移/未真实Provider长跑 = **不能宣称生产可用或发布准备功能完成**
+- 前端页面未开发 = **不能宣称用户可操作发布准备流程**
+
 ## 2026-08-11 最新生产交接：通用写作方法论接入已部署
 
 - 当前运行版本：`main@94f539b`，生产目录 `/opt/NovelCraft-Personal-Studio`；部署时保留服务器已有 `.orig`、`genre_presets.py`、`init_genre_library.py` 和 `celerybeat-schedule`，未做清理覆盖。
