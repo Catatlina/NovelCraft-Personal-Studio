@@ -28,6 +28,10 @@ from ..generation.generation_engine import (
 from ..repositories.plot import PlotNodeRepository
 from ...services.quality_profiles import compile_quality_directive, quality_profile_metadata
 from ..quality.readability_contract import build_readability_plan, render_readability_plan
+from ..quality.writing_methodology import (
+    build_writing_workflow_contract,
+    render_writing_methodology_contract,
+)
 
 MODE_ASSESS = "assess"
 MODE_ANALYZE = "analyze"
@@ -217,6 +221,9 @@ class PlotEngine(BaseEngine):
             "hook": ai_payload.get("hook"),
             "risks": ai_payload.get("risks") or [],
             "suggested_beats": ai_payload.get("suggested_beats") or [],
+            "causal_ledger": ai_payload.get("causal_ledger") or [],
+            "chapter_contract": ai_payload.get("chapter_contract") or {},
+            "state_delta": ai_payload.get("state_delta") or {},
             "chapter_title_hint": ai_payload.get("chapter_title"),
             "open_goals": [
                 {"id": g["id"], "name": g["name"],
@@ -285,6 +292,15 @@ class PlotEngine(BaseEngine):
             chapter_function={"reader_expectation": "本章读完仍想继续"},
             readability_plan=readability_plan,
         )
+        methodology_block = render_writing_methodology_contract(
+            build_writing_workflow_contract(
+                chapter_number,
+                plot_brief={
+                    "core_problem": "根据大纲、前情和目标确定本章不可回避的核心问题",
+                    "causal_ledger": [],
+                },
+            )
+        )
 
         return f"""你正在为一部中文长篇小说规划第 {chapter_number} 章的结构。
 
@@ -306,6 +322,8 @@ class PlotEngine(BaseEngine):
 {quality_directive}
 
 {render_readability_plan(readability_plan)}
+
+{methodology_block}
 
 请判断：这一章应该完成什么、张力应该推到什么位置、节奏如何安排、有什么风险，
 并给出 4-6 个节拍建议。同时给出你对"现在就自动生成这一章是否安全"的置信度。
@@ -329,6 +347,9 @@ class PlotEngine(BaseEngine):
   "opening_anchor": "本章开头必须承接上一章尾部的具体动作、地点或未决问题",
   "hook": "章末必须落到具体动作、发现或选择的追读钩子",
   "payoff_contract": {{"reader_promise":"读者本章要等什么","pressure":"当前压力", "active_choice":"主角主动选择", "payoff_type":"兑现类型", "visible_result":"可见结果", "witness_reaction":"他人反应", "cost":"代价/余波", "next_pressure":"章末新增压力", "setup_refs":[]}},
+  "chapter_contract": {{"core_problem":"本章不可回避的核心问题","observable_payoff":"正文中必须出现的可见兑现","cost":"主角或关系付出的代价/余波","next_inevitable_event":"由本章结果必然推出的下一压力"}},
+  "causal_ledger": [{{"event":"可见事件","knower":"谁知道以及不知道什么","motive":"为什么现在发生","cost":"事件付出的代价","next_effect":"对下一节/下一章造成的影响"}}],
+  "state_delta": {{"changed":["本章真正改变的状态"],"unchanged":["不能被正文悄悄改写的状态"]}},
   "risks": ["风险 1", "风险 2"],
   "suggested_beats": [
     {{"name": "节拍名", "content": "这一节拍发生什么", "target_words": 600,
@@ -423,6 +444,9 @@ build，内容要有试探、准备、取舍或蓄力，不能把连续施压当
                     "pacing_advice": data.get("pacing_advice"),
                     "risks": data.get("risks"),
                     "open_threads": data.get("open_threads"),
+                    "chapter_contract": data.get("chapter_contract") or {},
+                    "causal_ledger": data.get("causal_ledger") or [],
+                    "state_delta": data.get("state_delta") or {},
                 },
                 "beats": beats,
             }

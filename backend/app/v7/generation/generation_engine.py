@@ -62,6 +62,11 @@ from ..quality.readability_contract import (
     readability_plan_metadata,
     render_readability_plan,
 )
+from ..quality.writing_methodology import (
+    build_writing_workflow_contract,
+    render_writing_methodology_contract,
+    validate_writing_workflow,
+)
 from ..quality.web_research import WebResearchService, render_web_research_guidance
 from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
@@ -940,6 +945,10 @@ class SceneDirector:
             "reader_experience_plan": plot_brief.get("reader_experience_plan") or {},
             "prose_texture_plan": plot_brief.get("prose_texture_plan") or {},
             "payoff_contract": plot_brief.get("payoff_contract") or {},
+            "chapter_contract": plot_brief.get("chapter_contract") or {},
+            "causal_ledger": plot_brief.get("causal_ledger") or [],
+            "state_delta": plot_brief.get("state_delta") or {},
+            "writing_workflow": plot_brief.get("writing_workflow") or {},
             "chapter_type": plot_brief.get("chapter_type") or plot_brief.get("chapter_mode") or "normal",
             "emotional_target": plot_brief.get("emotional_target"),
             "opening_anchor": plot_brief.get("opening_anchor"),
@@ -962,6 +971,7 @@ class SceneDirector:
         previous_titles: list[Any] | None = None,
         opening_plan: dict[str, Any] | None = None,
         readability_plan: dict[str, Any] | None = None,
+        writing_workflow: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Produce a beat sheet. Returns dict including `_usage` for accounting.
 
@@ -970,6 +980,7 @@ class SceneDirector:
         for a second planning call that could contradict the first.
         """
         context_layers = context.get("context_layers") or {}
+        writing_workflow = writing_workflow or context_layers.get("writing_workflow") or {}
         chapter_type_hint = (plot_brief or {}).get("chapter_type") if isinstance(plot_brief, dict) else None
         effective_opening_plan = opening_plan or select_opening_plan(
             chapter_number,
@@ -1001,6 +1012,7 @@ class SceneDirector:
                 )
                 adopted["opening_plan"] = effective_opening_plan
                 adopted["readability_plan"] = readability_plan
+                adopted["writing_workflow"] = writing_workflow
                 return adopted
             except AIGatewayError:
                 # Plot assessment and scene planning are separate Provider
@@ -1124,6 +1136,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             f"目标字数：{target_word_count} 字。\n\n"
             f"{title_tomato_requirement}\n"
             f"{render_readability_plan(readability_plan)}\n\n"
+            f"{render_writing_methodology_contract(writing_workflow)}\n\n"
             f"【网文质量策略】\n{quality_directive}\n\n"
             f"{opening_block}\n\n"
             "请只输出 JSON，格式：\n"
@@ -1151,6 +1164,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             '"witness_reaction":"可选的具体他人反应","cost":"代价或余波",'
             '"next_pressure":"章末新增压力","setup_refs":[]},\n'
             '  "payoff_phases": ["pressure", "build", "burst", "feedback", "aftershock"],\n'
+            '  "chapter_contract": {"core_problem":"本章核心问题","observable_payoff":"可见兑现","cost":"代价/余波","next_inevitable_event":"下一必然压力"},\n'
+            '  "causal_ledger": [{"event":"事件","knower":"知情边界","motive":"为什么现在","cost":"代价","next_effect":"下一影响"}],\n'
+            '  "state_delta": {"changed":["变化"],"unchanged":["不变"]},\n'
             '  "confidence": 0.85\n'
             "}\n"
             "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数；每个 beat 必须增加 payoff_phase 或 payoff_phases，"
@@ -2729,6 +2745,7 @@ class GenerationEngine:
         target_word_count: int = 3000,
         max_continuations: int = 1,
         plot_brief: dict[str, Any] | None = None,
+        writing_workflow: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Generate one chapter with a soft length target and hard quality gates.
 
@@ -2830,6 +2847,24 @@ class GenerationEngine:
                 },
             )
 
+        seed_workflow = writing_workflow or (plot_brief or {}).get("writing_workflow") or {}
+        methodology_required = bool(seed_workflow or plot_brief)
+        seed_contract = seed_workflow.get("chapter_contract") if isinstance(seed_workflow, dict) else {}
+        workflow_input = {
+            **(plot_brief or {}),
+            "chapter_contract": seed_contract or (plot_brief or {}).get("chapter_contract") or {},
+            "causal_ledger": (seed_workflow.get("causal_ledger") if isinstance(seed_workflow, dict) else None)
+            or (plot_brief or {}).get("causal_ledger") or [],
+            "state_delta": (seed_workflow.get("state_delta") if isinstance(seed_workflow, dict) else None)
+            or (plot_brief or {}).get("state_delta") or {},
+        }
+        writing_workflow = build_writing_workflow_contract(
+            chapter_number,
+            context_layers=context.get("context_layers") or {},
+            plot_brief=workflow_input,
+        )
+        context.setdefault("context_layers", {})["writing_workflow"] = writing_workflow
+
         opening_plan = select_opening_plan(
             chapter_number,
             chapter_type=(plot_brief or {}).get("chapter_type") if isinstance(plot_brief, dict) else None,
@@ -2864,6 +2899,7 @@ class GenerationEngine:
                 previous_titles=context.get("previous_titles") or [],
                 opening_plan=opening_plan,
                 readability_plan=readability_plan,
+                writing_workflow=writing_workflow,
             )
             add_usage(step, scene_plan.pop("_usage", {}))
             step.set_output(
@@ -2879,6 +2915,14 @@ class GenerationEngine:
         scene_plan["recent_payoff_history"] = list(
             (context.get("context_layers") or {}).get("recent_payoff_history") or []
         )[-20:]
+        writing_workflow = build_writing_workflow_contract(
+            chapter_number,
+            context_layers=context.get("context_layers") or {},
+            plot_brief=workflow_input,
+            scene_plan=scene_plan,
+        )
+        scene_plan["writing_workflow"] = writing_workflow
+        context.setdefault("context_layers", {})["writing_workflow"] = writing_workflow
 
         # The payoff contract is a generation input, not only a review field.
         # Normalise it before the writer and humanizer see the chapter so a
@@ -3127,6 +3171,14 @@ class GenerationEngine:
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
         generation_failures = [*preflight_failures, *continuation_failures]
+        methodology_validation = validate_writing_workflow(writing_workflow)
+        if methodology_required and not methodology_validation.get("passed"):
+            generation_failures.append({
+                "code": "writing_methodology_contract_incomplete",
+                "severity": "high",
+                "message": "生成前因果契约未补齐，不能把缺失因果的正文标记为可用",
+                "missing": methodology_validation.get("missing") or [],
+            })
         mirror_stats = chapter_mirror_stats(
             final_text,
             previous_text=str(context_layers.get("previous_full_text") or ""),
@@ -3267,6 +3319,11 @@ class GenerationEngine:
             "readability_plan": readability_plan_metadata(
                 scene_plan.get("readability_plan") or readability_plan
             ),
+            "writing_methodology": {
+                "status": writing_workflow.get("status"),
+                "validation": methodology_validation,
+                "methodology_version": writing_workflow.get("methodology_version"),
+            },
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "chapter_title": {
                 "value": chapter_title_value,
@@ -3326,6 +3383,7 @@ class GenerationEngine:
                 "readability_plan": readability_plan_metadata(
                     scene_plan.get("readability_plan") or readability_plan
                 ),
+                "writing_workflow": writing_workflow,
             },
             "scene_plan": scene_plan,
             "payoff_contract": payoff_contract,
@@ -3339,6 +3397,7 @@ class GenerationEngine:
             "readability_plan": readability_plan_metadata(
                 scene_plan.get("readability_plan") or readability_plan
             ),
+            "writing_workflow": writing_workflow,
             "title_quality": generation_quality.get("chapter_title"),
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "deai": {
@@ -3543,6 +3602,7 @@ class GenerationEngine:
 
         # 上一章结尾状态（用于衔接）
         context_layers = context.get("context_layers") or {}
+        writing_workflow = scene_plan.get("writing_workflow") or context_layers.get("writing_workflow") or {}
         research_guidance = render_web_research_guidance(context_layers.get("web_research"))
         research_prompt = f"【实时网感灵感卡】\n{research_guidance}\n\n" if research_guidance else ""
         previous_transition = context_layers.get("previous_transition_contract") or {}
@@ -3599,6 +3659,7 @@ class GenerationEngine:
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
             f"{render_readability_plan(readability_plan)}\n\n"
+            f"{render_writing_methodology_contract(writing_workflow)}\n\n"
             f"{planner_readability_block}"
             f"{genre_writer_prompt}"
             f"{research_prompt}"
@@ -3654,6 +3715,7 @@ class GenerationEngine:
             f"{third_person_generation_contract()}\n"
             f"{content_generation_contract(quality_profile)}\n\n"
             f"{render_readability_plan(readability_plan, compact=True) if readability_plan else ''}\n\n"
+            f"{render_writing_methodology_contract(scene_plan.get('writing_workflow') or {})}\n\n"
             f"以下是本章已写好的结尾部分：\n\n{tail}\n\n"
             f"请只补足剩余节拍，目标补写约 {missing} 个汉字，"
             f"完成剩余节拍（{remaining}）并以钩子收束："

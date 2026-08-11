@@ -10,6 +10,14 @@
 - 生产证据：公网 `healthz` 200；`database=ok`、`redis=ok`、`worker=ok: 1 online`；`scripts/prod_smoke.py` 15/15；生产浏览器 v2 1 passed、兼容版 3 passed；八个主页面和 V7 Cost/Prompt 真实页面均可达且未命中 mock 标记。
 - 质量边界：本次 smoke 没有注入 Provider Key，因此未宣称真实正文质量、两本书各 20 章长跑或人工盲评已验收；下一步应使用真实账号和真实 Provider 按独立长跑门禁复核。
 
+## 2026-08-11 通用写作方法论接入（本次发布）
+
+- 新增 `backend/app/v7/quality/writing_methodology.py`，将用户提供的通用方法论编译为生成前章节契约、五列因果账本、状态锚点、工作流状态机和外部评测哈希绑定；不把整份长文原样塞入 Provider Prompt。
+- 已接入 PlotEngine、SceneDirector、GenerationEngine、续写、ReviewEngine、实时 V7 审阅和 StoryDirector 更新持久化。缺少核心问题、可见兑现、代价、下一压力或因果账本列时，生成质量标记为失败，不能伪装为可用章节。
+- 新增 `POST /api/v1/chapters/{chapter_id}/external-evaluation`，只登记真实外部报告；正文哈希不匹配、完成评测缺少真实分数或非法状态转换都会拒绝写入。
+- 代码级证据：方法论专项及 V7 生成/审阅契约 **36 passed**；Python compile、`git diff --check` 和路由导入通过。
+- 本次推送部署后必须补充远端 commit、迁移状态、容器健康、`prod_smoke.py` 结果和外部评测接口专项结果；本机数据库/Redis 全量测试不能作为远端验收依据。
+
 ## 2026-08-11 生成前可读性预案（待本次发布验收）
 
 - 根因：此前去 AI 味主要依赖生成后的 DeAIPipeline 和最终审阅门禁；生成前的场景规划只有爽点节拍、开场和连续性约束，没有明确本章的读者体验、信息落地方式、句段节奏、段落肌理和人物声音。
