@@ -1095,9 +1095,33 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
     enforce_quota(user["id"], None, "max_words_per_month")
     if topic.get("novel_id"):
         novel_id = topic["novel_id"]
-        existing_run = db.execute("SELECT id FROM workflow_runs WHERE novel_id=%s ORDER BY created_at DESC LIMIT 1", (novel_id,)).fetchone()
-        db.close()
+        existing_run = db.execute("SELECT id, status FROM workflow_runs WHERE novel_id=%s ORDER BY created_at DESC LIMIT 1", (novel_id,)).fetchone()
         if existing_run:
+            if payload.auto_start and existing_run["status"] == "waiting_human":
+                db.close()
+                from app.workers.tasks import confirm_human
+                try:
+                    confirm_human(
+                        existing_run["id"], topic["title"],
+                        request.headers.get("X-Api-Key", ""),
+                        request.headers.get("X-Api-Base-Url", ""),
+                        request.headers.get("X-Model", ""),
+                    )
+                except Exception as exc:
+                    raise HTTPException(status_code=502, detail=f"榜单书名自动确认失败：{exc}") from exc
+                return ok({"novel_id": novel_id, "run_id": existing_run["id"], "status": "generating", "auto_confirmed": True})
+            if payload.auto_start and existing_run["status"] in {"pending", "running", "queued"}:
+                db.execute(
+                    """UPDATE workflow_runs
+                       SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+                           'suggested_title', %s, 'selected_title', %s,
+                           'auto_confirm_title', true, 'title_locked', true
+                       ), updated_at = now()
+                       WHERE id = %s""",
+                    (topic["title"], topic["title"], existing_run["id"]),
+                )
+                db.commit()
+            db.close()
             return ok({"novel_id": novel_id, "run_id": existing_run["id"], "status": "already_created"})
         if not payload.auto_start:
             return ok({"novel_id": novel_id, "run_id": None, "status": "planning"})
@@ -1106,6 +1130,7 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             run_id = create_run(topic["project_id"], novel_id, request.headers.get("X-Api-Key", ""),
                                 request.headers.get("X-Api-Base-Url", ""), request.headers.get("X-Model", ""),
                                 selected_title=topic["title"],
+                                auto_confirm_title=True,
                                 idempotency_key=f"ranking-topic:{topic_id}:book-plan:v1")
             status_db = connect()
             status_db.execute("UPDATE topic_candidates SET status='generating' WHERE id=%s", (topic_id,))
@@ -1142,6 +1167,7 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             run_id = create_run(topic["project_id"], novel_id, request.headers.get("X-Api-Key", ""),
                                 request.headers.get("X-Api-Base-Url", ""), request.headers.get("X-Model", ""),
                                 selected_title=topic["title"],
+                                auto_confirm_title=True,
                                 idempotency_key=f"ranking-topic:{topic_id}:book-plan:v1")
             status_db = connect()
             status_db.execute("UPDATE topic_candidates SET status='generating' WHERE id=%s", (topic_id,))
