@@ -504,6 +504,21 @@ class ContextAssembler:
         previous_transition_contract: dict[str, Any] = {}
         recent_payoff_types: list[str] = []
         recent_payoff_history: list[dict[str, Any]] = []
+        previous_workflow = (previous[-1].get("writing_workflow") or {}) if previous else {}
+        previous_current_state = (
+            previous_workflow.get("current_state")
+            if isinstance(previous_workflow, dict)
+            else {}
+        ) or {}
+        previous_delta = (previous[-1].get("transition_contract") or {}).get("state_delta") if previous else {}
+        previous_delta = previous_delta if isinstance(previous_delta, dict) else {}
+        legacy_known_facts = [
+            item.get("summary") or item.get("key")
+            for values in previous_delta.values()
+            if isinstance(values, list)
+            for item in values
+            if isinstance(item, dict) and (item.get("summary") or item.get("key"))
+        ][:12]
         if payoff_history_chapters:
             last_text = previous[-1].get("text") or ""
             # The old 400-character tail was too short to carry a scene's
@@ -575,6 +590,15 @@ class ContextAssembler:
             # mirror detector after the new chapter is generated.
             "previous_full_text": previous[-1].get("text") if previous else "",
             "previous_transition_contract": previous_transition_contract,
+            # Carry the last accepted workflow's knowledge boundary forward;
+            # a scene plan must not let a character react to a fact that was
+            # not yet known at the start of this chapter.
+            "current_time": previous_current_state.get("time"),
+            "current_location": previous_current_state.get("location"),
+            "known_facts": previous_current_state.get("knowledge") or legacy_known_facts,
+            "objects": previous_current_state.get("objects") or [],
+            "resources": previous_current_state.get("resources") or [],
+            "relationships": previous_current_state.get("relationships") or [],
             "opening_history": opening_history,
             "recent_payoff_types": recent_payoff_types[-8:],
             "recent_payoff_history": recent_payoff_history[-5:],  # P1-1 质量整改：从20章降到5章
@@ -1173,6 +1197,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             "严格覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段；"
             "至少有一个 beat 明确写 build（压制后的试探、准备、取舍或蓄力），不能把连续的压力描述冒充 build。"
             "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
+            "输出必须紧凑：每个 beat 的 name/purpose/content/emotion 各不超过 80 字，"
+            "causal_ledger 每列不超过 60 字，列表只写本章真正发生的 4-6 个事件；不要重复字段或附加解释。"
+            "causal_ledger 的 knower 必须写清具体人物/群体及其知情时点；上一章未确认的事实不得让人物预先知晓。"
             "禁止写成剧情摘要、操作说明或元叙述，禁止出现‘第X章’、‘本章’、"
             "‘主角在……发现……’、‘读者将……’等模板。"
         )
@@ -1183,10 +1210,14 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 + third_person_generation_contract()
                 + content_generation_contract(quality_profile)
             ),
-            max_tokens=2000,
+            # This contract contains the causal ledger, payoff phases and
+            # readability plan.  2k completion tokens truncated real DeepSeek
+            # plans mid-JSON during long runs; keep the first attempt large
+            # enough and let AIGateway's bounded length retry handle outliers.
+            max_tokens=4200,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.4.0",
+            prompt_version="1.5.0",
         )
         plan = result["data"]
         usage = dict(result.get("usage") or {})
@@ -1213,10 +1244,10 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             repaired = await self.gateway.generate_json(
                 repair_prompt,
                 system_prompt="你是严格的场景计划校对员，只输出合法 JSON。",
-                max_tokens=2200,
+                max_tokens=3600,
                 temperature=0.0,
                 prompt_name="v7.generation.scene_plan.repair",
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
             )
             repair_usage = repaired.get("usage") or {}
             usage = {
@@ -1504,6 +1535,93 @@ class DeAIPipeline:
             "reason": "ok" if replaced > 0 and after_ratio < 0.30 else "target_not_reached",
         })
         return repaired if evidence["applied"] else source, evidence
+
+    async def repair_opening(
+        self,
+        text: str,
+        *,
+        chapter_number: int = 1,
+        opening_plan: dict[str, Any] | None = None,
+        source_facts: str = "",
+        quality_profile: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Repair a failed opening contract before the final de-AI pass.
+
+        The repair is intentionally prefix-only: the provider returns one
+        replacement paragraph and the application preserves the rest of the
+        generated chapter byte-for-byte.  This gives a real model repair
+        opportunity without allowing an opening fix to rewrite plot facts or
+        silently become a second chapter draft.
+        """
+        if self.gateway is None:
+            raise AIGatewayError("opening repair gateway is not configured")
+        plan = opening_plan if isinstance(opening_plan, dict) else {}
+        requested = str(plan.get("mode") or "action").strip().lower()
+        recent = [str(item) for item in (plan.get("forbidden_recent_modes") or [])]
+        paragraphs = text.replace("\r\n", "\n").split("\n\n")
+        first_paragraph = paragraphs[0].strip() if paragraphs else ""
+        if not first_paragraph:
+            raise AIGatewayError("opening repair source paragraph is empty")
+
+        prompt = (
+            "只修复正文第一段的开场方式，输出 JSON，不要解释。"
+            f"本章指定开场类型：{requested}；最近三章禁止重复：{recent or ['无']}。"
+            "第一段必须从指定类型直接起笔，并在前300字内出现具体压力、异常、目标或选择；"
+            "禁止身体部位+疼痛/发闷/一阵袭来/‘像有人’作为默认开头。"
+            "必须保留原段中的人物、地点、时间、物件、事件、因果和信息，不得新增剧情、删事实或写总结。"
+            "只返回一个完整段落字段 opening_text，不能返回正文全文。\n\n"
+            f"【上一章/设定事实】\n{source_facts or '（按原段事实，不补写未知信息）'}\n\n"
+            f"【原第一段】\n{first_paragraph}\n\n"
+            'JSON 格式：{"opening_text":"修复后的第一段"}'
+        )
+        result = await self.gateway.generate_json(
+            prompt,
+            system_prompt=(
+                "你是严格的中文网文开场编辑，只输出合法 JSON。"
+                + third_person_generation_contract()
+                + content_generation_contract(quality_profile)
+            ),
+            max_tokens=min(2200, max(1100, int(len(first_paragraph) * 1.4))),
+            temperature=0.45,
+            prompt_name="v7.generation.opening_repair",
+            prompt_version="1.0.0",
+        )
+        candidate = str((result.get("data") or {}).get("opening_text") or "").strip()
+        if not candidate or "\n\n" in candidate:
+            raise AIGatewayError("opening repair did not return exactly one paragraph")
+        if len(candidate) < max(20, int(len(first_paragraph) * 0.25)):
+            raise AIGatewayError("opening repair candidate is too short")
+        if len(candidate) > max(700, int(len(first_paragraph) * 1.8)):
+            raise AIGatewayError("opening repair candidate expanded the source paragraph")
+
+        repaired = "\n\n".join([candidate, *paragraphs[1:]])
+        duplicate_stats = duplicate_paragraph_stats(repaired)
+        if float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01:
+            raise AIGatewayError("opening repair candidate contains repeated full paragraphs")
+        gate = inspect_opening(
+            repaired,
+            requested_mode=requested,
+            chapter_number=chapter_number,
+            recent_modes=recent,
+        )
+        if not gate.get("passed"):
+            raise AIGatewayError(
+                "opening repair still failed: "
+                + ";".join(str(item.get("code")) for item in gate.get("flags") or [])
+            )
+        return {
+            "processed_text": repaired,
+            "opening": gate,
+            "quality_gate": {"passed": True, "mode": "provider_prefix_repair"},
+            "layers_applied": [{
+                "layer": "provider_opening_contract_repair",
+                "changes": 1,
+                "applied": True,
+                "requested_mode": requested,
+                "observed_mode": gate.get("observed_mode"),
+            }],
+            "usage": result.get("usage") or {},
+        }
 
     async def process(
         self,
@@ -2648,16 +2766,26 @@ class AIGateway:
             "provider": None,
         }
         last_text = ""
+        last_finish_reason = "unknown"
         for attempt in range(2):
+            compact_retry = attempt > 0
+            retry_max_tokens = max_tokens
+            if compact_retry and last_finish_reason == "length":
+                # A valid JSON contract is more important than preserving the
+                # first, truncated attempt.  Give the same real provider one
+                # bounded larger response budget; never synthesize the
+                # missing tail locally.
+                retry_max_tokens = min(6000, max(max_tokens, int(max_tokens * 1.5)))
             result = await self.generate(
                 prompt if attempt == 0 else (
                     prompt
-                    + "\n\n上一次输出不是合法 JSON，请严格只输出 JSON 对象，不要任何解释、不要代码块标记。"
+                    + "\n\n上一次输出不是可用的完整 JSON，请严格只输出一个完整 JSON 对象，不要解释、不要代码块标记。"
+                    + "所有字符串值保持精炼；数组只保留契约必需项；不要重复字段，不要输出契约之外的长篇说明。"
                 ),
                 system_prompt=system_prompt,
                 model=model,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=retry_max_tokens,
                 json_mode=True,
                 prompt_name=prompt_name,
                 prompt_version=prompt_version,
@@ -2670,13 +2798,15 @@ class AIGateway:
             usage_total["model"] = result["model"]
             usage_total["provider"] = result.get("provider")
             last_text = result["text"]
+            last_finish_reason = str(result.get("finish_reason") or "unknown")
 
             data = self._parse_json(last_text)
             if data is not None:
                 return {"data": data, "usage": usage_total, "raw": last_text}
 
         raise AIGatewayError(
-            f"LLM did not return parseable JSON after 2 attempts: {last_text[:200]}"
+            "LLM did not return parseable JSON after 2 attempts "
+            f"(finish_reason={last_finish_reason}): {last_text[:200]}"
         )
 
     @staticmethod
@@ -3107,6 +3237,66 @@ class GenerationEngine:
             input_summary="Run 7-layer de-AI pipeline",
         ) as step:
             context_layers = context.get("context_layers") or {}
+            opening_repair_result: dict[str, Any] | None = None
+            opening_failure_codes = {
+                str(item.get("code") or "")
+                for item in preflight_failures
+                if str(item.get("code") or "").startswith("opening_")
+            }
+            non_opening_failures = [
+                item for item in preflight_failures
+                if not str(item.get("code") or "").startswith("opening_")
+            ]
+            if opening_failure_codes and not non_opening_failures:
+                # Opening diversity is a repairable prose contract. Give the
+                # real provider one prefix-only repair before treating the
+                # chapter as unusable; hard POV/content failures still fail
+                # closed and never get hidden by this path.
+                try:
+                    opening_repair_result = await self.deai_pipeline.repair_opening(
+                        text,
+                        chapter_number=chapter_number,
+                        opening_plan=scene_plan.get("opening_plan") or {},
+                        source_facts=json.dumps(
+                            {
+                                "previous_transition_contract": context_layers.get(
+                                    "previous_transition_contract"
+                                ),
+                                "previous_tail": context_layers.get("previous_tail"),
+                                "known_facts": context_layers.get("known_facts") or [],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        quality_profile=self.quality_profile,
+                    )
+                    text = opening_repair_result["processed_text"]
+                    opening_gate = opening_repair_result["opening"]
+                    raw_pov_metrics = analyze_third_person_narrative(text)
+                    raw_content_policy = analyze_content_policy(text, self.quality_profile)
+                    preflight_failures = []
+                    if not raw_pov_metrics["passed"]:
+                        preflight_failures.append({
+                            "code": "third_person_narrative_required",
+                            "severity": "high",
+                            "message": "开场修复后的正文叙述部分出现第一人称；对白/短信中的第一人称不计入。",
+                            "evidence": raw_pov_metrics,
+                        })
+                    if not raw_content_policy["passed"]:
+                        preflight_failures.extend(raw_content_policy.get("failures") or [])
+                    step.set_output(
+                        "provider opening repair passed",
+                        data={"opening_repair": opening_repair_result.get("opening")},
+                    )
+                    add_usage(step, opening_repair_result.get("usage") or {})
+                except (AIGatewayError, ValueError) as exc:
+                    preflight_failures = [
+                        *non_opening_failures,
+                        {
+                            "code": "opening_repair_failed",
+                            "severity": "high",
+                            "message": f"开场契约修复失败：{type(exc).__name__}",
+                        },
+                    ]
             if preflight_failures:
                 before_metrics = analyze_deai_patterns(text, profile=self.quality_profile)
                 deai_result = {
@@ -3159,6 +3349,15 @@ class GenerationEngine:
                     active_rules=context_layers.get("active_rules") or [],
                     readability_plan=scene_plan.get("readability_plan") or readability_plan,
                 )
+            if opening_repair_result:
+                deai_result["layers_applied"] = [
+                    *(opening_repair_result.get("layers_applied") or []),
+                    *(deai_result.get("layers_applied") or []),
+                ]
+                deai_result["total_changes"] = int(deai_result.get("total_changes") or 0) + int(
+                    sum(item.get("changes") or 0 for item in opening_repair_result.get("layers_applied") or [])
+                )
+                deai_result.setdefault("metrics", {})["opening_repair"] = opening_repair_result.get("opening") or {}
             deai_result.setdefault("metrics", {})["pov_preflight"] = raw_pov_metrics
             deai_result.setdefault("metrics", {})["content_policy_preflight"] = raw_content_policy
             add_usage(step, deai_result.get("usage") or {})

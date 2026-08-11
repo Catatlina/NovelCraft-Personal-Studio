@@ -301,14 +301,25 @@ export function GenerationConsole({ novelId }: GenerationConsoleProps) {
               <p className="text-sm text-gray-500">Words</p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg text-center">
-              <p className={`text-2xl font-bold ${
-                generationResult.review_score >= 80 ? 'text-green-600' :
-                generationResult.review_score >= 60 ? 'text-amber-600' :
-                'text-red-600'
-              }`}>
-                {generationResult.review_score || '-'}
-              </p>
-              <p className="text-sm text-gray-500">Review Score</p>
+              {(() => {
+                const gatePassed = generationResult.passed_review === true
+                  && generationResult.quality_gate?.passed === true;
+                return (
+                  <>
+                    <p className={`text-2xl font-bold ${
+                      gatePassed && generationResult.review_score >= 80 ? 'text-green-600' :
+                      generationResult.review_score >= 60 ? 'text-amber-600' :
+                      'text-red-600'
+                    }`}>
+                      {generationResult.review_score || '-'}
+                    </p>
+                    <p className="text-sm text-gray-500">V7 审阅分（非交付状态）</p>
+                    <p className={`mt-1 text-xs font-medium ${gatePassed ? 'text-green-600' : 'text-red-600'}`}>
+                      {gatePassed ? '质量门通过，可交付' : '质量门未通过，需重写'}
+                    </p>
+                  </>
+                );
+              })()}
             </div>
             <div className="p-4 bg-gray-50 rounded-lg text-center">
               <p className="text-sm font-mono text-gray-600 truncate">

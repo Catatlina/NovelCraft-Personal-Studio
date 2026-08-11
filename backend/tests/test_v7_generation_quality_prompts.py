@@ -7,6 +7,7 @@ from app.prompt_registry import PROMPT_SEEDS, render_prompt
 from app.services.quality_risks import build_quality_repair_contract
 from app.v7.quality.deai_metrics import analyze_deai_patterns
 from app.v7.generation.generation_engine import (
+    AIGateway,
     AIGatewayError,
     DeAIPipeline,
     GenerationEngine,
@@ -15,6 +16,7 @@ from app.v7.generation.generation_engine import (
     validate_tomato_chapter_title,
 )
 from app.v7.quality.opening_variation import (
+    build_opening_history,
     inspect_opening,
     select_opening_plan,
 )
@@ -58,6 +60,88 @@ def test_opening_scheduler_is_global_and_does_not_default_to_body_sensation():
     )
     assert second["mode"] != first["mode"]
     assert second["mode"] != "body_sensation"
+
+
+def test_opening_history_prefers_persisted_observed_mode_over_legacy_classifier():
+    history = build_opening_history([
+        {
+            "chapter_number": 11,
+            "text": "门外传来警报，所有人同时回头。",
+            "opening": {"observed_mode": "action"},
+        }
+    ])
+
+    assert history[0]["mode"] == "action"
+
+
+def test_explicit_repeated_opening_mode_is_replaced_by_safe_scheduler_choice():
+    plan = select_opening_plan(
+        12,
+        previous_history=[
+            {"chapter_number": 9, "mode": "action"},
+            {"chapter_number": 10, "mode": "object"},
+            {"chapter_number": 11, "mode": "dialogue"},
+        ],
+        plot_brief={"opening_mode": "action"},
+    )
+
+    assert plan["mode"] not in {"action", "object", "dialogue"}
+
+
+def test_json_gateway_retries_truncated_output_with_compact_larger_budget():
+    gateway = object.__new__(AIGateway)
+    calls = []
+
+    async def fake_generate(prompt, **kwargs):
+        calls.append({"prompt": prompt, **kwargs})
+        if len(calls) == 1:
+            return {
+                "text": '{"chapter_title":"截断',
+                "tokens_input": 3,
+                "tokens_output": 10,
+                "cost": 0.01,
+                "model": "test",
+                "provider": "deepseek",
+                "finish_reason": "length",
+            }
+        return {
+            "text": '{"chapter_title":"完整计划"}',
+            "tokens_input": 3,
+            "tokens_output": 12,
+            "cost": 0.01,
+            "model": "test",
+            "provider": "deepseek",
+            "finish_reason": "stop",
+        }
+
+    gateway.generate = fake_generate
+    result = asyncio.run(gateway.generate_json("输出计划", max_tokens=100))
+
+    assert result["data"]["chapter_title"] == "完整计划"
+    assert calls[1]["max_tokens"] == 150
+    assert "完整 JSON" in calls[1]["prompt"]
+
+
+def test_provider_opening_repair_only_replaces_first_paragraph():
+    class Gateway:
+        async def generate_json(self, *_args, **_kwargs):
+            return {
+                "data": {"opening_text": "他抬手按住门把，门内立刻传来第二声敲击。"},
+                "usage": {"tokens_input": 2, "tokens_output": 4, "cost": 0.01},
+            }
+
+    source = "警报声突然响起，所有人被迫转身。\n\n林越盯着门缝，没有松手。"
+    result = asyncio.run(
+        DeAIPipeline(Gateway()).repair_opening(
+            source,
+            chapter_number=12,
+            opening_plan={"mode": "action", "forbidden_recent_modes": ["external_event"]},
+        )
+    )
+
+    assert result["quality_gate"]["passed"] is True
+    assert result["opening"]["observed_mode"] == "action"
+    assert result["processed_text"].endswith("林越盯着门缝，没有松手。")
 
 
 def test_opening_gate_rejects_the_repeated_body_sensation_template():

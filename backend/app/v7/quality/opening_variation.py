@@ -96,15 +96,30 @@ def classify_opening(text: Any) -> str:
 
 
 def build_opening_history(chapters: list[dict[str, Any]] | None, *, limit: int = 5) -> list[dict[str, Any]]:
-    """Create compact, persisted-free history from accepted chapter text."""
+    """Create compact history, preferring the persisted observed mode.
+
+    Reclassifying every old opening from a short text sample can collapse
+    distinct openings into ``external_event``.  New chapters persist the
+    actual gate result, so the scheduler can use that evidence and only fall
+    back to classification for legacy chapters.
+    """
     result: list[dict[str, Any]] = []
     for chapter in (chapters or [])[-limit:]:
         if not isinstance(chapter, dict):
             continue
         text = str(chapter.get("text") or "")
+        opening = chapter.get("opening") or chapter.get("opening_quality") or {}
+        persisted_mode = (
+            opening.get("observed_mode")
+            if isinstance(opening, dict)
+            else chapter.get("opening_mode")
+        )
+        mode = str(persisted_mode or "").strip().lower()
+        if mode not in OPENING_MODES:
+            mode = classify_opening(text)
         result.append({
             "chapter_number": chapter.get("chapter_number"),
-            "mode": classify_opening(text),
+            "mode": mode,
             "sample": _opening_sample(text, 80),
         })
     return result
@@ -130,6 +145,9 @@ def select_opening_plan(
 
     chapter_type_key = str(chapter_type or (plot_brief or {}).get("chapter_type") or "normal").lower()
     if explicit:
+        # An outline may request a mode, but it cannot silently override the
+        # global no-repeat contract.  Keep the requested mode first and add a
+        # deterministic safe alternative for the rare collision.
         candidates = [explicit]
     elif chapter_number <= 1:
         # Cold opens should not default to pain, waking up or body status.
@@ -145,6 +163,11 @@ def select_opening_plan(
 
     if recent:
         selected = next((mode for mode in candidates if mode not in recent), candidates[0])
+        if selected in recent and explicit:
+            selected = next(
+                (mode for mode in ("action", "object", "dialogue", "environment", "external_event") if mode not in recent),
+                selected,
+            )
     else:
         # Compatibility writers may only expose summaries, not prior prose.
         # Keep their openings varied by chapter number instead of falling back

@@ -198,6 +198,15 @@ def _persist_v7_chapter(
         "reader_experience": reader_experience or {},
         "review_issues": review_issues or [],
         "quality_gate": quality_gate or {},
+        # review_score is the V7 narrative review score; delivery is the
+        # application decision after continuity and hard gates.  Keeping both
+        # prevents a 90+ review from being mistaken for a publishable chapter.
+        "delivery_status": "accepted" if status == "reviewed" else status,
+        "delivery_gate_passed": bool(status == "reviewed" and (quality_gate or {}).get("passed") is True),
+        "delivery_blockers": [
+            item for item in ((quality_gate or {}).get("failures") or [])
+            if isinstance(item, dict)
+        ],
         "duplicate_paragraphs": duplicate_paragraphs,
         "rework_count": rework_count,
         "quality_reason": (
