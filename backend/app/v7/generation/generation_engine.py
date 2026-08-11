@@ -276,10 +276,12 @@ class ContextAssembler:
         brain: NovelBrain,
         project_id: str | None = None,
         genre_id: str | None = None,
+        novel_id: str | None = None,
     ):
         self.brain = brain
         self.project_id = project_id
         self.genre_id = genre_id
+        self.novel_id = novel_id
         self._genre_cache: dict[str, Any] | None = None
 
     async def load_style_card(self) -> dict[str, Any]:
@@ -314,14 +316,15 @@ class ContextAssembler:
         *,
         limit: int = 2,
     ) -> list[dict[str, Any]]:
-        """Load behavior annotations from this project only.
+        """Load behavior annotations from this novel only.
 
         Samples are optional knowledge, but once a project has declared them
         retrieval failures are real failures.  Returning an invented/default
         sample here would make a generation trace look healthy while silently
-        changing the project's writing behavior.
+        changing the novel's writing behavior.  A studio project can contain
+        multiple novels, so ``source_novel_id`` is a required second scope.
         """
-        if not self.project_id:
+        if not self.project_id or not self.novel_id:
             return []
         query_text = str(query or "").strip() or "行为 选择 信息 结果 代价"
 
@@ -332,8 +335,9 @@ class ContextAssembler:
             try:
                 row = conn.execute(
                     "SELECT COUNT(*) AS count FROM knowledge_items "
-                    "WHERE project_id=%s AND kind='behavior_sample' AND is_deleted=FALSE",
-                    (self.project_id,),
+                    "WHERE project_id=%s AND kind='behavior_sample' AND is_deleted=FALSE "
+                    "AND meta->>'source_novel_id'=%s",
+                    (self.project_id, self.novel_id),
                 ).fetchone()
                 return int((row or {}).get("count") or 0)
             finally:
@@ -351,6 +355,7 @@ class ContextAssembler:
                 self.project_id,
                 ["behavior_sample"],
                 min(max(1, int(limit)), 3),
+                {"source_novel_id": self.novel_id},
             )
         except Exception as exc:
             raise AIGatewayError(
@@ -376,6 +381,7 @@ class ContextAssembler:
                 "result_type": meta.get("result_type") or "",
                 "tags": meta.get("tags") or [],
                 "source_project": meta.get("source_project") or self.project_id,
+                "source_novel_id": meta.get("source_novel_id") or self.novel_id,
             })
         return samples
 
@@ -3092,7 +3098,12 @@ class GenerationEngine:
             project_id=project_id,
             provider_config=self.provider_config,
         )
-        self.context_assembler = ContextAssembler(brain, project_id, genre_id)
+        self.context_assembler = ContextAssembler(
+            brain,
+            project_id,
+            genre_id,
+            novel_id=str(novel_id),
+        )
         self.scene_director = SceneDirector(brain, self.ai_gateway)
         self.deai_pipeline = DeAIPipeline(self.ai_gateway)
 

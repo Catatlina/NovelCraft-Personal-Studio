@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from app.v7.quality.writing_methodology import (
@@ -147,3 +150,10 @@ def test_workflow_rebuild_preserves_generation_sample_and_model_provenance():
     )
     assert rebuilt["fact_card"]["behavior_samples"][0]["id"] == "sample-1"
     assert rebuilt["model_adaptation"]["model"] == "deepseek-chat"
+
+
+def test_behavior_sample_fixture_declares_novel_scope():
+    fixture = Path(__file__).parents[2] / "docs/behavior_samples/datang-front5.json"
+    samples = json.loads(fixture.read_text(encoding="utf-8"))
+    assert len(samples) == 5
+    assert all(sample["meta"].get("source_novel_id") for sample in samples)

@@ -11,6 +11,7 @@
       "result_type": "现场结果+新压力",
       "tags": ["结果先行", "现场反馈", "信息缺口"],
       "source_project": "datang",
+      "source_novel_id": "b5cced0c-e4e9-4920-85e9-d6820c7e4ee0",
       "source_file": "写作系统/黄金样本标注集-前5章.md"
     }
   },
@@ -26,6 +27,7 @@
       "result_type": "选择改变关系或行动路线",
       "tags": ["配角独立", "拒绝权", "非完美问答"],
       "source_project": "datang",
+      "source_novel_id": "b5cced0c-e4e9-4920-85e9-d6820c7e4ee0",
       "source_file": "写作系统/黄金样本标注集-前5章.md"
     }
   },
@@ -41,6 +43,7 @@
       "result_type": "获得局部证据+暴露或资源成本",
       "tags": ["知情边界", "信息延迟", "证据链"],
       "source_project": "datang",
+      "source_novel_id": "b5cced0c-e4e9-4920-85e9-d6820c7e4ee0",
       "source_file": "写作系统/黄金样本标注集-前5章.md"
     }
   },
@@ -56,6 +59,7 @@
       "result_type": "可见收益+代价+新敌意",
       "tags": ["爽点兑现", "状态变化", "结果成本"],
       "source_project": "datang",
+      "source_novel_id": "b5cced0c-e4e9-4920-85e9-d6820c7e4ee0",
       "source_file": "写作系统/黄金样本标注集-前5章.md"
     }
   },
@@ -71,6 +75,7 @@
       "result_type": "新选择或新危机",
       "tags": ["章末钩子", "余波", "连续性"],
       "source_project": "datang",
+      "source_novel_id": "b5cced0c-e4e9-4920-85e9-d6820c7e4ee0",
       "source_file": "写作系统/黄金样本标注集-前5章.md"
     }
   }

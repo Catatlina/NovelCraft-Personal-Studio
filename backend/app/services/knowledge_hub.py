@@ -78,7 +78,13 @@ def reindex_project_embeddings(project_id: str) -> dict:
     return {"items": len(ids), "chunks": chunks_total, "backend": resolve_backend()}
 
 
-def search(query: str, project_id: str | None = None, kinds: list[str] | None = None, limit: int = 10) -> list[dict]:
+def search(
+    query: str,
+    project_id: str | None = None,
+    kinds: list[str] | None = None,
+    limit: int = 10,
+    meta_filters: dict[str, str] | None = None,
+) -> list[dict]:
     """Search indexed knowledge by vector distance, with lexical fallback."""
     db = connect()
     lexical_sql = """SELECT id, kind, title, body, meta, source_url, -1.0 AS distance
@@ -91,6 +97,9 @@ def search(query: str, project_id: str | None = None, kinds: list[str] | None = 
     if kinds:
         lexical_sql += " AND kind = ANY(%s)"
         lexical_params.append(kinds)
+    for key, value in (meta_filters or {}).items():
+        lexical_sql += " AND meta->>%s=%s"
+        lexical_params.extend([key, value])
     lexical_sql += " ORDER BY created_at DESC LIMIT %s"
     lexical_params.append(limit)
     lexical_rows = db.execute(lexical_sql, tuple(lexical_params)).fetchall()
@@ -115,6 +124,9 @@ def search(query: str, project_id: str | None = None, kinds: list[str] | None = 
     if kinds:
         vector_sql += " AND ki.kind = ANY(%s)"
         vector_params.append(kinds)
+    for key, value in (meta_filters or {}).items():
+        vector_sql += " AND ki.meta->>%s=%s"
+        vector_params.extend([key, value])
     vector_sql += " GROUP BY ki.id, ki.kind, ki.title, ki.body, ki.meta, ki.source_url ORDER BY distance LIMIT %s"
     vector_params.append(limit)
     try:
@@ -139,6 +151,9 @@ def search(query: str, project_id: str | None = None, kinds: list[str] | None = 
         placeholders = ",".join(["%s"] * len(kinds))
         sql += f" AND kind IN ({placeholders})"
         params.extend(kinds)
+    for key, value in (meta_filters or {}).items():
+        sql += " AND meta->>%s=%s"
+        params.extend([key, value])
 
     # Simple ILIKE search
     sql += " AND (title ILIKE %s OR body ILIKE %s) ORDER BY created_at DESC LIMIT %s"
