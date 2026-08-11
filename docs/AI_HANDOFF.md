@@ -2,9 +2,9 @@
 > 更新时间：2026-08-11
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
-## 2026-08-11 v0.9.2 出版准备层开发（进行中，分支 agent/publishing-v0.9.2）
+## 2026-08-11 v0.9.2 出版准备层开发（已部署，分支 agent/publishing-v0.9.2）
 
-### 已完成代码（未提交、未部署）
+### 已完成代码（已提交、已部署到生产）
 
 - **statistics_v1 确定性统计层**：`backend/app/v7/quality/statistics_v1.py`（9.3KB）。UTF-8字节偏移、章节/段落/句子/对话四级切分、双哈希（content_sha256 + normalized_sha256）、异常标点检测。同一输入字节级一致输出。测试 11/11 通过。
 - **Alembic 迁移**：`backend/alembic/versions/nc_v092_publishing_preparation.py`（13.7KB）。新建6表（platform_publication_profiles、publication_variants、chapter_statistics_snapshots、quality_gate_results、ai_disclosure_records、human_editing_records）+ contents.publishing_status 字段。内置番茄/起点/晋江示例配置（policy_status=stale）。down_revision=nc_v7_genre_packs。
@@ -26,24 +26,52 @@
 
 ### 未完成
 
-- Git 提交、推送、远端部署（VPS 43.156.17.78）
-- Alembic 迁移在生产执行
-- 20章真实 Provider 长跑验收
+- 20章真实 Provider 长跑验收（尝试被 blocked_quality 阻断：现有小说第6章 status=needs_rewrite，V7运行时禁止继续生成下一章；百章一致性小说为测试短文本不适合真实验收）
 - 前端发布准备页面（API已就绪，前端未开发）
 - AI披露文案生成（v1.1）
+- payoff_density 门禁的真实爽点检测（当前为关键词启发式，需接入AI评分或更复杂NLP）
+
+### 部署与生产验证
+
+- 分支：`agent/publishing-v0.9.2`，9个commit，已推送到 origin
+- 生产 VPS：43.156.17.78，生产目录 `/opt/NovelCraft-Personal-Studio`
+- 数据库备份：`backups/pre-deploy-v092-20260812-001419.sql.gz`（273M）
+- 镜像重建：`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --scale flower=0`
+- Alembic 迁移：`nc_v092_publishing_preparation (head)`，6个新表全部创建，contents.publishing_status 字段已添加
+- 示例平台配置：番茄/起点/晋江各一份，policy_status=stale（符合规范，需用户手动确认后才能 publish_ready）
+- 容器状态：api/worker/beat/frontend/postgres/redis/backup 全部健康运行
+- API路由验证：`GET /api/v1/publishing/gates/definitions` 返回 401（认证要求，说明路由已注册）
+
+### 门禁验收（6章真实正文）
+
+- 测试小说："重生后我靠签到系统在侯府杀疯了"（6章，每章2400-4400字）
+- quality_candidate 通过率：6/6（100%）— 七项门禁均已输出
+- publish_ready 通过率：0/6 — 因 payoff_density 门禁未通过（启发式关键词检测未命中）
+- 各门禁通过率：content_quality 100%(均分90)、continuity 100%、readability 100%、platform_compliance 100%、ai_disclosure 100%、external_risk 100%、payoff_density 0%
+- 统计层验证：段落/句子/对话切分正常，异常标点检测=0，双哈希正常
 
 ### 验证命令与结果
 
 ```bash
+# 本地单元测试
 cd backend && python3 tests/test_publishing_v092.py
 # 58 passed, 0 failed
+
+# 强制门禁
+bash scripts/ai_development_gate.sh
+# RESULT: clean.
+
+# 生产门禁验收（API容器内）
+docker exec -w /app -e PYTHONPATH=/app novelcraft-personal-studio-api-1 python /tmp/v092_quick_gate_test.py
+# 6章真实正文，quality_candidate 6/6，七道门禁全部正常运行
 ```
 
 ### 证据等级
 
-- 代码存在 + 模块导入成功 + 58单元测试通过 = **代码级可用**
-- 未提交/未部署/未生产迁移/未真实Provider长跑 = **不能宣称生产可用或发布准备功能完成**
+- 代码存在 + 模块导入成功 + 58单元测试通过 + 生产部署 + 6章真实正文门禁运行 = **代码级可用，已部署**
+- 20章真实 Provider 长跑未完成（被质量门禁阻断）= **不能宣称全链路生产可用**
 - 前端页面未开发 = **不能宣称用户可操作发布准备流程**
+- payoff_density 为启发式检测 = **不能宣称真实爽点密度评估完成**
 
 ## 2026-08-11 最新生产交接：通用写作方法论接入已部署
 

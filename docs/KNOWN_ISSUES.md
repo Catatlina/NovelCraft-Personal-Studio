@@ -1,18 +1,21 @@
 # Starlume AI 当前已知问题
 
-## 2026-08-11 KI-041 v0.9.2 出版准备层开发中（代码级可用，未部署）
+## 2026-08-11 KI-041 v0.9.2 出版准备层（已部署，代码级可用，20章长跑未完成）
 
-- 状态：**代码级可用**（7个新文件+1迁移+main.py修改，58单元测试通过，未提交/未部署/未生产迁移）。
+- 状态：**已部署**（7个新文件+1迁移+main.py修改，58单元测试通过，9个commit已推送，生产Alembic迁移已执行，6表+1字段已创建，容器健康运行）。
 - 分支：`agent/publishing-v0.9.2`（从 main@8a0dfc7 新建）。
-- 已完成：statistics_v1确定性统计、Alembic迁移(6表+1字段)、七道发布门禁引擎、发布准备服务(状态机)、ChapterContext五类融合、局部修复引擎、18个API端点(已注册)、58单元测试。
+- 已完成：statistics_v1确定性统计、Alembic迁移(6表+1字段)、七道发布门禁引擎、发布准备服务(状态机)、ChapterContext五类融合、局部修复引擎、18个API端点(已注册)、58单元测试、生产部署、6章真实正文门禁验收。
+- 门禁验收结果：6章真实正文 quality_candidate 6/6(100%)，publish_ready 0/6（因payoff_density启发式检测未命中），其余6道门禁100%通过，content_quality均分90。
 - 已知限制：
   - 内置平台示例配置 policy_status=stale，默认情况下 platform_compliance 子门禁不通过，publish_ready 会被阻断——符合规范（stale/unknown不能publish_ready），用户必须手动确认平台规则。
   - external_risk 门禁的 is_blocking 是动态的（仅 prohibited 时 True），保存到 quality_gate_results 时反映运行时状态。
   - 局部修复引擎默认只做规则级修复，AI修复函数(ai_repair_fn)需调用方注入，未接入真实Provider。
   - content_quality 门禁在无已有V7审阅分时使用启发式评分（上限95），不是真实AI评分。
+  - payoff_density 门禁为关键词启发式检测（结果类词汇+章末悬念词），不是真实爽点密度评估，需接入AI评分或更复杂NLP。
   - 前端发布准备页面未开发，API已就绪。
   - AI披露文案生成放v1.1，当前只做状态记录和发布阻断。
-- 未闭合：Git提交/推送/部署、生产Alembic迁移、20章真实Provider长跑验收、前端页面。
+- 20章长跑阻断原因：现有小说"重生后我靠签到系统在侯府杀疯了"第6章 status=needs_rewrite，V7运行时质量门禁禁止继续生成下一章（返回 blocked_quality）；百章一致性小说为每章一句话的测试短文本，不适合真实验收。需创建正确配置的新书或修复现有小说质量后才能完成20章真实Provider长跑。
+- 未闭合：20章真实Provider长跑验收、前端页面、payoff_density真实检测、AI披露文案生成(v1.1)。
 
 ## 2026-08-10 KI-040 一致性检查输入/输出接口错位（已修复，生产复跑已验收）
 
