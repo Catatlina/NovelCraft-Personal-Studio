@@ -368,6 +368,29 @@ export default function App() {
     };
   }, [token, project?.id, run?.id, currentNovelCacheKey]);
 
+  // Progress is also a deep link and can be entered after a reload, from an
+  // old tab, or before the ranking callback has finished updating `run`.
+  // In those cases restore the run belonging to the selected novel rather
+  // than leaving the page bound to an empty/previous project run.
+  useEffect(() => {
+    if (tab !== "progress" || !token || !project || !novel?.id) return;
+    if (run?.novel_id === novel.id) return;
+    const selectedNovelId = novel.id;
+    const selectionEpoch = novelSelectionEpoch.current;
+    let active = true;
+    void api<Run>(`/api/v1/runs/latest?project_id=${project.id}&novel_id=${selectedNovelId}`)
+      .then(nextRun => {
+        if (!active || selectionEpoch !== novelSelectionEpoch.current || novel?.id !== selectedNovelId) return;
+        setRun(nextRun);
+        localStorage.setItem(`nc_current_run:${project.id}`, nextRun.id);
+      })
+      .catch(caught => {
+        if (!active || selectionEpoch !== novelSelectionEpoch.current) return;
+        if (!(caught instanceof ApiError && caught.status === 404)) setError(String(caught));
+      });
+    return () => { active = false; };
+  }, [tab, token, project?.id, novel?.id, run?.novel_id]);
+
   useEffect(() => {
     if (!run) return;
     // 只有 run 与节点都进入终态后才停止轮询；旧数据可能出现 run=succeeded
