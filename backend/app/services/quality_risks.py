@@ -11,6 +11,7 @@ from typing import Any
 
 
 RISK_LABELS: dict[str, str] = {
+    "opening_quality": "开场质量",
     "continuity": "跨章连贯性",
     "pacing": "节奏与铺垫",
     "plot_logic": "因果逻辑",
@@ -20,6 +21,10 @@ RISK_LABELS: dict[str, str] = {
 }
 
 RISK_GUIDANCE: dict[str, dict[str, Any]] = {
+    "opening_quality": {
+        "goal": "执行本章指定的开场类型，避免连续章节复用同一身体感受模板，并在前300字完成可见推进",
+        "checks": ["第一段出现具体压力、目标或选择", "不默认从醒来/疼痛/空泛环境起笔", "最近三章开场类型不重复"],
+    },
     "continuity": {
         "goal": "承接上一章已经落地的具体场景、人物状态、物品和未解悬念，并留下可验证的连续性证据",
         "checks": ["开头直接承接上一章尾部", "时间/地点/人物状态不跳变", "没有无铺垫的新核心人物或能力"],
@@ -47,6 +52,7 @@ RISK_GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 _DIMENSION_ALIASES: dict[str, str] = {
+    "opening_quality": "opening_quality",
     "consistency": "continuity",
     "continuity": "continuity",
     "world_conflict": "continuity",

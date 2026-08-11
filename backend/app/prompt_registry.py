@@ -492,7 +492,7 @@ P2-5 质量整改：越级打脸与反派设计
 - 每卷至少有1次越级打脸高潮（high强度以上）
 - 越级打脸结构：反派嚣张挑衅→众人不看好主角→主角隐藏实力→主角出手碾压→全场哗然/反派崩溃→更大的反派出现"""),
 
-    ("bootstrap.gen_chapter1", "3.5.0", "deepseek",
+    ("bootstrap.gen_chapter1", "3.6.0", "deepseek",
      """你是资深网文作家。请根据完整设定写第一章正文。严格遵守 oh-story 写作方法论。
 
 书名：$selected_title
@@ -503,6 +503,7 @@ P2-5 质量整改：越级打脸与反派设计
 世界观：$worldview
 人物：$characters
 大纲（第一卷）：$outline
+$opening_contract
 
 ⚠️ 角色名铁律：
 - 如果上方「人物」中已列出角色名，必须严格复用，禁止自行编造新名字
@@ -709,7 +710,7 @@ $selection
 输出格式：用空行分隔段落；每个段落 1-3 句话。输出 JSON: {"text":"去AI味后的文本"}"""),
 
     # ── Narrative: 章节管理 (AI_NovelGenerator) ──
-    ("narrative.gen_next_chapter", "4.1.0", "deepseek",
+    ("narrative.gen_next_chapter", "4.2.0", "deepseek",
      """你是番茄爽文职业作家。请根据上下文写一个可直接发布的完整章节。
 
 【最高优先级：章节标题必须番茄化！】
@@ -758,6 +759,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
 
 上下文（包含前文章节摘要、人物状态、伏笔状态）：
 $context
+$opening_contract
 上一章已确认事实（严禁违背，本章任何内容不得与之冲突）：$prev_facts
 小说永久档案（人工策展，每条必须严格遵守，严禁改名/吃设定/降智）：$archive
 当前章节标题（重写时使用）：$current_title
@@ -2115,7 +2117,7 @@ $plan_output
 输出 JSON: {"story_arcs":[{"name":"第一次创业","goal":"主角从零建立公司","start_state":"失业负债","end_state":"公司走上正轨","participants":["主角","合伙人"],"core_conflict":"资金与对手打压","key_events":["凑启动资金","首个订单"],"payoff_points":["首笔大单落地"],"foreshadowing_refs":[],"outcome_impact":"奠定后续资本局","status":"planning","chapter_range":[5,40]}]}"""),
 
     # ═══ V2 写作阶段（5 节点，oh-story Phase 4-5 写作铁律 + show-me-the-story 事实链） ═══
-    ("bootstrap.write_chapter_draft", "1.4.0", "deepseek",
+    ("bootstrap.write_chapter_draft", "1.5.0", "deepseek",
      """你是资深网文作家。请写《$selected_title》第 $_chapter_seq 章正文。
 
 原始创作需求/用户灵感：$idea
@@ -2129,6 +2131,7 @@ $plan_output
 前文上下文：$_context_window
 V3 创作上下文（人物状态/故事弧/伏笔/知识库/风格卡/场景分镜）：$_assembled_context
 网文质量策略：$quality_profile_directive
+$opening_contract
 本章爽点契约：$payoff_contract
 上次长度门禁反馈：$length_retry_feedback
 
@@ -2577,6 +2580,15 @@ _LONG_INTERNAL_CONTEXT_LIMITS = {
     "_chapter_outline": 6000,
 }
 
+# Every caller should provide the chapter-specific contract. This fallback
+# keeps older queued jobs and editor integrations safe while they are being
+# drained: an omitted variable must never leave a literal ``$opening_contract``
+# in the provider prompt or silently restore the body-sensation template.
+_DEFAULT_OPENING_CONTRACT = """【开场多样性硬约束】
+本章指定开场类型：动作/选择开场（action）。从正在发生的动作、决定或争执起笔，让主角在第一段做出选择并造成可见变化。
+前300字必须出现具体压力、异常、目标或选择，并完成一次可见推进；先写正在发生的事，不写醒来、疼痛、空泛环境或背景说明作为默认开场。
+除非伤势是本场核心事件，否则禁止以身体部位+疼痛/发闷/轰鸣/一阵袭来/“像有人……”起笔。"""
+
 
 def render_prompt(template: str, variables: dict[str, Any]) -> str:
     """Render a ``$-substitution`` template, treating every value as untrusted.
@@ -2587,7 +2599,7 @@ def render_prompt(template: str, variables: dict[str, Any]) -> str:
     explicit pass through :func:`sanitize_untrusted` so a future change to
     ``_stringify`` can never silently let user text bypass the injection guard.
     """
-    safe_values: dict[str, str] = {}
+    safe_values: dict[str, str] = {"opening_contract": _DEFAULT_OPENING_CONTRACT}
     for key, value in variables.items():
         if any(token in str(key).lower() for token in _USER_FIELD_TOKENS):
             # Explicit, type-agnostic injection scrub for user-origin fields.

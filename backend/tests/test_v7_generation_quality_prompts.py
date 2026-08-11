@@ -3,6 +3,9 @@ from contextlib import asynccontextmanager
 
 import pytest
 
+from app.prompt_registry import PROMPT_SEEDS, render_prompt
+from app.services.quality_risks import build_quality_repair_contract
+from app.v7.quality.deai_metrics import analyze_deai_patterns
 from app.v7.generation.generation_engine import (
     AIGatewayError,
     DeAIPipeline,
@@ -11,6 +14,11 @@ from app.v7.generation.generation_engine import (
     ensure_unique_chapter_title,
     validate_tomato_chapter_title,
 )
+from app.v7.quality.opening_variation import (
+    inspect_opening,
+    select_opening_plan,
+)
+from app.v7.quality.readability_contract import build_readability_plan, render_readability_plan
 
 
 def test_repeated_chapter_title_gets_a_short_plot_hook():
@@ -36,6 +44,123 @@ def test_repeated_chapter_title_gets_a_short_plot_hook():
 def test_tomato_title_gate_rejects_summary_titles_and_accepts_reader_hooks():
     assert validate_tomato_chapter_title("江心岛迷雾·周衡在逃脱后，发现手机屏")[0] is False
     assert validate_tomato_chapter_title("密室现身")[0] is True
+
+
+def test_opening_scheduler_is_global_and_does_not_default_to_body_sensation():
+    first = select_opening_plan(1, previous_history=[])
+    assert first["mode"] == "action"
+    assert first["mode"] != "body_sensation"
+
+    second = select_opening_plan(
+        2,
+        chapter_type="normal",
+        previous_history=[{"chapter_number": 1, "mode": first["mode"]}],
+    )
+    assert second["mode"] != first["mode"]
+    assert second["mode"] != "body_sensation"
+
+
+def test_opening_gate_rejects_the_repeated_body_sensation_template():
+    text = "后脑勺的钝痛一浪一浪地顶上来，像有人攥着他的后脑勺往地上砸。"
+    result = inspect_opening(
+        text,
+        requested_mode="action",
+        chapter_number=1,
+    )
+    assert result["passed"] is False
+    assert result["observed_mode"] == "body_sensation"
+    assert {
+        item["code"] for item in result["flags"]
+    } >= {
+        "opening_body_sensation_default",
+        "opening_body_sensation_cliche",
+        "opening_first_chapter_body_default",
+    }
+
+
+def test_readability_plan_is_deterministic_and_changes_delivery_texture():
+    first = build_readability_plan(
+        1,
+        chapter_type="normal",
+        plot_brief={
+            "reader_promise": "看主角在公开场合反击",
+            "emotional_target": "压迫 -> 爆发 -> 追杀",
+            "hook": "对手拿出主角不该知道的证据",
+        },
+        opening_plan={"mode": "action", "label": "动作/选择开场"},
+    )
+    second = build_readability_plan(
+        2,
+        chapter_type="relationship",
+        plot_brief={"reader_promise": "看两人的关系彻底撕开"},
+        opening_plan={"mode": "dialogue", "label": "对白冲突开场"},
+    )
+
+    assert first["information_delivery"]["mode"] == "action_consequence"
+    assert second["information_delivery"]["mode"] == "dialogue_subtext"
+    rendered = render_readability_plan(first)
+    assert "生成前可读性预案" in rendered
+    assert "事件先发生" in rendered
+    assert "不要把每个人的反应都写成整齐的震惊" in rendered
+
+
+def test_opening_gate_blocks_recent_mode_reuse_but_allows_explicit_body_contract():
+    repeated = inspect_opening(
+        "他抬手按住门把，门内立刻传来第二声敲击。",
+        requested_mode="action",
+        chapter_number=4,
+        recent_modes=["action", "dialogue", "action"],
+    )
+    assert repeated["passed"] is False
+    assert any(item["code"] == "opening_mode_repetition" for item in repeated["flags"])
+
+    explicit_body = inspect_opening(
+        "胸口的刺痛逼得他弯下腰，血顺着衣襟滴到地上。",
+        requested_mode="body_sensation",
+        chapter_number=4,
+    )
+    assert explicit_body["passed"] is True
+
+
+def test_legacy_prompt_templates_have_a_safe_global_opening_fallback():
+    seeds = {name: template for name, _version, _model, template in PROMPT_SEEDS}
+    for name in (
+        "bootstrap.gen_chapter1",
+        "narrative.gen_next_chapter",
+        "bootstrap.write_chapter_draft",
+    ):
+        rendered = render_prompt(seeds[name], {})
+        assert "$opening_contract" not in rendered
+        assert "开场多样性硬约束" in rendered
+        assert "身体部位+疼痛" in rendered
+
+
+def test_opening_gate_is_a_blocking_quality_repair_category():
+    contract = build_quality_repair_contract({
+        "overall_score": 95,
+        "dimensions": {"opening_quality": 95},
+        "issues": [{
+            "dimension": "opening_quality",
+            "severity": "high",
+            "description": "开场类型门禁未通过",
+        }],
+    })
+    assert contract["passed"] is False
+    assert "opening_quality" in contract["blocking_categories"]
+
+
+def test_structural_ai_smell_triggers_semantic_rewrite_instead_of_remaining_advisory():
+    text = "\n\n".join(
+        [
+            "沈夜看着门口的灯，缓缓地走向前方，心里明白事情不会如此简单。" * 2
+            for _ in range(20)
+        ]
+    )
+    metrics = analyze_deai_patterns(text, profile={"platform": "fanqie"})
+    assert any(flag["code"] == "structural_ai_smell" for flag in metrics["flags"])
+    assert "structural_ai_smell" in {
+        flag["code"] for flag in metrics["flags"]
+    }
 
 
 def test_deterministic_opening_repair_preserves_paragraphs_and_reaches_target():
@@ -223,6 +348,32 @@ def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     assert "章末必须把钩子落实" in prompt
     assert "压制→蓄力→爆发→反馈→余波" in prompt
     assert "反馈必须落到对手、组织、资源、规则或旁观者的可见变化" in prompt
+
+
+def test_generation_prompt_carries_readability_contract_before_writing():
+    plan = build_readability_plan(
+        12,
+        chapter_type="normal",
+        plot_brief={"reader_promise": "看主角当场翻盘"},
+        opening_plan={"mode": "object", "label": "物件异常开场"},
+    )
+    prompt = GenerationEngine._build_generation_prompt(
+        None,
+        12,
+        {"rendered_context": "", "context_layers": {"readability_plan": plan}},
+        {
+            "chapter_title": "门后是什么",
+            "reader_promise": "看主角当场翻盘",
+            "beats": [],
+            "readability_plan": plan,
+        },
+        None,
+        3000,
+    )
+
+    assert "【生成前可读性预案：先执行，再写正文】" in prompt
+    assert "用动作和立刻发生的后果交付信息" in prompt
+    assert "不是事后润色" not in prompt
 
 
 def test_plot_brief_preserves_payoff_phase_labels_for_the_writer():

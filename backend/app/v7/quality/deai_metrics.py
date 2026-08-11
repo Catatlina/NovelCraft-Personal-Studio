@@ -171,8 +171,8 @@ def analyze_deai_patterns(
     report_metrics = analyze_report_metrics(text, profile=profile)
     
     # 阶段2：去AI味两层互补 - 模式级检测
-    # 与词级检查并联，补充检测行文模式和结构
-    # 目前作为信息返回，不加入 flags，后续可根据需要调整
+    # 与词级检查并联，补充检测行文模式和结构。以前这里只返回信息，
+    # 导致整章结构已经呈现机器化特征时仍然不会触发语义重写。
     structural_ai_smell_result = None
     if size >= 500:  # 文本太短时不做模式级检测，结果不准确
         # 根据平台选择阈值预设
@@ -233,6 +233,34 @@ def analyze_deai_patterns(
             "evidence": duplicate_paragraphs.get("examples") or [],
         })
 
+    if structural_ai_smell_result:
+        failed_dimensions = [
+            dimension
+            for dimension in structural_ai_smell_result.dimensions
+            if not dimension.passed
+            and not (
+                dimension.name == "对话省略比例"
+                and "0/0" in str(dimension.detail)
+            )
+        ]
+        # One failed dimension is not proof of machine prose: a dialogue-free
+        # chapter, for example, can legitimately score low on dialogue
+        # omission. Require multiple independent signals before paying for a
+        # semantic rewrite or blocking a draft.
+        if len(failed_dimensions) >= 2 and structural_ai_smell_result.overall_score < 75:
+            flags.append({
+                "code": "structural_ai_smell",
+                "severity": "medium",
+                "message": (
+                    "模式级 AI 味信号叠加："
+                    + "、".join(dimension.name for dimension in failed_dimensions[:4])
+                ),
+                "evidence": {
+                    "overall_score": structural_ai_smell_result.overall_score,
+                    "failed_dimensions": [dimension.to_dict() for dimension in failed_dimensions],
+                },
+            })
+
     risk_score = min(
         100,
         ai_phrase_hits * 12
@@ -246,6 +274,14 @@ def analyze_deai_patterns(
         risk_score = min(100, risk_score + min(18, tic_metrics["dominant_count"] * 2))
     if duplicate_ratio >= 0.01:
         risk_score = min(100, max(risk_score, 70 if duplicate_ratio < 0.08 else 95))
+    if any(
+        isinstance(flag, dict) and flag.get("code") == "structural_ai_smell"
+        for flag in flags
+    ) and structural_ai_smell_result:
+        risk_score = min(
+            100,
+            max(risk_score, int(round(100 - structural_ai_smell_result.overall_score))),
+        )
     return {
         "schema_version": "deai-metrics-v1",
         "risk_score": risk_score,

@@ -22,6 +22,12 @@ from .. import gateway
 from ..repositories import loop_repos as repo
 from .content_policy import analyze_content_policy
 from .pov_quality import analyze_third_person_narrative
+from ..v7.quality.opening_variation import (
+    build_opening_history,
+    inspect_opening,
+    opening_prompt_block,
+    select_opening_plan,
+)
 
 # Repair is triggered below this average 7-dim score. Overridable so the repair
 # branch can be exercised against real text without faking a review result.
@@ -622,6 +628,24 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
     context_text, context_hash, included, layers = _build_context_pkg(
         project_id, novel_id, chapter_seq, style, bible
     )
+    legacy_history = build_opening_history(
+        [
+            {"chapter_number": row.get("seq"), "text": row.get("text") or ""}
+            for row in repo.get_recent_chapter_bodies(novel_id, limit=3)
+            if int(row.get("seq") or 0) < chapter_seq
+        ],
+        limit=3,
+    )
+    opening_plan = select_opening_plan(
+        chapter_seq,
+        previous_history=legacy_history,
+        plot_brief={"chapter_type": "normal"},
+    )
+    opening_contract = opening_prompt_block(opening_plan)
+    context_text = context_text + "\n\n" + opening_contract
+    included.append("opening_variation")
+    layers["opening_variation"] = len(opening_contract)
+    context_hash = _hash(context_text)
     repo.ensure_book_config(project_id, novel_id, genre=ctx.get("genre", "都市重生"))
 
     # 1. generate with layered retry (§6.3 task_retry_policy)
@@ -645,6 +669,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         "worldview": ctx.get("worldview", ""),
                         "characters": ctx.get("characters", ""),
                         "outline": "",
+                        "opening_contract": opening_contract,
                     },
                 )
             else:
@@ -666,6 +691,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         "review_feedback": "",
                         "prev_facts": prev_facts_var,
                         "archive": archive_var,
+                        "opening_contract": opening_contract,
                     },
                 )
             chapter = out.get("chapter", {})
@@ -696,14 +722,15 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             user_id=user_id,
             variables={
                 "context": context_text,
-                        "current_title": title,
-                        "current_body": text,
-                        "archive": archive_var,
-                        "prev_facts": prev_facts_var,
-                        "review_feedback": (
+                "current_title": title,
+                "current_body": text,
+                "archive": archive_var,
+                "prev_facts": prev_facts_var,
+                "review_feedback": (
                     f"字数不足：当前 {len(text)} 字，必须扩写至 {MIN_CHAPTER_CHARS} 字以上，"
                     "不得删减既有情节，只做加密加细。"
                 ),
+                "opening_contract": opening_contract,
             },
         )
         exp_chapter = exp.get("chapter", {})
@@ -733,7 +760,13 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         _profile["genre"] = _ai.get("genre") or _ai.get("category") or ""
     pov_check = analyze_third_person_narrative(text)
     content_check = analyze_content_policy(text, _profile)
-    if not pov_check["passed"] or not content_check["passed"]:
+    opening_check = inspect_opening(
+        text,
+        requested_mode=opening_plan.get("mode"),
+        chapter_number=chapter_seq,
+        recent_modes=opening_plan.get("forbidden_recent_modes") or [],
+    )
+    if not pov_check["passed"] or not content_check["passed"] or not opening_check["passed"]:
         feedback_parts = []
         if not pov_check["passed"]:
             feedback_parts.append(
@@ -745,6 +778,11 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                 "内容安全/架空现实违规：删除脏话、敏感表达；都市题材将现实人名、地名、公司、平台、品牌和事件"
                 "全部改成原创虚构实体。普通词‘草’只有在明确植物语境下保留，脏话用干净替代表达。"
             )
+        if not opening_check["passed"]:
+            feedback_parts.append(
+                "开场类型门禁未通过：必须执行指定的" + str(opening_plan.get("label") or opening_plan.get("mode"))
+                + "，只重写前300-500字的起笔，保留原有事件、人物、时间线和因果；禁止身体部位+疼痛/一阵/像有人模板。"
+            )
         _rp = gateway.complete(
             run_id=run_id, node_key="policy_fix", project_id=project_id,
             task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
@@ -752,7 +790,8 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             variables={"context": context_text, "current_title": title,
                        "current_body": text,
                        "review_feedback": "严重违规，必须完整重写表达但保留已发生事件、人物关系、时间线和因果："
-                                         + "；".join(feedback_parts)},
+                                         + "；".join(feedback_parts),
+                       "opening_contract": opening_contract},
         )
         _rp_ch = _rp.get("chapter", {}) or {}
         _rp_paras = _rp_ch.get("body", []) if isinstance(_rp_ch, dict) else []
@@ -763,6 +802,12 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
             _save_chapter_content(project_id, novel_id, chapter_seq, title, paragraphs)
             pov_check = analyze_third_person_narrative(text)
             content_check = analyze_content_policy(text, _profile)
+            opening_check = inspect_opening(
+                text,
+                requested_mode=opening_plan.get("mode"),
+                chapter_number=chapter_seq,
+                recent_modes=opening_plan.get("forbidden_recent_modes") or [],
+            )
             report["steps"].append({
                 "step": "policy_fix", "applied": True,
                 "pov_passed": pov_check["passed"],
@@ -775,6 +820,7 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         "step": "generation_policy_preflight",
         "pov": pov_check,
         "content_policy": content_check,
+        "opening": opening_check,
     })
     if not pov_check["passed"]:
         quality_blocked = True
@@ -784,6 +830,12 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
         quality_block_reasons.extend(
             str(item.get("code") or "content_policy_failed")
             for item in content_check.get("failures") or []
+        )
+    if not opening_check["passed"]:
+        quality_blocked = True
+        quality_block_reasons.extend(
+            str(item.get("code") or "opening_variation_failed")
+            for item in opening_check.get("flags") or []
         )
 
     # 1d. continuity fact-lock guard (deterministic backstop for model priors that
@@ -890,7 +942,8 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                         prompt_name="narrative.gen_next_chapter", user_id=user_id,
                         variables={"context": context_text, "current_title": title,
                                    "current_body": "", "review_feedback": fb,
-                                   "prev_facts": facts, "archive": archive_var},
+                                   "prev_facts": facts, "archive": archive_var,
+                                   "opening_contract": opening_contract},
                     )
                     cg_ch = cg.get("chapter", {}) or {}
                     cg_paras = cg_ch.get("body", []) if isinstance(cg_ch, dict) else []
@@ -1146,7 +1199,8 @@ def run_single_chapter(project_id: str, novel_id: str, chapter_seq: int,
                 task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
                 user_id=user_id,
                 variables={"context": context_text, "current_title": title,
-                           "current_body": text, "review_feedback": feedback},
+                           "current_body": text, "review_feedback": feedback,
+                           "opening_contract": opening_contract},
             )
             rw_chapter = rw.get("chapter", {}) or {}
             rw_paras = rw_chapter.get("body", []) if isinstance(rw_chapter, dict) else []

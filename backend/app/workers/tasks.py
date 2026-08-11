@@ -45,6 +45,12 @@ from app.services.quality_profiles import (
     profile_from_context,
     quality_profile_metadata,
 )
+from app.v7.quality.opening_variation import (
+    build_opening_history,
+    inspect_opening,
+    opening_prompt_block,
+    select_opening_plan,
+)
 from app.services.planning_contract import (
     creative_bible_section_defects,
     creative_bible_strategy_section_defects,
@@ -363,14 +369,77 @@ def _quality_directive_for_chapter(run_context: dict) -> tuple[str, dict[str, An
         chapter_outline = {}
     profile = profile_from_context(run_context)
     contract = chapter_outline.get("payoff_contract") if isinstance(chapter_outline, dict) else None
+    opening_plan = select_opening_plan(
+        seq,
+        chapter_type=chapter_outline.get("chapter_type") if isinstance(chapter_outline, dict) else None,
+        previous_history=run_context.get("_opening_history") or [],
+        plot_brief=chapter_outline,
+    )
     directive = compile_quality_directive(
         profile,
         chapter_number=seq,
         chapter_function=chapter_outline,
         payoff_contract=contract if isinstance(contract, dict) else None,
         active_rules=run_context.get("active_rules") or [],
+        opening_plan=opening_plan,
     )
     return directive, quality_profile_metadata(profile), contract if isinstance(contract, dict) else {}
+
+
+def _opening_contract_for_chapter(run_context: dict[str, Any]) -> str:
+    """Shared opening contract for the compatibility/bootstrap writer."""
+    seq = int(run_context.get("_chapter_seq") or run_context.get("chapter_seq") or 1)
+    outline = run_context.get("_chapter_outline") or {}
+    outline = outline if isinstance(outline, dict) else {}
+    plan = select_opening_plan(
+        seq,
+        chapter_type=outline.get("chapter_type") or outline.get("function_type"),
+        previous_history=run_context.get("_opening_history") or [],
+        plot_brief=outline,
+    )
+    return opening_prompt_block(plan)
+
+
+def _opening_history_for_novel(novel_id: str, before_chapter: int | None = None) -> list[dict[str, Any]]:
+    """Load recent persisted prose for legacy worker routes.
+
+    The canonical V7 brain already supplies this history. This small adapter
+    keeps direct Celery/editor calls on the same global scheduler without
+    adding a second source of story facts.
+    """
+    db = connect()
+    try:
+        try:
+            rows = db.execute(
+                """SELECT seq, body FROM contents
+                   WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+                   AND status='reviewed'
+                   ORDER BY seq DESC LIMIT 5""",
+                (novel_id,),
+            ).fetchall()
+        except Exception:
+            # History is a quality input, not a reason to turn an otherwise
+            # explicit generation failure into a database-shaped exception.
+            rows = []
+    finally:
+        db.close()
+    chapters = []
+    for row in reversed(rows):
+        seq = int(row.get("seq") or 0)
+        if before_chapter is not None and seq >= int(before_chapter):
+            continue
+        chapters.append({
+            "chapter_number": seq,
+            "text": extract_body_text(row.get("body") or ""),
+        })
+    return build_opening_history(chapters, limit=3)
+
+
+def _opening_plan_for_novel(novel_id: str, chapter_number: int) -> dict[str, Any]:
+    return select_opening_plan(
+        chapter_number,
+        previous_history=_opening_history_for_novel(novel_id, before_chapter=chapter_number),
+    )
 
 
 def _market_benchmark_for_run(run_context: dict[str, Any] | None, *, chapter_number: int = 1) -> dict[str, Any]:
@@ -1618,6 +1687,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         **run_context,
                         "fidelity_feedback": "；".join(fidelity_feedback),
                         "quality_profile_directive": quality_directive,
+                        "opening_contract": _opening_contract_for_chapter(run_context),
                         "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
                         "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
                         "market_benchmark": json.dumps(
@@ -1816,6 +1886,7 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
                         "length_retry_feedback": quality_feedback,
                         "quality_retry_feedback": quality_feedback,
                         "quality_profile_directive": quality_directive,
+                        "opening_contract": _opening_contract_for_chapter(run_context),
                         "quality_profile": json.dumps(quality_metadata, ensure_ascii=False),
                         "payoff_contract": json.dumps(payoff_contract, ensure_ascii=False),
                         "market_benchmark": json.dumps(
@@ -3056,13 +3127,21 @@ def _generate_next_chapter_unlocked(novel_id: str, project_id: str,
         inject_str = inject_foreshadow_context(due_foreshadows)
         context = inject_str + "\n\n" + context
 
+    opening_plan = _opening_plan_for_novel(novel_id, next_seq)
+    opening_contract = opening_prompt_block(opening_plan)
+
     # Generate — output is schema-validated by the gateway; the stable mutation id
     # lets a retry replay the succeeded ai_call instead of paying for a new one.
     generation_key = slot_key or f"novel:{novel_id}:chapter:{next_seq}:v1"
     output = complete(
         run_id=None, node_key=None, project_id=project_id,
         task_type="gen_next_chapter", prompt_name="narrative.gen_next_chapter",
-        variables={"context": context, "context_length": len(context), "assembled_layers": list(assembler.layers_built.keys())},
+        variables={
+            "context": context,
+            "context_length": len(context),
+            "assembled_layers": list(assembler.layers_built.keys()),
+            "opening_contract": opening_contract,
+        },
         client_mutation_id=generation_key,
     )
 
@@ -3212,9 +3291,17 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
     current_body = list(paragraphs)
     last_score = 0.0
     last_chars = 0
+    opening_plan = _opening_plan_for_novel(novel_id, chapter_seq)
+    opening_contract = opening_prompt_block(opening_plan)
     for attempt in range(max_rewrites + 1):
         current_text = "\n".join(current_body)
         last_chars = count_content_chars(current_text)
+        opening_quality = inspect_opening(
+            current_text,
+            requested_mode=opening_plan.get("mode"),
+            chapter_number=chapter_seq,
+            recent_modes=opening_plan.get("forbidden_recent_modes") or [],
+        )
         length_ok = last_chars >= MIN_CHAPTER_CHARS
         length_issue = "" if length_ok else f"字数不足：{last_chars}/{MIN_CHAPTER_CHARS} 字"
         review = _try_canonical_v7_review(
@@ -3255,6 +3342,15 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
         if length_issue:
             score = min(score, threshold - 1)
             issues.append(length_issue)
+        if not opening_quality["passed"]:
+            for flag in opening_quality.get("flags") or []:
+                issues.append({
+                    "dimension": "opening_quality",
+                    "severity": "high",
+                    "description": flag.get("message") or "开场质量门禁未通过",
+                    "suggestion": "只重写前300-500字的起笔，保留人物、事件、时间线和因果，并执行指定开场类型",
+                    "excerpt": flag.get("evidence") or "",
+                })
         # V3 §11.1 reader experience: advisory only — surfaces weak dims as
         # issues + durable meta, never changes score / never blocks the gate.
         from app.services.reader_experience import (
@@ -3311,6 +3407,7 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             "quality_risks": quality_contract["risks"],
             "quality_status": "ai_review_passed" if passed else "needs_rewrite",
             "quality_reason": f"score={score:.0f}/{threshold:.0f}, chars={last_chars}",
+            "opening_quality": opening_quality,
         }
         if canonical_v7:
             review_meta.update({
@@ -3380,7 +3477,8 @@ def _review_and_finalize_chapter(chapter_id: str, novel_id: str, project_id: str
             variables={"rewrite": True, "chapter_seq": chapter_seq, "current_title": current_title,
                        "current_body": current_text,
                        "review_feedback": repair_feedback(quality_contract, issues),
-                       "continuity": continuity},
+                       "continuity": continuity,
+                       "opening_contract": opening_contract},
             client_mutation_id=f"{generation_key}:rewrite:{attempt + 1}:v1",
         )["chapter"]
         current_title = rewritten["title"]
@@ -3455,6 +3553,7 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
     project_id = chapter["project_id"]
     novel_id = chapter["parent_id"]
     db.close()
+    opening_contract = opening_prompt_block(_opening_plan_for_novel(novel_id, seq))
 
     # ``canonical`` is retained only for queued-message compatibility.  Manual
     # regeneration is also V7-only now; otherwise an old retry could silently
@@ -3589,6 +3688,7 @@ def regenerate_chapter_task(self, chapter_id: str, reason: str = "",
             "current_body": current_text,
             "review_feedback": [reason or "人工审核拒绝：请重写本章，保留章节序号，强化冲突、叙事和可读性。"],
             "context": f"小说：《{novel['title']}》\n章节序号：第{seq}章\n拒绝原因：{reason}",
+            "opening_contract": opening_contract,
         },
         client_mutation_id=f"manual-review:{chapter_id}:regenerate:{int(time.time())}:v1",
     )

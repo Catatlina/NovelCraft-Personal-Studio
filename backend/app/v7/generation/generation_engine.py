@@ -51,6 +51,17 @@ from ...services.quality_profiles import (
 )
 from ..quality.deai_metrics import analyze_deai_patterns
 from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
+from ..quality.opening_variation import (
+    build_opening_history,
+    inspect_opening,
+    opening_prompt_block,
+    select_opening_plan,
+)
+from ..quality.readability_contract import (
+    build_readability_plan,
+    readability_plan_metadata,
+    render_readability_plan,
+)
 from ..quality.web_research import WebResearchService, render_web_research_guidance
 from ...services.pov_quality import analyze_third_person_narrative, third_person_generation_contract
 
@@ -470,6 +481,7 @@ class ContextAssembler:
             count=3,
             include_rejected=include_rejected,
         )
+        opening_history = build_opening_history(previous, limit=3)
         payoff_history_chapters = await self.load_previous_chapters(
             chapter_number,
             count=5,  # P1-1 质量整改：payoff_history 从20章降到5章
@@ -558,6 +570,7 @@ class ContextAssembler:
             # mirror detector after the new chapter is generated.
             "previous_full_text": previous[-1].get("text") if previous else "",
             "previous_transition_contract": previous_transition_contract,
+            "opening_history": opening_history,
             "recent_payoff_types": recent_payoff_types[-8:],
             "recent_payoff_history": recent_payoff_history[-5:],  # P1-1 质量整改：从20章降到5章
             "style_card": style_card,
@@ -711,6 +724,16 @@ class ContextAssembler:
         tail = layers.get("previous_tail")
         if tail:
             blocks.append("【上一章结尾原文（用于承接）】\n" + tail)
+
+        opening_history = layers.get("opening_history") or []
+        if opening_history:
+            blocks.append(
+                "【最近章节开场类型（只用于避免模板重复）】\n"
+                + "、".join(
+                    f"第{item.get('chapter_number')}章:{item.get('mode')}"
+                    for item in opening_history[-3:]
+                )
+            )
 
         return "\n\n".join(blocks) if blocks else "（暂无历史上下文，这是故事的开端）"
 
@@ -914,6 +937,8 @@ class SceneDirector:
             "conflict": plot_brief.get("tension_target"),
             "hook": plot_brief.get("hook"),
             "reader_promise": plot_brief.get("reader_promise"),
+            "reader_experience_plan": plot_brief.get("reader_experience_plan") or {},
+            "prose_texture_plan": plot_brief.get("prose_texture_plan") or {},
             "payoff_contract": plot_brief.get("payoff_contract") or {},
             "chapter_type": plot_brief.get("chapter_type") or plot_brief.get("chapter_mode") or "normal",
             "emotional_target": plot_brief.get("emotional_target"),
@@ -935,6 +960,8 @@ class SceneDirector:
         plot_brief: dict[str, Any] | None = None,
         quality_profile: dict[str, Any] | None = None,
         previous_titles: list[Any] | None = None,
+        opening_plan: dict[str, Any] | None = None,
+        readability_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Produce a beat sheet. Returns dict including `_usage` for accounting.
 
@@ -942,6 +969,24 @@ class SceneDirector:
         plot engine's assessment pass, it is adopted directly instead of paying
         for a second planning call that could contradict the first.
         """
+        context_layers = context.get("context_layers") or {}
+        chapter_type_hint = (plot_brief or {}).get("chapter_type") if isinstance(plot_brief, dict) else None
+        effective_opening_plan = opening_plan or select_opening_plan(
+            chapter_number,
+            chapter_type=chapter_type_hint,
+            previous_history=context_layers.get("opening_history") or [],
+            plot_brief=plot_brief,
+        )
+        readability_plan = readability_plan or build_readability_plan(
+            chapter_number,
+            chapter_type=chapter_type_hint,
+            plot_brief=plot_brief,
+            quality_profile=quality_profile,
+            opening_plan=effective_opening_plan,
+            style_card=context_layers.get("style_card") or {},
+            recent_history=context_layers.get("readability_history") or [],
+        )
+
         adopted = self._adopt_plot_brief(
             chapter_number,
             target_word_count,
@@ -954,6 +999,8 @@ class SceneDirector:
                     adopted,
                     target_word_count=target_word_count,
                 )
+                adopted["opening_plan"] = effective_opening_plan
+                adopted["readability_plan"] = readability_plan
                 return adopted
             except AIGatewayError:
                 # Plot assessment and scene planning are separate Provider
@@ -980,6 +1027,8 @@ class SceneDirector:
             chapter_function=plot_brief or {},
             payoff_contract=(plot_brief or {}).get("payoff_contract") if plot_brief else None,
             active_rules=(context.get("context_layers") or {}).get("active_rules") or [],
+            opening_plan=effective_opening_plan,
+            readability_plan=readability_plan,
         )
 
         # 章节标题番茄化要求（最高优先级）
@@ -1055,6 +1104,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 f"═════════════════════════════════════════════════════════════\n\n"
             )
 
+        opening_block = opening_prompt_block(effective_opening_plan)
         prompt = (
             f"【最高优先级：核心设定与硬性约束 - 必须严格遵守，不得擅自修改！】\n"
             f"═════════════════════════════════════════════════════════════\n"
@@ -1073,7 +1123,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             f"{brief_block}\n"
             f"目标字数：{target_word_count} 字。\n\n"
             f"{title_tomato_requirement}\n"
+            f"{render_readability_plan(readability_plan)}\n\n"
             f"【网文质量策略】\n{quality_directive}\n\n"
+            f"{opening_block}\n\n"
             "请只输出 JSON，格式：\n"
             "{\n"
             '  "chapter_title": "本章标题",\n'
@@ -1088,6 +1140,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             '  "hook": "章末钩子",\n'
             '  "reader_promise": "读者在本章应获得的情绪/信息承诺",\n'
             '  "emotional_target": "开场情绪 -> 中段转折 -> 章末情绪",\n'
+            '  "reader_experience_plan": {"reader_emotion":"本章读者情绪","information_to_feel":"读者要现场感受到的变化","scene_payoff":"本章兑现","avoid":["同构写法"]},\n'
+            '  "prose_texture_plan": {"information_delivery":"动作/对白/物件/反馈","rhythm":"句段节奏","voice_anchor":"人物声音抓手"},\n'
+            '  "opening_mode": "action|dialogue|object|external_event|environment|body_sensation",\n'
             '  "opening_anchor": "与上一章尾部衔接的具体动作/地点/未决问题",\n'
             '  "payoff_contract": {"reader_promise":"读者本章要等什么","pressure":"当前压力",'
             '"active_choice":"主角主动选择","payoff_type":"兑现类型",'
@@ -1115,7 +1170,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             max_tokens=2000,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.3.0",
+            prompt_version="1.4.0",
         )
         plan = result["data"]
         usage = dict(result.get("usage") or {})
@@ -1174,6 +1229,23 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         )
         plan["chapter_number"] = chapter_number
         plan["chapter_type"] = str(plan.get("chapter_type") or "normal").strip().lower()
+        if plan["chapter_type"] != str(readability_plan.get("chapter_type") or "normal"):
+            readability_plan = build_readability_plan(
+                chapter_number,
+                chapter_type=plan["chapter_type"],
+                plot_brief={
+                    **(plot_brief or {}),
+                    "chapter_type": plan["chapter_type"],
+                },
+                quality_profile=quality_profile,
+                opening_plan=effective_opening_plan,
+                style_card=context_layers.get("style_card") or {},
+                recent_history=context_layers.get("readability_history") or [],
+            )
+        # The provider may describe the scene, but the application-owned
+        # scheduler is the authority for opening diversity.
+        plan["opening_plan"] = effective_opening_plan
+        plan["readability_plan"] = readability_plan
         plan["target_word_count"] = target_word_count
         self.validate_scene_plan_contract(plan, target_word_count=target_word_count)
         plan["_usage"] = usage
@@ -1233,6 +1305,7 @@ class DeAIPipeline:
         "ai_phrase",
         "repeated_phrase",           # P0-1: 恢复重复短语检测
         "repeated_tic",
+        "structural_ai_smell",
     }
     # Low-severity observations remain auditable metrics, but must not trigger
     # a billable whole-chapter provider rewrite on their own.
@@ -1244,6 +1317,7 @@ class DeAIPipeline:
         "duplicate_paragraph",
         "ai_phrase",
         "repeated_tic",
+        "structural_ai_smell",
     }
 
     def __init__(self, gateway: "AIGateway | None" = None):
@@ -1428,6 +1502,7 @@ class DeAIPipeline:
         safe_deduplicate: bool = False,
         active_rules: list[Any] | None = None,
         force_semantic_rewrite: bool = False,
+        readability_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run rule pre-clean and semantic humanization.
 
@@ -1570,7 +1645,9 @@ class DeAIPipeline:
             "结构层打散‘提出观点-解释-总结’的重复段式，场景转换用动作/对白承接，"
             "章末保留悬念而不是总结；句法层减少正式连接词、对称排比和过度完整的解释；"
             "词语层删除高频套话、翻译腔和空泛形容；人物层保留角色口吻与对白潜台词，"
-            "用动作和细节承载情绪，不把情绪标签直接说满。原文自然的地方少改，"
+            "用动作和细节承载情绪，不把情绪标签直接说满。不要把全文修成同一种‘干净、完整、均匀’的句子，"
+            "允许符合人物口吻的短句、碎片句、停顿和省略主语；让段落有长短落差，段首轮换动作、物件、声音、对白、"
+            "环境后果和人物反应，但不要按固定顺序机械轮换。原文自然的地方少改，"
             "不得摘要、缩写、新增剧情或机械删成电报句。标点不设禁用清单；"
             "保留有语义必要的破折号、省略号和分号，只处理整章高密度、连续重复或模板化使用。\n\n"
             f"{third_person_generation_contract()}\n"
@@ -1579,7 +1656,8 @@ class DeAIPipeline:
             f"【禁止改动】\n{forbidden_changes or '情节、人物、时间线、设定与对白信息'}\n\n"
             f"【作者文风卡】\n{style_profile or '（暂无作者文风卡）'}\n\n"
             f"【上次质量反馈】\n{quality_retry_feedback or '（首次定稿）'}\n\n"
-            f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=payoff_contract, active_rules=active_rules)}\n\n"
+            f"【本章质量策略】\n{compile_quality_directive(quality_profile, payoff_contract=payoff_contract, active_rules=active_rules, readability_plan=readability_plan)}\n\n"
+            f"{render_readability_plan(readability_plan, compact=True) if readability_plan else ''}\n\n"
             f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
             # P1-2 质量整改：调整爽点保护锚点的描述
             # 明确告诉模型：保护的是事实和因果，表达方式可以完全彻底重写
@@ -1611,7 +1689,7 @@ class DeAIPipeline:
                     + content_generation_contract(quality_profile)
                 ),
                 max_tokens=max(2400, min(5200, int(chinese_word_count(text) * 1.18))),
-                temperature=0.45,
+                temperature=0.65,
                 prompt_name="bootstrap.final_humanize",
                 prompt_version="1.3.0",
             )
@@ -1838,6 +1916,38 @@ class DeAIPipeline:
                         "applied": True,
                         "evidence": fallback_evidence,
                     })
+        structural_smell = after_metrics.get("structural_ai_smell") or {}
+        structural_flags = [
+            flag for flag in after_metrics.get("flags") or []
+            if isinstance(flag, dict) and flag.get("code") == "structural_ai_smell"
+        ]
+        if structural_flags:
+            structural_evidence = {
+                "message": structural_flags[0].get("message") or "模式级 AI 味门禁未通过",
+                "evidence": structural_smell,
+            }
+            if opening_repair_gate.get("passed", True):
+                opening_repair_gate = {
+                    **opening_repair_gate,
+                    "passed": False,
+                    "code": "structural_ai_smell",
+                    **structural_evidence,
+                }
+            else:
+                # Preserve the first concrete failure (for example a provider
+                # rejection) while keeping the independent structural signal
+                # visible for the next bounded retry and audit trail.
+                opening_repair_gate = {
+                    **opening_repair_gate,
+                    "structural_ai_smell": structural_evidence,
+                }
+            layers.append({
+                "layer": "structural_ai_smell_gate",
+                "changes": 0,
+                "applied": False,
+                "reason": "语义改写后仍有多项独立结构信号未消除",
+                "evidence": structural_flags[0].get("evidence") or {},
+            })
         layers.append(
             {
                 "layer": "semantic_final_humanize",
@@ -2720,6 +2830,24 @@ class GenerationEngine:
                 },
             )
 
+        opening_plan = select_opening_plan(
+            chapter_number,
+            chapter_type=(plot_brief or {}).get("chapter_type") if isinstance(plot_brief, dict) else None,
+            previous_history=(context.get("context_layers") or {}).get("opening_history") or [],
+            plot_brief=plot_brief,
+        )
+        context.setdefault("context_layers", {})["opening_plan"] = opening_plan
+        readability_plan = build_readability_plan(
+            chapter_number,
+            chapter_type=(plot_brief or {}).get("chapter_type") if isinstance(plot_brief, dict) else None,
+            plot_brief=plot_brief,
+            quality_profile=self.quality_profile,
+            opening_plan=opening_plan,
+            style_card=(context.get("context_layers") or {}).get("style_card") or {},
+            recent_history=(context.get("context_layers") or {}).get("readability_history") or [],
+        )
+        context.setdefault("context_layers", {})["readability_plan"] = readability_plan
+
         # Step: plan scene (real AI)
         async with self.tracer.trace_step(
             "generation.plan_scene",
@@ -2734,6 +2862,8 @@ class GenerationEngine:
                 plot_brief=plot_brief,
                 quality_profile=self.quality_profile,
                 previous_titles=context.get("previous_titles") or [],
+                opening_plan=opening_plan,
+                readability_plan=readability_plan,
             )
             add_usage(step, scene_plan.pop("_usage", {}))
             step.set_output(
@@ -2803,7 +2933,7 @@ class GenerationEngine:
                 max_tokens=generation_max_tokens,
                 temperature=0.85,
                 prompt_name="v7.generation.chapter",
-                prompt_version="1.5.0",
+                prompt_version="1.6.0",
             )
             add_usage(step, first)
             text = first["text"].strip()
@@ -2813,6 +2943,12 @@ class GenerationEngine:
             # draft that already violates the global writing contract.
             raw_pov_metrics = analyze_third_person_narrative(text)
             raw_content_policy = analyze_content_policy(text, self.quality_profile)
+            opening_gate = inspect_opening(
+                text,
+                requested_mode=(scene_plan.get("opening_plan") or {}).get("mode"),
+                chapter_number=chapter_number,
+                recent_modes=(scene_plan.get("opening_plan") or {}).get("forbidden_recent_modes") or [],
+            )
             preflight_failures: list[dict[str, Any]] = []
             if not raw_pov_metrics["passed"]:
                 preflight_failures.append({
@@ -2823,6 +2959,11 @@ class GenerationEngine:
                 })
             if not raw_content_policy["passed"]:
                 preflight_failures.extend(raw_content_policy.get("failures") or [])
+            for opening_failure in opening_gate.get("flags") or []:
+                preflight_failures.append({
+                    **opening_failure,
+                    "message": f"开场质量门禁：{opening_failure.get('message')}",
+                })
 
             continuations = 0
             continuation_failures: list[dict[str, Any]] = []
@@ -2853,7 +2994,11 @@ class GenerationEngine:
                 )
                 cont = await self.ai_gateway.generate(
                     self._build_continuation_prompt(
-                        text, scene_plan, missing, quality_profile=self.quality_profile
+                        text,
+                        scene_plan,
+                        missing,
+                        quality_profile=self.quality_profile,
+                        readability_plan=scene_plan.get("readability_plan") or readability_plan,
                     ),
                     system_prompt=(
                         "你是一位专业中文网络小说作者，正在续写同一章的后半部分。"
@@ -2932,6 +3077,7 @@ class GenerationEngine:
                         "after": before_metrics,
                         "pov": raw_pov_metrics,
                         "content_policy": raw_content_policy,
+                        "opening": opening_gate,
                     },
                     "quality_gate": {
                         "passed": False,
@@ -2967,6 +3113,7 @@ class GenerationEngine:
                     payoff_contract=payoff_contract,
                     safe_deduplicate=True,
                     active_rules=context_layers.get("active_rules") or [],
+                    readability_plan=scene_plan.get("readability_plan") or readability_plan,
                 )
             deai_result.setdefault("metrics", {})["pov_preflight"] = raw_pov_metrics
             deai_result.setdefault("metrics", {})["content_policy_preflight"] = raw_content_policy
@@ -3027,6 +3174,18 @@ class GenerationEngine:
             )
         final_pov_metrics = analyze_third_person_narrative(final_text)
         final_content_policy = analyze_content_policy(final_text, self.quality_profile)
+        final_opening_gate = inspect_opening(
+            final_text,
+            requested_mode=(scene_plan.get("opening_plan") or {}).get("mode"),
+            chapter_number=chapter_number,
+            recent_modes=(scene_plan.get("opening_plan") or {}).get("forbidden_recent_modes") or [],
+        )
+        for opening_failure in final_opening_gate.get("flags") or []:
+            if not any(item.get("code") == opening_failure.get("code") for item in generation_failures):
+                generation_failures.append({
+                    **opening_failure,
+                    "message": f"最终开场质量门禁：{opening_failure.get('message')}",
+                })
         if not final_pov_metrics["passed"] and not any(
             item.get("code") == "third_person_narrative_required" for item in generation_failures
         ):
@@ -3098,12 +3257,16 @@ class GenerationEngine:
             "continuation_limit": continuation_limit,
             "pov_metrics": final_pov_metrics,
             "content_policy": final_content_policy,
+            "opening": final_opening_gate,
             "payoff_validation": payoff_validation,
             "payoff_beat_validation": payoff_beat_validation,
             "payoff_beat_repair": payoff_beat_repair,
             "payoff_variety": payoff_variety,
             "payoff_score": payoff_score,
             "chapter_mirror": mirror_stats,
+            "readability_plan": readability_plan_metadata(
+                scene_plan.get("readability_plan") or readability_plan
+            ),
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "chapter_title": {
                 "value": chapter_title_value,
@@ -3112,7 +3275,7 @@ class GenerationEngine:
                 "max_chars": 12,
                 "style": "tomato_reader_hook",
             },
-            "web_research": {
+                "web_research": {
                 "status": (context.get("context_layers") or {}).get("web_research", {}).get("status", "disabled"),
                 "cache_status": (context.get("context_layers") or {}).get("web_research", {}).get("cache_status"),
                 "card_count": len((context.get("context_layers") or {}).get("web_research", {}).get("cards") or []),
@@ -3158,6 +3321,11 @@ class GenerationEngine:
                 "recent_payoff_types": context["context_layers"].get("recent_payoff_types", []),
                 "recent_payoff_history": context["context_layers"].get("recent_payoff_history", []),
                 "web_research": context["context_layers"].get("web_research", {}),
+                "opening_history": context["context_layers"].get("opening_history", []),
+                "opening_plan": scene_plan.get("opening_plan") or {},
+                "readability_plan": readability_plan_metadata(
+                    scene_plan.get("readability_plan") or readability_plan
+                ),
             },
             "scene_plan": scene_plan,
             "payoff_contract": payoff_contract,
@@ -3167,6 +3335,10 @@ class GenerationEngine:
             "chapter_mirror": mirror_stats,
             "pov_metrics": final_pov_metrics,
             "content_policy": final_content_policy,
+            "opening_quality": final_opening_gate,
+            "readability_plan": readability_plan_metadata(
+                scene_plan.get("readability_plan") or readability_plan
+            ),
             "title_quality": generation_quality.get("chapter_title"),
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "deai": {
@@ -3227,6 +3399,10 @@ class GenerationEngine:
             safe_deduplicate=True,
             active_rules=active_rules,
             force_semantic_rewrite=True,
+            readability_plan=(
+                (generation.get("scene_plan") or {}).get("readability_plan")
+                or context.get("readability_plan")
+            ),
         )
 
         final_text = deai_result.get("processed_text") or generation.get("text") or ""
@@ -3324,6 +3500,30 @@ class GenerationEngine:
             chapter_function=scene_plan,
             payoff_contract=scene_plan.get("payoff_contract") or None,
             active_rules=(context.get("context_layers") or {}).get("active_rules") or [],
+            opening_plan=scene_plan.get("opening_plan") or (context.get("context_layers") or {}).get("opening_plan"),
+            readability_plan=scene_plan.get("readability_plan")
+            or (context.get("context_layers") or {}).get("readability_plan"),
+        )
+        readability_plan = scene_plan.get("readability_plan") or (
+            context.get("context_layers") or {}
+        ).get("readability_plan")
+        reader_experience_plan = scene_plan.get("reader_experience_plan") or {}
+        prose_texture_plan = scene_plan.get("prose_texture_plan") or {}
+        planner_readability_block = ""
+        if reader_experience_plan or prose_texture_plan:
+            planner_readability_block = (
+                "【场景导演补充的读者体验与表达重点】\n"
+                + json.dumps(
+                    {
+                        "reader_experience": reader_experience_plan,
+                        "prose_texture": prose_texture_plan,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
+        opening_block = opening_prompt_block(
+            scene_plan.get("opening_plan") or (context.get("context_layers") or {}).get("opening_plan")
         )
         beat_lines = "\n".join(
             f"{i + 1}. {b.get('name')}（约{b.get('target_words', 0)}字，情绪：{b.get('emotion','')}）："
@@ -3398,9 +3598,12 @@ class GenerationEngine:
             f"情绪曲线：{scene_plan.get('emotional_target', '')}\n"
             f"开场接续锚点：{scene_plan.get('opening_anchor', '')}\n"
             f"章末钩子：{scene_plan.get('hook', '')}\n\n"
+            f"{render_readability_plan(readability_plan)}\n\n"
+            f"{planner_readability_block}"
             f"{genre_writer_prompt}"
             f"{research_prompt}"
             f"【网文质量策略】\n{quality_directive}\n\n"
+            f"{opening_block}\n\n"
             f"【AI味候选词库指导】\n{render_ai_flavor_guidance(quality_profile)}\n\n"
             f"【本章爽点契约】\n{json.dumps(scene_plan.get('payoff_contract') or {}, ensure_ascii=False)}\n\n"
             "【连续性硬门禁】上一章结尾、交接契约和本章第一场必须处于同一"
@@ -3441,6 +3644,7 @@ class GenerationEngine:
         missing: int,
         *,
         quality_profile: dict[str, Any] | None = None,
+        readability_plan: dict[str, Any] | None = None,
     ) -> str:
         tail = text[-1600:]
         beats = scene_plan.get("beats") or []
@@ -3449,6 +3653,7 @@ class GenerationEngine:
         return (
             f"{third_person_generation_contract()}\n"
             f"{content_generation_contract(quality_profile)}\n\n"
+            f"{render_readability_plan(readability_plan, compact=True) if readability_plan else ''}\n\n"
             f"以下是本章已写好的结尾部分：\n\n{tail}\n\n"
             f"请只补足剩余节拍，目标补写约 {missing} 个汉字，"
             f"完成剩余节拍（{remaining}）并以钩子收束："
