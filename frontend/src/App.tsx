@@ -1230,9 +1230,26 @@ export default function App() {
           onCreate={() => setTab("wizard")}
           onBookCreated={async (novelId, runId) => {
             const book = await api<Content>(`/api/v1/contents/${novelId}`);
+            // Ranking generation creates the novel and run outside the normal
+            // wizard flow. Register the novel in the global selector and make
+            // the returned run authoritative before showing Progress; merely
+            // setting `novel` leaves Progress bound to the previous run.
+            userSelectedNovel.current = true;
+            novelSelectionEpoch.current += 1;
+            setNovels(current => [book, ...current.filter(item => item.id !== book.id)]);
             setNovel(book);
             void cacheSet(currentNovelCacheKey, book);
-            setTab(runId ? "progress" : "library");
+            setRun(null);
+            setChapters([]);
+            setChapter(null);
+            setEditorText("");
+            setVersions([]);
+            if (runId) {
+              await refreshRun(runId);
+              setTab("progress");
+              return;
+            }
+            if (await activateNovel(novelId)) setTab("library");
           }}
         />
       )}
