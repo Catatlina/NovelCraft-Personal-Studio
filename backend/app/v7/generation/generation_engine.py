@@ -210,6 +210,10 @@ class AIGatewayError(RuntimeError):
     """Raised when the LLM call cannot be completed."""
 
 
+class AIGatewayTruncatedError(AIGatewayError):
+    """The provider stopped at its output limit before returning a full result."""
+
+
 class BudgetAccountingError(AIGatewayError):
     """Raised when a successful provider call cannot be durably accounted for."""
 
@@ -2621,6 +2625,7 @@ class AIGateway:
         prompt_version: str | None = None,
         client_mutation_id: str | None = None,
         task_type: str | None = None,
+        reject_truncated: bool = True,
     ) -> dict[str, Any]:
         """Call the LLM. Raises AIGatewayError after all retries fail."""
         await self._resolve_model_route(task_type or prompt_name)
@@ -2629,7 +2634,9 @@ class AIGateway:
                 f"{self.provider.upper()}_API_KEY is not configured; refusing to fabricate output"
             )
 
-        await self._assert_budget(prompt, max_tokens)
+        base_max_tokens = max(1, int(max_tokens or 1))
+        request_max_tokens = base_max_tokens
+        await self._assert_budget(prompt, request_max_tokens)
 
         model = model or self.default_model
 
@@ -2656,7 +2663,7 @@ class AIGateway:
                         system_prompt=system_prompt,
                         history=history,
                         temperature=temperature,
-                        max_tokens=max_tokens,
+                        max_tokens=request_max_tokens,
                         json_mode=json_mode,
                         # Keep the existing test seam while the transport is
                         # now owned by the shared V6/V7 gateway.
@@ -2693,6 +2700,19 @@ class AIGateway:
                     "prompt_name": prompt_name,
                     "prompt_version": prompt_version,
                 }
+                if (
+                    reject_truncated
+                    and str(result_payload.get("finish_reason") or "stop") == "length"
+                ):
+                    # A chapter ending mid-sentence/quote is not a usable
+                    # completion. Charge the real provider response, then
+                    # retry with a bounded larger budget; never return the
+                    # truncated prefix as if it were a successful draft.
+                    await self._record_budget_spend(result_payload, prompt_name)
+                    raise AIGatewayTruncatedError(
+                        "LLM output was truncated at the provider token limit "
+                        f"(max_tokens={request_max_tokens})"
+                    )
                 await self._record_budget_spend(result_payload, prompt_name)
                 try:
                     await self._record_shared_provenance(
@@ -2718,6 +2738,14 @@ class AIGateway:
                 last_error = exc
                 if isinstance(exc, BudgetAccountingError):
                     break
+                if isinstance(exc, AIGatewayTruncatedError):
+                    next_limit = min(
+                        6000,
+                        max(request_max_tokens + 600, int(request_max_tokens * 1.5)),
+                    )
+                    if next_limit > request_max_tokens:
+                        request_max_tokens = next_limit
+                        await self._assert_budget(prompt, request_max_tokens)
                 if attempt == self.max_retries:
                     try:
                         await self._record_failed_provenance(
@@ -2787,6 +2815,7 @@ class AIGateway:
                 temperature=temperature,
                 max_tokens=retry_max_tokens,
                 json_mode=True,
+                reject_truncated=False,
                 prompt_name=prompt_name,
                 prompt_version=prompt_version,
                 client_mutation_id=client_mutation_id,
