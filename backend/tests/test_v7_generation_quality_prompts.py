@@ -293,6 +293,18 @@ def test_structural_ai_smell_triggers_semantic_rewrite_instead_of_remaining_advi
     }
 
 
+def test_report_like_ordered_narrative_scaffold_triggers_rewrite():
+    text = "\n\n".join([
+        "林越掀开灰烬，确认这里有人来过。第一步，找到水。第二步，确认自己在哪。第三步，找到能问路的人。",
+        "林越把木牌攥进掌心，首先确认刻痕还新，其次看向庙外，最后决定沿着烟柱走。",
+        "风从破墙里灌进来，灰烬贴着鞋面打转。",
+        "他把手机塞回口袋，烟柱在西边没有散。",
+    ] * 7)
+    metrics = analyze_deai_patterns(text, profile={"platform": "fanqie"})
+    assert metrics["expository_scaffold"]["triggered"] is True
+    assert any(flag["code"] == "expository_scaffold" for flag in metrics["flags"])
+
+
 def test_deterministic_opening_repair_preserves_paragraphs_and_reaches_target():
     paragraphs = [
         f"陆沉在第{i}次试剑时记住了一个细节，剑锋擦过石面，留下了一道新痕。"

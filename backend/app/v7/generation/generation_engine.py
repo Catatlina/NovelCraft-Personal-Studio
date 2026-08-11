@@ -1564,6 +1564,7 @@ class DeAIPipeline:
         "repeated_phrase",           # P0-1: 恢复重复短语检测
         "repeated_tic",
         "structural_ai_smell",
+        "expository_scaffold",
     }
     # Low-severity observations remain auditable metrics, but must not trigger
     # a billable whole-chapter provider rewrite on their own.
@@ -1576,6 +1577,7 @@ class DeAIPipeline:
         "ai_phrase",
         "repeated_tic",
         "structural_ai_smell",
+        "expository_scaffold",
     }
 
     def __init__(self, gateway: "AIGateway | None" = None):
@@ -2292,6 +2294,40 @@ class DeAIPipeline:
                 "applied": False,
                 "reason": "语义改写后仍有多项独立结构信号未消除",
                 "evidence": structural_flags[0].get("evidence") or {},
+            })
+        residual_naturalness_flags = [
+            flag for flag in after_metrics.get("flags") or []
+            if isinstance(flag, dict)
+            and flag.get("code") in self.SEMANTIC_REWRITE_FLAGS
+            and str(flag.get("severity") or "").lower()
+            in self.SEMANTIC_REWRITE_SEVERITIES
+            and flag.get("code") != "structural_ai_smell"
+        ]
+        if residual_naturalness_flags:
+            residual_codes = sorted({str(flag.get("code")) for flag in residual_naturalness_flags})
+            residual_evidence = {
+                "codes": residual_codes,
+                "flags": residual_naturalness_flags,
+            }
+            if opening_repair_gate.get("passed", True):
+                opening_repair_gate = {
+                    **opening_repair_gate,
+                    "passed": False,
+                    "code": "naturalness_signal_persisted",
+                    "message": "语义改写后仍有结构性表达信号未消除",
+                    "naturalness_signals": residual_evidence,
+                }
+            else:
+                opening_repair_gate = {
+                    **opening_repair_gate,
+                    "naturalness_signals": residual_evidence,
+                }
+            layers.append({
+                "layer": "naturalness_signal_gate",
+                "changes": 0,
+                "applied": False,
+                "reason": "语义改写后仍保留中高风险表达结构",
+                "evidence": residual_evidence,
             })
         layers.append(
             {
@@ -3353,6 +3389,9 @@ class GenerationEngine:
                     "避免总结性旁白与说教结尾、避免翻译腔。直接输出正文，不要标题、"
                     "不要任何解释或markdown标记。标点不设禁用清单，按人物语气和"
                     "场景功能使用；只避免整章高密度、连续重复的模板化符号。"
+                    "后台的设定、节拍表和质量契约只用于你选材，绝不能在正文中复述成检查表、"
+                    "操作说明或作者讲解；默认不用‘第一步/第二步/第三步’等清单串联叙事，"
+                    "除非人物确实在制定计划且这句话会改变下一步行动。"
                     + third_person_generation_contract()
                     + content_generation_contract(self.quality_profile)
                 ),
@@ -3430,6 +3469,7 @@ class GenerationEngine:
                         "你是一位专业中文网络小说作者，正在续写同一章的后半部分。"
                         "直接接着写正文，不要重复已有内容，不要写标题或说明。"
                         "保持自然分段和人物语气；标点按语义使用，不要批量堆叠同一符号。"
+                        "不要把节拍表改写成步骤清单或解释性旁白。"
                         + third_person_generation_contract()
                         + content_generation_contract(self.quality_profile)
                     ),
@@ -4157,6 +4197,8 @@ class GenerationEngine:
             "同时保持第三人称限知清晰，不能把人名全换成‘他/她’来制造另一种重复。"
             "章末必须把钩子落实为动作、发现或新的选择，不得用总结/说教代替；"
             "情绪要有起伏，避免每段都用同一种‘提出问题-解释-总结’结构；"
+            "后台节拍和质量规则不得原样进入正文；默认不用‘第一步/第二步/第三步’、‘首先/其次/最后’组织叙述，"
+            "除非这是人物真实计划且只保留必要片段；不要把因果账本写成作者解释，让读者从动作、对白和后果自己拼出结论；"
             "不要为了‘去AI味’禁用任何单个词或标点，判断标准是整章分布、语境和阅读体验。"
         )
 
