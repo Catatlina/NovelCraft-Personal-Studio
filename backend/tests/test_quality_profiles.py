@@ -45,6 +45,22 @@ def test_quality_directive_is_bounded_and_does_not_ban_single_punctuation():
     assert "禁止所有标点" not in directive
 
 
+def test_quality_directive_uses_shared_opening_plan_without_body_default():
+    profile = select_quality_profile(platform="番茄", genre="都市", subgenre="都市重生")
+    directive = compile_quality_directive(
+        profile,
+        chapter_number=1,
+        opening_plan={
+            "mode": "object",
+            "label": "物件异常开场",
+            "directive": "从一个具体物件的异常起笔，让物件推动人物行动。",
+            "forbidden_recent_modes": [],
+        },
+    )
+    assert "物件异常开场" in directive
+    assert "身体感受不是默认开场" in directive
+
+
 def test_longlife_style_plugin_is_explicit_and_scoped_to_matching_xuanhuan_subgenres():
     profile = select_quality_profile(
         platform="起点",

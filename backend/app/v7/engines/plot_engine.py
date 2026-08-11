@@ -27,6 +27,7 @@ from ..generation.generation_engine import (
 )
 from ..repositories.plot import PlotNodeRepository
 from ...services.quality_profiles import compile_quality_directive, quality_profile_metadata
+from ..quality.readability_contract import build_readability_plan, render_readability_plan
 
 MODE_ASSESS = "assess"
 MODE_ANALYZE = "analyze"
@@ -171,7 +172,7 @@ class PlotEngine(BaseEngine):
                 # writer. Keep its provenance version distinct from the old
                 # planning prompt so production traces cannot silently mix
                 # pre-contract and post-contract decisions.
-                prompt_version="1.2.0",
+                prompt_version="1.3.0",
             )
             ai_payload = ai["data"] or {}
             self.record_usage(ai["usage"])
@@ -208,6 +209,8 @@ class PlotEngine(BaseEngine):
             "tension_target": ai_payload.get("tension_target"),
             "pacing_advice": ai_payload.get("pacing_advice"),
             "reader_promise": ai_payload.get("reader_promise"),
+            "reader_experience_plan": ai_payload.get("reader_experience_plan") or {},
+            "prose_texture_plan": ai_payload.get("prose_texture_plan") or {},
             "payoff_contract": ai_payload.get("payoff_contract") or {},
             "emotional_target": ai_payload.get("emotional_target"),
             "opening_anchor": ai_payload.get("opening_anchor"),
@@ -272,10 +275,15 @@ class PlotEngine(BaseEngine):
                 f"梗概：{(previous_node.description or '')[:300]}"
             )
 
+        readability_plan = build_readability_plan(
+            chapter_number,
+            quality_profile=self.quality_profile or {},
+        )
         quality_directive = compile_quality_directive(
             self.quality_profile or None,
             chapter_number=chapter_number,
             chapter_function={"reader_expectation": "本章读完仍想继续"},
+            readability_plan=readability_plan,
         )
 
         return f"""你正在为一部中文长篇小说规划第 {chapter_number} 章的结构。
@@ -297,6 +305,8 @@ class PlotEngine(BaseEngine):
 【网文质量策略】
 {quality_directive}
 
+{render_readability_plan(readability_plan)}
+
 请判断：这一章应该完成什么、张力应该推到什么位置、节奏如何安排、有什么风险，
 并给出 4-6 个节拍建议。同时给出你对"现在就自动生成这一章是否安全"的置信度。
 
@@ -314,6 +324,8 @@ class PlotEngine(BaseEngine):
   "pacing_advice": "节奏建议的一句话描述",
   "reader_promise": "本章给读者的情绪/信息承诺，以及读者为什么要继续追读",
   "emotional_target": "情绪曲线：开场情绪 -> 中段转折 -> 章末情绪",
+  "reader_experience_plan": {{"reader_emotion":"读者在现场感受到什么","information_to_feel":"信息如何通过事件落地","scene_payoff":"本章兑现","avoid":["同构写法"]}},
+  "prose_texture_plan": {{"information_delivery":"动作/对白/物件/反馈","rhythm":"句段节奏","voice_anchor":"人物声音抓手"}},
   "opening_anchor": "本章开头必须承接上一章尾部的具体动作、地点或未决问题",
   "hook": "章末必须落到具体动作、发现或选择的追读钩子",
   "payoff_contract": {{"reader_promise":"读者本章要等什么","pressure":"当前压力", "active_choice":"主角主动选择", "payoff_type":"兑现类型", "visible_result":"可见结果", "witness_reaction":"他人反应", "cost":"代价/余波", "next_pressure":"章末新增压力", "setup_refs":[]}},

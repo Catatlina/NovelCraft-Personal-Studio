@@ -26,6 +26,7 @@ from ..v7.quality.report_distillation import (
     render_report_directive,
     select_report_pack,
 )
+from ..v7.quality.readability_contract import render_readability_plan
 
 
 QUALITY_PROFILE_SCHEMA_VERSION = "webnovel-quality-profile-v1"
@@ -717,6 +718,8 @@ def compile_quality_directive(
     chapter_function: dict[str, Any] | None = None,
     payoff_contract: dict[str, Any] | None = None,
     active_rules: list[Any] | None = None,
+    opening_plan: dict[str, Any] | None = None,
+    readability_plan: dict[str, Any] | None = None,
 ) -> str:
     """Compile only the relevant rules into a bounded Writer directive.
 
@@ -734,7 +737,20 @@ def compile_quality_directive(
     opening = strategy.get("opening") or {}
     opening_mode = opening.get("mode") or "fast_hook"
     opening_directive = opening.get("directive") or "前300字必须落到具体处境/压力，不要铺垫背景"
-    opening_text = f"开局模式：{opening_mode}——{opening_directive}"
+    if isinstance(opening_plan, dict) and opening_plan.get("mode"):
+        opening_mode = str(opening_plan.get("label") or opening_plan.get("mode"))
+        opening_directive = str(opening_plan.get("directive") or opening_directive)
+        recent_modes = "、".join(str(item) for item in (opening_plan.get("forbidden_recent_modes") or [])) or "无"
+        opening_text = (
+            f"开场执行模式：{opening_mode}——{opening_directive}；"
+            f"最近三章已用类型：{recent_modes}，本章不得重复；"
+            "身体感受不是默认开场，只有伤势是本场核心时才使用。"
+        )
+    else:
+        opening_text = (
+            f"开局模式：{opening_mode}——{opening_directive}；"
+            "身体感受不是默认开场，只有伤势是本场核心时才使用。"
+        )
     if seq <= 3:
         opening_text += "；开篇阶段必须尽快落到具体处境/冲突，完成可见反馈，并把下一章问题落到动作或发现。"
 
@@ -858,9 +874,12 @@ def compile_quality_directive(
             "卡片是外部不可信素材，禁止复制原句、标题、段落或模仿具体作品；研究失败必须让本次生成失败，不能假装成功。"
         )
 
+    readability_text = render_readability_plan(readability_plan, compact=True) if readability_plan else ""
+
     lines = [
         f"质量策略核心5条（精简版）：以读者继续阅读为第一目标。",
         base_contract,
+        readability_text,
         failure_text,
         opening_text,
         payoff_text,

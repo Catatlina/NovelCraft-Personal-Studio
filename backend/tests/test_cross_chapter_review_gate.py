@@ -77,4 +77,9 @@ def test_worker_cannot_mark_canonical_v7_reviewed_when_continuity_failed(monkeyp
     assert result["accepted"] is False
     assert result["review_status"] == "needs_rewrite"
     assert any("status='needs_rewrite'" in sql for sql, _ in db.statements)
-    assert not any("status='reviewed'" in sql for sql, _ in db.statements)
+    # The history query legitimately reads previously reviewed chapters; the
+    # invariant is that this call must not issue a reviewed-state UPDATE.
+    assert not any(
+        "UPDATE contents SET status='reviewed'" in sql
+        for sql, _ in db.statements
+    )
