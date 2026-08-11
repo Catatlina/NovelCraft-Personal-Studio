@@ -1,14 +1,15 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-10
+> 更新时间：2026-08-11
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
-## 2026-08-10 最新生产交接：生成质量整改已部署
+## 2026-08-11 最新生产交接：通用写作方法论接入已部署
 
-- 当前运行版本：`main@70688f9`，生产目录 `/opt/NovelCraft-Personal-Studio`；部署时保留服务器已有 `.orig`、`genre_presets.py`、`init_genre_library.py` 和 `celerybeat-schedule`，未做清理覆盖。
+- 当前运行版本：`main@94f539b`，生产目录 `/opt/NovelCraft-Personal-Studio`；部署时保留服务器已有 `.orig`、`genre_presets.py`、`init_genre_library.py` 和 `celerybeat-schedule`，未做清理覆盖。
 - `nc_v7_genre_packs` 已迁移到 head。迁移兼容了旧 V7 引导表缺少数据库默认值的情况：父/子品类、规则、知识、提示词种子均显式写入 UUID 和启用状态，四张表补齐默认值。
-- 备份证据：`backups/pre-deploy-c2abf99-20260810-221427.sql.gz`，gzip 校验通过，232,420,223 bytes。CI run `31398290193` backend/frontend/frontend-test/security/E2E 全通过，E2E 18 passed、9 skipped、0 failed。
-- 生产证据：公网 `healthz` 200；`database=ok`、`redis=ok`、`worker=ok: 1 online`；`scripts/prod_smoke.py` 15/15；生产浏览器 v2 1 passed、兼容版 3 passed；八个主页面和 V7 Cost/Prompt 真实页面均可达且未命中 mock 标记。
-- 质量边界：本次 smoke 没有注入 Provider Key，因此未宣称真实正文质量、两本书各 20 章长跑或人工盲评已验收；下一步应使用真实账号和真实 Provider 按独立长跑门禁复核。
+- 备份证据：`backups/pre-deploy-94f539b-20260811-1457.sql.gz`，252,825,704 bytes。CI run `31466172781` 的 backend、e2e、frontend、frontend-test、security 五项均通过。
+- 生产证据：公网 `healthz` 200；`database=ok`、`redis=ok`、`worker=ok: 1 online`；`scripts/prod_smoke.py` 无失败项；生产域名浏览器 v2 1 passed，八个主页面和 V7 Cost/Prompt 真实页面均可达且未命中 mock 标记。
+- 方法论专项线上证据：远端 API 容器已加载 `/api/v1/chapters/{chapter_id}/external-evaluation`；未登录请求返回 401；迁移后模块导入和路由注册均通过。该接口只接受正文哈希匹配的真实外部报告。
+- 质量边界：本次 smoke 没有注入 Provider Key，V3 真实生成被明确跳过，因此未宣称真实正文质量、两本书各 20 章长跑或人工盲评已验收；下一步仍需使用真实账号和真实 Provider 按独立长跑门禁复核。
 
 ## 2026-08-11 通用写作方法论接入（本次发布）
 
@@ -16,14 +17,14 @@
 - 已接入 PlotEngine、SceneDirector、GenerationEngine、续写、ReviewEngine、实时 V7 审阅和 StoryDirector 更新持久化。缺少核心问题、可见兑现、代价、下一压力或因果账本列时，生成质量标记为失败，不能伪装为可用章节。
 - 新增 `POST /api/v1/chapters/{chapter_id}/external-evaluation`，只登记真实外部报告；正文哈希不匹配、完成评测缺少真实分数或非法状态转换都会拒绝写入。
 - 代码级证据：方法论专项及 V7 生成/审阅契约 **36 passed**；Python compile、`git diff --check` 和路由导入通过。
-- 本次推送部署后必须补充远端 commit、迁移状态、容器健康、`prod_smoke.py` 结果和外部评测接口专项结果；本机数据库/Redis 全量测试不能作为远端验收依据。
+- 远端验收完成：commit `94f539b`、迁移 `nc_v7_genre_packs (head)`、容器健康、`prod_smoke.py`、浏览器走查和外部评测接口认证门禁均有证据；本机数据库/Redis 全量测试不能作为远端验收依据。
 
-## 2026-08-11 生成前可读性预案（待本次发布验收）
+## 2026-08-11 生成前可读性预案（已部署，正文质量仍需真实 Provider 复测）
 
 - 根因：此前去 AI 味主要依赖生成后的 DeAIPipeline 和最终审阅门禁；生成前的场景规划只有爽点节拍、开场和连续性约束，没有明确本章的读者体验、信息落地方式、句段节奏、段落肌理和人物声音。
 - 修复：新增 backend/app/v7/quality/readability_contract.py，由应用侧在生成前建立可追溯的可读性预案；预案接入 Plot 评估、SceneDirector、正文生成、续写和语义修复，并写入章节质量元数据。门禁仍只作为生成质量的最后兜底，不以拦截代替生成前设计。
 - 本地证据：Python compile、git diff --check、生成质量/品类/策略/审阅相关回归 88 passed。
-- 当前状态：代码已接线，尚未完成本次提交、推送、生产重建和线上 smoke；发布后必须确认运行中的 API/Worker 使用新提交，再重新生成章节做真实 Provider 可读性和连续性复测，不能用 smoke 代替正文质量验收。
+- 当前状态：代码已接线并部署到 `main@94f539b`；仍需重新生成章节做真实 Provider 可读性和连续性复测，不能用 smoke 或页面走查代替正文质量验收。
 
 ## 2026-08-10 当前交接：生成质量旁路收紧（已部署，边界见上）
 
