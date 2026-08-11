@@ -820,6 +820,14 @@ class ContextAssembler:
 class SceneDirector:
     """Plans the chapter beat sheet with a real AI call."""
 
+    SCENE_PLAN_PAYOFF_PHASES = (
+        "pressure",
+        "build",
+        "burst",
+        "feedback",
+        "aftershock",
+    )
+
     def __init__(self, brain: NovelBrain, gateway: "AIGateway"):
         self.brain = brain
         self.gateway = gateway
@@ -903,6 +911,102 @@ class SceneDirector:
             "planned_words": planned_words,
             "payoff_phases": sorted(phases),
         }
+
+    @classmethod
+    def _project_provider_declared_payoff_phases(
+        cls,
+        plan: Any,
+    ) -> dict[str, Any] | None:
+        """Project an explicit plan-level payoff arc onto beat labels.
+
+        Some provider responses carry the complete five-phase arc in
+        ``payoff_contract.payoff_arc`` but omit one label from the individual
+        beats.  The writer needs both representations.  This repair only
+        copies phases the provider already declared and requires concrete
+        result, feedback, cost and next-pressure fields before touching the
+        beat sheet; it never invents story content or a missing phase.
+        """
+        if not isinstance(plan, dict):
+            return None
+        beats = plan.get("beats")
+        if not isinstance(beats, list) or not beats:
+            return None
+
+        contract = plan.get("payoff_contract")
+        if not isinstance(contract, dict):
+            return None
+        declared_arc = contract.get("payoff_arc") or contract.get("payoff_phases")
+        if isinstance(declared_arc, str):
+            declared_arc = re.split(r"[,，、|>/→\s]+", declared_arc)
+        if not isinstance(declared_arc, list):
+            return None
+        declared = {
+            str(value).strip().lower()
+            for value in declared_arc
+            if str(value or "").strip()
+        }
+        required = set(cls.SCENE_PLAN_PAYOFF_PHASES)
+        if not required.issubset(declared):
+            return None
+        if any(
+            not str(contract.get(field) or "").strip()
+            for field in (
+                "visible_result",
+                "payoff_feedback",
+                "cost",
+                "next_pressure",
+            )
+        ):
+            return None
+
+        covered: set[str] = set()
+        normalised_beats: list[list[str]] = []
+        for beat in beats:
+            if not isinstance(beat, dict):
+                normalised_beats.append([])
+                continue
+            values = beat.get("payoff_phases")
+            if not isinstance(values, list):
+                values = [beat.get("payoff_phase")]
+            phases = [
+                str(value).strip().lower()
+                for value in values
+                if str(value or "").strip()
+            ]
+            normalised_beats.append(phases)
+            covered.update(phases)
+
+        missing = [phase for phase in cls.SCENE_PLAN_PAYOFF_PHASES if phase not in covered]
+        if not missing:
+            return None
+
+        last_index = len(beats) - 1
+        target_indexes = {
+            "pressure": 0,
+            "build": min(1, last_index),
+            "burst": min(2, last_index),
+            "feedback": max(last_index - 1, 0),
+            "aftershock": last_index,
+        }
+        applied: list[dict[str, Any]] = []
+        for phase in missing:
+            index = target_indexes[phase]
+            if not isinstance(beats[index], dict):
+                return None
+            phases = normalised_beats[index]
+            if phase not in phases:
+                phases.append(phase)
+            beats[index]["payoff_phases"] = list(dict.fromkeys(phases))
+            beats[index].pop("payoff_phase", None)
+            applied.append({"phase": phase, "beat_index": index})
+
+        plan["payoff_phases"] = list(cls.SCENE_PLAN_PAYOFF_PHASES)
+        plan["payoff_phase_projection"] = {
+            "source": "payoff_contract.payoff_arc",
+            "declared": list(cls.SCENE_PLAN_PAYOFF_PHASES),
+            "applied": applied,
+        }
+        return plan
 
     @staticmethod
     def _adopt_plot_brief(
@@ -1033,6 +1137,7 @@ class SceneDirector:
             previous_titles=previous_titles,
         )
         if adopted is not None:
+            self._project_provider_declared_payoff_phases(adopted)
             try:
                 self.validate_scene_plan_contract(
                     adopted,
@@ -1225,6 +1330,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         )
         plan = result["data"]
         usage = dict(result.get("usage") or {})
+        self._project_provider_declared_payoff_phases(plan)
         try:
             self.validate_scene_plan_contract(
                 plan,
@@ -1233,8 +1339,10 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         except AIGatewayError as contract_error:
             # Provider JSON can be syntactically valid while omitting one of
             # the commercial beat phases. Give the same real Provider one
-            # bounded repair opportunity; never invent a phase locally or let
-            # a malformed plan reach the writer.
+            # bounded repair opportunity. A plan-level arc projection above
+            # only copies phases the provider explicitly declared; it never
+            # invents a phase locally or lets a malformed plan reach the
+            # writer.
             repair_prompt = (
                 "下面的场景计划 JSON 没有通过结构契约校验。请只修复结构并输出完整 JSON，"
                 "不要写解释，不要改动已经存在的剧情事实。必须保留 4-6 个 beats，"
@@ -1264,6 +1372,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "model": repair_usage.get("model") or usage.get("model"),
             }
             plan = repaired["data"]
+            self._project_provider_declared_payoff_phases(plan)
             self.validate_scene_plan_contract(
                 plan,
                 target_word_count=target_word_count,
@@ -1298,6 +1407,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         plan["opening_plan"] = effective_opening_plan
         plan["readability_plan"] = readability_plan
         plan["target_word_count"] = target_word_count
+        self._project_provider_declared_payoff_phases(plan)
         self.validate_scene_plan_contract(plan, target_word_count=target_word_count)
         plan["_usage"] = usage
         return plan

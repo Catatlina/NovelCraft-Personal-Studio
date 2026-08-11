@@ -409,6 +409,50 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
     assert result["_usage"]["tokens_output"] == 10
 
 
+def test_scene_plan_projects_explicit_payoff_arc_without_inventing_content():
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, *_args, **_kwargs):
+            self.calls += 1
+            return {
+                "data": {
+                    "chapter_title": "余波来了",
+                    "chapter_type": "normal",
+                    "beats": [
+                        {"name": "压境", "content": "敌人封住退路", "target_words": 750, "payoff_phase": "pressure"},
+                        {"name": "试探", "content": "主角试探规则", "target_words": 750, "payoff_phase": "build"},
+                        {"name": "反击", "content": "主角兑现选择", "target_words": 750, "payoff_phase": "burst"},
+                        {"name": "反馈", "content": "对手被迫退让", "target_words": 750, "payoff_phase": "feedback"},
+                    ],
+                    "payoff_contract": {
+                        "visible_result": "对手当场退让",
+                        "payoff_feedback": "旁观者确认局势变化",
+                        "cost": "主角暴露一张底牌",
+                        "next_pressure": "新的追兵立即出现",
+                        "payoff_arc": ["pressure", "build", "burst", "feedback", "aftershock"],
+                    },
+                },
+                "usage": {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"},
+            }
+
+    gateway = Gateway()
+    result = asyncio.run(SceneDirector(None, gateway).plan_scene(
+        1,
+        {"rendered_context": ""},
+        target_word_count=3000,
+        quality_profile={},
+    ))
+
+    assert gateway.calls == 1
+    assert result["beats"][3]["content"] == "对手被迫退让"
+    assert result["beats"][3]["payoff_phases"] == ["feedback", "aftershock"]
+    assert result["payoff_phase_projection"]["applied"] == [
+        {"phase": "aftershock", "beat_index": 3}
+    ]
+
+
 def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():
     class Gateway:
         def __init__(self):
