@@ -63,6 +63,8 @@ from ..quality.readability_contract import (
     render_readability_plan,
 )
 from ..quality.writing_methodology import (
+    build_behavior_sample_query,
+    build_model_adaptation_record,
     build_writing_workflow_contract,
     render_writing_methodology_contract,
     validate_writing_workflow,
@@ -306,6 +308,76 @@ class ContextAssembler:
 
         return await asyncio.to_thread(_read)
 
+    async def load_behavior_samples(
+        self,
+        query: str | None,
+        *,
+        limit: int = 2,
+    ) -> list[dict[str, Any]]:
+        """Load behavior annotations from this project only.
+
+        Samples are optional knowledge, but once a project has declared them
+        retrieval failures are real failures.  Returning an invented/default
+        sample here would make a generation trace look healthy while silently
+        changing the project's writing behavior.
+        """
+        if not self.project_id or not str(query or "").strip():
+            return []
+
+        def _count() -> int:
+            from ...db import connect
+
+            conn = connect()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS count FROM knowledge_items "
+                    "WHERE project_id=%s AND kind='behavior_sample' AND is_deleted=FALSE",
+                    (self.project_id,),
+                ).fetchone()
+                return int((row or {}).get("count") or 0)
+            finally:
+                conn.close()
+
+        try:
+            available = await asyncio.to_thread(_count)
+            if available == 0:
+                return []
+            from ...services import knowledge_hub
+
+            rows = await asyncio.to_thread(
+                knowledge_hub.search,
+                str(query),
+                self.project_id,
+                ["behavior_sample"],
+                min(max(1, int(limit)), 3),
+            )
+        except Exception as exc:
+            raise AIGatewayError(
+                f"behavior sample retrieval unavailable: {type(exc).__name__}"
+            ) from exc
+
+        samples: list[dict[str, Any]] = []
+        for row in rows[:3]:
+            meta = row.get("meta") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except json.JSONDecodeError:
+                    meta = {}
+            annotation = meta.get("behavior_annotation") or row.get("body") or ""
+            samples.append({
+                "id": str(row.get("id") or ""),
+                "title": row.get("title") or "",
+                "annotation": str(annotation)[:1800],
+                "scene_type": meta.get("scene_type") or "",
+                "viewpoint": meta.get("viewpoint") or "",
+                "pressure": meta.get("pressure") or "",
+                "result_type": meta.get("result_type") or "",
+                "tags": meta.get("tags") or [],
+                "source_project": meta.get("source_project") or self.project_id,
+            })
+        return samples
+
     async def load_genre_context(self) -> dict[str, Any]:
         """加载品类上下文（风格卡、知识、约束、Prompt模板等）。
 
@@ -447,6 +519,7 @@ class ContextAssembler:
         scene_type: str = "normal",
         token_budget: int = 5400,
         include_rejected: bool = False,
+        behavior_query: str | None = None,
     ) -> dict[str, Any]:
         """Assemble layered context: state / goals / constraints / recap.
 
@@ -484,6 +557,7 @@ class ContextAssembler:
 
         # 加载品类上下文（第8层）
         genre_context = await self.load_genre_context()
+        behavior_samples = await self.load_behavior_samples(behavior_query)
 
         previous = await self.load_previous_chapters(
             chapter_number,
@@ -610,6 +684,8 @@ class ContextAssembler:
             "active_rules": active_rules,
             "quality_learning": quality_learning,
             "genre": genre_context,  # 第8层：品类上下文
+            "behavior_samples": behavior_samples,
+            "project_id": self.project_id,
         }
 
         rendered = self.render(layers)
@@ -750,6 +826,19 @@ class ContextAssembler:
                 )
             )
 
+        behavior_samples = layers.get("behavior_samples") or []
+        if behavior_samples:
+            blocks.append(
+                "【行为级黄金样本（只学习行为，不复制正文）】\n"
+                "只学习人物目标、信息缺口、选择压力、因果推进和结果成本；禁止复制原句、句长、标点、段落结构或专有名词。\n"
+                + "\n".join(
+                    f"- {item.get('title')}: 场景={item.get('scene_type') or '未标注'}；"
+                    f"视角={item.get('viewpoint') or '未标注'}；压力={item.get('pressure') or '未标注'}；"
+                    f"行为标注：{item.get('annotation') or ''}"
+                    for item in behavior_samples[:3]
+                )
+            )
+
         recap = layers.get("recap", [])
         if recap:
             blocks.append("【前情提要】\n" + "\n".join(recap))
@@ -789,6 +878,7 @@ class ContextAssembler:
             "active_rules": layers.get("active_rules", []),
             "quality_learning": layers.get("quality_learning", []),
             "web_research": layers.get("web_research", {}),
+            "behavior_samples": layers.get("behavior_samples", []),
         }
         anchor = cls.render(anchor_layers)
         state_blob = cls.render(
@@ -3062,6 +3152,7 @@ class GenerationEngine:
             context = await self.context_assembler.assemble_context(
                 chapter_number,
                 include_rejected=bool(getattr(self, "include_rejected_context", False)),
+                behavior_query=build_behavior_sample_query(plot_brief),
             )
             step.set_output(
                 f"context {context['rendered_chars']} chars, "
@@ -3133,6 +3224,16 @@ class GenerationEngine:
             plot_brief=workflow_input,
         )
         context.setdefault("context_layers", {})["writing_workflow"] = writing_workflow
+
+        # The methodology is a generation input.  Failing here prevents a
+        # prose call from producing text that we already know cannot be traced
+        # back to confirmed facts and a five-column causal ledger.
+        methodology_validation = validate_writing_workflow(writing_workflow)
+        if methodology_required and not methodology_validation.get("passed"):
+            raise AIGatewayError(
+                "writing methodology preflight failed: "
+                + "; ".join(methodology_validation.get("missing") or ["unknown"])
+            )
 
         opening_plan = select_opening_plan(
             chapter_number,
@@ -3508,6 +3609,17 @@ class GenerationEngine:
 
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
+        model_adaptation = build_model_adaptation_record(
+            provider=getattr(self.ai_gateway, "provider", None),
+            model=usage.get("model") or getattr(self.ai_gateway, "default_model", None),
+            prompt_version="1.6.0",
+            temperature=0.85,
+            max_tokens=generation_max_tokens,
+            behavior_sample_count=len(context_layers.get("behavior_samples") or []),
+        )
+        writing_workflow["model_adaptation"] = model_adaptation
+        writing_workflow.setdefault("fact_card", {})["model_adaptation"] = model_adaptation
+        context_layers["model_adaptation"] = model_adaptation
         generation_failures = [*preflight_failures, *continuation_failures]
         methodology_validation = validate_writing_workflow(writing_workflow)
         if methodology_required and not methodology_validation.get("passed"):

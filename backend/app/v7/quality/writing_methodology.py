@@ -22,6 +22,9 @@ from typing import Any
 WRITING_METHODOLOGY_VERSION = "1.0.0"
 WRITING_WORKFLOW_SCHEMA_VERSION = "writing-workflow-v1"
 EXTERNAL_EVALUATION_SCHEMA_VERSION = "external-evaluation-v1"
+FACT_CARD_SCHEMA_VERSION = "fact-card-v1"
+CAUSAL_AUDIT_SCHEMA_VERSION = "causal-audit-v1"
+MODEL_ADAPTATION_SCHEMA_VERSION = "model-adaptation-v1"
 EXTERNAL_SCORE_THRESHOLD = 90.0
 
 WORKFLOW_STATUSES: tuple[str, ...] = (
@@ -98,6 +101,185 @@ def _normalise_ledger(rows: Any, beats: Any = None) -> list[dict[str, Any]]:
     return normalised
 
 
+def _normalise_fact_items(value: Any, limit: int = 24) -> list[str]:
+    """Keep fact-card entries short and source-shaped; never invent facts."""
+    values = value if isinstance(value, list) else ([value] if value not in (None, "") else [])
+    result: list[str] = []
+    for item in values[:limit]:
+        text = _text(
+            item.get("summary") or item.get("fact") or item.get("key")
+            or item.get("name") or item.get("description")
+        ) if isinstance(item, dict) else _text(item)
+        if text and text != "unknown":
+            result.append(text)
+    return result
+
+
+def build_fact_card(
+    chapter_number: int,
+    *,
+    context_layers: dict[str, Any] | None = None,
+    source: dict[str, Any] | None = None,
+    writing_workflow: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the provider-facing fact card from confirmed project state.
+
+    This is deliberately a contract, not a summary generator.  Unknown time,
+    location, objects and resources stay unknown/empty so a model cannot turn
+    an omitted field into an invented continuity fact.
+    """
+    context_layers = context_layers if isinstance(context_layers, dict) else {}
+    source = source if isinstance(source, dict) else {}
+    workflow = writing_workflow if isinstance(writing_workflow, dict) else {}
+    contract = source.get("chapter_contract") or workflow.get("chapter_contract") or {}
+    previous = context_layers.get("previous_transition_contract") or {}
+    previous_end = previous.get("end_state") or {}
+    previous_text = context_layers.get("previous_tail") or ""
+    confirmed = _normalise_fact_items(
+        source.get("confirmed_facts")
+        or source.get("setting_facts")
+        or context_layers.get("known_facts")
+        or previous_end.get("knowledge")
+        or [row.get("event") for row in _normalise_ledger(source.get("causal_ledger"))]
+        or [contract.get("core_problem")]
+    )
+    character_boundaries = _normalise_fact_items(
+        source.get("character_boundaries")
+        or context_layers.get("characters")
+        or context_layers.get("relationships")
+    )
+    return {
+        "schema_version": FACT_CARD_SCHEMA_VERSION,
+        "chapter_number": int(chapter_number),
+        "previous_chapter": {
+            "tail": _text(previous_text),
+            "transition": previous,
+            "has_previous": bool(previous_text or previous),
+        },
+        "confirmed_facts": confirmed,
+        "character_boundaries": character_boundaries,
+        "scene_constraints": _normalise_fact_items(
+            source.get("scene_constraints") or context_layers.get("constraints")
+        ),
+        "object_ledger": _normalise_fact_items(
+            source.get("object_ledger") or context_layers.get("objects") or previous_end.get("objects")
+        ),
+        "resource_ledger": _normalise_fact_items(
+            source.get("resource_ledger") or context_layers.get("resources") or previous_end.get("resources")
+        ),
+        "state_anchors": {
+            "time": _first_text(context_layers.get("current_time"), previous_end.get("time")),
+            "location": _first_text(context_layers.get("current_location"), previous_end.get("location")),
+            "relationships": _normalise_fact_items(context_layers.get("relationships") or previous_end.get("relationships")),
+        },
+        "chapter_contract": {
+            "core_problem": _text(contract.get("core_problem")),
+            "observable_payoff": _text(contract.get("observable_payoff")),
+            "cost": _text(contract.get("cost")),
+            "next_pressure": _text(contract.get("next_inevitable_event")),
+        },
+        "model_adaptation": source.get("model_adaptation") or context_layers.get("model_adaptation") or {},
+        "behavior_samples": context_layers.get("behavior_samples") or [],
+        "provenance": {
+            "source": "project_state_and_plot_contract",
+            "project_scoped": bool(context_layers.get("project_id")),
+        },
+    }
+
+
+def validate_fact_card(card: dict[str, Any] | None) -> dict[str, Any]:
+    """Fail closed on missing generation inputs while allowing chapter one."""
+    card = card if isinstance(card, dict) else {}
+    missing: list[str] = []
+    if card.get("schema_version") != FACT_CARD_SCHEMA_VERSION:
+        missing.append("schema_version")
+    if not card.get("confirmed_facts"):
+        missing.append("confirmed_facts")
+    for field in ("character_boundaries", "scene_constraints", "object_ledger", "resource_ledger"):
+        if field not in card:
+            missing.append(field)
+    contract = card.get("chapter_contract") or {}
+    for field in ("core_problem", "observable_payoff", "cost", "next_pressure"):
+        if not _text(contract.get(field)):
+            missing.append(f"chapter_contract.{field}")
+    return {
+        "schema_version": FACT_CARD_SCHEMA_VERSION,
+        "passed": not missing,
+        "missing": missing,
+        "blocking": bool(missing),
+        "message": "fact card ready" if not missing else "fact card incomplete",
+    }
+
+
+def normalize_causal_audit(value: Any) -> dict[str, Any]:
+    """Normalize the reviewer-owned causal audit without hiding missing data."""
+    raw = value if isinstance(value, dict) else {}
+    conclusion = _text(raw.get("conclusion")) or "unverified"
+    if conclusion not in {"pass", "return_scene", "return_skeleton", "unverified"}:
+        conclusion = "unverified"
+
+    def issues(field: str) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for item in _list(raw.get(field), limit=20):
+            if isinstance(item, dict):
+                result.append({
+                    "location": _text(item.get("location") or item.get("anchor")),
+                    "fact": _text(item.get("fact") or item.get("event")),
+                    "gap": _text(item.get("gap") or item.get("issue")),
+                    "repair": _text(item.get("repair") or item.get("suggestion")),
+                })
+            else:
+                result.append({"location": "", "fact": "", "gap": _text(item), "repair": ""})
+        return result
+
+    return {
+        "schema_version": CAUSAL_AUDIT_SCHEMA_VERSION,
+        "conclusion": conclusion,
+        "red_issues": issues("red_issues"),
+        "orange_issues": issues("orange_issues"),
+        "yellow_issues": issues("yellow_issues"),
+        "preserved_facts": _normalise_fact_items(raw.get("preserved_facts"), limit=30),
+        "repair_boundaries": _normalise_fact_items(raw.get("repair_boundaries"), limit=20),
+        "complete": bool(value and isinstance(value, dict) and conclusion != "unverified"),
+    }
+
+
+def build_behavior_sample_query(source: dict[str, Any] | None) -> str:
+    """Create a project-local retrieval query from scene function, not prose."""
+    source = source if isinstance(source, dict) else {}
+    payoff = source.get("payoff_contract") or {}
+    values = [
+        source.get("chapter_type"), source.get("scene_type"), source.get("pov_character"),
+        source.get("tension_target"), source.get("reader_promise"), source.get("payoff_type"),
+        payoff.get("payoff_type"), payoff.get("visible_result"), source.get("hook"),
+    ]
+    return " ".join(dict.fromkeys(text for text in (_text(value) for value in values) if text and text != "unknown"))[:500]
+
+
+def build_model_adaptation_record(
+    *,
+    provider: Any = None,
+    model: Any = None,
+    prompt_version: Any = None,
+    temperature: Any = None,
+    max_tokens: Any = None,
+    behavior_sample_count: Any = 0,
+) -> dict[str, Any]:
+    """Record the model/input combination that produced a chapter."""
+    return {
+        "schema_version": MODEL_ADAPTATION_SCHEMA_VERSION,
+        "provider": _text(provider),
+        "model": _text(model),
+        "prompt_version": _text(prompt_version),
+        "parameters": {
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        },
+        "behavior_sample_count": int(behavior_sample_count or 0),
+        "baseline_required": True,
+    }
+
+
 def _missing_contract_fields(contract: dict[str, Any], ledger: list[dict[str, Any]]) -> list[str]:
     missing: list[str] = []
     for field in ("core_problem", "observable_payoff", "cost", "next_inevitable_event"):
@@ -118,12 +300,19 @@ def validate_writing_workflow(workflow: dict[str, Any] | None) -> dict[str, Any]
     chapter_contract = workflow.get("chapter_contract") or {}
     ledger = workflow.get("causal_ledger") or []
     missing = _missing_contract_fields(chapter_contract, ledger)
+    fact_card = workflow.get("fact_card")
+    fact_validation = validate_fact_card(fact_card) if fact_card is not None else {
+        "passed": False,
+        "missing": ["fact_card"],
+    }
+    missing.extend(f"fact_card.{item}" for item in fact_validation.get("missing") or [])
     return {
         "schema_version": WRITING_WORKFLOW_SCHEMA_VERSION,
         "passed": not missing,
         "missing": missing,
         "blocking": bool(missing),
         "message": "causal contract ready" if not missing else "pre-generation causal contract incomplete",
+        "fact_card": fact_validation,
     }
 
 
@@ -216,6 +405,12 @@ def build_writing_workflow_contract(
         "status": status,
         "chapter_contract": chapter_contract,
         "causal_ledger": ledger,
+        "fact_card": build_fact_card(
+            chapter_number,
+            context_layers=context_layers,
+            source=source,
+        ),
+        "model_adaptation": source.get("model_adaptation") or context_layers.get("model_adaptation") or {},
         "current_state": current_state,
         "state_delta": source.get("state_delta") or {},
         "open_threads": _list(source.get("open_threads") or previous.get("open_threads")),
@@ -224,6 +419,7 @@ def build_writing_workflow_contract(
             "causal_passed": review.get("causal_passed"),
             "style_passed": review.get("style_passed"),
             "review_score": review.get("review_score"),
+            "causal_audit": normalize_causal_audit(review.get("causal_audit")),
         },
         "external_evaluation": external,
         "provenance": {

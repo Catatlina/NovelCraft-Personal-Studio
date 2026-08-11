@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from app.v7.quality.writing_methodology import (
+    build_behavior_sample_query,
+    build_model_adaptation_record,
     build_writing_workflow_contract,
+    normalize_causal_audit,
     register_external_evaluation,
     render_writing_methodology_contract,
     text_sha256,
@@ -95,3 +98,39 @@ def test_workflow_status_transition_does_not_skip_external_gate():
     assert workflow["status"] == "external_pending"
     with pytest.raises(ValueError, match="invalid writing workflow transition"):
         transition_workflow_status(workflow, "published")
+
+
+def test_fact_card_and_behavior_contract_are_project_ready():
+    workflow = build_writing_workflow_contract(2, plot_brief=_ready_brief())
+    assert workflow["fact_card"]["schema_version"] == "fact-card-v1"
+    assert workflow["validation"]["fact_card"]["passed"] is True
+    assert "对抗" in build_behavior_sample_query({
+        "chapter_type": "对抗",
+        "pov_character": "主角",
+        "payoff_contract": {"payoff_type": "反击"},
+    })
+
+
+def test_causal_audit_preserves_red_issue_and_repair_boundary():
+    audit = normalize_causal_audit({
+        "conclusion": "return_scene",
+        "red_issues": [{"location": "第3段", "gap": "知情越界", "repair": "补可见证据"}],
+        "repair_boundaries": ["仓库夺证事件单元"],
+    })
+    assert audit["schema_version"] == "causal-audit-v1"
+    assert audit["red_issues"][0]["gap"] == "知情越界"
+    assert audit["repair_boundaries"] == ["仓库夺证事件单元"]
+
+
+def test_model_adaptation_record_is_explicit():
+    record = build_model_adaptation_record(
+        provider="deepseek",
+        model="deepseek-chat",
+        prompt_version="1.6.0",
+        temperature=0.85,
+        max_tokens=2400,
+        behavior_sample_count=2,
+    )
+    assert record["schema_version"] == "model-adaptation-v1"
+    assert record["parameters"]["temperature"] == 0.85
+    assert record["behavior_sample_count"] == 2

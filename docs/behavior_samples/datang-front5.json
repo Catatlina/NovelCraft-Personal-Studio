@@ -1,0 +1,77 @@
+[
+  {
+    "title": "大唐前五章-结果先行",
+    "kind": "behavior_sample",
+    "body": "先让读者看到动作和结果，再补必要解释；信息通过现场反馈交付，不用百科式说明拖慢冲突。",
+    "meta": {
+      "behavior_annotation": "结果先行；先交付现场变化，再补最小必要信息；每个解释都要服务于当前选择和冲突。",
+      "scene_type": "现场危机/信息揭示",
+      "viewpoint": "限知视角",
+      "pressure": "即时危险与信息不完整",
+      "result_type": "现场结果+新压力",
+      "tags": ["结果先行", "现场反馈", "信息缺口"],
+      "source_project": "datang",
+      "source_file": "写作系统/黄金样本标注集-前5章.md"
+    }
+  },
+  {
+    "title": "大唐前五章-局部人物独立判断",
+    "kind": "behavior_sample",
+    "body": "局部人物有自己的目标和判断，可以拒绝主角、误解信息或提出代价，不围着主角自动问答。",
+    "meta": {
+      "behavior_annotation": "配角保持独立目标、利益和拒绝权；对白不承担百科讲解；人物选择会改变现场走向。",
+      "scene_type": "谈判/冲突/协作",
+      "viewpoint": "主角限知",
+      "pressure": "利益冲突与信任不足",
+      "result_type": "选择改变关系或行动路线",
+      "tags": ["配角独立", "拒绝权", "非完美问答"],
+      "source_project": "datang",
+      "source_file": "写作系统/黄金样本标注集-前5章.md"
+    }
+  },
+  {
+    "title": "大唐前五章-现代信息存在延迟",
+    "kind": "behavior_sample",
+    "body": "跨时空或跨系统信息不会瞬间全知；人物只能依据已获得的片段行动，误判和补证据应产生真实压力。",
+    "meta": {
+      "behavior_annotation": "严格维护知情边界和信息延迟；不让任何人物使用未建立来源的现代信息；误判必须由证据修正并留下成本。",
+      "scene_type": "跨界通信/调查",
+      "viewpoint": "双端信息不对称",
+      "pressure": "延迟、误判、证据不足",
+      "result_type": "获得局部证据+暴露或资源成本",
+      "tags": ["知情边界", "信息延迟", "证据链"],
+      "source_project": "datang",
+      "source_file": "写作系统/黄金样本标注集-前5章.md"
+    }
+  },
+  {
+    "title": "大唐前五章-兑现带状态成本",
+    "kind": "behavior_sample",
+    "body": "爽点兑现必须落到可见结果，同时改变资源、身份、责任、关系或敌我状态，并留下下一章压力。",
+    "meta": {
+      "behavior_annotation": "结果先落地，再明确收益与成本；每次兑现至少改变一项可追踪状态，不用空泛震惊收尾。",
+      "scene_type": "爽点兑现/反击",
+      "viewpoint": "主角主动推进",
+      "pressure": "对手压制、身份暴露、资源消耗",
+      "result_type": "可见收益+代价+新敌意",
+      "tags": ["爽点兑现", "状态变化", "结果成本"],
+      "source_project": "datang",
+      "source_file": "写作系统/黄金样本标注集-前5章.md"
+    }
+  },
+  {
+    "title": "大唐前五章-每章留下可追踪压力",
+    "kind": "behavior_sample",
+    "body": "章末不是总结，而是具体动作、发现或选择；新压力必须由本章结果推出，下一章可以从交接状态继续。",
+    "meta": {
+      "behavior_annotation": "高潮之后写清余波和代价，再用本章结果推出下一压力；章末钩子必须是可见动作、发现或选择。",
+      "scene_type": "章末交接/新危机",
+      "viewpoint": "连续限知视角",
+      "pressure": "兑现后的余波与责任升级",
+      "result_type": "新选择或新危机",
+      "tags": ["章末钩子", "余波", "连续性"],
+      "source_project": "datang",
+      "source_file": "写作系统/黄金样本标注集-前5章.md"
+    }
+  }
+]
