@@ -104,8 +104,9 @@
 - 状态：**已接线**。
 - 代码范围：作品创建/导入、榜单成书、小说设置、`contents.meta`、worker context、V7 quality profile、`GenerationEngine`、V7 event log、Docker/env 示例均已接入；研究失败 fail-closed，不返回 mock 或静态替代正文。
 - 验证：研究服务 6/6、相关 V7/质量 25/25、Redis 依赖回归 30/30、前端 3/3、构建/编译/差异检查通过。
-- 阻断：生产 healthz 已确认 `web_research_provider=tavily` 且 Key 已配置，但本次 smoke 未注入 Provider/Tavily 调用，不具备真实联网正文质量证据。
-- 下一步：用真实 Provider 执行一章，确认 live/cached、`web_research.completed`、AI ledger 和正文 Prompt 证据，最后跑两本书各 20 章并做人工爽感/连续性复核。
+- 最新证据（2026-08-17）：诊断作品真实调用已返回 `live/miss`，2条查询、10个来源、5张原创灵感卡，真实 `deepseek-chat` 整理调用与成本、`web_research.completed` 已写入生产 V7 数据库；联网搜索链路已具备真实样本证据。
+- 当前阻断：同一诊断作品的真实第1章在第2场生成期连续三次命中 `repeated_paragraph_opening`，正文未持久化；需先部署段首编排 Prompt 修复并完成一次成功正文样本，不能用搜索卡成功替代正文质量验收。
+- 下一步：修复部署后只重试一次诊断作品正文；成功后再按“清空历史章节”的规则启动真实20章长跑，并做上下章连续性、人工爽感和外部检测复核。
 
 ## 2026-08-10 KI-033 本机全量后端集成回归受 PostgreSQL 环境阻断
 

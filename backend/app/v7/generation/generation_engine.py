@@ -3877,6 +3877,13 @@ class GenerationEngine:
             if scene_index == 2:
                 opening_instruction += "前半场必须把上一场落点转成新的选择、代价或风险。"
         retry_block = f"\n【上次场景未通过，必须在本次生成中修复】\n{retry_feedback}\n" if retry_feedback else ""
+        paragraph_opening_contract = (
+            "【自然段首编排（生成期执行，不要输出清单）】"
+            "本场如果自然形成 8 段或以上，至少把 6 段的起笔分散到动作、物件、声音、环境变化、对白或他人反应；"
+            "相邻段落不得用同一个两字姓名起笔，同一姓名最多出现在约四分之一的段首。"
+            "需要写主角时，优先先写正在发生的动作、视线、手中物件或现场后果，再在句中带出姓名；"
+            "不要为了达标硬塞无关描写，也不要把所有姓名机械替换成‘他/她’，段落必须仍然服务于本场目标和压力。"
+        )
         minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
         allowed_maximum = self._scene_allowed_max_chars(scene_card, scene_index=scene_index)
         maximum = max(
@@ -3905,6 +3912,7 @@ class GenerationEngine:
             f"{opening_instruction}\n"
             f"{contract_block}\n"
             f"{causal_contract_block}"
+            f"{paragraph_opening_contract}\n"
             "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
             "跨场景桥接硬要求：如果本场 scene_card.location/time/characters 与上一场交接不同，"

@@ -1059,6 +1059,8 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "不要把每个段落都写成‘现象→判断→解释→总结’的完整闭环" in prompt
     assert "本场 prose_texture_plan 指定的限知叙述偏向" in prompt
     assert "本章叙述质地与人物声音（生成前执行）" in prompt
+    assert "自然段首编排（生成期执行，不要输出清单）" in prompt
+    assert "同一姓名最多出现在约四分之一的段首" in prompt
     assert "重大袭击、对抗或爆发结束后" in prompt
     assert "关键异常、开门、封印松动、袭击、修炼变化或新能力必须先写可见前提/征兆" in prompt
     assert "碑文、幻象、梦境或他人话语里的数字/年代属于原说话者" in prompt
