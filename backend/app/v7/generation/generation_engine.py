@@ -104,6 +104,8 @@ SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
 # boundary was rejecting otherwise natural scenes by a few dozen characters;
 # chapter-level target reservation remains the hard ceiling.
 SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
+READER_SCENE_TARGET_MAX_RATIO = 1.05
+READER_SCENE_VARIANCE_CHARS = 32
 
 
 def chinese_word_count(text: str) -> int:
@@ -3206,6 +3208,24 @@ class GenerationEngine:
             + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
         )
 
+    @staticmethod
+    def _reader_scene_max_chars(scene_card: dict[str, Any], *, scene_index: int) -> int:
+        """Keep production scenes close to their reader-first allocation.
+
+        The legacy scene envelope is intentionally broad for short synthetic
+        tests and compatibility callers. A real reader-budget chapter needs
+        a narrower per-scene envelope so one early scene cannot consume the
+        slack reserved for the climax and leave a later scene with an
+        impossible fragment such as 218 characters.
+        """
+        target_words = max(1, int(scene_card.get("target_words") or 300))
+        minimum = max(120, int(target_words * 0.45))
+        return max(
+            minimum + 100,
+            int(target_words * READER_SCENE_TARGET_MAX_RATIO)
+            + READER_SCENE_VARIANCE_CHARS,
+        )
+
     def _scene_generation_max_tokens(
         self,
         scene_card: dict[str, Any],
@@ -3542,6 +3562,11 @@ class GenerationEngine:
                 )
             scene_max_chars = min(
                 nominal_max_scene_chars,
+                (
+                    self._reader_scene_max_chars(card, scene_index=index)
+                    if target_word_count >= 1800
+                    else nominal_max_scene_chars
+                ),
                 remaining_scene_budget,
                 remaining_planned_budget if target_word_count >= 1800 else remaining_scene_budget,
             )
@@ -3555,9 +3580,10 @@ class GenerationEngine:
                 card,
                 scene_index=index,
             )
-            pacing_max_scene_chars = self._scene_allowed_max_chars(
-                card,
-                scene_index=index,
+            pacing_max_scene_chars = (
+                self._reader_scene_max_chars(card, scene_index=index)
+                if target_word_count >= 1800
+                else self._scene_allowed_max_chars(card, scene_index=index)
             )
             for attempt in range(3):
                 attempt_warnings: list[dict[str, Any]] = []
