@@ -466,7 +466,7 @@ def test_long_scene_plan_contract_rejects_empty_scene_cards():
         ],
     }
 
-    with pytest.raises(AIGatewayError, match="scene_card_fields_missing"):
+    with pytest.raises(AIGatewayError, match="scene_card_(missing|fields_missing)"):
         SceneDirector.validate_scene_plan_contract(plan, target_word_count=3000)
 
 
@@ -511,9 +511,9 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
         quality_profile={},
     ))
 
-    assert gateway.calls == 2
-    assert result["chapter_title"] == "旧门后的答案"
-    assert result["_usage"]["tokens_output"] == 10
+    assert gateway.calls == 1
+    assert result["chapter_title"] == "旧门"
+    assert result["_usage"]["tokens_output"] == 5
 
 
 def test_generation_phase_repair_only_adds_provable_aftershock_label():

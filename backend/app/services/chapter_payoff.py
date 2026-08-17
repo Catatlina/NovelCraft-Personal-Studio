@@ -611,6 +611,25 @@ def repair_payoff_beat_structure(beats: Any) -> dict[str, Any]:
             "emotion": "推进",
             "target_words": 300,
             "payoff_phases": [phase],
+            # This is a structural instruction card, not invented story
+            # state. It gives the writer a causal slot to fill from the
+            # already-confirmed neighboring beats instead of allowing a
+            # synthetic phase to reach prose generation without continuity
+            # constraints.
+            "scene_card": {
+                "location": "沿用上一节已确认地点或其明确承接地点",
+                "time": "承接上一节已确认时间",
+                "characters": [],
+                "goal": f"把{phase_copy.get(phase, (phase, ''))[0]}写成现场动作",
+                "obstacle": purpose,
+                "choice": "人物依据已确认信息作出当前选择",
+                "turn": "本阶段产生一个可见转折",
+                "state_change": "本阶段造成一项可观察状态变化",
+                "knowledge_boundary": "只使用前面已确认的事实，不补写未知设定",
+                "handoff": "把本阶段结果直接交给下一节或章末压力",
+                "trigger": "上一阶段已经发生的结果",
+                "causal_link": "上一阶段结果触发本阶段行动并产生可见反馈",
+            },
             "source": "pre_generation_payoff_repair",
         })
         repaired_phases.append(phase)
