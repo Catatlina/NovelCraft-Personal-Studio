@@ -852,6 +852,30 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "生成期必须控制在 216-648 字" in prompt
 
 
+def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():
+    from types import SimpleNamespace
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.ai_gateway = SimpleNamespace(provider="deepseek")
+    card = {"target_words": 600}
+
+    deepseek_limit = engine._scene_generation_max_tokens(
+        card,
+        scene_index=2,
+        max_scene_chars=850,
+    )
+    engine.ai_gateway.provider = "openai"
+    openai_limit = engine._scene_generation_max_tokens(
+        card,
+        scene_index=2,
+        max_scene_chars=850,
+    )
+
+    assert deepseek_limit == int(850 * 0.72)
+    assert openai_limit == int(850 * 0.86)
+    assert deepseek_limit < openai_limit
+
+
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
     import inspect
     from app.v7.director.story_director import StoryDirector

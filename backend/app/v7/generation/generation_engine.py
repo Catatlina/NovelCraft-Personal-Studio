@@ -77,8 +77,14 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.0.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.1.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
+# DeepSeek's Chinese output in the first real acceptance run averaged more
+# than one non-whitespace character per provider output token.  Keep the
+# request below the character envelope so the provider does not write a
+# naturally detailed scene that the chapter-level gate must reject later.
+SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 0.72
+SCENE_OPENAI_TOKEN_CHAR_MARGIN = 0.86
 
 
 def chinese_word_count(text: str) -> int:
@@ -3107,12 +3113,12 @@ class GenerationEngine:
         maximum = max(minimum + 100, int(target_words * 1.35))
         return minimum, maximum
 
-    @classmethod
     def _scene_generation_max_tokens(
-        cls,
+        self,
         scene_card: dict[str, Any],
         *,
         scene_index: int,
+        max_scene_chars: int | None = None,
     ) -> int:
         """Keep the Provider token ceiling in the same scale as scene chars.
 
@@ -3120,10 +3126,25 @@ class GenerationEngine:
         call had a fixed 700-token floor.  That floor was larger than the
         short scene contracts, so DeepSeek naturally returned a 600-700
         character scene and the application rejected it as overlong.  The
-        token ceiling now derives from the accepted character envelope.
+        first real long-run also showed that a 0.95 token/character estimate
+        was still too loose for DeepSeek.  The ceiling now uses a provider-
+        conservative margin and the current chapter budget.
         """
-        _minimum, maximum = cls._scene_length_bounds(scene_card, scene_index=scene_index)
-        return max(240, min(1600, int(maximum * 0.95)))
+        _minimum, nominal_maximum = self._scene_length_bounds(
+            scene_card,
+            scene_index=scene_index,
+        )
+        maximum = max(
+            _minimum,
+            int(max_scene_chars) if max_scene_chars is not None else nominal_maximum,
+        )
+        provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
+        margin = (
+            SCENE_OPENAI_TOKEN_CHAR_MARGIN
+            if provider == "openai"
+            else SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN
+        )
+        return max(240, min(1600, int(maximum * margin)))
 
     @staticmethod
     def _scene_naturalness_flags(
@@ -3255,6 +3276,7 @@ class GenerationEngine:
         current_state: dict[str, Any],
         previous_handoffs: list[dict[str, Any]],
         retry_feedback: str = "",
+        max_scene_chars: int | None = None,
     ) -> str:
         context_layers = context.get("context_layers") or {}
         style_card = context_layers.get("style_card") or {}
@@ -3295,7 +3317,11 @@ class GenerationEngine:
             if scene_index == 2:
                 opening_instruction += "前半场必须把上一场落点转成新的选择、代价或风险。"
         retry_block = f"\n【上次场景未通过，必须在本次生成中修复】\n{retry_feedback}\n" if retry_feedback else ""
-        minimum, maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
+        minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
+        maximum = max(
+            minimum,
+            int(max_scene_chars) if max_scene_chars is not None else nominal_maximum,
+        )
         opening_constraint = str(scene_card.get("opening_constraint") or "").strip()
         contract_block = f"\n【本场开头硬约束】\n{opening_constraint}" if opening_constraint else ""
         return (
@@ -3329,6 +3355,7 @@ class GenerationEngine:
         context: dict[str, Any],
         scene_plan: dict[str, Any],
         target_word_count: int,
+        chapter_max_chars: int,
     ) -> dict[str, Any]:
         """Generate a chapter as a serial chain of real Provider scene calls."""
         cards = self._normalise_scene_cards(scene_plan, target_word_count=target_word_count)
@@ -3355,6 +3382,23 @@ class GenerationEngine:
             usage["model"] = call_usage.get("model") or usage["model"]
 
         for index, card in enumerate(cards, start=1):
+            accepted_chars = chinese_word_count("\n\n".join(scene_texts))
+            minimum_scene_chars, nominal_max_scene_chars = self._scene_length_bounds(
+                card,
+                scene_index=index,
+            )
+            future_minimum_chars = sum(
+                self._scene_length_bounds(future_card, scene_index=future_index)[0]
+                for future_index, future_card in enumerate(cards[index:], start=index + 1)
+            )
+            remaining_scene_budget = chapter_max_chars - accepted_chars - future_minimum_chars
+            if remaining_scene_budget < minimum_scene_chars:
+                raise AIGatewayError(
+                    "scene serial chapter budget exhausted before the next scene: "
+                    f"scene={index}, accepted_chars={accepted_chars}, "
+                    f"chapter_max_chars={chapter_max_chars}"
+                )
+            scene_max_chars = min(nominal_max_scene_chars, remaining_scene_budget)
             feedback = ""
             accepted_scene = ""
             scene_metrics: dict[str, Any] = {}
@@ -3375,6 +3419,7 @@ class GenerationEngine:
                         current_state=current_state,
                         previous_handoffs=handoffs,
                         retry_feedback=feedback,
+                        max_scene_chars=scene_max_chars,
                     ),
                     system_prompt=(
                         "你是稳定写作同一本长篇小说的中文网文作者。只输出本场正文，"
@@ -3385,6 +3430,7 @@ class GenerationEngine:
                     max_tokens=self._scene_generation_max_tokens(
                         card,
                         scene_index=index,
+                        max_scene_chars=scene_max_chars,
                     ),
                     temperature=0.82,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
@@ -3420,20 +3466,21 @@ class GenerationEngine:
                         "max_scene_chars": max_scene_chars,
                     }
                     attempt_warnings.append(warning)
-                    # A beat target is a pacing reference, not a sentence
-                    # truncation command.  Only an extreme runaway scene is
-                    # a generation failure; normal Chinese detail remains
-                    # available to the chapter-level reviewer.
-                    if candidate_word_count > max_scene_chars * 2:
-                        issues.append({
-                            **warning,
-                            "code": "scene_extreme_overlong",
-                            "severity": "high",
-                            "message": (
-                                f"场景有 {candidate_word_count} 字，超过合理上限 {max_scene_chars * 2} 字；"
-                                "必须在生成期收束"
-                            ),
-                        })
+                    # The current scene budget already reserves the minimum
+                    # space required by later scenes.  Exceeding it makes the
+                    # chapter impossible to keep inside its hard envelope;
+                    # retry the scene with explicit generation feedback
+                    # instead of accepting prose that will fail only after
+                    # the whole chapter is assembled.
+                    issues.append({
+                        **warning,
+                        "code": "scene_chapter_budget_overrun",
+                        "severity": "high",
+                        "message": (
+                            f"场景有 {candidate_word_count} 字，超过本章当前生成预算 {max_scene_chars} 字；"
+                            "必须在生成期收束，不得依赖章节完成后的截断或重写"
+                        ),
+                    })
                 if not issues:
                     accepted_scene = candidate
                     scene_warnings = attempt_warnings
@@ -3464,7 +3511,12 @@ class GenerationEngine:
                 "word_count": chinese_word_count(accepted_scene),
                 "min_scene_chars": self._scene_length_bounds(card, scene_index=index)[0],
                 "max_scene_chars": self._scene_length_bounds(card, scene_index=index)[1],
-                "max_provider_tokens": self._scene_generation_max_tokens(card, scene_index=index),
+                "chapter_budget_max_chars": scene_max_chars,
+                "max_provider_tokens": self._scene_generation_max_tokens(
+                    card,
+                    scene_index=index,
+                    max_scene_chars=scene_max_chars,
+                ),
                 "attempts": 2 if feedback else 1,
                 "generation_warnings": scene_warnings,
                 "naturalness_metrics": scene_metrics,
@@ -3712,6 +3764,7 @@ class GenerationEngine:
                 context=context,
                 scene_plan=scene_plan,
                 target_word_count=target_word_count,
+                chapter_max_chars=maximum_chapter_chars,
             )
             add_usage(step, serial_result.get("usage") or {})
             text = str(serial_result.get("text") or "").strip()
