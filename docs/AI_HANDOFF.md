@@ -6,9 +6,9 @@
 
 - **作品开关**：生产原作 `4ee9db30-98c7-40d5-9484-12432efed69e` 已通过 `PUT /api/v1/novels/{novel_id}/generation-settings` 切换为 `web_research_mode=required`；生产 healthz 已确认 Tavily provider 和 Key 配置存在。
 - **真实联网研究证据**：诊断作品 `44c557a8-8e4d-461a-8079-eace38d260cf` 无历史章节。生产真实调用返回 `status=live`、`cache_status=miss`、2条查询、10个来源、5张原创灵感卡；卡片整理使用真实 `deepseek-chat`，成本记录约 `0.003175 CNY`，`web_research.completed` 和 `v7.research.web_meme_cards` 已写入 V7 数据库。
-- **真实正文尝试边界**：使用正确 V7 入口 `/api/v7/director/{novel_id}/generate-chapter` 发起第1章真实创作；约100秒后在第2场生成期连续三次命中 `repeated_paragraph_opening`，返回500且未持久化章节。该结果证明正文仍未通过生成契约，不能记为一章验收，也不能记为20章长跑。
-- **当前修复**：在场景正文 Prompt 前置可执行的“自然段首编排”契约，要求动作/物件/声音/环境/对白/他人反应分散起笔，限制同一姓名段首占比，并加入 Prompt 回归断言。后续只在此修复部署并通过回归后重试一次诊断作品，不重复盲跑。
-- **当前边界**：联网搜索链路为**真实样本已验收**；真实正文生成质量仍为**未验收**。20章长跑、七道门禁运行、披露人工确认/正式发布、朱雀95/5/0外部报告、前端登录态发布流程仍未完成。
+- **真实正文尝试边界**：首轮请求在第2场三次命中 `repeated_paragraph_opening`，未持久化；依据实际证据收紧段首硬结构后，生产提交 `0daeac9` 的最后一次诊断重试返回 HTTP 200，V7 `completed`，正文 `v6_content_id=2e1c9489-ccea-4ca9-91fc-efe831a0b53d` 已持久化，3072字，状态为 `reviewed`。
+- **当前修复**：场景正文 Prompt 已加入“每连续8段同一姓名最多2段”的可执行结构，重试反馈会带上实际段数/命中数；该修复已部署，生产定向回归 `77 passed`。成功章节的 generation metadata 记录 `web_research=live/miss`、6张卡、9个来源，V7 Prompt execution、成本账本、审阅与一致性记录齐全。
+- **当前边界**：真实联网搜索和**单章正文样本已验收**；这不等于外部朱雀95/5/0，也不等于长期可读性。20章长跑、七道门禁运行、披露人工确认/正式发布、朱雀95/5/0外部报告、前端登录态发布流程仍未完成；长跑必须另建 `active_chapters=0` 的清空历史副本，不能复用本诊断章。
 
 ## 2026-08-17 生成期质量改造与清空历史长跑规则（当前批次）
 

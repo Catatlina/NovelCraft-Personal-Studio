@@ -61,7 +61,7 @@
 |---|---|---|---|
 | 作品级联网创作开关 | 已验收 | 原作 `4ee9db30-98c7-40d5-9484-12432efed69e` 通过正式生成设置 API 切换为 `required`；生产 Tavily Key 已配置 | 真实正文质量仍需验收 |
 | 真实联网搜索与灵感卡 | 已验收 | 诊断作品 `44c557a8-8e4d-461a-8079-eace38d260cf` 实测 `live/miss`，2 查询、10 来源、5 卡片，真实 DeepSeek 整理调用、成本和 `web_research.completed` 已持久化 | 不能替代一章正文和20章长跑 |
-| 联网正文生成 | 未验收 | 正确 V7 入口已进入真实 Provider；第2场连续三次命中 `repeated_paragraph_opening`，未保存章节 | 部署生成期段首编排修复后成功跑通一章 |
+| 联网正文生成（单章） | 已验收 | 正确 V7 入口真实 Provider 第1章 HTTP 200；V7 completed，3072字正文持久化，`web_research=live/miss`、6卡片、9来源、Prompt execution/成本/审阅记录齐全 | 20章长跑、长期连续性与外部95/5/0仍未验收 |
 
 ## 2026-08-10 最新生产证据
 
