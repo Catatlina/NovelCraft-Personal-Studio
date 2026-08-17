@@ -124,7 +124,50 @@ class ConsistencyChecker:
         # stored under ``text``.  Older test doubles returned a bare string;
         # _parse_response accepts both so the real provider path and existing
         # seams share one strict parser.
-        return self._parse_response(response, chapter_text)
+        result = self._parse_response(response, chapter_text)
+        if chapter_number <= 1 and not previous_chapter_tail and not previous_transition_contract:
+            # A new novel has no previous chapter by definition. Do not let a
+            # Provider turn that missing input into a cross-chapter blocker;
+            # the first chapter is checked against its own outline, rules and
+            # opening pressure instead.
+            previous_missing_markers = (
+                "上一章",
+                "上章",
+                "前章",
+            )
+            absence_markers = (
+                "为空",
+                "没有",
+                "无",
+                "无法验证",
+                "缺失",
+                "未提供",
+            )
+            retained: list[dict[str, Any]] = []
+            removed = False
+            for issue in result.issues:
+                description = str(issue.get("description") or "")
+                if (
+                    any(marker in description for marker in previous_missing_markers)
+                    and any(marker in description for marker in absence_markers)
+                ):
+                    removed = True
+                    continue
+                retained.append(issue)
+            if removed:
+                result.issues = retained
+                result.passed = (
+                    result.score >= CONSISTENCY_PASS_SCORE
+                    and not any(
+                        str(item.get("severity") or "") in {"严重", "高", "high", "critical"}
+                        for item in retained
+                    )
+                )
+                result.summary = (
+                    f"首章无上一章可承接；已忽略缺失前章输入，保留本章内部一致性检查。"
+                    f" {result.summary}"
+                ).strip()
+        return result
 
     def _build_check_prompt(
         self,
@@ -181,7 +224,16 @@ class ConsistencyChecker:
                 for item in active_rules[:12]
             )
 
+        first_chapter_note = (
+            "这是第1章，也是新书开端；没有上一章结尾是正常输入，不得因为‘上一章为空/无法验证’判定跨章失败。"
+            "本章应改查自身开场锚点、细纲节拍、人物动机、规则来源和具体风险。"
+            if chapter_number <= 1
+            else "本章不是第一章，必须严格承接上一章已落地的动作、地点、人物状态和未决线索。"
+        )
         return f"""你是一个专业的小说一致性审查员。请严格检查第 {chapter_number} 章是否与设定、大纲、上一章衔接一致。
+
+【章节范围】
+{first_chapter_note}
 
 【核心设定】
 {core_settings_truncated or '（无核心设定）'}
@@ -206,7 +258,7 @@ class ConsistencyChecker:
 {chapter_text_truncated}
 
 【检查清单】
-1. 衔接一致性：人物位置、时间、动作、物品是否承接上一章结尾？有没有跳跃或断层？
+1. 衔接一致性：第1章检查自身开场锚点和内部动作链；后续章节检查人物位置、时间、动作、物品是否承接上一章结尾，不能把第一章缺少上一章当成问题。
 2. 设定一致性：修为等级、金手指规则、人物性格、世界观设定是否符合？有没有 OOC 或设定矛盾？
 3. 大纲一致性：细纲的节拍点是否都写到了？有没有偏离主线？章末钩子是否到位？
 4. 逻辑自洽：有没有前后矛盾或逻辑漏洞？人物行为是否合理？

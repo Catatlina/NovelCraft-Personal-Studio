@@ -52,3 +52,30 @@ def test_consistency_checker_serializes_plot_brief_and_parses_gateway_envelope()
 
     assert result.passed is True
     assert result.score == 95
+
+
+def test_first_chapter_does_not_fail_for_missing_previous_chapter_input():
+    import asyncio
+
+    class _FirstChapterGateway:
+        async def generate(self, prompt, **kwargs):
+            return {
+                "text": (
+                    '{"consistency_score": 90, "passed": false, "issues": '
+                    '[{"type":"衔接","severity":"严重",'
+                    '"description":"上一章结尾状态为空，无法验证承接。",'
+                    '"suggestion":"提供上一章结尾"}], "summary":"首章"}'
+                )
+            }
+
+    result = asyncio.run(
+        ConsistencyChecker(_FirstChapterGateway()).check(
+            chapter_text="门缝里透出一线光。",
+            chapter_number=1,
+            chapter_outline={"must_accomplish": ["出现异常"]},
+        )
+    )
+
+    assert result.passed is True
+    assert result.issues == []
+    assert "首章无上一章可承接" in result.summary

@@ -341,6 +341,12 @@ class ReviewEngine(BaseEngine):
             ensure_ascii=False,
         )
         methodology_block = render_writing_methodology_contract(data.get("writing_workflow") or {})
+        chapter_scope_note = (
+            "本章是第1章：没有上一章是正常状态，不得把‘上一章为空/无法验证承接’作为质量问题；"
+            "请改查开篇是否有具体目标、异常、风险和可见后果。"
+            if int(data.get("chapter_number") or 0) == 1
+            else "本章不是第1章：必须用上一章交接证据检查开头的时间、地点、人物状态和未决线索。"
+        )
 
         prompt = (
             "请对下面这章小说正文做专业审稿，先给 7 个宏观维度打分，"
@@ -348,6 +354,7 @@ class ReviewEngine(BaseEngine):
             f"【已确立设定】\n{setting_block}\n\n"
             f"【必须遵守的约束】\n{constraint_block}\n\n"
             f"【跨章连续性证据】\n{continuity_block}\n\n"
+            f"【章节范围判定】\n{chapter_scope_note}\n\n"
             f"【本章计划与确定性表达指标】\n{plan_block}\n\n"
             f"{methodology_block}\n\n"
             f"【novel-reviewer AI味候选信号（仅供复核，不是门禁）】\n{lexicon_block}\n\n"
