@@ -176,7 +176,7 @@ class PlotEngine(BaseEngine):
                 # writer. Keep its provenance version distinct from the old
                 # planning prompt so production traces cannot silently mix
                 # pre-contract and post-contract decisions.
-                prompt_version="1.3.0",
+                prompt_version="1.4.0",
             )
             ai_payload = ai["data"] or {}
             self.record_usage(ai["usage"])
@@ -354,7 +354,13 @@ class PlotEngine(BaseEngine):
   "suggested_beats": [
     {{"name": "节拍名", "content": "这一节拍发生什么", "target_words": 600,
       "emotion": "情绪", "importance": 0.6,
-      "payoff_phase": "pressure|build|burst|feedback|aftershock"}}
+      "payoff_phase": "pressure|build|burst|feedback|aftershock",
+      "scene_card": {{"location":"地点", "time":"时间", "characters":["在场人物"],
+        "goal":"本场目标", "obstacle":"本场可见阻碍", "choice":"人物在此刻做出的选择",
+        "turn":"本场转折", "state_change":"明确状态变化",
+        "knowledge_boundary":"人物此时知道/不知道什么", "handoff":"下一场直接承接点",
+        "trigger":"触发本场关键事件的可见前提",
+        "causal_link":"前因如何在正文中导致本场结果"}}}}
   ],
   "confidence": 0.0
 }}
@@ -362,6 +368,10 @@ class PlotEngine(BaseEngine):
 每个 suggested_beats 必须显式标注 payoff_phase 或 payoff_phases，严格覆盖
 pressure、build、burst、feedback、aftershock 五个阶段；至少一个节拍必须是
 build，内容要有试探、准备、取舍或蓄力，不能把连续施压当作 build。
+每个 suggested_beats 必须填写完整 scene_card，不能返回空对象或省略字段；场景卡必须让写作者能直接执行，
+至少写清地点、时间、人物目标、可见阻碍、主动选择、转折、状态变化、知情边界、承接点、触发前提和因果连接。
+如果节拍包含知识展示、求助、指点或关系互动，必须同时设计一个会改变关系、资源、风险、认知或位置的阻碍/选择/结果；
+禁止只写“求助—指点—恍然大悟”“聊天—解释—离开”这类没有现场阻力和代价的平铺节拍。
 标题必须是读者会看到的短标题，不得写成剧情摘要或操作说明；禁止出现“第X章”、
 “本章”、“主角在……发现……”、“读者将……”等元叙述模板。若与上一章标题相近，
 改用本章具体事件、物件、冲突或情绪意象命名。"""

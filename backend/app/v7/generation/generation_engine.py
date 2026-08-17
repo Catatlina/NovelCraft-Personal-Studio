@@ -903,6 +903,34 @@ class SceneDirector:
                 words = 0
             if words <= 0:
                 beat_errors.append(f"beat_{index}_target_words_invalid")
+            if target_word_count >= 1800:
+                scene_card = beat.get("scene_card") or beat.get("scene")
+                if not isinstance(scene_card, dict):
+                    beat_errors.append(f"beat_{index}_scene_card_missing")
+                else:
+                    required_scene_fields = (
+                        "location",
+                        "time",
+                        "goal",
+                        "obstacle",
+                        "choice",
+                        "turn",
+                        "state_change",
+                        "knowledge_boundary",
+                        "handoff",
+                        "trigger",
+                        "causal_link",
+                    )
+                    missing_scene_fields = [
+                        field
+                        for field in required_scene_fields
+                        if not str(scene_card.get(field) or "").strip()
+                    ]
+                    if missing_scene_fields:
+                        beat_errors.append(
+                            f"beat_{index}_scene_card_fields_missing:"
+                            + ",".join(missing_scene_fields[:4])
+                        )
             phase_values = beat.get("payoff_phases")
             if not isinstance(phase_values, list):
                 phase_values = [beat.get("payoff_phase")]

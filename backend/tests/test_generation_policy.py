@@ -115,6 +115,8 @@ def test_pre_generation_plot_prompt_inherits_the_same_contract():
     assert "第三人称叙述硬约束" in prompt
     assert "都市爽文可以使用现实地名" in prompt
     assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in prompt
+    assert "每个 suggested_beats 必须填写完整 scene_card" in prompt
+    assert "禁止只写“求助—指点—恍然大悟”" in prompt
 
 
 def test_v7_runtime_adds_mechanic_specific_directive_for_non_simulator_cheats():

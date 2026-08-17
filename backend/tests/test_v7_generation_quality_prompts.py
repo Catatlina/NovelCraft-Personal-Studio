@@ -32,6 +32,23 @@ from app.v7.quality.opening_variation import (
 from app.v7.quality.readability_contract import build_readability_plan, render_readability_plan
 
 
+def _complete_scene_card(index: int) -> dict:
+    return {
+        "location": f"场景地点{index}",
+        "time": "夜里",
+        "characters": ["主角"],
+        "goal": "确认当前异常",
+        "obstacle": "异常阻止主角直接得到答案",
+        "choice": "主角选择先试探再推进",
+        "turn": "试探触发新的现场变化",
+        "state_change": "线索和风险各增加一项",
+        "knowledge_boundary": "主角只知道现场可见事实",
+        "handoff": "下一场承接新的现场压力",
+        "trigger": "上一动作留下的可见异常",
+        "causal_link": "可见异常促使主角作出当前选择并产生结果",
+    }
+
+
 def test_repeated_chapter_title_gets_a_short_plot_hook():
     title = ensure_unique_chapter_title(
         "语音里的求救",
@@ -432,6 +449,27 @@ def test_scene_plan_contract_rejects_empty_or_incomplete_provider_plan():
         )
 
 
+def test_long_scene_plan_contract_rejects_empty_scene_cards():
+    phases = ["pressure", "build", "burst", "feedback", "aftershock"]
+    plan = {
+        "chapter_title": "门后是什么",
+        "chapter_type": "suspense",
+        "beats": [
+            {
+                "name": f"beat-{i}",
+                "content": "继续推进",
+                "target_words": 600,
+                "payoff_phase": phase,
+                "scene_card": {},
+            }
+            for i, phase in enumerate(phases)
+        ],
+    }
+
+    with pytest.raises(AIGatewayError, match="scene_card_fields_missing"):
+        SceneDirector.validate_scene_plan_contract(plan, target_word_count=3000)
+
+
 def test_scene_plan_repairs_semantically_incomplete_provider_plan():
     class Gateway:
         def __init__(self):
@@ -447,7 +485,7 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
                         "chapter_title": "旧门",
                         "chapter_type": "normal",
                         "beats": [
-                            {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase}
+                            {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase, "scene_card": _complete_scene_card(i)}
                             for i, phase in enumerate(phases[:-1])
                         ],
                     },
@@ -458,7 +496,7 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
                     "chapter_title": "旧门后的答案",
                     "chapter_type": "normal",
                     "beats": [
-                        {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase}
+                        {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase, "scene_card": _complete_scene_card(i)}
                         for i, phase in enumerate(phases)
                     ],
                 },
@@ -517,7 +555,7 @@ def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():
                     "chapter_title": "补上的余波",
                     "chapter_type": "normal",
                     "beats": [
-                        {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase}
+                        {"name": f"beat-{i}", "content": "继续推进", "target_words": 600, "payoff_phase": phase, "scene_card": _complete_scene_card(i)}
                         for i, phase in enumerate(phases)
                     ],
                 },
@@ -566,6 +604,7 @@ def test_scene_plan_uses_bounded_structural_repair_after_provider_repeats_missin
                             "content": "继续推进并留下具体后果",
                             "target_words": 500,
                             "payoff_phase": phase,
+                            "scene_card": _complete_scene_card(i),
                         }
                         for i, phase in enumerate(phases)
                     ],
