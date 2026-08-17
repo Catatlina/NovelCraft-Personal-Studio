@@ -29,6 +29,7 @@ from .gateway import (
 from .config import settings
 from .v7.quality.web_research import normalize_web_research_mode
 from .core.authz import ensure_project_member, ok
+from .services.novel_export import extract_body_text
 from .schemas import (
     AiEditRequest,
     AiOperation,
@@ -352,6 +353,7 @@ class ExternalEvaluationRequest(BaseModel):
     status: str = Field(default="completed", max_length=40)
     human_score: float | None = Field(default=None, ge=0, le=100)
     suspected_ai_score: float | None = Field(default=None, ge=0, le=100)
+    ai_feature_score: float | None = Field(default=None, ge=0, le=100)
     scores: dict[str, Any] = Field(default_factory=dict)
     flagged_segments: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -1047,14 +1049,7 @@ async def register_external_evaluation(
     try:
         _require_v7_chapter_scope(conn, chapter, "external_evaluation")
         body = decode(chapter.get("body"), {})
-        if isinstance(body, dict):
-            chapter_text = "\n".join(
-                str(item.get("text") or "")
-                for item in (body.get("content") or [])
-                if isinstance(item, dict)
-            ).strip()
-        else:
-            chapter_text = str(body or "").strip()
+        chapter_text = extract_body_text(body).strip()
         from .v7.quality.writing_methodology import (
             register_external_evaluation,
             transition_workflow_status,
@@ -1078,9 +1073,9 @@ async def register_external_evaluation(
             "legacy_evaluation_binding": True,
         }
         workflow["external_evaluation"] = evaluation
-        next_status = "external_90_plus" if evaluation["status"] == "external_90_plus" else "external_pending"
+        next_status = evaluation["status"] if evaluation["status"] in {"external_95_5_0", "external_failed"} else "external_pending"
         try:
-            if next_status == "external_90_plus" and workflow.get("status") != "external_pending":
+            if next_status in {"external_95_5_0", "external_failed"} and workflow.get("status") not in {"external_pending", next_status}:
                 transition_workflow_status(workflow, "external_pending")
             transition_workflow_status(workflow, next_status)
         except ValueError as exc:

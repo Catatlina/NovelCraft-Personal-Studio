@@ -345,7 +345,15 @@ def detect_paragraph_rhythm(text: str) -> Dict[str, Any]:
     """
     paragraphs = [p.strip() for p in re.split(r"\n{2,}|\n", text) if p.strip()]
     if len(paragraphs) < 5:
-        return {"cv": 0.0, "mean": 0, "std": 0, "total_paragraphs": len(paragraphs)}
+        lengths = [len(re.sub(r"\s+", "", p)) for p in paragraphs]
+        return {
+            "cv": 0.0,
+            "mean": round(mean(lengths), 1) if lengths else 0,
+            "std": 0,
+            "total_paragraphs": len(paragraphs),
+            "min_length": min(lengths) if lengths else 0,
+            "max_length": max(lengths) if lengths else 0,
+        }
     
     lengths = [len(re.sub(r"\s+", "", p)) for p in paragraphs]
     

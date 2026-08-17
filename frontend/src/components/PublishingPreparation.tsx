@@ -17,6 +17,7 @@ type Profile = {
   policy_status: string;
   policy_version?: string;
   ai_usage_policy: string;
+  extra_metadata?: Record<string, unknown>;
 };
 
 type Variant = {
@@ -33,7 +34,7 @@ type Variant = {
   publication_status: string;
   ai_disclosure_status: string;
   ai_disclosure_text?: string;
-  gate_summary?: { blocking_failures?: string[]; gate_scores?: Record<string, { passed: boolean; score?: number }> };
+  gate_summary?: { blocking_failures?: string[]; gate_scores?: Record<string, { passed: boolean; score?: number }>; external_evaluation?: ExternalEvaluation | null };
 };
 
 type Readiness = {
@@ -44,7 +45,21 @@ type Readiness = {
   platform_policy_confirmed: boolean;
   external_ai_flagged: boolean;
   external_ai_score?: number | null;
+  external_hard_gate?: boolean;
+  external_evaluation?: ExternalEvaluation | null;
   gate_summary?: Variant["gate_summary"];
+};
+
+type ExternalEvaluation = {
+  provider?: string;
+  scope?: string;
+  status?: string;
+  human_score?: number | null;
+  suspected_ai_score?: number | null;
+  ai_feature_score?: number | null;
+  target_passed?: boolean;
+  input_hash?: string;
+  thresholds?: { human_min?: number; suspected_ai_max?: number; ai_feature_max?: number };
 };
 
 type Disclosure = {
@@ -95,7 +110,7 @@ function textValue(value: unknown): string {
   return "";
 }
 
-function variantId(variant: Variant): string {
+function variantId(variant: Partial<Variant>): string {
   return String(variant.id || variant.variant_id || "");
 }
 
@@ -123,6 +138,15 @@ export function PublishingPreparation({ projectId, novelId, novelTitle, chapters
   const [policyStatus, setPolicyStatus] = useState("unknown");
   const [policyVersion, setPolicyVersion] = useState("");
   const [aiUsagePolicy, setAiUsagePolicy] = useState("required_disclosure");
+  const [externalHardGate, setExternalHardGate] = useState(true);
+  const [externalProvider, setExternalProvider] = useState("zhuque");
+  const [externalScope, setExternalScope] = useState("chapter");
+  const [humanScore, setHumanScore] = useState("");
+  const [suspectedAiScore, setSuspectedAiScore] = useState("");
+  const [aiFeatureScore, setAiFeatureScore] = useState("");
+  const [humanEditNote, setHumanEditNote] = useState("");
+  const [humanCharsAdded, setHumanCharsAdded] = useState("");
+  const [humanCharsRemoved, setHumanCharsRemoved] = useState("");
   const [variantName, setVariantName] = useState("");
   const [title, setTitle] = useState(novelTitle || "");
   const [synopsis, setSynopsis] = useState("");
@@ -206,7 +230,7 @@ export function PublishingPreparation({ projectId, novelId, novelTitle, chapters
     try {
       await api(`/api/v1/publishing/platform-profiles`, {
         method: "POST",
-        body: JSON.stringify({ project_id: projectId, platform, profile_name: profileName, policy_status: policyStatus, policy_version: policyVersion, ai_usage_policy: aiUsagePolicy }),
+        body: JSON.stringify({ project_id: projectId, platform, profile_name: profileName, policy_status: policyStatus, policy_version: policyVersion, ai_usage_policy: aiUsagePolicy, extra_metadata: { external_detector_hard_gate: externalHardGate, external_target: { human_min: 95, suspected_ai_max: 5, ai_feature_max: 0 } } }),
       });
       setProfileName("");
       await loadProfiles();
@@ -279,6 +303,76 @@ export function PublishingPreparation({ projectId, novelId, novelTitle, chapters
     finally { setBusy(""); }
   }
 
+  async function sha256Hex(value: string): Promise<string> {
+    if (!globalThis.crypto?.subtle) throw new Error("当前浏览器不支持正文哈希，无法登记外部报告");
+    const canonical = value.replace(/\r\n/g, "\n").replace(/\n{2,}/g, "\n").trim();
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+    return Array.from(new Uint8Array(digest)).map(item => item.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function registerExternalReport() {
+    if (!selectedChapter || !externalProvider.trim() || !externalScope.trim()) return;
+    const scores = [humanScore, suspectedAiScore, aiFeatureScore].map(value => Number(value));
+    if (scores.some(value => !Number.isFinite(value) || value < 0 || value > 100)) {
+      setError("请填写0到100之间的人工特征、疑似AI和AI特征分数");
+      return;
+    }
+    setBusy("external"); setError(""); setNotice("");
+    try {
+      const text = textValue(selectedChapter.body);
+      const inputHash = await sha256Hex(text);
+      await api(`/api/v1/chapters/${selectedChapter.id}/external-evaluation`, {
+        method: "POST",
+        body: JSON.stringify({
+          provider: externalProvider.trim(),
+          scope: `${externalScope.trim()}-${selectedChapter.id}`,
+          input_hash: inputHash,
+          status: "completed",
+          human_score: scores[0],
+          suspected_ai_score: scores[1],
+          ai_feature_score: scores[2],
+          scores: { human_score: scores[0], suspected_ai_score: scores[1], ai_feature_score: scores[2] },
+          flagged_segments: [],
+        }),
+      });
+      await Promise.all([loadVariants(), loadSelected(variantId(selectedVariant || {}))]);
+      setNotice("外部报告已按正文哈希登记；现在重新运行七道门禁");
+      if (selectedVariant) await runGates();
+    } catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(""); }
+  }
+
+  async function confirmHumanEditing() {
+    if (!selectedChapter || !selectedVariant) return;
+    const added = Number(humanCharsAdded || 0);
+    const removed = Number(humanCharsRemoved || 0);
+    if (!humanEditNote.trim() || !Number.isFinite(added) || !Number.isFinite(removed) || added + removed <= 0) {
+      setError("请填写人工修订说明，并填写大于0的新增/删除字数");
+      return;
+    }
+    setBusy("human-edit"); setError(""); setNotice("");
+    try {
+      const afterHash = await sha256Hex(textValue(selectedChapter.body));
+      await api(`/api/v1/publishing/human-editing`, {
+        method: "POST",
+        body: JSON.stringify({
+          chapter_id: selectedChapter.id,
+          variant_id: variantId(selectedVariant),
+          edit_type: "author_revision_attestation",
+          after_sha256: afterHash,
+          chars_added: added,
+          chars_removed: removed,
+          human_confirmed: true,
+          confirmation_note: humanEditNote.trim(),
+        }),
+      });
+      await Promise.all([loadVariants(), loadSelected(variantId(selectedVariant))]);
+      setNotice("人工修订确认已记录；现在重新运行门禁");
+      await runGates();
+    } catch (err) { setError(errorMessage(err)); }
+    finally { setBusy(""); }
+  }
+
   if (!projectId || !novelId) {
     return <div className="publishing-empty panel"><Send size={24} /><h2>先选择项目与小说</h2><p>发布准备页需要明确的项目和作品范围，避免把门禁结果写入错误作品。</p></div>;
   }
@@ -333,6 +427,7 @@ export function PublishingPreparation({ projectId, novelId, novelTitle, chapters
             <label className="field"><span className="form-label">规则状态</span><select className="form-input" value={policyStatus} onChange={event => setPolicyStatus(event.target.value)}><option value="unknown">unknown</option><option value="stale">stale</option><option value="confirmed">confirmed</option></select></label>
             <label className="field"><span className="form-label">规则版本</span><input className="form-input" value={policyVersion} onChange={event => setPolicyVersion(event.target.value)} placeholder="人工核实后填写" /></label>
             <label className="field"><span className="form-label">AI政策</span><select className="form-input" value={aiUsagePolicy} onChange={event => setAiUsagePolicy(event.target.value)}><option value="allowed">allowed</option><option value="allowed_with_human_editing">allowed_with_human_editing</option><option value="required_disclosure">required_disclosure</option><option value="prohibited">prohibited</option></select></label>
+            <label className="field publishing-checkbox-field"><span className="form-label">外部检测策略</span><span className="publishing-checkbox"><input type="checkbox" checked={externalHardGate} onChange={event => setExternalHardGate(event.target.checked)} />启用95/5/0硬门</span></label>
           </div>
           <button className="btn-ghost" onClick={() => void createProfile()} disabled={busy === "profile" || !profileName.trim()}>{busy === "profile" ? <Loader2 className="spin" size={15} /> : <Plus size={15} />}保存平台配置</button>
         </section>
@@ -349,6 +444,31 @@ export function PublishingPreparation({ projectId, novelId, novelTitle, chapters
               <div className="publishing-meta-line">平台规则：{readiness?.platform_policy_confirmed ? "已确认" : "未确认"} · AI披露：{STATUS_LABELS[readiness?.ai_disclosure_status || "pending"] || readiness?.ai_disclosure_status || "待生成"}</div>
               <button className="btn-primary publishing-full-button" onClick={() => void runGates()} disabled={busy === "gates" || !selectedChapter}>{busy === "gates" ? <Loader2 className="spin" size={15} /> : <ClipboardCheck size={15} />}运行七道门禁</button>
             </>}
+          </section>
+
+          <section className="card">
+            <div className="card-head"><div><div className="card-title">外部检测报告</div><div className="card-sub">只登记真实报告，不自动改写或制造分数</div></div></div>
+            <div className="publishing-form-grid">
+              <label className="field"><span className="form-label">检测器</span><input className="form-input" value={externalProvider} onChange={event => setExternalProvider(event.target.value)} placeholder="zhuque" /></label>
+              <label className="field"><span className="form-label">范围</span><input className="form-input" value={externalScope} onChange={event => setExternalScope(event.target.value)} placeholder="chapter" /></label>
+              <label className="field"><span className="form-label">人工特征</span><input className="form-input" inputMode="decimal" value={humanScore} onChange={event => setHumanScore(event.target.value)} placeholder="≥95" /></label>
+              <label className="field"><span className="form-label">疑似AI</span><input className="form-input" inputMode="decimal" value={suspectedAiScore} onChange={event => setSuspectedAiScore(event.target.value)} placeholder="≤5" /></label>
+              <label className="field"><span className="form-label">AI特征</span><input className="form-input" inputMode="decimal" value={aiFeatureScore} onChange={event => setAiFeatureScore(event.target.value)} placeholder="=0" /></label>
+            </div>
+            <p className="muted publishing-chapter-note">当前正文：{selectedChapter ? `${textValue(selectedChapter.body).length} 字，报告会绑定该正文的规范化SHA-256` : "暂无章节"}</p>
+            <button className="btn-primary publishing-full-button" onClick={() => void registerExternalReport()} disabled={busy === "external" || !selectedChapter}>{busy === "external" ? <Loader2 className="spin" size={15} /> : <ClipboardCheck size={15} />}登记真实报告并重跑门禁</button>
+            {(readiness?.external_evaluation || selectedVariant?.gate_summary?.external_evaluation) && <p className="publishing-meta-line">最近报告：{(readiness?.external_evaluation || selectedVariant?.gate_summary?.external_evaluation)?.status || "已登记"} · 目标{(readiness?.external_evaluation || selectedVariant?.gate_summary?.external_evaluation)?.target_passed ? "通过" : "未通过"}</p>}
+          </section>
+
+          <section className="card">
+            <div className="card-head"><div><div className="card-title">人工修订确认</div><div className="card-sub">请先在编辑器实际修改正文，再提交责任声明</div></div></div>
+            <label className="field"><span className="form-label">修订说明</span><textarea className="form-input" value={humanEditNote} onChange={event => setHumanEditNote(event.target.value)} placeholder="说明你改了哪些段落、节奏或人物表达，以及确认后的正文为何可作为作者版本" /></label>
+            <div className="publishing-form-grid">
+              <label className="field"><span className="form-label">新增字数</span><input className="form-input" inputMode="numeric" value={humanCharsAdded} onChange={event => setHumanCharsAdded(event.target.value)} placeholder="0" /></label>
+              <label className="field"><span className="form-label">删除字数</span><input className="form-input" inputMode="numeric" value={humanCharsRemoved} onChange={event => setHumanCharsRemoved(event.target.value)} placeholder="0" /></label>
+            </div>
+            <p className="muted publishing-chapter-note">系统只记录人工声明、当前正文哈希和改动量，不把声明伪装成检测器证明。</p>
+            <button className="btn-primary publishing-full-button" onClick={() => void confirmHumanEditing()} disabled={busy === "human-edit" || !selectedVariant || !selectedChapter}>{busy === "human-edit" ? <Loader2 className="spin" size={15} /> : <Check size={15} />}确认人工修订并重跑门禁</button>
           </section>
 
           <section className="card">

@@ -105,6 +105,7 @@ class HumanEditingRequest(BaseModel):
     chars_removed: int = 0
     human_confirmed: bool = False
     editor_name: str = ""
+    confirmation_note: str = Field(default="", max_length=2000)
 
 
 class LocalRepairRequest(BaseModel):
@@ -117,6 +118,7 @@ def _load_chapter_scope(db, chapter_id: str, user: dict, *, write: bool) -> dict
     """Resolve a chapter and enforce its owning project scope."""
     row = db.execute(
         """SELECT id, project_id, parent_id, type
+           , meta
            FROM contents
            WHERE id=%s AND is_deleted=FALSE""",
         (chapter_id,),
@@ -209,6 +211,9 @@ def run_publishing_gates(req: GateRunRequest, user: dict = Depends(require_admin
         if req.variant_id:
             variant = _load_variant_scope(db, req.variant_id, user, write=True)
             _assert_variant_chapter_scope(chapter, variant, req.chapter_id)
+        chapter_meta = decode(chapter.get("meta"), {})
+        chapter_meta = chapter_meta if isinstance(chapter_meta, dict) else {}
+        external_evaluation = chapter_meta.get("external_evaluation")
         report = run_publishing_gates_for_chapter(
             db=db,
             chapter_id=req.chapter_id,
@@ -220,6 +225,7 @@ def run_publishing_gates(req: GateRunRequest, user: dict = Depends(require_admin
             existing_review_score=req.existing_review_score,
             external_score=req.external_score,
             external_flagged=req.external_flagged,
+            external_evaluation=external_evaluation if isinstance(external_evaluation, dict) else None,
             user_id=user.get("id"),
         )
         db.commit()
@@ -473,10 +479,12 @@ def record_human_editing_api(req: HumanEditingRequest, user: dict = Depends(requ
             req.repaired_sentences, req.repaired_paragraphs,
             req.chars_added, req.chars_removed,
             req.human_confirmed, req.editor_name or user.get("email", ""),
-            user.get("id"),
+            user.get("id"), req.confirmation_note,
         )
         db.commit()
         return ok(result, message="人工编辑记录已保存")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         db.close()
 
@@ -557,13 +565,22 @@ def check_publish_readiness(variant_id: str, user: dict = Depends(require_admin_
 
         # 检查平台规则状态
         platform_ok = True
+        external_hard_gate = False
         if variant.get("platform_profile_id"):
             profile = db.execute(
-                "SELECT policy_status FROM platform_publication_profiles WHERE id = %s",
+                "SELECT policy_status, extra_metadata FROM platform_publication_profiles WHERE id = %s",
                 (variant["platform_profile_id"],),
             ).fetchone()
             if profile and profile["policy_status"] != "confirmed":
                 platform_ok = False
+            if profile:
+                extra = decode(profile.get("extra_metadata"), {})
+                external_hard_gate = bool(isinstance(extra, dict) and extra.get("external_detector_hard_gate"))
+
+        external_gate = gates.get("external_risk") or {}
+        external_evaluation = external_gate.get("evidence", {}).get("external_evaluation") if isinstance(external_gate.get("evidence"), dict) else None
+        if isinstance(external_evaluation, str):
+            external_evaluation = decode(external_evaluation, {})
 
         ready = len(blocking_failures) == 0 and ai_ok and platform_ok and variant.get("publication_status") == "publish_ready"
 
@@ -576,6 +593,8 @@ def check_publish_readiness(variant_id: str, user: dict = Depends(require_admin_
             "platform_policy_confirmed": platform_ok,
             "external_ai_flagged": variant.get("external_ai_flagged", False),
             "external_ai_score": variant.get("external_ai_score"),
+            "external_hard_gate": external_hard_gate,
+            "external_evaluation": external_evaluation,
             "gate_summary": variant.get("gate_summary", {}),
         }, message="发布就绪检查完成")
     finally:

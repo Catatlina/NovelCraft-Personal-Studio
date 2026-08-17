@@ -673,10 +673,13 @@ def test_deai_forced_local_repair_calls_provider_without_detector_flag():
     assert gateway.calls == 1
 
 
-def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
-    paragraph_a = "沈夜把手按在门上，听见门内传来三下敲击，便停住了呼吸。" * 3
-    paragraph_b = "林薇没有催他，只把短棍横在身前，目光落向院墙外的黑暗。" * 3
-    first_text = f"{paragraph_a}\n\n{paragraph_b}"
+def test_generation_uses_serial_scene_handoffs_and_skips_full_chapter_rewrite():
+    scene_texts = [
+        "沈夜按住门锁，门内的水声忽然停了。他没有推门，先把耳朵贴上去，听见里面有人拖动椅脚。林薇抬手拦住他，指了指门缝下那道刚刚亮起的红线。那道光贴着地面一闪一闪，像在等他们先犯错。楼道里的声控灯灭了，黑暗把两人的影子压在门上。林薇没有说话，只把短棍横在身前，目光停在那道红线上。",
+        "红线沿着地砖爬到墙角，像有人在里面重新接通了电。沈夜退半步，取出旧钥匙试探锁孔，钥匙没有转动，门后却传来一声低低的笑。林薇压低声音问他要不要离开，他却盯住了锁眼里的微光。锁芯里有细小的齿轮响了一下，像在回应他的犹豫。楼上传来水管敲击声，门内的笑声随即停住。",
+        "他把钥匙收回掌心，改用鞋尖压住门槛。门板猛地向外撞来，林薇侧身避开，短棍砸在门框上，震落了一层灰。沈夜趁那一瞬看清了屋里的黑布，布角沾着水，水珠正逆着地面往回流。门缝里的红线随之抬高，贴到了他的鞋面。鞋底传来一阵冰凉，他立刻把脚收了回来。楼道里有人咳了一声。",
+        "黑布后面摆着一台亮着绿灯的旧收音机。沈夜没有进屋，只伸手切断电源，收音机却换成了他的声音。门内再次敲响三下，楼道尽头也亮起了灯。林薇回头时，楼梯口已经站着一个看不清脸的人。那人没有上前，只把手里的钥匙朝他们晃了晃。钥匙上的铜牌撞出脆响，像给这场僵持定了一个期限。",
+    ]
 
     class Step:
         def set_output(self, *_args, **_kwargs):
@@ -702,7 +705,13 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
             return {
                 "chapter_title": "门后的声音",
                 "hook": "门内再次敲响",
-                "beats": [],
+                "chapter_type": "suspense",
+                "beats": [
+                    {"name": "试探", "content": "沈夜确认门内异常", "target_words": 180, "payoff_phase": "pressure"},
+                    {"name": "找规则", "content": "两人试探红线和锁", "target_words": 180, "payoff_phase": "build"},
+                    {"name": "撞门", "content": "门后反击并露出黑布", "target_words": 180, "payoff_phase": "burst"},
+                    {"name": "回声", "content": "收音机与楼道灯形成新压迫", "target_words": 180, "payoff_phases": ["feedback", "aftershock"]},
+                ],
                 "_usage": {},
             }
 
@@ -710,17 +719,33 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
         def __init__(self):
             self.calls = []
             self.call_kwargs = []
+            self.json_calls = []
 
         async def generate(self, prompt, **_kwargs):
             self.calls.append(prompt)
             self.call_kwargs.append(_kwargs)
-            text = first_text if len(self.calls) == 1 else first_text
+            text = scene_texts[len(self.calls) - 1]
             return {
                 "text": text,
                 "tokens_input": 0,
                 "tokens_output": 0,
                 "cost": 0.0,
                 "model": "test",
+            }
+
+        async def generate_json(self, prompt, **_kwargs):
+            self.json_calls.append((prompt, _kwargs))
+            return {
+                "data": {
+                    "time": "夜里",
+                    "location": "旧楼三层门口",
+                    "known_facts": [f"第{len(self.json_calls)}场已确认有异常"],
+                    "state_changes": [f"第{len(self.json_calls)}场留下新压力"],
+                    "open_threads": ["收音机的声音来源未明"],
+                    "continuity_warnings": ["下一场必须承接门内敲击"],
+                    "next_bridge": "门内再次敲响三下",
+                },
+                "usage": {"tokens_input": 1, "tokens_output": 1, "cost": 0.0, "model": "test"},
             }
 
     class Deai:
@@ -755,12 +780,11 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
 
     result = asyncio.run(engine.generate_chapter(1, target_word_count=600))
 
-    assert result["text"] == first_text
-    assert len(engine.ai_gateway.calls) == 2
-    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] <= 900
-    assert result["generation_quality"]["passed"] is False
-    assert {item["code"] for item in result["generation_quality"]["failures"]} >= {
-        "continuation_duplicate",
-        "chapter_too_short",
-    }
-    assert engine.deai_pipeline.calls[0]["force_semantic_rewrite"] is True
+    assert result["text"] == "\n\n".join(scene_texts)
+    assert len(engine.ai_gateway.calls) == 4
+    assert len(engine.ai_gateway.json_calls) == 4
+    assert all("上一场末尾原文" in prompt for prompt in engine.ai_gateway.calls)
+    assert result["generation_quality"]["generation_mode"] == "scene_serial"
+    assert result["scene_serial"]["generation_mode"] == "scene_serial"
+    assert result["generation_quality"]["scene_serial"]["handoff_count"] == 4
+    assert engine.deai_pipeline.calls == []

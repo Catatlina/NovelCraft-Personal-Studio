@@ -223,6 +223,9 @@ th { color: var(--text-muted); font-size: 13px; }
 .publishing-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .publishing-field-wide { grid-column: 1 / -1; }
 .publishing-form-grid textarea { min-height: 94px; }
+.publishing-checkbox-field { justify-content: flex-start; }
+.publishing-checkbox { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; color: var(--text-secondary); font-size: 12px; }
+.publishing-checkbox input { accent-color: var(--brand-500); }
 .publishing-readiness-list { display: flex; flex-direction: column; gap: 7px; margin: 14px 0; }
 .publishing-readiness-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-secondary); font-size: 12px; }
 .publishing-readiness-row > span { display: inline-flex; align-items: center; gap: 7px; }

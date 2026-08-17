@@ -66,12 +66,14 @@ def test_external_evaluation_is_bound_to_exact_text_and_real_score():
             "scope": "chapter-1",
             "input_hash": text_sha256(text),
             "status": "completed",
-            "human_score": 92.0,
-            "suspected_ai_score": 8.0,
+            "human_score": 95.0,
+            "suspected_ai_score": 5.0,
+            "ai_feature_score": 0.0,
             "flagged_segments": [],
         },
     )
-    assert evaluation["status"] == "external_90_plus"
+    assert evaluation["status"] == "external_95_5_0"
+    assert evaluation["target_passed"] is True
     assert evaluation["input_hash"] == text_sha256(text)
 
     with pytest.raises(ValueError, match="input_hash"):
@@ -82,7 +84,9 @@ def test_external_evaluation_is_bound_to_exact_text_and_real_score():
                 "scope": "chapter-1",
                 "input_hash": text_sha256(text),
                 "status": "completed",
-                "human_score": 92.0,
+                "human_score": 95.0,
+                "suspected_ai_score": 5.0,
+                "ai_feature_score": 0.0,
             },
         )
 
@@ -95,3 +99,21 @@ def test_workflow_status_transition_does_not_skip_external_gate():
     assert workflow["status"] == "external_pending"
     with pytest.raises(ValueError, match="invalid writing workflow transition"):
         transition_workflow_status(workflow, "published")
+
+
+def test_external_evaluation_fails_closed_when_target_is_not_met():
+    text = "主角把证据按在投影台上。"
+    evaluation = register_external_evaluation(
+        text,
+        {
+            "provider": "zhuque",
+            "scope": "chapter-1",
+            "input_hash": text_sha256(text),
+            "status": "completed",
+            "human_score": 0.0,
+            "suspected_ai_score": 42.68,
+            "ai_feature_score": 57.32,
+        },
+    )
+    assert evaluation["status"] == "external_failed"
+    assert evaluation["target_passed"] is False

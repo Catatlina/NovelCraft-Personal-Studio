@@ -8,7 +8,7 @@
 - 生产部署证据：代码为 `bb04e5a`；迁移为 `nc_v11_disclosure_payoff (head)`；`publishing.ai_disclosure`、`publishing.payoff_semantic` Prompt/route 已落库；API/Worker/Beat/数据库/Redis/Frontend 容器运行；发布门禁定义接口实际返回 `401 authentication required`。披露 provenance 修复部署前备份为 `backups/pre-deploy-disclosure-provenance-20260817.sql.gz`，gzip 校验通过。
 - 真实 Provider 样本：生产第6章语义评估返回 `semantic_score=85.0`、`payoff_count=1`、`ending_pressure=true`，来源为 `v6.complete`；AI披露变体 `Provider真实样本-20260817-v2` 返回 `generated`，生成方式为 `provider`，模型来源为 `deepseek-chat`，变体仍为 `draft` 且未人工确认/发布。
 - 登录态前端验收：使用新域名 `https://starlume.xyjin.xyz/` 登录后，发布准备页 `#/publish` 可加载真实项目、作品、变体、披露状态和章节选择；浅色主题与深色主题均复验，浅色主题卡片已恢复白底深色字，生产页面可读。
-- 当前边界：上述 Provider 与前端结论是单样本/登录态流程的**已验收**，不等同于20章长跑或发布完成。现有作品第6章为 `needs_rewrite`，因此20章真实 Provider 长跑仍**未开始**，本轮未执行生产正文写入。
+- 当前边界（单样本/登录态实测）：上述 Provider 与前端结论是单样本/登录态流程的**已验收**，不等同于20章长跑或发布完成。现有作品第6章为 `needs_rewrite`，因此20章真实 Provider 长跑仍**未开始**，本轮未执行生产正文写入。
 
 ## 2026-08-11 两本设定包生产 10 章长跑复跑 [实测]
 

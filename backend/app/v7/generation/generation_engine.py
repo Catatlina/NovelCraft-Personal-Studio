@@ -1,7 +1,8 @@
 """Generation Engine - Sprint 2.
 
 Real generation pipeline:
-  context assembly -> scene planning (AI) -> AI generation -> de-AI pipeline
+  context assembly -> scene planning (AI) -> serial scene generation with
+  state handoffs -> generation-time scene retry -> advisory/fallback audit
 
 No mocks, no placeholder text. Failures raise instead of returning fake success.
 """
@@ -76,6 +77,8 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
+SCENE_SERIAL_GENERATION_VERSION = "2.0.0"
+SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 
 
 def chinese_word_count(text: str) -> int:
@@ -934,6 +937,7 @@ class SceneDirector:
                 # different arc and could erase the build phase.
                 "payoff_phase": beat.get("payoff_phase"),
                 "payoff_phases": beat.get("payoff_phases"),
+                "scene_card": beat.get("scene_card") or beat.get("scene") or {},
             })
 
         planned = sum(b["target_words"] for b in normalised)
@@ -1173,7 +1177,12 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             '  "scene_goal": "本章要达成的叙事目的",\n'
             '  "chapter_type": "normal|aftermath|relationship|suspense",\n'
             '  "beats": [{"name":"节拍名","purpose":"作用","content":"要写什么",'
-            '"emotion":"情绪","target_words":800,"payoff_phase":"pressure|build|burst|feedback|aftershock"}],\n'
+            '"emotion":"情绪","target_words":800,"payoff_phase":"pressure|build|burst|feedback|aftershock",'
+            '"scene_card":{"location":"地点","time":"时间","characters":["在场人物"],'
+            '"goal":"本场目标","obstacle":"本场阻碍","choice":"人物选择",'
+            '"turn":"本场转折","state_change":"明确状态变化",'
+            '"knowledge_boundary":"人物此时能知道/不能知道什么",'
+            '"handoff":"下一场可直接承接的落点"}}],\n'
             '  "pov_character": "视角人物",\n'
             '  "pov_policy": "third_person_narrative",\n'
             '  "pacing": "slow|medium|fast",\n'
@@ -1200,6 +1209,8 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数；每个 beat 必须增加 payoff_phase 或 payoff_phases，"
             "严格覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段；"
             "至少有一个 beat 明确写 build（压制后的试探、准备、取舍或蓄力），不能把连续的压力描述冒充 build。"
+            "每个 beat 都必须提供 scene_card：明确地点、时间、在场人物、目标、阻碍、选择、转折、状态变化、"
+            "知情边界和下一场承接点；这些字段服务于连续写作，不要写成泛泛的剧情摘要。"
             "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
             "输出必须紧凑：每个 beat 的 name/purpose/content/emotion 各不超过 80 字，"
             "causal_ledger 每列不超过 60 字，列表只写本章真正发生的 4-6 个事件；不要重复字段或附加解释。"
@@ -1239,7 +1250,8 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "下面的场景计划 JSON 没有通过结构契约校验。请只修复结构并输出完整 JSON，"
                 "不要写解释，不要改动已经存在的剧情事实。必须保留 4-6 个 beats，"
                 "每个 beat 有 name、content、target_words，并通过 payoff_phase 或 payoff_phases"
-                "完整覆盖 pressure、build、burst、feedback、aftershock 五阶段；"
+                "完整覆盖 pressure、build、burst、feedback、aftershock 五阶段；每个 beat 必须有"
+                "scene_card，写清地点、时间、人物、目标、阻碍、选择、转折、状态变化、知情边界和承接点；"
                 "chapter_type 必须是 normal、aftermath、relationship、suspense 之一。\n"
                 f"校验错误：{contract_error}\n"
                 f"原始计划：{json.dumps(plan, ensure_ascii=False)}\n"
@@ -2898,6 +2910,381 @@ class GenerationEngine:
         self.scene_director = SceneDirector(brain, self.ai_gateway)
         self.deai_pipeline = DeAIPipeline(self.ai_gateway)
 
+    @staticmethod
+    def _normalise_scene_cards(
+        scene_plan: dict[str, Any],
+        *,
+        target_word_count: int,
+    ) -> list[dict[str, Any]]:
+        """Turn planner beats into explicit scene contracts.
+
+        The old writer received a beat list and was asked to infer all scene
+        boundaries while writing the whole chapter.  That makes continuity a
+        best-effort property of one long completion.  A scene card is the
+        smallest unit that can carry a goal, obstacle, choice, turn and state
+        change into the next real Provider call.
+        """
+        beats = scene_plan.get("beats") or []
+        if not isinstance(beats, list) or not beats:
+            raise AIGatewayError("scene serial contract invalid: no scene beats")
+        cards: list[dict[str, Any]] = []
+        planned_words = sum(
+            int(beat.get("target_words") or 0)
+            for beat in beats
+            if isinstance(beat, dict)
+        )
+        if planned_words <= 0:
+            planned_words = max(1, int(target_word_count or 1))
+        for index, raw in enumerate(beats, start=1):
+            if not isinstance(raw, dict):
+                raise AIGatewayError(f"scene serial contract invalid: scene_{index}_not_object")
+            scene_card = raw.get("scene_card") or raw.get("scene") or {}
+            if not isinstance(scene_card, dict):
+                scene_card = {}
+            target_words = int(raw.get("target_words") or 0)
+            if target_words <= 0:
+                target_words = max(200, int(target_word_count * 0.8 / len(beats)))
+            cards.append({
+                "scene_index": index,
+                "name": str(raw.get("name") or f"场景{index}")[:80],
+                "purpose": str(raw.get("purpose") or "")[:160],
+                "content": str(raw.get("content") or "")[:800],
+                "emotion": str(raw.get("emotion") or "")[:80],
+                "target_words": target_words,
+                "payoff_phase": raw.get("payoff_phase"),
+                "payoff_phases": raw.get("payoff_phases") or [],
+                "location": str(scene_card.get("location") or raw.get("location") or "")[:120],
+                "time": str(scene_card.get("time") or raw.get("time") or "")[:120],
+                "characters": [
+                    str(item)[:80]
+                    for item in (scene_card.get("characters") or raw.get("characters") or [])
+                    if str(item).strip()
+                ][:8],
+                "goal": str(scene_card.get("goal") or raw.get("goal") or raw.get("purpose") or "")[:240],
+                "obstacle": str(scene_card.get("obstacle") or raw.get("obstacle") or "")[:240],
+                "choice": str(scene_card.get("choice") or raw.get("choice") or "")[:240],
+                "turn": str(scene_card.get("turn") or raw.get("turn") or "")[:240],
+                "state_change": str(
+                    scene_card.get("state_change") or raw.get("state_change") or ""
+                )[:240],
+                "knowledge_boundary": str(
+                    scene_card.get("knowledge_boundary") or raw.get("knowledge_boundary") or ""
+                )[:240],
+                "handoff": str(scene_card.get("handoff") or raw.get("handoff") or "")[:240],
+            })
+        # Keep the plan's declared scale visible to the writer, but do not
+        # silently inflate a scene merely to satisfy a chapter target.
+        for card in cards:
+            card["target_share"] = round(card["target_words"] / planned_words, 4)
+        return cards
+
+    @staticmethod
+    def _scene_naturalness_flags(
+        text: str,
+        *,
+        accepted_text: str = "",
+    ) -> list[dict[str, Any]]:
+        """Return only generation-time defects that justify one scene retry.
+
+        This is deliberately narrower than the post-write audit.  It catches
+        provider leakage, duplicate paragraphs and strong template signals at
+        the scene boundary; it does not rewrite prose or optimise a detector
+        score after the chapter is complete.
+        """
+        candidate = str(text or "").strip()
+        if not candidate:
+            return [{"code": "scene_empty", "message": "Provider returned an empty scene"}]
+        flags: list[dict[str, Any]] = []
+        metrics = analyze_deai_patterns(candidate)
+        retry_codes = {
+            "ai_phrase",
+            "uniform_cadence",
+            "repeated_paragraph_opening",
+            "repeated_tic",
+            "structural_ai_smell",
+        }
+        for flag in metrics.get("flags") or []:
+            if (
+                isinstance(flag, dict)
+                and flag.get("code") in retry_codes
+                and str(flag.get("severity") or "").lower() in {"medium", "high"}
+            ):
+                flags.append(flag)
+        duplicate_stats = duplicate_paragraph_stats(
+            f"{accepted_text}\n\n{candidate}" if accepted_text else candidate
+        )
+        if float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01:
+            flags.append({
+                "code": "scene_duplicate_paragraph",
+                "severity": "high",
+                "message": "场景与已接受正文存在完整段落重复",
+                "evidence": duplicate_stats,
+            })
+        if re.search(r"(?:根据大纲|场景目标|场景卡|接下来写|读者将|本章需要)", candidate):
+            flags.append({
+                "code": "scene_meta_leakage",
+                "severity": "high",
+                "message": "场景正文泄露了写作工程说明",
+            })
+        return flags
+
+    @staticmethod
+    def _merge_scene_state(
+        current: dict[str, Any],
+        handoff: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge a Provider-produced scene checkpoint without inventing facts."""
+        merged = dict(current or {})
+        for key in ("time", "location", "next_bridge"):
+            value = handoff.get(key)
+            if isinstance(value, str) and value.strip():
+                merged[key] = value.strip()
+        for key in ("known_facts", "open_threads", "state_changes", "continuity_warnings"):
+            values = handoff.get(key)
+            if isinstance(values, list):
+                merged[key] = [item for item in values if str(item).strip()]
+        return merged
+
+    async def _extract_scene_handoff(
+        self,
+        *,
+        chapter_number: int,
+        scene_index: int,
+        scene_card: dict[str, Any],
+        scene_text: str,
+        current_state: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Ask the real Provider for the next-scene state checkpoint.
+
+        This is not a prose audit.  It is a compact write-time transaction:
+        the next scene cannot rely on facts that were not returned in this
+        checkpoint, and an unusable checkpoint stops generation instead of
+        silently falling back to guessed state.
+        """
+        checkpoint = await self.ai_gateway.generate_json(
+            (
+                "请把刚写完的小说场景压缩成下一场景可执行的状态交接 JSON。"
+                "只记录正文明确发生或明确知道的事实，不推测作者意图，不补写正文。"
+                "next_bridge 必须是下一场景可以直接接住的动作、地点、人物状态或未决问题。\n"
+                f"第{chapter_number}章，第{scene_index}场。\n"
+                f"场景卡：{json.dumps(scene_card, ensure_ascii=False)}\n"
+                f"写入前状态：{json.dumps(current_state, ensure_ascii=False)}\n"
+                f"场景正文：\n{scene_text}\n\n"
+                "只输出 JSON："
+                '{"time":"当前明确时间", "location":"当前明确地点", '
+                '"known_facts":["人物现在明确知道的事实"], '
+                '"state_changes":["本场真正改变的状态"], '
+                '"open_threads":["仍未解决且可继续的线索"], '
+                '"continuity_warnings":["下一场不可违反的限制"], '
+                '"next_bridge":"下一场直接承接点"}'
+            ),
+            system_prompt="你是连续剧小说的状态编辑，只输出严格合法 JSON，不写解释。",
+            max_tokens=900,
+            temperature=0.15,
+            prompt_name="v7.generation.scene_handoff",
+            prompt_version=SCENE_SERIAL_GENERATION_VERSION,
+        )
+        data = checkpoint.get("data") if isinstance(checkpoint, dict) else None
+        if not isinstance(data, dict):
+            raise AIGatewayError("scene handoff contract invalid: expected an object")
+        for key in ("known_facts", "state_changes", "open_threads", "continuity_warnings"):
+            if not isinstance(data.get(key), list):
+                raise AIGatewayError(f"scene handoff contract invalid: {key} must be a list")
+        if not str(data.get("next_bridge") or "").strip():
+            raise AIGatewayError("scene handoff contract invalid: next_bridge is empty")
+        data["schema_version"] = SCENE_HANDOFF_SCHEMA
+        return data, dict(checkpoint.get("usage") or {})
+
+    def _build_scene_generation_prompt(
+        self,
+        *,
+        chapter_number: int,
+        context: dict[str, Any],
+        scene_plan: dict[str, Any],
+        scene_card: dict[str, Any],
+        scene_index: int,
+        scene_count: int,
+        previous_scene_tail: str,
+        current_state: dict[str, Any],
+        previous_handoffs: list[dict[str, Any]],
+        retry_feedback: str = "",
+    ) -> str:
+        context_layers = context.get("context_layers") or {}
+        style_card = context_layers.get("style_card") or {}
+        author_card = style_card.get("author_card") if isinstance(style_card, dict) else {}
+        author_card = author_card if isinstance(author_card, dict) else {}
+        sample_prose = str(
+            author_card.get("sample_prose")
+            or style_card.get("sample_prose")
+            or ""
+        )[:1800]
+        style_block = json.dumps(style_card, ensure_ascii=False, separators=(",", ":"))[:4200]
+        if sample_prose:
+            style_block += f"\n【作者已确认样本文风（只学表达，不复制内容）】\n{sample_prose}"
+        handoff_block = json.dumps(previous_handoffs[-3:], ensure_ascii=False)[:3600]
+        progress_block = json.dumps(current_state, ensure_ascii=False)[:3600]
+        opening_instruction = ""
+        if scene_index == 1:
+            opening_instruction = (
+                "这是本章第一场，开头必须从上一章结尾的动作、地点、物件或未决问题接住；"
+                "不要重新介绍世界观，不要把上一章复述一遍。"
+            )
+        else:
+            opening_instruction = (
+                "这是本章后续场景，第一段必须接住上一场最后的动作、视线、声音、地点或选择；"
+                "不允许用‘与此同时’、‘另一边’或空泛时间跳跃把状态抹掉。"
+            )
+        retry_block = f"\n【上次场景未通过，必须在本次生成中修复】\n{retry_feedback}\n" if retry_feedback else ""
+        return (
+            "你正在连续写一部长篇中文网络小说，当前任务只写一个场景，不写整章摘要。"
+            "直接输出自然正文，不要标题、JSON、解释、场景编号、写作说明或 Markdown。\n"
+            f"第{chapter_number}章《{scene_plan.get('chapter_title') or ''}》，"
+            f"第{scene_index}/{scene_count}场。\n"
+            f"【全书硬事实与前情】\n{context.get('rendered_context') or '无'}\n\n"
+            f"【作者风格约束】\n{style_block or '暂无已确认样本；不要伪造固定口癖。'}\n\n"
+            f"【本场契约】\n{json.dumps(scene_card, ensure_ascii=False)}\n\n"
+            f"【上一场末尾原文】\n{previous_scene_tail or '本章开端，承接全书上一章结尾。'}\n\n"
+            f"【已确认的写入状态】\n{progress_block}\n\n"
+            f"【前面场景的状态交接】\n{handoff_block or '无'}\n\n"
+            f"{opening_instruction}\n"
+            "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
+            "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
+            "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
+            "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
+            "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
+            "不要为了达到字数重复冲突。\n"
+            f"本场约写 {scene_card.get('target_words')} 字，合理范围为 "
+            f"{max(180, int(scene_card.get('target_words', 300) * 0.45))}-"
+            f"{max(260, int(scene_card.get('target_words', 300) * 1.35))} 字。"
+            f"{retry_block}"
+        )
+
+    async def _generate_scene_sequence(
+        self,
+        *,
+        chapter_number: int,
+        context: dict[str, Any],
+        scene_plan: dict[str, Any],
+        target_word_count: int,
+    ) -> dict[str, Any]:
+        """Generate a chapter as a serial chain of real Provider scene calls."""
+        cards = self._normalise_scene_cards(scene_plan, target_word_count=target_word_count)
+        current_state = {
+            "time": (context.get("context_layers") or {}).get("current_time") or "",
+            "location": (context.get("context_layers") or {}).get("current_location") or "",
+            "known_facts": list((context.get("context_layers") or {}).get("known_facts") or []),
+            "open_threads": list(
+                ((context.get("context_layers") or {}).get("previous_transition_contract") or {}).get(
+                    "open_threads"
+                )
+                or []
+            ),
+        }
+        scene_texts: list[str] = []
+        scene_outputs: list[dict[str, Any]] = []
+        handoffs: list[dict[str, Any]] = []
+        usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+
+        def add_call_usage(call_usage: dict[str, Any]) -> None:
+            usage["tokens_input"] += int(call_usage.get("tokens_input") or 0)
+            usage["tokens_output"] += int(call_usage.get("tokens_output") or 0)
+            usage["cost"] += float(call_usage.get("cost") or 0.0)
+            usage["model"] = call_usage.get("model") or usage["model"]
+
+        for index, card in enumerate(cards, start=1):
+            feedback = ""
+            accepted_scene = ""
+            scene_metrics: dict[str, Any] = {}
+            for attempt in range(2):
+                result = await self.ai_gateway.generate(
+                    self._build_scene_generation_prompt(
+                        chapter_number=chapter_number,
+                        context=context,
+                        scene_plan=scene_plan,
+                        scene_card=card,
+                        scene_index=index,
+                        scene_count=len(cards),
+                        previous_scene_tail=scene_texts[-1][-1200:] if scene_texts else (
+                            (context.get("context_layers") or {}).get("previous_tail") or ""
+                        ),
+                        current_state=current_state,
+                        previous_handoffs=handoffs,
+                        retry_feedback=feedback,
+                    ),
+                    system_prompt=(
+                        "你是稳定写作同一本长篇小说的中文网文作者。只输出本场正文，"
+                        "不输出任何工程说明；优先保证人物声音、动作因果、现场感和自然节奏。"
+                        + third_person_generation_contract()
+                        + content_generation_contract(self.quality_profile)
+                    ),
+                    max_tokens=max(
+                        700,
+                        min(
+                            1900,
+                            int(max(260, card["target_words"] * 1.35) * 0.62),
+                        ),
+                    ),
+                    temperature=0.82,
+                    prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
+                    prompt_version=SCENE_SERIAL_GENERATION_VERSION,
+                )
+                add_call_usage(result)
+                candidate = str(result.get("text") or "").strip()
+                scene_metrics = analyze_deai_patterns(candidate)
+                issues = self._scene_naturalness_flags(
+                    candidate,
+                    accepted_text="\n\n".join(scene_texts),
+                )
+                min_scene_chars = max(120, int(card["target_words"] * 0.45))
+                if chinese_word_count(candidate) < min_scene_chars:
+                    issues.append({
+                        "code": "scene_too_short",
+                        "severity": "high",
+                        "message": f"场景只有 {chinese_word_count(candidate)} 字，至少需要 {min_scene_chars} 字",
+                    })
+                if not issues:
+                    accepted_scene = candidate
+                    break
+                if attempt == 0:
+                    feedback = "；".join(str(item.get("message") or item.get("code")) for item in issues[:5])
+                    continue
+                raise AIGatewayError(
+                    f"scene {index} failed generation contract after bounded retry: "
+                    + "; ".join(str(item.get("code")) for item in issues)
+                )
+
+            handoff, handoff_usage = await self._extract_scene_handoff(
+                chapter_number=chapter_number,
+                scene_index=index,
+                scene_card=card,
+                scene_text=accepted_scene,
+                current_state=current_state,
+            )
+            add_call_usage(handoff_usage)
+            handoffs.append(handoff)
+            current_state = self._merge_scene_state(current_state, handoff)
+            scene_texts.append(accepted_scene)
+            scene_outputs.append({
+                "scene_index": index,
+                "name": card["name"],
+                "target_words": card["target_words"],
+                "word_count": chinese_word_count(accepted_scene),
+                "attempts": 2 if feedback else 1,
+                "naturalness_metrics": scene_metrics,
+                "handoff": handoff,
+            })
+
+        return {
+            "text": "\n\n".join(scene_texts).strip(),
+            "scene_cards": cards,
+            "scene_outputs": scene_outputs,
+            "scene_handoffs": handoffs,
+            "scene_state": current_state,
+            "usage": usage,
+            "generation_mode": "scene_serial",
+            "generation_version": SCENE_SERIAL_GENERATION_VERSION,
+        }
+
     async def generate_chapter(
         self,
         chapter_number: int,
@@ -3117,36 +3504,23 @@ class GenerationEngine:
         scene_plan["payoff_beat_validation"] = payoff_beat_validation
         scene_plan["payoff_beat_repair"] = payoff_beat_repair
 
-        # Step: AI generation (at most one quality-checked continuation)
+        # Step: serial scene generation (the primary quality control)
         async with self.tracer.trace_step(
             "generation.ai_generate",
             "ai_generation",
-            input_summary=f"Generate a complete chapter near {target_word_count} chars with AI",
+            input_summary=f"Generate {len(scene_plan.get('beats') or [])} linked scenes near {target_word_count} chars with AI",
         ) as step:
-            gen_prompt = self._build_generation_prompt(
-                chapter_number, context, scene_plan, outline or prompt, target_word_count
+            serial_result = await self._generate_scene_sequence(
+                chapter_number=chapter_number,
+                context=context,
+                scene_plan=scene_plan,
+                target_word_count=target_word_count,
             )
-            first = await self.ai_gateway.generate(
-                gen_prompt,
-                system_prompt=(
-                    "你是一位专业中文网络小说作者。写作要求：画面感强、对白自然、"
-                    "避免总结性旁白与说教结尾、避免翻译腔。直接输出正文，不要标题、"
-                    "不要任何解释或markdown标记。标点不设禁用清单，按人物语气和"
-                    "场景功能使用；只避免整章高密度、连续重复的模板化符号。"
-                    + third_person_generation_contract()
-                    + content_generation_contract(self.quality_profile)
-                ),
-                max_tokens=generation_max_tokens,
-                temperature=0.85,
-                prompt_name="v7.generation.chapter",
-                prompt_version="1.6.0",
-            )
-            add_usage(step, first)
-            text = first["text"].strip()
-            # Cheap local preflight before any continuation or semantic
-            # humanization call.  The generation prompt is the primary control;
-            # this check only prevents spending another Provider request on a
-            # draft that already violates the global writing contract.
+            add_usage(step, serial_result.get("usage") or {})
+            text = str(serial_result.get("text") or "").strip()
+            scene_handoffs = serial_result.get("scene_handoffs") or []
+            scene_outputs = serial_result.get("scene_outputs") or []
+            scene_state = serial_result.get("scene_state") or {}
             raw_pov_metrics = analyze_third_person_narrative(text)
             raw_content_policy = analyze_content_policy(text, self.quality_profile)
             opening_gate = inspect_opening(
@@ -3170,93 +3544,19 @@ class GenerationEngine:
                     **opening_failure,
                     "message": f"开场质量门禁：{opening_failure.get('message')}",
                 })
-
             continuations = 0
             continuation_failures: list[dict[str, Any]] = []
-            # A chapter that is already close to its target should finish on
-            # its hook.  Repeatedly asking for more text is a common source of
-            # padding and duplicated paragraphs.
-            continuation_limit = min(max(0, int(max_continuations)), 1)
-            while (
-                not preflight_failures
-                and
-                chinese_word_count(text) < minimum_chapter_chars
-                and continuations < continuation_limit
-            ):
-                continuations += 1
-                missing = target_word_count - chinese_word_count(text)
-                continuation_max_tokens = max(
-                    900,
-                    min(
-                        2400,
-                        int(
-                            max(
-                                0,
-                                maximum_chapter_chars - chinese_word_count(text),
-                            )
-                            * 0.58
-                        ),
-                    ),
-                )
-                cont = await self.ai_gateway.generate(
-                    self._build_continuation_prompt(
-                        text,
-                        scene_plan,
-                        missing,
-                        quality_profile=self.quality_profile,
-                        readability_plan=scene_plan.get("readability_plan") or readability_plan,
-                    ),
-                    system_prompt=(
-                        "你是一位专业中文网络小说作者，正在续写同一章的后半部分。"
-                        "直接接着写正文，不要重复已有内容，不要写标题或说明。"
-                        "保持自然分段和人物语气；标点按语义使用，不要批量堆叠同一符号。"
-                        + third_person_generation_contract()
-                        + content_generation_contract(self.quality_profile)
-                    ),
-                    max_tokens=continuation_max_tokens,
-                    temperature=0.85,
-                    prompt_name="v7.generation.continuation",
-                    prompt_version="1.5.0",
-                )
-                add_usage(step, cont)
-                candidate = text.rstrip() + "\n\n" + cont["text"].strip()
-                duplicate_stats = duplicate_paragraph_stats(candidate)
-                if (
-                    float(duplicate_stats.get("duplicate_ratio") or 0.0) >= 0.01
-                    or int(duplicate_stats.get("adjacent_duplicate_count") or 0) > 0
-                ):
-                    continuation_failures.append(
-                        {
-                            "code": "continuation_duplicate",
-                            "severity": "high",
-                            "message": "续写候选与已有正文出现完整段落重复，已丢弃候选",
-                            "evidence": duplicate_stats,
-                        }
-                    )
-                    break
-                if chinese_word_count(candidate) > maximum_chapter_chars:
-                    continuation_failures.append(
-                        {
-                            "code": "continuation_overflow",
-                            "severity": "high",
-                            "message": (
-                                f"续写候选超过本章最大长度 {maximum_chapter_chars} 字，"
-                                "已丢弃候选"
-                            ),
-                            "candidate_chars": chinese_word_count(candidate),
-                        }
-                    )
-                    break
-                text = candidate
-
             raw_count = chinese_word_count(text)
+            continuation_limit = 0
             step.set_output(
-                f"{raw_count} chars, {continuations} continuation(s)",
+                f"{raw_count} chars, {len(scene_outputs)} serial scenes",
                 data={
                     "raw_word_count": raw_count,
                     "continuations": continuations,
                     "continuation_limit": continuation_limit,
                     "continuation_failures": continuation_failures,
+                    "scene_outputs": scene_outputs,
+                    "scene_state": scene_state,
                 },
             )
 
@@ -3266,7 +3566,7 @@ class GenerationEngine:
         async with self.tracer.trace_step(
             "generation.deai_process",
             "deai_processing",
-            input_summary="Run 7-layer de-AI pipeline",
+            input_summary="Record generation-first naturalness metrics; use rewrite only as fallback",
         ) as step:
             context_layers = context.get("context_layers") or {}
             opening_repair_result: dict[str, Any] | None = None
@@ -3354,39 +3654,33 @@ class GenerationEngine:
                     "usage": {},
                 }
             else:
-                deai_result = await self.deai_pipeline.process(
-                    text,
-                    source_facts=json.dumps(
-                        {
-                            "previous_transition_contract": context_layers.get(
-                                "previous_transition_contract"
-                            ),
-                            "previous_tail": context_layers.get("previous_tail"),
-                        },
-                        ensure_ascii=False,
-                    ),
-                    forbidden_changes=json.dumps(
-                        context_layers.get("constraints") or [], ensure_ascii=False
-                    ),
-                    style_profile=json.dumps(
-                        {
-                            **(context_layers.get("style_card") or {}),
-                            "active_rules": context_layers.get("active_rules") or [],
-                        },
-                        ensure_ascii=False,
-                    ),
-                    quality_profile=self.quality_profile,
-                    payoff_contract=payoff_contract,
-                    safe_deduplicate=True,
-                    active_rules=context_layers.get("active_rules") or [],
-                    # Canonical V7 generation must always pass through the
-                    # real Provider humanizer.  The deterministic metrics are
-                    # explainable quality signals, not a proxy for Zhuque or
-                    # any other external detector; a green local report must
-                    # not silently skip this provider-backed editing step.
-                    force_semantic_rewrite=True,
-                    readability_plan=scene_plan.get("readability_plan") or readability_plan,
-                )
+                # Scene serial generation is the primary naturalness control.
+                # Keep the post-write pipeline as an explicit fallback only:
+                # it must not rewrite every accepted chapter and erase the
+                # voice that was established scene by scene.  The metrics stay
+                # observable for the audit layer, but they are not a detector
+                # score and do not silently trigger a full-chapter rewrite.
+                before_metrics = analyze_deai_patterns(text, profile=self.quality_profile)
+                deai_result = {
+                    "processed_text": text,
+                    "layers_applied": [],
+                    "total_changes": 0,
+                    "semantic_humanize": False,
+                    "humanize_changes": [],
+                    "ai_patterns_removed": [],
+                    "metrics": {
+                        "before": before_metrics,
+                        "after": before_metrics,
+                        "mode": "generation_first",
+                        "post_write_audit": "advisory_unless_fallback_requested",
+                    },
+                    "quality_gate": {
+                        "passed": True,
+                        "mode": "generation_first",
+                        "post_write_audit": "fallback_only",
+                    },
+                    "usage": {},
+                }
             if opening_repair_result:
                 deai_result["layers_applied"] = [
                     *(opening_repair_result.get("layers_applied") or []),
@@ -3538,6 +3832,8 @@ class GenerationEngine:
             })
         generation_quality = {
             "schema_version": "generation-quality-v1",
+            "generation_mode": "scene_serial",
+            "generation_version": SCENE_SERIAL_GENERATION_VERSION,
             "passed": not generation_failures,
             "minimum_chars": minimum_chapter_chars,
             "maximum_chars": maximum_chapter_chars,
@@ -3560,6 +3856,12 @@ class GenerationEngine:
                 "status": writing_workflow.get("status"),
                 "validation": methodology_validation,
                 "methodology_version": writing_workflow.get("methodology_version"),
+            },
+            "scene_serial": {
+                "scene_count": len(scene_outputs),
+                "handoff_count": len(scene_handoffs),
+                "state": scene_state,
+                "post_write_audit": "fallback_only",
             },
             "quality_profile": quality_profile_metadata(self.quality_profile),
             "chapter_title": {
@@ -3588,6 +3890,8 @@ class GenerationEngine:
                 "tokens": usage["tokens_input"] + usage["tokens_output"],
                 "cost": usage["cost"],
                 "deai_changes": deai_result["total_changes"],
+                "generation_mode": "scene_serial",
+                "scene_count": len(scene_outputs),
             },
         )
 
@@ -3621,8 +3925,17 @@ class GenerationEngine:
                     scene_plan.get("readability_plan") or readability_plan
                 ),
                 "writing_workflow": writing_workflow,
+                "scene_state": scene_state,
+                "scene_handoffs": scene_handoffs,
             },
             "scene_plan": scene_plan,
+            "scene_serial": {
+                "generation_mode": "scene_serial",
+                "generation_version": SCENE_SERIAL_GENERATION_VERSION,
+                "scene_outputs": scene_outputs,
+                "scene_handoffs": scene_handoffs,
+                "final_state": scene_state,
+            },
             "payoff_contract": payoff_contract,
             "payoff_validation": payoff_validation,
             "payoff_variety": payoff_variety,
@@ -3642,6 +3955,8 @@ class GenerationEngine:
                 "total_changes": deai_result["total_changes"],
                 "provider_humanization_required": True,
                 "provider_humanization_performed": bool(deai_result.get("semantic_humanize")),
+                "generation_first": True,
+                "post_write_audit": "fallback_only",
                 "external_detector_verification": "not_verified",
                 "semantic_humanize": deai_result.get("semantic_humanize", False),
                 "humanize_changes": deai_result.get("humanize_changes", []),

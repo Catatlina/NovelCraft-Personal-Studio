@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
-WRITING_METHODOLOGY_VERSION = "1.0.0"
+WRITING_METHODOLOGY_VERSION = "1.1.0"
 WRITING_WORKFLOW_SCHEMA_VERSION = "writing-workflow-v1"
-EXTERNAL_EVALUATION_SCHEMA_VERSION = "external-evaluation-v1"
-EXTERNAL_SCORE_THRESHOLD = 90.0
+EXTERNAL_EVALUATION_SCHEMA_VERSION = "external-evaluation-v2"
+EXTERNAL_HUMAN_MIN = 95.0
+EXTERNAL_SUSPECTED_AI_MAX = 5.0
+EXTERNAL_AI_FEATURE_MAX = 0.0
+EXTERNAL_PASS_STATUS = "external_95_5_0"
 
 WORKFLOW_STATUSES: tuple[str, ...] = (
     "input_pending",
@@ -31,7 +35,8 @@ WORKFLOW_STATUSES: tuple[str, ...] = (
     "causal_passed",
     "style_passed",
     "external_pending",
-    "external_90_plus",
+    "external_failed",
+    EXTERNAL_PASS_STATUS,
     "published",
     "blocked",
 )
@@ -42,16 +47,23 @@ WORKFLOW_TRANSITIONS: dict[str, frozenset[str]] = {
     "drafted": frozenset({"causal_passed", "blocked"}),
     "causal_passed": frozenset({"style_passed", "external_pending", "blocked"}),
     "style_passed": frozenset({"external_pending", "blocked"}),
-    "external_pending": frozenset({"external_90_plus", "blocked"}),
-    "external_90_plus": frozenset({"published", "blocked"}),
+    "external_pending": frozenset({"external_failed", EXTERNAL_PASS_STATUS, "blocked"}),
+    "external_failed": frozenset({"external_pending", "blocked"}),
+    EXTERNAL_PASS_STATUS: frozenset({"published", "blocked"}),
     "published": frozenset({"published"}),
     "blocked": frozenset({"input_pending", "causal_ready", "drafted", "blocked"}),
 }
 
 
 def text_sha256(text: str) -> str:
-    """Return the stable hash used to bind an external report to正文."""
-    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+    """Return the stable hash used to bind an external report to正文.
+
+    Editor clients may represent paragraph breaks as one or two newlines;
+    normalising only line endings and paragraph separators keeps the evidence
+    bound to the same visible prose without accepting content changes.
+    """
+    canonical = re.sub(r"\n{2,}", "\n", (text or "").replace("\r\n", "\n")).strip()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _text(value: Any) -> str:
@@ -147,8 +159,16 @@ def _default_external_evaluation() -> dict[str, Any]:
         "provider": None,
         "input_hash": None,
         "scope": None,
+        "human_score": None,
+        "suspected_ai_score": None,
+        "ai_feature_score": None,
         "scores": {},
         "flagged_segments": [],
+        "thresholds": {
+            "human_min": EXTERNAL_HUMAN_MIN,
+            "suspected_ai_max": EXTERNAL_SUSPECTED_AI_MAX,
+            "ai_feature_max": EXTERNAL_AI_FEATURE_MAX,
+        },
     }
 
 
@@ -277,8 +297,6 @@ def render_writing_methodology_contract(workflow: dict[str, Any] | None) -> str:
 def register_external_evaluation(
     chapter_text: str,
     payload: dict[str, Any],
-    *,
-    score_threshold: float = EXTERNAL_SCORE_THRESHOLD,
 ) -> dict[str, Any]:
     """Validate and register an actual external report; never fabricate scores."""
     payload = payload if isinstance(payload, dict) else {}
@@ -292,29 +310,48 @@ def register_external_evaluation(
     if not provider or not scope:
         raise ValueError("external evaluation requires provider and scope")
     scores = payload.get("scores") if isinstance(payload.get("scores"), dict) else {}
-    if payload.get("human_score") is not None:
-        scores = {**scores, "human_score": payload.get("human_score")}
-    if payload.get("suspected_ai_score") is not None:
-        scores = {**scores, "suspected_ai_score": payload.get("suspected_ai_score")}
-    human_score = scores.get("human_score")
-    if human_score is not None:
+    for key in ("human_score", "suspected_ai_score", "ai_feature_score"):
+        if payload.get(key) is not None:
+            scores = {**scores, key: payload.get(key)}
+    parsed_scores: dict[str, float | None] = {}
+    for key in ("human_score", "suspected_ai_score", "ai_feature_score"):
+        value = scores.get(key)
+        if value is None:
+            parsed_scores[key] = None
+            continue
         try:
-            human_score = float(human_score)
+            parsed = float(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError("human_score must be numeric") from exc
-        if human_score < 0 or human_score > 100:
-            raise ValueError("human_score must be between 0 and 100")
-        scores["human_score"] = human_score
+            raise ValueError(f"{key} must be numeric") from exc
+        if parsed < 0 or parsed > 100:
+            raise ValueError(f"{key} must be between 0 and 100")
+        parsed_scores[key] = parsed
+        scores[key] = parsed
     final_status = "completed" if status in {"completed", "complete", "done"} else status
-    if final_status == "completed" and human_score is None:
-        raise ValueError("completed external evaluation requires human_score")
+    if final_status == "completed" and any(parsed_scores[key] is None for key in parsed_scores):
+        raise ValueError("completed external evaluation requires human_score, suspected_ai_score and ai_feature_score")
+    passed = (
+        parsed_scores["human_score"] is not None
+        and parsed_scores["human_score"] >= EXTERNAL_HUMAN_MIN
+        and parsed_scores["suspected_ai_score"] is not None
+        and parsed_scores["suspected_ai_score"] <= EXTERNAL_SUSPECTED_AI_MAX
+        and parsed_scores["ai_feature_score"] is not None
+        and parsed_scores["ai_feature_score"] <= EXTERNAL_AI_FEATURE_MAX
+    )
+    result_status = EXTERNAL_PASS_STATUS if passed else ("external_failed" if final_status == "completed" else final_status)
     return {
         "schema_version": EXTERNAL_EVALUATION_SCHEMA_VERSION,
-        "status": "external_90_plus" if human_score is not None and human_score >= score_threshold else final_status,
+        "status": result_status,
         "provider": provider,
         "input_hash": expected_hash,
         "scope": scope,
+        **parsed_scores,
         "scores": scores,
         "flagged_segments": _list(payload.get("flagged_segments"), limit=30),
-        "threshold": score_threshold,
+        "thresholds": {
+            "human_min": EXTERNAL_HUMAN_MIN,
+            "suspected_ai_max": EXTERNAL_SUSPECTED_AI_MAX,
+            "ai_feature_max": EXTERNAL_AI_FEATURE_MAX,
+        },
+        "target_passed": passed,
     }

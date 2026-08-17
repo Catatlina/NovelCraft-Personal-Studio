@@ -192,6 +192,38 @@ def test_publishing_gates():
     assert_true(not ext.is_blocking, "allowed政策下external_risk应非阻断")
     assert_true(len(ext.warnings) > 0, "external_flagged时应有warning")
 
+    # 2.5 作品级95/5/0外部硬门：缺报告和失败报告均必须阻断
+    hard_profile = {
+        "platform": "fanqie",
+        "policy_status": "confirmed",
+        "ai_usage_policy": "allowed_with_human_editing",
+        "extra_metadata": {"external_detector_hard_gate": True},
+    }
+    report_hard_pending = gates_mod.run_all_gates(
+        chapter_id="test-007",
+        text=SAMPLE_CHAPTER,
+        platform_profile=hard_profile,
+        metadata={"title": "test", "synopsis": "冲突故事主角", "tags": ["x"], "category": "y"},
+        human_editing_confirmed=True,
+    )
+    assert_true(report_hard_pending.gates["external_risk"].is_blocking, "外部硬门应阻断")
+    assert_true(not report_hard_pending.gates["external_risk"].passed, "缺少外部报告时应不通过")
+    report_hard_pass = gates_mod.run_all_gates(
+        chapter_id="test-008",
+        text=SAMPLE_CHAPTER,
+        platform_profile=hard_profile,
+        metadata={"title": "test", "synopsis": "冲突故事主角", "tags": ["x"], "category": "y"},
+        human_editing_confirmed=True,
+        external_evaluation={
+            "status": "external_95_5_0",
+            "target_passed": True,
+            "human_score": 95.0,
+            "suspected_ai_score": 5.0,
+            "ai_feature_score": 0.0,
+        },
+    )
+    assert_true(report_hard_pass.gates["external_risk"].passed, "满足95/5/0时外部硬门应通过")
+
     print(f"  ✅ 门禁测试完成 (累计{_passed})")
 
 

@@ -7,11 +7,11 @@
 4. readability        可读性（句段节奏/段落肌理/对话比例）
 5. platform_compliance 平台合规（平台规则 + 元数据完整性 + 元数据质量）
 6. ai_disclosure      AI披露合规（按平台政策阻断）
-7. external_risk      外部AI检测风险（仅记录，平台禁止时才阻断）
+7. external_risk      外部AI检测风险（按作品策略记录或阻断）
 
 关键规则：
 - quality_candidate：七项门禁均已输出，但不要求全部通过。
-- publish_ready：所有 is_blocking=TRUE 的门禁必须通过；external_risk 仅在平台政策禁止AI时阻断。
+- publish_ready：所有 is_blocking=TRUE 的门禁必须通过；外部硬门配置开启时必须满足95/5/0。
 - 生成完成 ≠ reviewed；内部审核通过 ≠ publish_ready；publish_ready ≠ 自动发布。
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ GATE_DEFINITIONS = {
         "name": "外部检测风险",
         "is_blocking": False,  # 默认不阻断，平台禁止AI时才阻断
         "default_threshold": 80.0,
-        "description": "外部AI检测结果仅记录展示，平台政策禁止时才阻断",
+        "description": "按作品策略记录或阻断；硬门要求人工特征≥95、疑似AI≤5、AI特征=0",
     },
 }
 
@@ -528,27 +528,57 @@ def gate_external_risk(
     platform_profile: Optional[dict[str, Any]] = None,
     external_score: Optional[float] = None,
     external_flagged: bool = False,
+    external_evaluation: Optional[dict[str, Any]] = None,
 ) -> GateResult:
-    """外部AI检测风险门禁。默认不阻断，平台禁止AI时才阻断。
+    """外部AI检测风险门禁。
 
-    规则：external_flagged不阻断publish_ready的前提是平台政策允许；
-    必须在发布确认页明显展示，不能静默隐藏。
+    默认保留历史兼容行为（只记录风险）；作品配置
+    ``extra_metadata.external_detector_hard_gate=true`` 后，必须有绑定当前
+    正文哈希的真实报告，并满足人工特征≥95、疑似AI≤5、AI特征=0。
     """
     profile = platform_profile or {}
     policy = profile.get("ai_usage_policy", "unknown")
-    is_blocking = policy == "prohibited"  # 仅在禁止AI时阻断
+    extra = profile.get("extra_metadata") or {}
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except (TypeError, ValueError):
+            extra = {}
+    hard_gate = bool(
+        profile.get("external_detector_hard_gate")
+        or (isinstance(extra, dict) and extra.get("external_detector_hard_gate"))
+    )
+    is_blocking = hard_gate or policy == "prohibited"
 
     issues = []
     warnings = []
     passed = True
+    evaluation = external_evaluation if isinstance(external_evaluation, dict) else None
+    evaluation_status = str((evaluation or {}).get("status") or "not_run")
+    human_score = (evaluation or {}).get("human_score")
+    suspected_ai_score = (evaluation or {}).get("suspected_ai_score")
+    ai_feature_score = (evaluation or {}).get("ai_feature_score")
+    target_passed = evaluation_status == "external_95_5_0" and bool((evaluation or {}).get("target_passed"))
 
-    if external_flagged or (external_score is not None and external_score >= 80):
+    if hard_gate and not target_passed:
+        passed = False
+        issues.append({
+            "type": "external_target_not_met",
+            "message": "外部硬门未通过：需要人工特征≥95、疑似AI≤5、AI特征=0的当前正文报告",
+            "status": evaluation_status,
+            "scores": {
+                "human_score": human_score,
+                "suspected_ai_score": suspected_ai_score,
+                "ai_feature_score": ai_feature_score,
+            },
+        })
+    if external_flagged or (external_score is not None and external_score >= 80) or (evaluation and not target_passed):
         warnings.append({
             "type": "ai_detected",
-            "message": f"外部AI检测疑似AI生成（分数{external_score}），发布页必须明显展示",
-            "score": external_score,
+            "message": "外部检测报告未达到当前作品目标，发布页必须明显展示",
+            "score": external_score if external_score is not None else suspected_ai_score,
         })
-        if is_blocking:
+        if policy == "prohibited" and not hard_gate:
             passed = False
             issues.append({"type": "ai_prohibited_by_platform", "message": "平台禁止AI内容，外部检测命中后阻断发布"})
 
@@ -556,12 +586,21 @@ def gate_external_risk(
         gate_key="external_risk",
         gate_name=GATE_DEFINITIONS["external_risk"]["name"],
         passed=passed,
-        score=external_score or 0.0,
-        threshold=80.0,
+        score=float(suspected_ai_score if suspected_ai_score is not None else (external_score or 0.0)),
+        threshold=5.0 if hard_gate else 80.0,
         is_blocking=is_blocking,
         issues=issues,
         warnings=warnings,
-        evidence={"external_flagged": external_flagged, "external_score": external_score, "blocking_due_to_policy": is_blocking},
+        evidence={
+            "external_flagged": external_flagged,
+            "external_score": external_score,
+            "external_evaluation": evaluation,
+            "hard_gate": hard_gate,
+            "target": {"human_min": 95.0, "suspected_ai_max": 5.0, "ai_feature_max": 0.0},
+            "target_passed": target_passed,
+            "blocking_due_to_policy": is_blocking,
+        },
+        gate_version="v2.0",
     )
 
 
@@ -580,6 +619,7 @@ def run_all_gates(
     human_editing_confirmed: bool = False,
     external_score: Optional[float] = None,
     external_flagged: bool = False,
+    external_evaluation: Optional[dict[str, Any]] = None,
 ) -> PublishingGateReport:
     """运行全部七道门禁，返回综合报告。"""
     stats = compute_statistics(text)
@@ -592,7 +632,7 @@ def run_all_gates(
         "readability": gate_readability(text, stats),
         "platform_compliance": gate_platform_compliance(text, stats, platform_profile, metadata),
         "ai_disclosure": gate_ai_disclosure(platform_profile, disclosure_record, human_editing_confirmed),
-        "external_risk": gate_external_risk(platform_profile, external_score, external_flagged),
+        "external_risk": gate_external_risk(platform_profile, external_score, external_flagged, external_evaluation),
     }
 
     # quality_candidate：七项均已输出（不要求全部通过）

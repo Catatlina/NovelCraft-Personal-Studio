@@ -371,23 +371,30 @@ def record_human_editing(
     human_confirmed: bool = False,
     editor_name: str = "",
     editor_id: Optional[str] = None,
+    confirmation_note: str = "",
 ) -> dict[str, Any]:
     """记录人工编辑（用于allowed_with_human_editing政策）。"""
+    if human_confirmed and not confirmation_note.strip():
+        raise ValueError("人工确认必须填写修订说明")
+    if human_confirmed and not after_sha256.strip():
+        raise ValueError("人工确认必须绑定当前正文哈希")
+    if human_confirmed and chars_added + chars_removed <= 0:
+        raise ValueError("人工确认必须填写实际改动字数")
     record_id = _new_id()
     db.execute(
         """
         INSERT INTO human_editing_records
             (id, chapter_id, variant_id, editor_id, edit_type, repaired_sentence_indices,
              repaired_paragraph_indices, before_sha256, after_sha256,
-             chars_added, chars_removed, human_confirmed, editor_name)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             chars_added, chars_removed, human_confirmed, confirmation_note, editor_name)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (record_id, chapter_id, variant_id, editor_id, edit_type,
          json.dumps(repaired_sentences or [], ensure_ascii=False),
          json.dumps(repaired_paragraphs or [], ensure_ascii=False),
          before_sha256, after_sha256, chars_added, chars_removed,
-         human_confirmed, editor_name),
+         human_confirmed, confirmation_note, editor_name),
     )
     return {"editing_id": record_id}
 
@@ -419,6 +426,7 @@ def run_publishing_gates_for_chapter(
     existing_review_score: Optional[float] = None,
     external_score: Optional[float] = None,
     external_flagged: bool = False,
+    external_evaluation: Optional[dict[str, Any]] = None,
     user_id: Optional[str] = None,
 ) -> PublishingGateReport:
     """对章节运行七道门禁，保存结果，更新变体状态。"""
@@ -440,6 +448,14 @@ def run_publishing_gates_for_chapter(
             })
             external_flagged = external_flagged or variant.get("external_ai_flagged", False)
             external_score = external_score if external_score is not None else variant.get("external_ai_score")
+            if external_evaluation is None:
+                variant_summary = variant.get("gate_summary") or {}
+                if isinstance(variant_summary, str):
+                    try:
+                        variant_summary = json.loads(variant_summary)
+                    except (TypeError, ValueError):
+                        variant_summary = {}
+                external_evaluation = variant_summary.get("external_evaluation") if isinstance(variant_summary, dict) else None
 
     semantic_payoff = None
     if project_id and platform:
@@ -482,6 +498,7 @@ def run_publishing_gates_for_chapter(
         semantic_payoff=semantic_payoff,
         external_score=external_score,
         external_flagged=external_flagged,
+        external_evaluation=external_evaluation,
     )
 
     # 保存门禁结果
@@ -494,16 +511,24 @@ def run_publishing_gates_for_chapter(
             "quality_candidate": report.quality_candidate,
             "blocking_failures": report.blocking_failures,
             "gate_scores": {k: {"passed": v.passed, "score": v.score} for k, v in report.gates.items()},
+            "external_evaluation": report.gates["external_risk"].evidence.get("external_evaluation"),
         }
         db.execute(
             """
             UPDATE publication_variants
             SET gate_summary = %s, last_gate_run_at = now(),
                 external_ai_flagged = %s, external_ai_score = %s,
+                external_ai_provider = %s,
                 updated_at = now()
             WHERE id = %s
             """,
-            (json.dumps(gate_summary, ensure_ascii=False), external_flagged, external_score, variant_id),
+            (
+                json.dumps(gate_summary, ensure_ascii=False),
+                external_flagged or bool((external_evaluation or {}).get("status") == "external_failed"),
+                external_score if external_score is not None else (external_evaluation or {}).get("suspected_ai_score"),
+                (external_evaluation or {}).get("provider"),
+                variant_id,
+            ),
         )
 
         # 自动状态转换
