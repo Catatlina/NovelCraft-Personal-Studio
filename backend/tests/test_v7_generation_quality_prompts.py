@@ -960,7 +960,25 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
 
     assert "前180字内必须出现" in prompt
     assert "不能连续用日常拖慢开局" in prompt
+    assert "同一个两字人名不能连续占据多个段首" in prompt
     assert "生成期计划控制在 216-624 字，最多允许自然波动到 769 字" in prompt
+
+
+def test_scene_serial_retries_repeated_name_opening_across_accepted_scenes():
+    accepted = "\n\n".join(
+        ["苏长庚抬手压住门缝，听见里面的脚步停了。" for _ in range(8)]
+    )
+    candidate = "\n\n".join(
+        ["苏长庚把手机扣在掌心，示意身后的人别出声。" for _ in range(5)]
+        + ["雨水顺着窗框落下，屋里亮起一线冷光。"]
+    )
+
+    flags = GenerationEngine._scene_naturalness_flags(
+        candidate,
+        accepted_text=accepted,
+    )
+
+    assert any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
 
 
 def test_scene_serial_rescales_provider_plan_to_reader_target_before_writing():

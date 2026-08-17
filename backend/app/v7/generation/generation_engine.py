@@ -3394,6 +3394,7 @@ class GenerationEngine:
         retry_codes = {
             "ai_phrase",
             "uniform_cadence",
+            "repeated_paragraph_opening",
             "repeated_tic",
             "structural_ai_smell",
         }
@@ -3404,6 +3405,45 @@ class GenerationEngine:
                 and str(flag.get("severity") or "").lower() in {"medium", "high"}
             ):
                 flags.append(flag)
+        # A single scene often has fewer than twelve paragraphs, which is the
+        # minimum sample size for the chapter-level repeated-opening metric.
+        # Evaluate the accepted scene chain plus this candidate as a bounded
+        # generation-time signal, but only carry this one flag forward when
+        # the candidate increases the risk.  Other chapter-scale metrics stay
+        # in the post-write report and do not cause a scene retry here.
+        if accepted_text.strip():
+            before_opening = (
+                analyze_deai_patterns(accepted_text).get("repeated_paragraph_opening")
+                or {}
+            )
+            after_opening = (
+                analyze_deai_patterns(f"{accepted_text}\n\n{candidate}")
+                .get("repeated_paragraph_opening")
+                or {}
+            )
+            if (
+                float(after_opening.get("ratio") or 0.0) >= 0.30
+                and (
+                    str(after_opening.get("opening") or "")
+                    != str(before_opening.get("opening") or "")
+                    or int(after_opening.get("count") or 0)
+                    > int(before_opening.get("count") or 0)
+                )
+                and not any(
+                    item.get("code") == "repeated_paragraph_opening"
+                    for item in flags
+                    if isinstance(item, dict)
+                )
+            ):
+                flags.append({
+                    "code": "repeated_paragraph_opening",
+                    "severity": "medium",
+                    "message": (
+                        f"{after_opening.get('opening')}字开头段落在已写场景链中占比偏高，"
+                        "本场需要改用动作、物件、环境、对白或他人反应起笔"
+                    ),
+                    "evidence": after_opening,
+                })
         duplicate_stats = duplicate_paragraph_stats(
             f"{accepted_text}\n\n{candidate}" if accepted_text else candidate
         )
@@ -3570,6 +3610,9 @@ class GenerationEngine:
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
+            "段落起笔要自然轮换：同一个两字人名不能连续占据多个段首，也不能在本场段落中占多数；"
+            "可根据现场需要从动作、物件、声音、环境、对白或他人反应起笔，但不要为了轮换硬塞无关描写，"
+            "更不能把人名全部替换成‘他/她’。"
             "除非全书硬事实、已确认状态或本场契约明确给出，不要自行补写具体年份、持续年数、伤势来源、功法层级或系统规则；"
             "缺少依据时用动作和现场结果呈现，不要用精确数字制造伪连续性。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
