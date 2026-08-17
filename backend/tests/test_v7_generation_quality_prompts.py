@@ -970,6 +970,26 @@ def test_scene_truncation_retry_can_grow_past_the_old_fixed_ceiling():
     assert large_scene_retry_limit == SCENE_PROVIDER_TOKEN_CAP
 
 
+def test_scene_budget_guard_rejects_candidate_that_consumes_future_scene_minimums():
+    accepted_chars = 4300
+    candidate_chars = 700
+    future_minimum_chars = 120
+    chapter_max_chars = 4950
+
+    assert GenerationEngine._scene_exceeds_chapter_budget(
+        accepted_chars=accepted_chars,
+        candidate_chars=candidate_chars,
+        future_minimum_chars=future_minimum_chars,
+        chapter_max_chars=chapter_max_chars,
+    ) is True
+    assert GenerationEngine._scene_exceeds_chapter_budget(
+        accepted_chars=4300,
+        candidate_chars=500,
+        future_minimum_chars=future_minimum_chars,
+        chapter_max_chars=chapter_max_chars,
+    ) is False
+
+
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
     import inspect
     from app.v7.director.story_director import StoryDirector

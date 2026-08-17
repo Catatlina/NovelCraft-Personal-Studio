@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.3.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.4.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -3181,6 +3181,20 @@ class GenerationEngine:
         return max(240, min(SCENE_PROVIDER_TOKEN_CAP, int(maximum * margin)))
 
     @staticmethod
+    def _scene_exceeds_chapter_budget(
+        *,
+        accepted_chars: int,
+        candidate_chars: int,
+        future_minimum_chars: int,
+        chapter_max_chars: int,
+    ) -> bool:
+        """Keep a candidate from consuming the next scenes' hard minimum."""
+        return (
+            accepted_chars + candidate_chars + future_minimum_chars
+            > chapter_max_chars
+        )
+
+    @staticmethod
     def _scene_naturalness_flags(
         text: str,
         *,
@@ -3515,6 +3529,22 @@ class GenerationEngine:
                     scene_index=index,
                 )
                 candidate_word_count = chinese_word_count(candidate)
+                projected_chapter_chars = accepted_chars + candidate_word_count
+                if self._scene_exceeds_chapter_budget(
+                    accepted_chars=accepted_chars,
+                    candidate_chars=candidate_word_count,
+                    future_minimum_chars=future_minimum_chars,
+                    chapter_max_chars=chapter_max_chars,
+                ):
+                    issues.append({
+                        "code": "scene_chapter_budget_overrun",
+                        "severity": "high",
+                        "message": (
+                            f"本场候选会使章节达到 {projected_chapter_chars} 字，"
+                            f"并挤占后续场景最低 {future_minimum_chars} 字；"
+                            f"章节上限为 {chapter_max_chars} 字，必须在生成期收束本场"
+                        ),
+                    })
                 if candidate_word_count < min_scene_chars:
                     issues.append({
                         "code": "scene_too_short",
