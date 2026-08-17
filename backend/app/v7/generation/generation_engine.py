@@ -3085,6 +3085,12 @@ class GenerationEngine:
         )
         if planned_words <= 0:
             planned_words = max(1, int(target_word_count or 1))
+        scene_scale = 1.0
+        if (
+            target_word_count >= 1800
+            and abs(planned_words - target_word_count) > target_word_count * 0.10
+        ):
+            scene_scale = target_word_count / planned_words
         opening_excess = 0
         for index, raw in enumerate(beats, start=1):
             if not isinstance(raw, dict):
@@ -3095,6 +3101,8 @@ class GenerationEngine:
             target_words = int(raw.get("target_words") or 0)
             if target_words <= 0:
                 target_words = max(200, int(target_word_count * 0.8 / len(beats)))
+            elif scene_scale != 1.0:
+                target_words = max(200, int(target_words * scene_scale))
             opening_constraint = ""
             if index == 1:
                 # The opening is where the previous real-provider run lost
