@@ -104,6 +104,10 @@ SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
 # boundary was rejecting otherwise natural scenes by a few dozen characters;
 # chapter-level target reservation remains the hard ceiling.
 SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
+# A scene-level budget is a pacing guide, not a reason to rewrite a complete
+# scene for a few trailing characters. The chapter envelope and future-scene
+# reservation remain hard limits.
+SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS = 64
 # A chapter-level boundary needs a little more room than one paragraph. This
 # is still a bounded reader variance, not permission to approach the platform
 # ceiling or pad a chapter after its result is complete.
@@ -3921,16 +3925,34 @@ class GenerationEngine:
                         "severity": "high",
                         "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
                     })
-                if candidate_word_count > pacing_max_scene_chars:
+                scene_soft_max_chars = (
+                    pacing_max_scene_chars + SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS
+                )
+                if (
+                    candidate_word_count > pacing_max_scene_chars
+                    and candidate_word_count <= scene_soft_max_chars
+                ):
+                    attempt_warnings.append({
+                        "code": "scene_natural_length_variance",
+                        "severity": "low",
+                        "message": (
+                            f"场景有 {candidate_word_count} 字，略高于节拍建议上限 "
+                            f"{pacing_max_scene_chars} 字，但仍在自然波动范围内"
+                        ),
+                        "word_count": candidate_word_count,
+                        "max_scene_chars": pacing_max_scene_chars,
+                    })
+                if candidate_word_count > scene_soft_max_chars:
                     issues.append({
                         "code": "scene_overlong",
                         "severity": "high",
                         "message": (
                             f"场景有 {candidate_word_count} 字，超过 beat 目标上限 "
-                            f"{pacing_max_scene_chars} 字；必须在生成期收束本场"
+                            f"{scene_soft_max_chars} 字（建议上限 {pacing_max_scene_chars} 字）；"
+                            "必须在生成期收束本场"
                         ),
                         "word_count": candidate_word_count,
-                        "max_scene_chars": pacing_max_scene_chars,
+                        "max_scene_chars": scene_soft_max_chars,
                     })
                 if (
                     len(issues) == 1

@@ -15,6 +15,7 @@ from app.v7.generation.generation_engine import (
     SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN,
     SCENE_NATURAL_LENGTH_TOLERANCE,
     SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
+    SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS,
     SCENE_PROVIDER_TOKEN_CAP,
     SCENE_TARGET_MAX_RATIO,
     SceneDirector,
@@ -1086,6 +1087,10 @@ def test_scene_overlong_retry_keeps_completion_headroom():
 
     assert retry_limit == int(850 * SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN)
     assert retry_limit < 850
+
+
+def test_scene_length_soft_overflow_is_bounded_by_reader_pacing_contract():
+    assert SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS == 64
 
 
 def test_scene_truncation_retry_has_a_bounded_escalation():
