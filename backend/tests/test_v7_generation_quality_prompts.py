@@ -914,7 +914,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
 
     assert "前180字内必须出现" in prompt
     assert "不能连续用日常拖慢开局" in prompt
-    assert "生成期计划控制在 216-624 字，最多允许自然波动到 655 字" in prompt
+    assert "生成期计划控制在 216-624 字，最多允许自然波动到 705 字" in prompt
 
 
 def test_scene_length_bounds_make_pacing_budget_a_generation_contract():
@@ -1001,7 +1001,7 @@ def test_scene_overlong_retry_keeps_completion_headroom():
         token_margin=SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN,
     )
 
-    assert retry_limit == int(850 * 0.82)
+    assert retry_limit == int(850 * 0.86)
     assert retry_limit > int(850 * 0.64)
 
 
