@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.13.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.14.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -1320,6 +1320,11 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             "最后一个 beat 必须明确写出 aftershock，并让 content、scene_card.handoff 或 payoff_contract.next_pressure 之一落到具体的章末后果/下一压力。"
             "每个 beat 都必须提供 scene_card：明确地点、时间、在场人物、目标、阻碍、选择、转折、状态变化、"
             "知情边界和下一场承接点；这些字段服务于连续写作，不要写成泛泛的剧情摘要。"
+            "因果/动机是硬要求：每个 beat 的 content 和 scene_card.choice 都必须回答人物为什么在此刻行动；"
+            "如果重返上一章或前面场景出现过的地点、门、物件或线索，必须写清触发信息→当前目标→主动决定，"
+            "禁止只用‘鬼使神差’、‘下意识’、‘不知为何’或‘心血来潮’充当唯一动机。"
+            "重大袭击、对抗或爆发后的下一 beat，必须先写一个可见的即时后果（伤势、资源损失、环境变化、旁观者反应、"
+            "敌我状态变化或短暂喘息）再进入长段解释/师徒对话；不能从战斗结果直接跳到讲设定。"
             "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
             "输出必须紧凑：每个 beat 的 name/purpose/content/emotion 各不超过 80 字，"
             "causal_ledger 每列不超过 60 字，列表只写本章真正发生的 4-6 个事件；不要重复字段或附加解释。"
@@ -1341,7 +1346,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             max_tokens=4200,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.5.0",
+            prompt_version="1.6.0",
         )
         plan = self._repair_generation_phase_labels(result["data"]) or result["data"]
         usage = dict(result.get("usage") or {})
@@ -1361,6 +1366,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "每个 beat 有 name、content、target_words，并通过 payoff_phase 或 payoff_phases"
                 "完整覆盖 pressure、build、burst、feedback、aftershock 五阶段；每个 beat 必须有"
                 "scene_card，写清地点、时间、人物、目标、阻碍、选择、转折、状态变化、知情边界和承接点；"
+                "每个 beat 必须写清人物此刻为什么行动；重返已有地点/物件时必须写触发信息、当前目标和主动决定，"
+                "不得用‘鬼使神差’、‘下意识’或‘不知为何’代替动机；重大冲突后先写即时后果或喘息，"
+                "再进入解释性对话，不能从结果直接跳到讲设定；"
                 "chapter_type 必须是 normal、aftermath、relationship、suspense 之一。\n"
                 f"校验错误：{contract_error}\n"
                 f"原始计划：{json.dumps(plan, ensure_ascii=False)}\n"
@@ -1372,7 +1380,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 max_tokens=3600,
                 temperature=0.0,
                 prompt_name="v7.generation.scene_plan.repair",
-                prompt_version="1.1.0",
+                prompt_version="1.2.0",
             )
             repair_usage = repaired.get("usage") or {}
             usage = {
@@ -3717,6 +3725,10 @@ class GenerationEngine:
             f"{causal_contract_block}"
             "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
+            "因果连续性硬要求：人物重返已经出现过的地点、门、物件或线索时，必须先写触发信息、当前目标和主动决定；"
+            "不得只用‘鬼使神差’、‘下意识’、‘不知为何’或‘心血来潮’带过。重大袭击、对抗或爆发结束后，"
+            "先写一个可见的即时后果或短暂喘息（伤势、资源损失、环境变化、旁观者反应或敌我状态变化），"
+            "再进入长段解释、师徒对话或规则说明；不得从战斗结果直接跳到讲设定。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
             "叙述保持第三人称；门上字、碑文、账册、书信、纸条等直接文字若出现‘我/吾/我们’，"

@@ -980,6 +980,8 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "碑文、账册、书信、纸条等直接文字" in prompt
     assert "同一个两字人名不能连续占据多个段首" in prompt
     assert "破折号只在对白中确有停顿、打断或转折时使用" in prompt
+    assert "人物重返已经出现过的地点、门、物件或线索时" in prompt
+    assert "重大袭击、对抗或爆发结束后" in prompt
     assert "生成期计划控制在 216-624 字，最多允许自然波动到 769 字" in prompt
 
 
