@@ -16,8 +16,6 @@ from app.v7.generation.generation_engine import (
     SCENE_NATURAL_LENGTH_TOLERANCE,
     SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
     SCENE_PROVIDER_TOKEN_CAP,
-    READER_SCENE_TARGET_MAX_RATIO,
-    READER_SCENE_VARIANCE_CHARS,
     SCENE_TARGET_MAX_RATIO,
     SceneDirector,
     ensure_unique_chapter_title,
@@ -997,13 +995,6 @@ def test_scene_length_bounds_make_pacing_budget_a_generation_contract():
         int(maximum * SCENE_NATURAL_LENGTH_TOLERANCE)
         + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS
     )
-
-
-def test_reader_scene_budget_distributes_slack_before_writing_long_chapters():
-    assert GenerationEngine._reader_scene_max_chars(
-        {"target_words": 600},
-        scene_index=3,
-    ) == int(600 * READER_SCENE_TARGET_MAX_RATIO) + READER_SCENE_VARIANCE_CHARS
 
 
 def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():

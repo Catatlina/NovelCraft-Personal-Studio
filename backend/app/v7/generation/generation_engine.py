@@ -104,8 +104,6 @@ SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
 # boundary was rejecting otherwise natural scenes by a few dozen characters;
 # chapter-level target reservation remains the hard ceiling.
 SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
-READER_SCENE_TARGET_MAX_RATIO = 1.10
-READER_SCENE_VARIANCE_CHARS = 96
 
 
 def chinese_word_count(text: str) -> int:
@@ -3267,24 +3265,6 @@ class GenerationEngine:
             + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
         )
 
-    @staticmethod
-    def _reader_scene_max_chars(scene_card: dict[str, Any], *, scene_index: int) -> int:
-        """Keep production scenes close to their reader-first allocation.
-
-        The legacy scene envelope is intentionally broad for short synthetic
-        tests and compatibility callers. A real reader-budget chapter needs
-        a narrower per-scene envelope so one early scene cannot consume the
-        slack reserved for the climax and leave a later scene with an
-        impossible fragment such as 218 characters.
-        """
-        target_words = max(1, int(scene_card.get("target_words") or 300))
-        minimum = max(120, int(target_words * 0.45))
-        return max(
-            minimum + 100,
-            int(target_words * READER_SCENE_TARGET_MAX_RATIO)
-            + READER_SCENE_VARIANCE_CHARS,
-        )
-
     def _scene_generation_max_tokens(
         self,
         scene_card: dict[str, Any],
@@ -3631,9 +3611,8 @@ class GenerationEngine:
                     f"planning_max_chars={planning_max_chars}"
                 )
             scene_max_chars = min(
-                nominal_max_scene_chars,
                 (
-                    self._reader_scene_max_chars(card, scene_index=index)
+                    self._scene_allowed_max_chars(card, scene_index=index)
                     if target_word_count >= 1800
                     else nominal_max_scene_chars
                 ),
@@ -3650,10 +3629,9 @@ class GenerationEngine:
                 card,
                 scene_index=index,
             )
-            pacing_max_scene_chars = (
-                self._reader_scene_max_chars(card, scene_index=index)
-                if target_word_count >= 1800
-                else self._scene_allowed_max_chars(card, scene_index=index)
+            pacing_max_scene_chars = self._scene_allowed_max_chars(
+                card,
+                scene_index=index,
             )
             for attempt in range(3):
                 attempt_warnings: list[dict[str, Any]] = []
@@ -3694,6 +3672,7 @@ class GenerationEngine:
                     previous_issue_codes.intersection({
                         "scene_provider_truncated",
                         "scene_chapter_budget_overrun",
+                        "scene_reader_budget_overrun",
                     })
                     and attempt >= 2
                 ):
@@ -3779,6 +3758,20 @@ class GenerationEngine:
                             f"章节上限为 {chapter_max_chars} 字，必须在生成期收束本场"
                         ),
                     })
+                if (
+                    target_word_count >= 1800
+                    and accepted_chars + candidate_word_count + future_target_chars
+                    > planning_max_chars
+                ):
+                    issues.append({
+                        "code": "scene_reader_budget_overrun",
+                        "severity": "high",
+                        "message": (
+                            f"本场候选及后续目标合计 "
+                            f"{accepted_chars + candidate_word_count + future_target_chars} 字，"
+                            f"超过读者章节预算 {planning_max_chars} 字；必须在生成期压缩本场"
+                        ),
+                    })
                 if candidate_word_count < min_scene_chars:
                     issues.append({
                         "code": "scene_too_short",
@@ -3834,10 +3827,18 @@ class GenerationEngine:
                             )
                             if isinstance(item, dict) and item.get("code") == "scene_chapter_budget_overrun"
                             else (
-                            f"{item.get('code')}[token_limit={scene_token_limit},"
-                            f"max_chars={attempt_max_scene_chars}]"
-                            if isinstance(item, dict) and item.get("code") == "scene_provider_truncated"
-                            else str(item.get("code"))
+                                (
+                                    f"{item.get('code')}[accepted={accepted_chars},"
+                                    f"candidate={candidate_word_count},future_target={future_target_chars},"
+                                    f"planning_max={planning_max_chars}]"
+                                )
+                                if isinstance(item, dict) and item.get("code") == "scene_reader_budget_overrun"
+                                else (
+                                    f"{item.get('code')}[token_limit={scene_token_limit},"
+                                    f"max_chars={attempt_max_scene_chars}]"
+                                    if isinstance(item, dict) and item.get("code") == "scene_provider_truncated"
+                                    else str(item.get("code"))
+                                )
                             )
                         )
                         for item in issues
