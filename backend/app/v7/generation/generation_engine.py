@@ -3565,6 +3565,16 @@ class GenerationEngine:
                         scene_max_chars,
                         pacing_max_scene_chars,
                     )
+                if "scene_provider_truncated" in previous_issue_codes and attempt >= 2:
+                    # A repeated truncation means the Provider is not
+                    # self-terminating at the nominal beat length. Enter a
+                    # compact generation mode instead of repeatedly raising
+                    # the completion ceiling and paying for more unfinished
+                    # prose.
+                    attempt_max_scene_chars = max(
+                        min_scene_chars,
+                        int(attempt_max_scene_chars * 0.82),
+                    )
                 scene_token_limit = self._scene_generation_max_tokens(
                     card,
                     scene_index=index,
@@ -3612,7 +3622,8 @@ class GenerationEngine:
                         "severity": "high",
                         "message": (
                             f"Provider 在本场 {scene_token_limit} token 上限截断；"
-                            "必须压缩表达后重新生成，不能扩大预算"
+                            f"本次场景字符预算为 {attempt_max_scene_chars}；"
+                            "必须压缩表达后重新生成，不能增加内容或扩大预算"
                         ),
                     })
                 else:
@@ -3675,7 +3686,12 @@ class GenerationEngine:
                             f"{item.get('max_scene_chars')}字]"
                         )
                         if isinstance(item, dict) and item.get("code") == "scene_overlong"
-                        else str(item.get("code"))
+                        else (
+                            f"{item.get('code')}[token_limit={scene_token_limit},"
+                            f"max_chars={attempt_max_scene_chars}]"
+                            if isinstance(item, dict) and item.get("code") == "scene_provider_truncated"
+                            else str(item.get("code"))
+                        )
                         for item in issues
                     )
                 )
