@@ -66,7 +66,7 @@ _ENVIRONMENT_RE = re.compile(
     r"(?:雨|雾|风|雪|潮气|热浪|冷气|天光|灯光|地面|楼道|院子|街道|海面|山谷).{0,20}(?:压|卷|散|落|亮|暗|晃|漫|逼|涌|变)"
 )
 _ACTION_RE = re.compile(
-    r"(?:抬手|转身|推开|冲出|拔出|按住|抓住|扣下|迈步|扑|躲|拦|挡|撕|砸|掏出|站起|跪|回头|走向|冲向|决定|开口)"
+    r"(?:抬手|转身|推开|推门|进门|冲出|拔出|按住|抓住|扣下|迈步|迈进|拎起|握紧|扑|躲|拦|挡|撕|砸|掏出|站起|跪|回头|走向|往.{0,8}走|上楼|下楼|决定|开口)"
 )
 
 
@@ -88,10 +88,10 @@ def classify_opening(text: Any) -> str:
         return "external_event"
     if _OBJECT_RE.search(sample[:180]):
         return "object"
-    if _ENVIRONMENT_RE.search(sample[:180]):
-        return "environment"
     if _ACTION_RE.search(sample[:180]):
         return "action"
+    if _ENVIRONMENT_RE.search(sample[:180]):
+        return "environment"
     return "unknown"
 
 

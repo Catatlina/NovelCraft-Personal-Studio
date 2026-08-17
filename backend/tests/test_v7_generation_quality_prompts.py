@@ -18,6 +18,7 @@ from app.v7.generation.generation_engine import (
 )
 from app.v7.quality.opening_variation import (
     build_opening_history,
+    classify_opening,
     inspect_opening,
     select_opening_plan,
 )
@@ -250,6 +251,23 @@ def test_opening_gate_rejects_the_repeated_body_sensation_template():
         "opening_body_sensation_cliche",
         "opening_first_chapter_body_default",
     }
+
+
+def test_action_opening_with_environmental_consequences_is_not_misclassified():
+    text = (
+        "苏长庚推门进藏经阁时，天刚擦黑。扫帚靠在门边，他弯腰拎起来，"
+        "凭熟路往楼梯口走。一楼的灰被鞋底带起，在昏光里浮起又落下。"
+    )
+
+    assert classify_opening(text) == "action"
+    result = inspect_opening(
+        text,
+        requested_mode="action",
+        chapter_number=2,
+        recent_modes=["environment"],
+    )
+    assert result["passed"] is True
+    assert result["observed_mode"] == "action"
 
 
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
