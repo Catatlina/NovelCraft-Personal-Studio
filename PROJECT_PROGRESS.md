@@ -2,11 +2,11 @@
 
 ## 2026-08-17 最新代码质量复核与任务续接 [实测]
 
-- 已拉取远端 `agent/publishing-v0.9.2@5f83a7f`；旧未提交工作已保存到 `stash@{0}`，当前补丁仅在本地工作树，尚未提交、推送或部署。
+- 当前分支 `agent/publishing-v0.9.2` 已提交并推送至 `origin`，最新提交为 `1832158`；旧未提交工作仍保存在 `stash@{0}`，未被覆盖。
 - 本轮修复覆盖统计详情→局部修复链路、替换判定、跨章去重、AI失败语义、发布状态机/披露确认、平台规则版本、人工编辑记录、发布 API 项目范围，以及20章真实长跑脚本的真实章节序号/正文ID/证据持久化；新增前端发布准备页、Provider AI披露生成和语义爽点评估链路。
-- 证据：后端全量 `1121 passed, 138 skipped, 1 xpassed, 2 warnings`；发布语义/API专项 `28 passed`；v0.9.2自测 `60 passed`；前端 `57 passed`、TypeScript、生产构建通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py`、`ai_development_gate.sh`、Python 编译、`git diff --check` 均通过。此前 `911/149/54 errors` 为 Redis/PostgreSQL 未启动时的环境基线，不作为当前代码质量结论。
-- 生产只读核对：迁移为 `nc_v092_publishing_preparation (head)`，容器运行；章节编号由 `contents.seq` 提供。现有作品的第6章为 `needs_rewrite`，另外两本20章数据也有返工记录，因此真实 Provider 20章长跑仍未开始，未执行生产写入。
-- 当前状态边界：发布准备后端、前端页面、Provider AI披露与语义 `payoff_density` 均已在本地**已接线/可用**；本轮仍尚未 commit、push、部署，20章真实 Provider 长跑仍**未开始**。
+- 代码证据：后端全量 `1121 passed, 138 skipped, 1 xpassed, 2 warnings`；v0.9.2自测 `60 passed`；前端 `57 passed`、TypeScript、生产构建通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py`、`ai_development_gate.sh`、Python 编译、`git diff --check` 均通过。此前失败基线来自 Redis/PostgreSQL 未启动，不作为当前代码质量结论。
+- 生产部署证据：代码为 `1832158`；迁移为 `nc_v11_disclosure_payoff (head)`；`publishing.ai_disclosure`、`publishing.payoff_semantic` Prompt/route 已落库；API/Worker/Beat/数据库/Redis/Frontend 容器运行；发布门禁定义接口实际返回 `401 authentication required`。部署前备份为 `backups/pre-deploy-v11-20260817-103222.sql.gz`，gzip 校验通过。
+- 当前边界：发布准备后端、前端页面、Provider AI披露与语义 `payoff_density` 均已**可用/已接线**；生产尚未执行真实 Provider 文案或语义评估调用。现有作品第6章为 `needs_rewrite`，因此20章真实 Provider 长跑仍**未开始**，未执行生产正文写入。
 
 ## 2026-08-11 两本设定包生产 10 章长跑复跑 [实测]
 

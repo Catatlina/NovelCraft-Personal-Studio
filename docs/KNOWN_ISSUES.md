@@ -2,11 +2,11 @@
 
 ## 2026-08-17 KI-042 最新代码复核后的未闭合项
 
-- 状态：**已接线**。已拉取 `origin/agent/publishing-v0.9.2@5f83a7f`，并在本地修复统计/局部修复、发布状态机、AI披露、发布 API 项目范围以及20章长跑脚本问题；新增前端发布准备页、Provider AI披露草稿、语义爽点评估与迁移种子。本轮修复尚未 commit、push 或部署。
-- 验证：后端全量 `1121 passed, 138 skipped, 1 xpassed, 2 warnings`，发布语义/API专项 `28 passed`，v0.9.2自测 `60 passed`，前端 `57 passed`、TypeScript、生产构建、真实性门禁、交付声明门禁、强制开发门禁均通过。此前失败基线由本机 PostgreSQL/Redis 未启动造成，已补齐服务并复测。
-- 20章长跑仍未开始：生产只读数据确认现有《重生后我靠签到系统在侯府杀疯了》`seq=6` 为 `needs_rewrite`；《大唐：我的后台是整个华夏》和《封神：我带华夏民族举国登仙》也存在多条返工/重复序号记录。没有在未解决前置质量问题时调用 Provider，也没有创建新书或修改生产正文。
+- 状态：**可用**。本轮修复已提交为 `1832158`、推送并部署到生产；新增前端发布准备页、Provider AI披露草稿、语义爽点评估、迁移种子和长跑脚本真实性修复。
+- 验证：后端全量 `1121 passed, 138 skipped, 1 xpassed, 2 warnings`，v0.9.2自测 `60 passed`，前端 `57 passed`、TypeScript、生产构建、真实性门禁、交付声明门禁、强制开发门禁均通过。此前失败基线由本机 PostgreSQL/Redis 未启动造成，补齐服务后已复测。
+- 20章长跑仍未开始：生产只读数据确认现有《重生后我靠签到系统在侯府杀疯了》`seq=6` 为 `needs_rewrite`；没有在未解决前置质量问题时调用 Provider，也没有创建新书或修改生产正文。
 - 长跑脚本已修正为读取真实 `contents.seq`、真实 V7 `v6_content_id`、数据库平台配置与作品元数据，并对生成正文、门禁结果、证据持久化失败 fail-closed；真正执行仍需前置章节通过质量门禁和有效的平台配置。
-- 生产边界：生产迁移和容器状态保持健康，但本轮本地修复未部署；公网 healthz 本次只观察到 Cloudflare `/login` `302`，不能据此宣称公网健康检查已验收。
+- 生产边界：Alembic 为 `nc_v11_disclosure_payoff (head)`，API 路由实际返回 `401 authentication required`；生产尚未执行真实 Provider 文案/语义样本，公网 healthz 的 Cloudflare `/login` `302` 不作为公网健康检查验收证据。
 
 ## 2026-08-11 KI-041 v0.9.2 出版准备层（已部署，代码级可用，20章长跑未完成）
 

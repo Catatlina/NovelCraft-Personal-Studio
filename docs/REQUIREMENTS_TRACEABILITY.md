@@ -1,15 +1,15 @@
 # Starlume AI 小说主线需求追踪矩阵
 
-## 2026-08-17 最新代码质量复核（当前批次）
+## 2026-08-17 最新代码质量复核与生产部署（当前批次）
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
 |---|---|---|---|
-| statistics_v1 确定性章节统计 | 可用 | 最新分支本地专项通过；统计结果已补齐局部修复所需的句子正文、段落索引和字节范围；`19 passed`专项包含回归 | 本轮修复尚未部署，生产快照需复核 |
-| 七道发布门禁引擎 | 已接线 | v0.9.2自测 `60 passed`；生产此前已运行6章真实正文门禁；带项目/平台上下文时已接入真实 Provider 语义爽点评估 | 生产部署后复核、真实Provider 20章长跑 |
-| 发布状态机与AI披露阻断 | 可用 | `publish_ready`现在要求全部阻断门禁证据；披露生成不再自动确认；不存在的披露确认明确失败；专项保护测试通过 | 生产状态转换和前端确认流程 |
-| 发布准备 API 项目/作品/章节范围 | 已接线 | 章节、变体、平台配置、披露均经项目成员与关联作品校验；新增 API 范围回归测试 | 本轮修复尚未部署，生产双用户接口回归 |
+| statistics_v1 确定性章节统计 | 可用 | 最新分支专项通过；统计结果已补齐局部修复所需的句子正文、段落索引和字节范围；生产代码为 `1832158` | 生产真实章节快照复核 |
+| 七道发布门禁引擎 | 已接线 | v0.9.2自测 `60 passed`；生产已有6章真实正文门禁；带项目/平台上下文时接入真实 Provider 语义爽点评估 | 生产真实 Provider 20章长跑 |
+| 发布状态机与AI披露阻断 | 可用 | `publish_ready`要求全部阻断门禁证据；披露生成不再自动确认；不存在的披露确认明确失败；生产迁移已到 `nc_v11_disclosure_payoff (head)` | 真实 Provider 文案与登录态流程 |
+| 发布准备 API 项目/作品/章节范围 | 已接线 | 章节、变体、平台配置、披露均经项目成员与关联作品校验；API 路由实际返回 `401 authentication required` | 生产双用户接口回归 |
 | 20章真实Provider长跑验收 | 未开始 | 长跑脚本已改为真实 `contents.seq`、真实 V7 `v6_content_id`、数据库平台配置和证据写入；生产只读确认现有第6章 `needs_rewrite` | 先修复前置章节或用户授权创建正确配置新书 |
-| 生产部署 | 可用 | 生产迁移为 `nc_v092_publishing_preparation (head)`，容器运行；生产代码为部署快照 `353271f` | 本轮本地修复尚未 commit/push/deploy |
+| 生产部署 | 可用 | 生产代码 `1832158`；迁移 `nc_v11_disclosure_payoff (head)`；API/Worker/Beat/数据库/Redis/Frontend 容器运行；部署前备份 gzip 校验通过 | 公网 healthz 仍受 Cloudflare `/login` 302 影响 |
 | 前端发布准备页面 | 已接线 | `PublishingPreparation` 已接入主导航、真实平台/变体/门禁/披露 API；前端 `57 passed`、TypeScript 和生产构建通过 | 生产部署后真实用户流程验收 |
 | AI披露文案生成 | 已接线 | `publishing.ai_disclosure` 真实 Provider 结构化输出、草稿记录与显式人工确认；迁移同步 Prompt/route | 生产部署后真实 Provider 调用与平台文案复核 |
 | payoff_density 真实检测 | 已接线 | `publishing.payoff_semantic` 真实 Provider 结构化事件/证据/后果/章末压力，低置信度和 malformed output fail-closed | 生产部署后真实章节语义复核、20章长跑 |
@@ -20,7 +20,7 @@
 - `backend/.venv/bin/python backend/tests/test_publishing_v092.py`：`60 passed`。
 - `python3 scripts/verify_ai_truthfulness.py`、`python3 scripts/verify_delivery_claims.py`、`bash scripts/ai_development_gate.sh`：均通过。
 - 当前全量基线 `PYTHONPATH=backend backend/.venv/bin/pytest -q backend/tests`：`1121 passed, 138 skipped, 1 xpassed, 2 warnings`，退出码 0；此前失败基线来自本机 PostgreSQL/Redis 未启动，已不再作为当前结论。
-- 当前工作树有本轮未提交修复；旧工作区改动保存在 `stash@{0}`。生产只读核对未调用Provider、未写生产正文；公网 healthz 本次观察为 Cloudflare 到 `/login` 的 `302`，不作为公网健康验收证据。
+- 当前分支干净且已推送至 `origin/agent/publishing-v0.9.2`；旧工作区改动保存在 `stash@{0}`。生产只读核对未调用Provider、未写生产正文；公网 healthz 本次观察为 Cloudflare 到 `/login` 的 `302`，不作为公网健康验收证据。
 
 ## 2026-08-11 v0.9.2 出版准备层（历史开发快照）
 
