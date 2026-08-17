@@ -3432,6 +3432,45 @@ class GenerationEngine:
                 and str(flag.get("severity") or "").lower() in {"medium", "high"}
             ):
                 flags.append(flag)
+        # Chapter-scale detection deliberately needs twelve paragraphs to
+        # avoid false positives. A serial scene is often shorter, so catch a
+        # clearly repetitive named opening before it contaminates the next
+        # scene. Pronoun-led paragraphs are excluded for the same reason as
+        # the chapter metric: ordinary third-person web prose can reuse them.
+        paragraphs = [
+            item.strip()
+            for item in re.split(r"\n{2,}|\n", candidate)
+            if item.strip()
+        ]
+        if len(paragraphs) >= 8:
+            openings: dict[str, int] = {}
+            for paragraph in paragraphs:
+                first = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", paragraph)
+                opening = first[:2]
+                if not opening or opening[:1] in "他她它我你":
+                    continue
+                openings[opening] = openings.get(opening, 0) + 1
+            opening, count = max(openings.items(), key=lambda item: item[1], default=("", 0))
+            ratio = count / len(paragraphs) if paragraphs else 0.0
+            if count >= 4 and ratio >= 0.45 and not any(
+                item.get("code") == "repeated_paragraph_opening"
+                for item in flags
+                if isinstance(item, dict)
+            ):
+                flags.append({
+                    "code": "repeated_paragraph_opening",
+                    "severity": "medium",
+                    "message": (
+                        f"本场 {opening} 字段首占 {ratio:.1%}，短场景中已形成机械起笔；"
+                        "必须改用动作、物件、环境、对白或他人反应起笔"
+                    ),
+                    "evidence": {
+                        "opening": opening,
+                        "count": count,
+                        "ratio": round(ratio, 4),
+                        "paragraph_count": len(paragraphs),
+                    },
+                })
         # A single scene often has fewer than twelve paragraphs, which is the
         # minimum sample size for the chapter-level repeated-opening metric.
         # Evaluate the accepted scene chain plus this candidate as a bounded
@@ -4055,6 +4094,16 @@ class GenerationEngine:
                         str(item.get("message") or item.get("code"))
                         for item in issues[:5]
                     )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "repeated_paragraph_opening"
+                        for item in issues
+                    ):
+                        feedback += (
+                            "\n段首修复硬要求：本次完整重写时至少把一半段落改为从动作、物件、"
+                            "声音、环境、对白或他人反应起笔；同一人物姓名不得连续作为段首，"
+                            "不要只把姓名替换成‘他/她’，也不要删掉事件或合并段落。"
+                        )
                     if candidate:
                         feedback += (
                             "\n上一版候选正文（可能未完或超长，只用于本次生成期重写；"

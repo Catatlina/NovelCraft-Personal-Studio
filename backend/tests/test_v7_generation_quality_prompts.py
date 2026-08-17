@@ -984,6 +984,22 @@ def test_scene_serial_retries_repeated_name_opening_across_accepted_scenes():
     assert any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
 
 
+def test_scene_serial_catches_repeated_name_opening_in_a_short_scene():
+    candidate = "\n\n".join(
+        ["苏长庚抬头看向门缝，手指扣紧了扫帚柄。" for _ in range(4)]
+        + [
+            "雨声敲在窗纸上，屋里的火光轻轻一晃。",
+            "赵小胖把册子压在桌角，没敢再问。",
+            "门轴发出一声轻响，楼道里的脚步停了。",
+            "灯芯爆开一点火星，照亮了地上的旧印记。",
+        ]
+    )
+
+    flags = GenerationEngine._scene_naturalness_flags(candidate)
+
+    assert any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
+
+
 def test_scene_serial_rescales_provider_plan_to_reader_target_before_writing():
     cards = GenerationEngine._normalise_scene_cards(
         {
