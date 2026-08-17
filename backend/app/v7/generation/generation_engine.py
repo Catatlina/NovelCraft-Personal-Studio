@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.6.5"
+SCENE_SERIAL_GENERATION_VERSION = "2.7.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -86,6 +86,8 @@ SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 1.25
 SCENE_OPENAI_TOKEN_CHAR_MARGIN = 1.10
 SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 1.35
 SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20
+SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN = 1.70
+SCENE_OPENAI_FINAL_TRUNCATION_REPAIR_MARGIN = 1.50
 # The retry must have enough completion headroom to finish a Chinese scene.
 # The prompt and hard character envelope perform the compression; an overly
 # small token cap turns a valid pacing repair into provider truncation.
@@ -3481,16 +3483,26 @@ class GenerationEngine:
             accepted_scene = ""
             scene_metrics: dict[str, Any] = {}
             scene_warnings: list[dict[str, Any]] = []
-            for attempt in range(2):
+            previous_issue_codes: set[str] = set()
+            attempts_used = 0
+            for attempt in range(3):
                 attempt_warnings: list[dict[str, Any]] = []
                 provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
                 if attempt == 0:
                     repair_margin = None
-                elif "scene_provider_truncated" in feedback:
+                elif "scene_provider_truncated" in previous_issue_codes:
                     repair_margin = (
-                        SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN
-                        if provider == "openai"
-                        else SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN
+                        (
+                            SCENE_OPENAI_FINAL_TRUNCATION_REPAIR_MARGIN
+                            if provider == "openai"
+                            else SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN
+                        )
+                        if attempt >= 2
+                        else (
+                            SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN
+                            if provider == "openai"
+                            else SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN
+                        )
                     )
                 else:
                     repair_margin = (
@@ -3598,8 +3610,14 @@ class GenerationEngine:
                 if not issues:
                     accepted_scene = candidate
                     scene_warnings = attempt_warnings
+                    attempts_used = attempt + 1
                     break
-                if attempt == 0:
+                previous_issue_codes = {
+                    str(item.get("code") or "")
+                    for item in issues
+                    if isinstance(item, dict)
+                }
+                if attempt < 2:
                     feedback = "；".join(str(item.get("message") or item.get("code")) for item in issues[:5])
                     continue
                 raise AIGatewayError(
@@ -3639,7 +3657,7 @@ class GenerationEngine:
                     scene_index=index,
                     max_scene_chars=scene_max_chars,
                 ),
-                "attempts": 2 if feedback else 1,
+                "attempts": attempts_used or (2 if feedback else 1),
                 "generation_warnings": scene_warnings,
                 "naturalness_metrics": scene_metrics,
                 "handoff": handoff,

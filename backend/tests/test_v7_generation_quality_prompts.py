@@ -12,6 +12,7 @@ from app.v7.generation.generation_engine import (
     DeAIPipeline,
     GenerationEngine,
     SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN,
+    SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN,
     SCENE_NATURAL_LENGTH_TOLERANCE,
     SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
     SCENE_PROVIDER_TOKEN_CAP,
@@ -1007,6 +1008,10 @@ def test_scene_overlong_retry_keeps_completion_headroom():
 
     assert retry_limit == int(850 * 0.86)
     assert retry_limit > int(850 * 0.64)
+
+
+def test_scene_truncation_retry_has_a_bounded_escalation():
+    assert SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN == 1.70
 
 
 def test_scene_budget_guard_rejects_candidate_that_consumes_future_scene_minimums():
