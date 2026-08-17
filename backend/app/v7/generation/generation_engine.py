@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.5.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.6.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -92,6 +92,8 @@ SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20
 SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 1.10
 SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 1.00
 SCENE_PROVIDER_TOKEN_CAP = 6000
+SCENE_TARGET_MAX_RATIO = 1.30
+SCENE_NATURAL_LENGTH_TOLERANCE = 1.05
 
 
 def chinese_word_count(text: str) -> int:
@@ -3141,8 +3143,20 @@ class GenerationEngine:
         """
         target_words = max(1, int(scene_card.get("target_words") or 300))
         minimum = max(120, int(target_words * 0.45))
-        maximum = max(minimum + 100, int(target_words * 1.25))
+        maximum = max(minimum + 100, int(target_words * SCENE_TARGET_MAX_RATIO))
         return minimum, maximum
+
+    @staticmethod
+    def _scene_allowed_max_chars(scene_card: dict[str, Any], *, scene_index: int) -> int:
+        """Allow a small natural-language variance without accepting padding."""
+        _minimum, planned_maximum = GenerationEngine._scene_length_bounds(
+            scene_card,
+            scene_index=scene_index,
+        )
+        return max(
+            planned_maximum,
+            int(planned_maximum * SCENE_NATURAL_LENGTH_TOLERANCE),
+        )
 
     def _scene_generation_max_tokens(
         self,
@@ -3369,10 +3383,13 @@ class GenerationEngine:
                 opening_instruction += "前半场必须把上一场落点转成新的选择、代价或风险。"
         retry_block = f"\n【上次场景未通过，必须在本次生成中修复】\n{retry_feedback}\n" if retry_feedback else ""
         minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
+        allowed_maximum = self._scene_allowed_max_chars(scene_card, scene_index=scene_index)
         maximum = max(
             minimum,
             int(max_scene_chars) if max_scene_chars is not None else nominal_maximum,
         )
+        if max_scene_chars is not None:
+            allowed_maximum = min(allowed_maximum, int(max_scene_chars))
         opening_constraint = str(scene_card.get("opening_constraint") or "").strip()
         contract_block = f"\n【本场开头硬约束】\n{opening_constraint}" if opening_constraint else ""
         return (
@@ -3396,8 +3413,9 @@ class GenerationEngine:
             "缺少依据时用动作和现场结果呈现，不要用精确数字制造伪连续性。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
-            f"本场约写 {scene_card.get('target_words')} 字，生成期必须控制在 {minimum}-{maximum} 字；"
-            "这个上限是硬约束，不是建议。达到事件结果后立即收束；如果已经完成目标，"
+            f"本场约写 {scene_card.get('target_words')} 字，生成期计划控制在 {minimum}-{maximum} 字，"
+            f"最多允许自然波动到 {allowed_maximum} 字；超过这个上限就是不合格。"
+            "达到事件结果后立即收束；如果已经完成目标，"
             "不得继续补写日常、环境、回忆或重复反应来凑字数。"
             f"{retry_block}"
         )
@@ -3529,7 +3547,11 @@ class GenerationEngine:
                         candidate,
                         accepted_text="\n\n".join(scene_texts),
                     ))
-                min_scene_chars, pacing_max_scene_chars = self._scene_length_bounds(
+                min_scene_chars, _planned_max_scene_chars = self._scene_length_bounds(
+                    card,
+                    scene_index=index,
+                )
+                pacing_max_scene_chars = self._scene_allowed_max_chars(
                     card,
                     scene_index=index,
                 )
