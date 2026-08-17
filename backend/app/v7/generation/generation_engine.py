@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.17.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.18.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -339,11 +339,32 @@ class ContextAssembler:
                     "WHERE project_id=%s ORDER BY updated_at DESC LIMIT 1",
                     (self.project_id,),
                 ).fetchone()
-                if not row:
+                author_card = decode(row.get("author_card"), {}) if row else {}
+                genre_card = decode(row.get("genre_card"), {}) if row else {}
+                author_card = author_card if isinstance(author_card, dict) else {}
+                genre_card = genre_card if isinstance(genre_card, dict) else {}
+                if author_card or genre_card:
+                    return {"author_card": author_card, "genre_card": genre_card}
+
+                # A project can have a useful novel-level style summary before
+                # the richer author-style learning table has been populated.
+                # Do not silently discard it: an empty style card makes the
+                # prose provider fall back to generic model cadence.
+                novel = conn.execute(
+                    "SELECT meta FROM contents WHERE id=%s AND type='novel' "
+                    "AND is_deleted=FALSE",
+                    (str(self.brain.novel_id),),
+                ).fetchone()
+                meta = decode(novel.get("meta"), {}) if novel else {}
+                style_summary = str(meta.get("style") or "").strip() if isinstance(meta, dict) else ""
+                if not style_summary:
                     return {}
                 return {
-                    "author_card": decode(row.get("author_card"), {}) or {},
-                    "genre_card": decode(row.get("genre_card"), {}) or {},
+                    "author_card": {
+                        "style_summary": style_summary,
+                        "source": "novel_meta.style",
+                    },
+                    "genre_card": {},
                 }
             finally:
                 conn.close()
@@ -977,6 +998,61 @@ class SceneDirector:
         }
 
     @staticmethod
+    def _ensure_prose_texture_plan(
+        plan: dict[str, Any],
+        *,
+        chapter_number: int,
+    ) -> dict[str, Any]:
+        """Carry an executable prose texture into the writer prompt.
+
+        A planner may omit the optional texture object even when the chapter
+        contract is valid.  Leaving that omission silent makes the prose call
+        fall back to a generic, highly regular model cadence.  Fill only the
+        writing instructions that are safe to derive from the chapter shape;
+        this is not an author imitation or a post-write rewrite.
+        """
+        source = plan.get("prose_texture_plan")
+        texture = dict(source) if isinstance(source, dict) else {}
+        modes = (
+            {
+                "narrator_bias": "限知只写视角人物当下能确认的细节，原因只露出一半，先让动作留下问题。",
+                "sensory_anchor": "手边物件和触感：让一个具体物件在选择前后发生可见变化。",
+                "subtext": "人物不正面回答关键问题，先改拿物件、避开视线或把话说到一半。",
+                "rhythm": "连续动作使用短句，观察和犹豫允许长句；转折后不追加解释性总结。",
+            },
+            {
+                "narrator_bias": "限知只跟随人物当前的误判与修正，不替读者提前宣布真相。",
+                "sensory_anchor": "一个反复出现但会改变意义的声音或光线，随现场结果变化。",
+                "subtext": "人物用看似日常的话掩住真实目的，让对话和动作互相打架。",
+                "rhythm": "对白短、动作断、信息隔段落露出；允许一处回答落空，不用整齐排比补齐。",
+            },
+            {
+                "narrator_bias": "只挑人物会在此刻注意到的偏差，不做全景式环境清单。",
+                "sensory_anchor": "一个有磨损、重量或温度的物件，作为人物判断的依据而非装饰。",
+                "subtext": "人物口头答应，身体却先做出保留、试探或准备退路的动作。",
+                "rhythm": "信息密集处打断句群，结果出现后留一点余波，不把每段写成完整闭环。",
+            },
+            {
+                "narrator_bias": "限知跟着人物最在意的风险走，暂不解释与当前选择无关的设定。",
+                "sensory_anchor": "现场留下的一处具体痕迹，前后两次出现时含义必须发生变化。",
+                "subtext": "人物通过反问、错开话题或临时改动作表达拒绝，不由旁白代说情绪。",
+                "rhythm": "起笔方式跟随现场而变，不按动作/环境/对白固定轮换；高潮处收短，余波处放慢。",
+            },
+        )[max(0, chapter_number - 1) % 4]
+        defaults = {
+            "information_delivery": "动作、对白、物件和他人反馈交替承载信息，解释延后到人物需要作选择时",
+            "voice_anchor": "人物先做选择再说话；不同人物的避答、用词和反应不能互换",
+            **modes,
+        }
+        normalised = {
+            key: str(texture.get(key) or defaults[key]).strip()[:320]
+            for key in defaults
+        }
+        normalised["source"] = "provider" if source else "deterministic_texture_scheduler"
+        plan["prose_texture_plan"] = normalised
+        return plan
+
+    @staticmethod
     def _repair_generation_phase_labels(plan: Any) -> dict[str, Any] | None:
         """Repair only a provable phase-label omission before prose generation.
 
@@ -1474,6 +1550,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         )
         plan["chapter_number"] = chapter_number
         plan["chapter_type"] = str(plan.get("chapter_type") or "normal").strip().lower()
+        plan = self._ensure_prose_texture_plan(plan, chapter_number=chapter_number)
         if plan["chapter_type"] != str(readability_plan.get("chapter_type") or "normal"):
             readability_plan = build_readability_plan(
                 chapter_number,
@@ -3734,6 +3811,12 @@ class GenerationEngine:
             if scene_index == 1
             else ""
         )
+        prose_texture_plan = scene_plan.get("prose_texture_plan") or {}
+        prose_texture_block = json.dumps(
+            prose_texture_plan,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )[:2600]
         chapter_contract = scene_plan.get("chapter_contract") or {}
         payoff_contract = scene_plan.get("payoff_contract") or {}
         causal_ledger = scene_plan.get("causal_ledger") or []
@@ -3808,6 +3891,7 @@ class GenerationEngine:
             f"第{scene_index}/{scene_count}场。\n"
             f"【全书硬事实与前情】\n{context.get('rendered_context') or '无'}\n\n"
             f"【作者风格约束】\n{style_block or '暂无已确认样本；不要伪造固定口癖。'}\n\n"
+            f"【本章叙述质地与人物声音（生成前执行）】\n{prose_texture_block or '缺失；先按限知、潜台词和信息延后原则组织正文。'}\n\n"
             f"【本场契约】\n{json.dumps(scene_card, ensure_ascii=False)}\n\n"
             f"【上一场末尾原文】\n{previous_scene_tail or '本章开端，承接全书上一章结尾。'}\n\n"
             f"【已确认的写入状态】\n{progress_block}\n\n"
