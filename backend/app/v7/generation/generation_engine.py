@@ -3381,6 +3381,30 @@ class GenerationEngine:
         )
 
     @staticmethod
+    def _should_shrink_retry_envelope(
+        *,
+        previous_issue_codes: set[str],
+        attempt: int,
+        compression_mode: bool,
+    ) -> bool:
+        """Shrink only a complete over-budget candidate, never a truncation.
+
+        A Provider truncation is missing prose, so its partial character count
+        cannot prove that the scene is overlong.  Treating it as an overlong
+        candidate can shrink the next completion envelope until the Provider
+        is guaranteed to truncate again.
+        """
+        return bool(
+            previous_issue_codes.intersection({
+                "scene_chapter_budget_overrun",
+                "scene_reader_budget_overrun",
+            })
+            and "scene_provider_truncated" not in previous_issue_codes
+            and attempt >= 2
+            and not compression_mode
+        )
+
+    @staticmethod
     def _final_scene_budget_variance_allowed(
         *,
         projected_chars: int,
@@ -3975,28 +3999,14 @@ class GenerationEngine:
                             int(previous_candidate_chars * 0.80),
                         ),
                     )
-                if (
-                    previous_issue_codes.intersection({
-                        "scene_provider_truncated",
-                        "scene_chapter_budget_overrun",
-                        "scene_reader_budget_overrun",
-                    })
-                    and attempt >= 2
-                    and not (
-                        "scene_reader_budget_overrun" in previous_issue_codes
-                        and "scene_provider_truncated" in previous_issue_codes
-                    )
-                    and not (
-                        not future_minimum_chars
-                        and "scene_provider_truncated" in previous_issue_codes
-                    )
-                    and not compression_mode
+                if self._should_shrink_retry_envelope(
+                    previous_issue_codes=previous_issue_codes,
+                    attempt=attempt,
+                    compression_mode=compression_mode,
                 ):
-                    # A repeated truncation means the Provider is not
-                    # self-terminating at the nominal beat length. Enter a
-                    # compact generation mode instead of repeatedly raising
-                    # the completion ceiling and paying for more unfinished
-                    # prose.
+                    # A complete over-budget candidate needs a smaller
+                    # character envelope instead of another full-size retry.
+                    # Truncated candidates are explicitly excluded above.
                     attempt_max_scene_chars = max(
                         min_scene_chars,
                         int(attempt_max_scene_chars * 0.82),
@@ -4092,8 +4102,15 @@ class GenerationEngine:
                         "message": (
                             f"Provider 在本场 {scene_token_limit} token 上限截断；"
                             f"本次场景字符预算为 {attempt_max_scene_chars}；"
-                            "必须压缩表达后重新生成，不能增加内容或扩大预算"
+                            "必须在同一字符预算内重写并收束；重试可以增加 token 完成空间，"
+                            "但不能扩写事件或扩大读者预算"
                         ),
+                        "evidence": {
+                            "attempt": attempt + 1,
+                            "token_limit": scene_token_limit,
+                            "max_scene_chars": attempt_max_scene_chars,
+                            "candidate_chars": chinese_word_count(candidate),
+                        },
                     })
                 else:
                     issues.extend(self._scene_naturalness_flags(
@@ -4102,70 +4119,77 @@ class GenerationEngine:
                     ))
                 candidate_word_count = chinese_word_count(candidate)
                 projected_chapter_chars = accepted_chars + candidate_word_count
-                if self._scene_exceeds_chapter_budget(
-                    accepted_chars=accepted_chars,
-                    candidate_chars=candidate_word_count,
-                    future_minimum_chars=future_minimum_chars,
-                    chapter_max_chars=chapter_max_chars,
-                ):
-                    issues.append({
-                        "code": "scene_chapter_budget_overrun",
-                        "severity": "high",
-                        "message": (
-                            f"本场候选会使章节达到 {projected_chapter_chars} 字，"
-                            f"并挤占后续场景最低 {future_minimum_chars} 字；"
-                            f"章节上限为 {chapter_max_chars} 字，必须在生成期收束本场"
-                        ),
-                    })
-                if (
-                    target_word_count >= 1800
-                    and accepted_chars + candidate_word_count + future_target_chars
-                    > planning_max_chars
-                ):
-                    issues.append({
-                        "code": "scene_reader_budget_overrun",
-                        "severity": "high",
-                        "message": (
-                            f"本场候选及后续目标合计 "
-                            f"{accepted_chars + candidate_word_count + future_target_chars} 字，"
-                            f"超过读者章节预算 {planning_max_chars} 字；必须在生成期压缩本场"
-                        ),
-                    })
-                if candidate_word_count < min_scene_chars:
-                    issues.append({
-                        "code": "scene_too_short",
-                        "severity": "high",
-                        "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
-                    })
-                scene_soft_max_chars = (
-                    pacing_max_scene_chars + SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS
-                )
-                if (
-                    candidate_word_count > pacing_max_scene_chars
-                    and candidate_word_count <= scene_soft_max_chars
-                ):
-                    attempt_warnings.append({
-                        "code": "scene_natural_length_variance",
-                        "severity": "low",
-                        "message": (
-                            f"场景有 {candidate_word_count} 字，略高于节拍建议上限 "
-                            f"{pacing_max_scene_chars} 字，但仍在自然波动范围内"
-                        ),
-                        "word_count": candidate_word_count,
-                        "max_scene_chars": pacing_max_scene_chars,
-                    })
-                if candidate_word_count > scene_soft_max_chars:
-                    issues.append({
-                        "code": "scene_overlong",
-                        "severity": "high",
-                        "message": (
-                            f"场景有 {candidate_word_count} 字，超过 beat 目标上限 "
-                            f"{scene_soft_max_chars} 字（建议上限 {pacing_max_scene_chars} 字）；"
-                            "必须在生成期收束本场"
-                        ),
-                        "word_count": candidate_word_count,
-                        "max_scene_chars": scene_soft_max_chars,
-                    })
+                # A truncated completion is an incomplete candidate, not an
+                # overlong scene.  Measuring its partial text against pacing
+                # and chapter budgets can switch the retry state into
+                # compression mode and shrink the next token limit below what
+                # is needed to finish the same scene.  Only complete Provider
+                # output is eligible for length and pacing validation.
+                if not truncated:
+                    if self._scene_exceeds_chapter_budget(
+                        accepted_chars=accepted_chars,
+                        candidate_chars=candidate_word_count,
+                        future_minimum_chars=future_minimum_chars,
+                        chapter_max_chars=chapter_max_chars,
+                    ):
+                        issues.append({
+                            "code": "scene_chapter_budget_overrun",
+                            "severity": "high",
+                            "message": (
+                                f"本场候选会使章节达到 {projected_chapter_chars} 字，"
+                                f"并挤占后续场景最低 {future_minimum_chars} 字；"
+                                f"章节上限为 {chapter_max_chars} 字，必须在生成期收束本场"
+                            ),
+                        })
+                    if (
+                        target_word_count >= 1800
+                        and accepted_chars + candidate_word_count + future_target_chars
+                        > planning_max_chars
+                    ):
+                        issues.append({
+                            "code": "scene_reader_budget_overrun",
+                            "severity": "high",
+                            "message": (
+                                f"本场候选及后续目标合计 "
+                                f"{accepted_chars + candidate_word_count + future_target_chars} 字，"
+                                f"超过读者章节预算 {planning_max_chars} 字；必须在生成期压缩本场"
+                            ),
+                        })
+                    if candidate_word_count < min_scene_chars:
+                        issues.append({
+                            "code": "scene_too_short",
+                            "severity": "high",
+                            "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
+                        })
+                    scene_soft_max_chars = (
+                        pacing_max_scene_chars + SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS
+                    )
+                    if (
+                        candidate_word_count > pacing_max_scene_chars
+                        and candidate_word_count <= scene_soft_max_chars
+                    ):
+                        attempt_warnings.append({
+                            "code": "scene_natural_length_variance",
+                            "severity": "low",
+                            "message": (
+                                f"场景有 {candidate_word_count} 字，略高于节拍建议上限 "
+                                f"{pacing_max_scene_chars} 字，但仍在自然波动范围内"
+                            ),
+                            "word_count": candidate_word_count,
+                            "max_scene_chars": pacing_max_scene_chars,
+                        })
+                    if candidate_word_count > scene_soft_max_chars:
+                        issues.append({
+                            "code": "scene_overlong",
+                            "severity": "high",
+                            "message": (
+                                f"场景有 {candidate_word_count} 字，超过 beat 目标上限 "
+                                f"{scene_soft_max_chars} 字（建议上限 {pacing_max_scene_chars} 字）；"
+                                "必须在生成期收束本场"
+                            ),
+                            "word_count": candidate_word_count,
+                            "max_scene_chars": scene_soft_max_chars,
+                        })
                 if (
                     len(issues) == 1
                     and issues[0].get("code") == "scene_reader_budget_overrun"

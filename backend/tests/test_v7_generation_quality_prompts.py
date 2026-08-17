@@ -1185,6 +1185,24 @@ def test_scene_overlong_retry_keeps_completion_headroom():
     assert retry_limit < 850
 
 
+def test_truncated_scene_never_enters_overlong_envelope_shrink_mode():
+    assert GenerationEngine._should_shrink_retry_envelope(
+        previous_issue_codes={"scene_provider_truncated"},
+        attempt=2,
+        compression_mode=False,
+    ) is False
+    assert GenerationEngine._should_shrink_retry_envelope(
+        previous_issue_codes={"scene_reader_budget_overrun"},
+        attempt=2,
+        compression_mode=False,
+    ) is True
+    assert GenerationEngine._should_shrink_retry_envelope(
+        previous_issue_codes={"scene_reader_budget_overrun", "scene_provider_truncated"},
+        attempt=2,
+        compression_mode=False,
+    ) is False
+
+
 def test_scene_length_soft_overflow_is_bounded_by_reader_pacing_contract():
     assert SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS == 64
 
