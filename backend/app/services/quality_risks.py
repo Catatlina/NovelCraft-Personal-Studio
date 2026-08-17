@@ -81,6 +81,36 @@ _MEDIUM_HINTS = (
     "断裂", "拖沓", "工整", "机械", "套话", "ai腔", "ai味", "风险", "过于",
 )
 
+# Provider reviewers sometimes label a useful editorial observation as
+# ``medium`` even while explicitly saying that the change is reasonable,
+# matches the outline, or has no visible jump/contradiction.  Those findings
+# belong in the warning stream; only material negative evidence may block a
+# chapter.  Keep this normalization narrow so "铺垫不足" and real conflicts
+# remain hard risks.
+_ADVISORY_REVIEW_HINTS = (
+    "合理",
+    "吻合",
+    "未出现跳跃",
+    "未构成直接矛盾",
+    "暂视为正常",
+    "需确认",
+)
+_MATERIAL_REVIEW_HINTS = (
+    "明显矛盾",
+    "直接矛盾",
+    "严重矛盾",
+    "时间线冲突",
+    "事实冲突",
+    "不一致",
+    "不符合",
+    "错误",
+    "未通过",
+    "缺少因果",
+    "铺垫不足",
+    "节奏偏慢",
+    "拖沓",
+)
+
 
 def _text(value: Any) -> str:
     if isinstance(value, dict):
@@ -97,6 +127,20 @@ def _severity(issue: Any, text: str) -> str:
             return explicit
     lowered = text.lower()
     return "medium" if any(hint.lower() in lowered for hint in _MEDIUM_HINTS) else "low"
+
+
+def _is_advisory_review_observation(issue: Any, text: str) -> bool:
+    """Detect a medium note that explicitly says the candidate is reasonable."""
+    if not isinstance(issue, dict):
+        return False
+    explicit = str(issue.get("severity") or "").lower().strip()
+    if explicit != "medium":
+        return False
+    lowered = text.lower()
+    return (
+        any(hint.lower() in lowered for hint in _ADVISORY_REVIEW_HINTS)
+        and not any(hint.lower() in lowered for hint in _MATERIAL_REVIEW_HINTS)
+    )
 
 
 def classify_quality_issue(issue: Any) -> dict[str, Any]:
@@ -116,6 +160,8 @@ def classify_quality_issue(issue: Any) -> dict[str, Any]:
                 break
     category = category or "other"
     severity = _severity(issue, text)
+    if _is_advisory_review_observation(issue, text):
+        severity = "low"
     return {
         "category": category,
         "label": RISK_LABELS.get(category, "其他问题"),

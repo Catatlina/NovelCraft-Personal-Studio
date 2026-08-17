@@ -54,6 +54,24 @@ def test_low_generic_note_does_not_create_false_blocker():
     assert gate["quality_repair_contract"]["blocking_categories"] == []
 
 
+def test_medium_reassuring_provider_observation_is_a_warning_not_a_blocker():
+    gate = evaluate_editor_review_gate(
+        _strong_review(
+            issues=[{
+                "dimension": "pacing",
+                "severity": "medium",
+                "description": "新增细节合理，与细纲吻合，未出现跳跃，但需确认后续回收。",
+            }]
+        ),
+        chars=2600,
+        minimum_chars=2000,
+    )
+
+    assert gate["passed"] is True
+    assert gate["quality_repair_contract"]["blocking_categories"] == []
+    assert gate["quality_repair_contract"]["risks"][0]["severity"] == "low"
+
+
 def test_continuity_without_evidence_is_fail_closed():
     contract = build_quality_repair_contract(
         _strong_review(),
