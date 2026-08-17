@@ -827,6 +827,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
 
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
     import inspect
+    from app.v7.director.story_director import StoryDirector
 
     parameter = inspect.signature(StoryDirector.generate_chapter).parameters["allow_rework"]
     assert parameter.default is False
