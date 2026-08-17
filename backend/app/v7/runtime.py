@@ -388,6 +388,7 @@ async def generate_v7_chapter(
             resolved_number,
             prompt=effective_prompt,
             outline=effective_outline,
+            allow_rework=False,
         )
         result["canonical_engine"] = "v7"
         result["chapter_number"] = resolved_number

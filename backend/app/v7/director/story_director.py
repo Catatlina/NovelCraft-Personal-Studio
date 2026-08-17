@@ -269,9 +269,15 @@ class StoryDirector:
         prompt: str | None = None,
         outline: str | None = None,
         target_word_count: int = 3000,
-        allow_rework: bool = True,
+        allow_rework: bool = False,
     ) -> dict[str, Any]:
-        """Run the full 7-step agent loop for one chapter."""
+        """Run the full 7-step agent loop for one chapter.
+
+        Generation-time scene contracts are the primary quality control.  A
+        post-write audit rewrite is an explicit, bounded fallback and is off
+        by default so a failed audit cannot silently turn into repeated prose
+        rewrites or hide a generation defect.
+        """
         run_id = await self.tracer.start_run(
             "chapter_generation",
             trigger="manual",

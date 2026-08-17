@@ -788,3 +788,45 @@ def test_generation_uses_serial_scene_handoffs_and_skips_full_chapter_rewrite():
     assert result["scene_serial"]["generation_mode"] == "scene_serial"
     assert result["generation_quality"]["scene_serial"]["handoff_count"] == 4
     assert engine.deai_pipeline.calls == []
+
+
+def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract():
+    cards = GenerationEngine._normalise_scene_cards(
+        {
+            "beats": [
+                {"name": "扫地日常", "target_words": 800, "content": "先写日常"},
+                {"name": "异常", "target_words": 500, "content": "门后出现异常"},
+            ]
+        },
+        target_word_count=3000,
+    )
+
+    assert cards[0]["target_words"] == 480
+    assert "前两句" in cards[0]["opening_constraint"]
+    assert "前220字" in cards[0]["opening_constraint"]
+    assert "前两句" in cards[1]["opening_constraint"]
+    assert sum(card["target_share"] for card in cards) == 1.0
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    prompt = engine._build_scene_generation_prompt(
+        chapter_number=1,
+        context={"context_layers": {}, "rendered_context": ""},
+        scene_plan={"chapter_title": "藏经阁的门"},
+        scene_card=cards[0],
+        scene_index=1,
+        scene_count=2,
+        previous_scene_tail="",
+        current_state={},
+        previous_handoffs=[],
+    )
+
+    assert "前220字内必须出现" in prompt
+    assert "不能连续用日常拖慢开局" in prompt
+    assert "生成期必须控制在 216-537 字" in prompt
+
+
+def test_story_director_defaults_to_generation_first_without_post_write_rework():
+    import inspect
+
+    parameter = inspect.signature(StoryDirector.generate_chapter).parameters["allow_rework"]
+    assert parameter.default is False

@@ -2945,6 +2945,7 @@ class GenerationEngine:
         )
         if planned_words <= 0:
             planned_words = max(1, int(target_word_count or 1))
+        opening_excess = 0
         for index, raw in enumerate(beats, start=1):
             if not isinstance(raw, dict):
                 raise AIGatewayError(f"scene serial contract invalid: scene_{index}_not_object")
@@ -2954,6 +2955,26 @@ class GenerationEngine:
             target_words = int(raw.get("target_words") or 0)
             if target_words <= 0:
                 target_words = max(200, int(target_word_count * 0.8 / len(beats)))
+            opening_constraint = ""
+            if index == 1:
+                # The opening is where the previous real-provider run lost
+                # pacing: a 600-word routine beat delayed the first anomaly.
+                # Keep this as a generation contract instead of repairing a
+                # finished chapter with a detector-oriented rewrite.
+                opening_cap = max(320, min(480, int(target_word_count * 0.16)))
+                opening_excess = max(0, target_words - opening_cap)
+                target_words = min(target_words, opening_cap)
+                opening_constraint = (
+                    "前两句必须出现正在发生的动作、具体异常或明确目标；"
+                    "前220字内必须发生会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
+                    "日常交代最多两个短段，不能用扫地、环境、回忆或设定连续铺满开头；"
+                    "第一场结尾必须留下可见的动作、发现、选择或压力变化。"
+                )
+            elif index == 2:
+                opening_constraint = (
+                    "前两句继续上一场的动作或后果；前半场必须把上一场的异常转成新的选择、代价或风险，"
+                    "不得重新解释背景。"
+                )
             cards.append({
                 "scene_index": index,
                 "name": str(raw.get("name") or f"场景{index}")[:80],
@@ -2981,12 +3002,44 @@ class GenerationEngine:
                     scene_card.get("knowledge_boundary") or raw.get("knowledge_boundary") or ""
                 )[:240],
                 "handoff": str(scene_card.get("handoff") or raw.get("handoff") or "")[:240],
+                "opening_constraint": opening_constraint,
             })
+        if opening_excess and len(cards) > 1:
+            # Preserve the planner's total scale while moving time away from
+            # routine setup and into the consequential scenes that follow.
+            later_cards = cards[1:]
+            later_words = sum(card["target_words"] for card in later_cards) or len(later_cards)
+            distributed = 0
+            for offset, card in enumerate(later_cards):
+                if offset == len(later_cards) - 1:
+                    share = opening_excess - distributed
+                else:
+                    share = round(opening_excess * card["target_words"] / later_words)
+                    distributed += share
+                card["target_words"] += share
         # Keep the plan's declared scale visible to the writer, but do not
-        # silently inflate a scene merely to satisfy a chapter target.
+        # silently change the chapter scale merely to satisfy an opening cap.
+        planned_words = sum(card["target_words"] for card in cards) or 1
         for card in cards:
             card["target_share"] = round(card["target_words"] / planned_words, 4)
         return cards
+
+    @staticmethod
+    def _scene_length_bounds(
+        scene_card: dict[str, Any],
+        *,
+        scene_index: int,
+    ) -> tuple[int, int]:
+        """Return the write-time length contract for one scene.
+
+        Length is a pacing control, not a post-write truncation rule.  The
+        first scene receives a tighter upper bound so routine setup cannot
+        crowd out the first concrete event.
+        """
+        target_words = max(1, int(scene_card.get("target_words") or 300))
+        minimum = max(120, int(target_words * 0.45))
+        maximum = max(minimum + 100, int(target_words * (1.12 if scene_index == 1 else 1.2)))
+        return minimum, maximum
 
     @staticmethod
     def _scene_naturalness_flags(
@@ -3135,16 +3188,32 @@ class GenerationEngine:
         progress_block = json.dumps(current_state, ensure_ascii=False)[:3600]
         opening_instruction = ""
         if scene_index == 1:
-            opening_instruction = (
-                "这是本章第一场，开头必须从上一章结尾的动作、地点、物件或未决问题接住；"
-                "不要重新介绍世界观，不要把上一章复述一遍。"
+            if previous_scene_tail or (context.get("context_layers") or {}).get("previous_tail"):
+                opening_instruction = (
+                    "这是本章第一场，开头必须从上一章结尾的动作、地点、物件或未决问题接住；"
+                    "不要重新介绍世界观，不要把上一章复述一遍。"
+                )
+            else:
+                opening_instruction = (
+                    "这是故事开端，没有可供复述的上一章；直接从当前人物正在做的事和眼前问题起笔，"
+                    "不要先写世界观沿革、职业史或泛泛环境介绍。"
+                )
+            opening_instruction += (
+                "这是生成期节奏硬约束：前两句必须有动作、具体异常或明确目标；"
+                "前220字内必须出现会改变判断、位置、关系、资源或风险的具体事件；"
+                "日常铺垫最多两个短段，背景信息必须藏进动作、对白或物件，不能连续用日常拖慢开局。"
             )
         else:
             opening_instruction = (
                 "这是本章后续场景，第一段必须接住上一场最后的动作、视线、声音、地点或选择；"
                 "不允许用‘与此同时’、‘另一边’或空泛时间跳跃把状态抹掉。"
             )
+            if scene_index == 2:
+                opening_instruction += "前半场必须把上一场落点转成新的选择、代价或风险。"
         retry_block = f"\n【上次场景未通过，必须在本次生成中修复】\n{retry_feedback}\n" if retry_feedback else ""
+        minimum, maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
+        opening_constraint = str(scene_card.get("opening_constraint") or "").strip()
+        contract_block = f"\n【本场开头硬约束】\n{opening_constraint}" if opening_constraint else ""
         return (
             "你正在连续写一部长篇中文网络小说，当前任务只写一个场景，不写整章摘要。"
             "直接输出自然正文，不要标题、JSON、解释、场景编号、写作说明或 Markdown。\n"
@@ -3157,15 +3226,15 @@ class GenerationEngine:
             f"【已确认的写入状态】\n{progress_block}\n\n"
             f"【前面场景的状态交接】\n{handoff_block or '无'}\n\n"
             f"{opening_instruction}\n"
+            f"{contract_block}\n"
             "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
-            f"本场约写 {scene_card.get('target_words')} 字，合理范围为 "
-            f"{max(180, int(scene_card.get('target_words', 300) * 0.45))}-"
-            f"{max(260, int(scene_card.get('target_words', 300) * 1.35))} 字。"
+            f"本场约写 {scene_card.get('target_words')} 字，生成期必须控制在 {minimum}-{maximum} 字；"
+            "达到事件结果后立即收束，不要为了达到字数重复冲突或补写日常。"
             f"{retry_block}"
         )
 
@@ -3245,12 +3314,25 @@ class GenerationEngine:
                     candidate,
                     accepted_text="\n\n".join(scene_texts),
                 )
-                min_scene_chars = max(120, int(card["target_words"] * 0.45))
-                if chinese_word_count(candidate) < min_scene_chars:
+                min_scene_chars, max_scene_chars = self._scene_length_bounds(
+                    card,
+                    scene_index=index,
+                )
+                candidate_word_count = chinese_word_count(candidate)
+                if candidate_word_count < min_scene_chars:
                     issues.append({
                         "code": "scene_too_short",
                         "severity": "high",
-                        "message": f"场景只有 {chinese_word_count(candidate)} 字，至少需要 {min_scene_chars} 字",
+                        "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
+                    })
+                if candidate_word_count > max_scene_chars:
+                    issues.append({
+                        "code": "scene_overlong",
+                        "severity": "high",
+                        "message": (
+                            f"场景有 {candidate_word_count} 字，生成期上限为 {max_scene_chars} 字；"
+                            "必须提前兑现本场结果并收束"
+                        ),
                     })
                 if not issues:
                     accepted_scene = candidate
