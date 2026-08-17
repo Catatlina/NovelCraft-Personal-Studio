@@ -724,7 +724,11 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
             }
 
     class Deai:
+        def __init__(self):
+            self.calls = []
+
         async def process(self, text, **_kwargs):
+            self.calls.append(_kwargs)
             return {
                 "processed_text": text,
                 "layers_applied": [],
@@ -759,3 +763,4 @@ def test_generation_discards_duplicate_continuation_and_marks_draft_unusable():
         "continuation_duplicate",
         "chapter_too_short",
     }
+    assert engine.deai_pipeline.calls[0]["force_semantic_rewrite"] is True

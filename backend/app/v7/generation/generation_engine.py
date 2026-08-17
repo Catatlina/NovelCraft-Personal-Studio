@@ -1786,6 +1786,9 @@ class DeAIPipeline:
             "用动作和细节承载情绪，不把情绪标签直接说满。不要把全文修成同一种‘干净、完整、均匀’的句子，"
             "允许符合人物口吻的短句、碎片句、停顿和省略主语；让段落有长短落差，段首轮换动作、物件、声音、对白、"
             "环境后果和人物反应，但不要按固定顺序机械轮换。原文自然的地方少改，"
+            "这不是同义词替换：需要在不改变事实的前提下重组部分句群和段落内部节奏，"
+            "让不同段落的叙述密度、停顿、人物反应和信息露出产生自然波动；"
+            "不要为了制造波动故意加入错别字、冷僻词、病句或刻意不自然的表达，也不要伪造所谓‘人工痕迹’。"
             "不得摘要、缩写、新增剧情或机械删成电报句。标点不设禁用清单；"
             "保留有语义必要的破折号、省略号和分号，只处理整章高密度、连续重复或模板化使用。\n\n"
             f"{third_person_generation_contract()}\n"
@@ -1829,7 +1832,7 @@ class DeAIPipeline:
                 max_tokens=max(2400, min(5200, int(chinese_word_count(text) * 1.18))),
                 temperature=0.65,
                 prompt_name="bootstrap.final_humanize",
-                prompt_version="1.3.0",
+                prompt_version="1.4.0",
             )
         except AIGatewayError as exc:
             # A malformed/truncated semantic rewrite is a quality failure, not
@@ -3376,6 +3379,12 @@ class GenerationEngine:
                     payoff_contract=payoff_contract,
                     safe_deduplicate=True,
                     active_rules=context_layers.get("active_rules") or [],
+                    # Canonical V7 generation must always pass through the
+                    # real Provider humanizer.  The deterministic metrics are
+                    # explainable quality signals, not a proxy for Zhuque or
+                    # any other external detector; a green local report must
+                    # not silently skip this provider-backed editing step.
+                    force_semantic_rewrite=True,
                     readability_plan=scene_plan.get("readability_plan") or readability_plan,
                 )
             if opening_repair_result:
@@ -3631,6 +3640,9 @@ class GenerationEngine:
             "deai": {
                 "layers_applied": deai_result["layers_applied"],
                 "total_changes": deai_result["total_changes"],
+                "provider_humanization_required": True,
+                "provider_humanization_performed": bool(deai_result.get("semantic_humanize")),
+                "external_detector_verification": "not_verified",
                 "semantic_humanize": deai_result.get("semantic_humanize", False),
                 "humanize_changes": deai_result.get("humanize_changes", []),
                 "ai_patterns_removed": deai_result.get("ai_patterns_removed", []),
