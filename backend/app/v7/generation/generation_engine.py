@@ -3635,13 +3635,17 @@ class GenerationEngine:
         causal_ledger = scene_plan.get("causal_ledger") or []
         causal_contract_block = ""
         if chapter_contract or payoff_contract or causal_ledger:
+            causal_contract_json = json.dumps(
+                {
+                    "chapter_contract": chapter_contract,
+                    "payoff_contract": payoff_contract,
+                    "causal_ledger": causal_ledger[:6],
+                },
+                ensure_ascii=False,
+            )[:5200]
             causal_contract_block = (
                 "【本章因果闭环与代价】\n"
-                f"{json.dumps({
-                    'chapter_contract': chapter_contract,
-                    'payoff_contract': payoff_contract,
-                    'causal_ledger': causal_ledger[:6],
-                }, ensure_ascii=False)[:5200]}\n"
+                f"{causal_contract_json}\n"
                 "本场若触发契约中的选择、突破、指点、开启、使用能力或其他关键动作，"
                 "必须在本场或紧接下一场写出完整链条：触发动作→当场可见/可感知反馈→人物确认这就是代价或规则后果→新的压力。"
                 "代价不能只在旁白中与结果并列宣布；至少落到一个具体物件、身体变化、规则变化、他人反应或资源损失，"
