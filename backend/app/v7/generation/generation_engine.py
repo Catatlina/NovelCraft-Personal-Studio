@@ -3104,7 +3104,7 @@ class GenerationEngine:
         """
         target_words = max(1, int(scene_card.get("target_words") or 300))
         minimum = max(120, int(target_words * 0.45))
-        maximum = max(minimum + 100, int(target_words * (1.12 if scene_index == 1 else 1.2)))
+        maximum = max(minimum + 100, int(target_words * (1.35 if scene_index == 1 else 1.2)))
         return minimum, maximum
 
     @staticmethod
