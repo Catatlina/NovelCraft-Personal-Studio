@@ -3522,6 +3522,14 @@ class GenerationEngine:
             scene_warnings: list[dict[str, Any]] = []
             previous_issue_codes: set[str] = set()
             attempts_used = 0
+            min_scene_chars, _planned_max_scene_chars = self._scene_length_bounds(
+                card,
+                scene_index=index,
+            )
+            pacing_max_scene_chars = self._scene_allowed_max_chars(
+                card,
+                scene_index=index,
+            )
             for attempt in range(3):
                 attempt_warnings: list[dict[str, Any]] = []
                 provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
@@ -3547,10 +3555,20 @@ class GenerationEngine:
                         if provider == "openai"
                         else SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN
                     )
+                attempt_max_scene_chars = scene_max_chars
+                if "scene_overlong" in previous_issue_codes:
+                    # The first retry used a token margin but still exposed
+                    # the wider chapter remainder to the Provider. Tighten
+                    # both contracts on the next call so the model receives
+                    # an actual shorter scene budget instead of a warning.
+                    attempt_max_scene_chars = min(
+                        scene_max_chars,
+                        pacing_max_scene_chars,
+                    )
                 scene_token_limit = self._scene_generation_max_tokens(
                     card,
                     scene_index=index,
-                    max_scene_chars=scene_max_chars,
+                    max_scene_chars=attempt_max_scene_chars,
                     token_margin=repair_margin,
                 )
                 result = await self.ai_gateway.generate(
@@ -3567,7 +3585,7 @@ class GenerationEngine:
                         current_state=current_state,
                         previous_handoffs=handoffs,
                         retry_feedback=feedback,
-                        max_scene_chars=scene_max_chars,
+                        max_scene_chars=attempt_max_scene_chars,
                     ),
                     system_prompt=(
                         "你是稳定写作同一本长篇小说的中文网文作者。只输出本场正文，"
@@ -3602,14 +3620,6 @@ class GenerationEngine:
                         candidate,
                         accepted_text="\n\n".join(scene_texts),
                     ))
-                min_scene_chars, _planned_max_scene_chars = self._scene_length_bounds(
-                    card,
-                    scene_index=index,
-                )
-                pacing_max_scene_chars = self._scene_allowed_max_chars(
-                    card,
-                    scene_index=index,
-                )
                 candidate_word_count = chinese_word_count(candidate)
                 projected_chapter_chars = accepted_chars + candidate_word_count
                 if self._scene_exceeds_chapter_budget(
