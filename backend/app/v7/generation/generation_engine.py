@@ -3358,7 +3358,9 @@ class GenerationEngine:
             feedback = ""
             accepted_scene = ""
             scene_metrics: dict[str, Any] = {}
+            scene_warnings: list[dict[str, Any]] = []
             for attempt in range(2):
+                attempt_warnings: list[dict[str, Any]] = []
                 result = await self.ai_gateway.generate(
                     self._build_scene_generation_prompt(
                         chapter_number=chapter_number,
@@ -3407,16 +3409,34 @@ class GenerationEngine:
                         "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
                     })
                 if candidate_word_count > max_scene_chars:
-                    issues.append({
+                    warning = {
                         "code": "scene_overlong",
-                        "severity": "high",
+                        "severity": "medium",
                         "message": (
-                            f"场景有 {candidate_word_count} 字，生成期上限为 {max_scene_chars} 字；"
-                            "必须提前兑现本场结果并收束"
+                            f"场景有 {candidate_word_count} 字，超过 beat 目标上限 {max_scene_chars} 字；"
+                            "保留正文，记录为生成期节奏观察项"
                         ),
-                    })
+                        "word_count": candidate_word_count,
+                        "max_scene_chars": max_scene_chars,
+                    }
+                    attempt_warnings.append(warning)
+                    # A beat target is a pacing reference, not a sentence
+                    # truncation command.  Only an extreme runaway scene is
+                    # a generation failure; normal Chinese detail remains
+                    # available to the chapter-level reviewer.
+                    if candidate_word_count > max_scene_chars * 2:
+                        issues.append({
+                            **warning,
+                            "code": "scene_extreme_overlong",
+                            "severity": "high",
+                            "message": (
+                                f"场景有 {candidate_word_count} 字，超过合理上限 {max_scene_chars * 2} 字；"
+                                "必须在生成期收束"
+                            ),
+                        })
                 if not issues:
                     accepted_scene = candidate
+                    scene_warnings = attempt_warnings
                     break
                 if attempt == 0:
                     feedback = "；".join(str(item.get("message") or item.get("code")) for item in issues[:5])
@@ -3446,6 +3466,7 @@ class GenerationEngine:
                 "max_scene_chars": self._scene_length_bounds(card, scene_index=index)[1],
                 "max_provider_tokens": self._scene_generation_max_tokens(card, scene_index=index),
                 "attempts": 2 if feedback else 1,
+                "generation_warnings": scene_warnings,
                 "naturalness_metrics": scene_metrics,
                 "handoff": handoff,
             })
@@ -4037,6 +4058,11 @@ class GenerationEngine:
                 "scene_count": len(scene_outputs),
                 "handoff_count": len(scene_handoffs),
                 "state": scene_state,
+                "warnings": [
+                    warning
+                    for scene in scene_outputs
+                    for warning in (scene.get("generation_warnings") or [])
+                ],
                 "post_write_audit": "fallback_only",
             },
             "quality_profile": quality_profile_metadata(self.quality_profile),
