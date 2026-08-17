@@ -3709,6 +3709,7 @@ class GenerationEngine:
         scene_plan: dict[str, Any],
         target_word_count: int,
         chapter_max_chars: int,
+        chapter_reader_max_chars: int | None = None,
     ) -> dict[str, Any]:
         """Generate a chapter as a serial chain of real Provider scene calls."""
         cards = self._normalise_scene_cards(scene_plan, target_word_count=target_word_count)
@@ -3730,7 +3731,14 @@ class GenerationEngine:
         # Reserve the planned size of all future scenes.  The old scheduler
         # reserved only their minimum length, allowing the first scenes to
         # consume the reader target and leaving the climax with no room.
-        planning_max_chars = chapter_max_chars
+        # Reserve scene targets against the reader budget itself. The larger
+        # chapter envelope is only for a complete final-scene variance; it
+        # must not let an early scene consume space readers expect to be used
+        # by the remaining beats.
+        planning_max_chars = min(
+            chapter_max_chars,
+            int(chapter_reader_max_chars or chapter_max_chars),
+        )
 
         def add_call_usage(call_usage: dict[str, Any]) -> None:
             usage["tokens_input"] += int(call_usage.get("tokens_input") or 0)
@@ -4463,6 +4471,7 @@ class GenerationEngine:
                 scene_plan=scene_plan,
                 target_word_count=target_word_count,
                 chapter_max_chars=generation_hard_max_chars,
+                chapter_reader_max_chars=maximum_chapter_chars,
             )
             add_usage(step, serial_result.get("usage") or {})
             text = str(serial_result.get("text") or "").strip()
