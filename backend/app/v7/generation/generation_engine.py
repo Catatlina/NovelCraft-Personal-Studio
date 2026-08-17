@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.12.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.13.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -3696,6 +3696,8 @@ class GenerationEngine:
         )
         if max_scene_chars is not None:
             allowed_maximum = min(allowed_maximum, int(max_scene_chars))
+        requested_target = max(1, int(scene_card.get("target_words") or maximum))
+        effective_target = max(minimum, min(requested_target, maximum))
         opening_constraint = str(scene_card.get("opening_constraint") or "").strip()
         contract_block = f"\n【本场开头硬约束】\n{opening_constraint}" if opening_constraint else ""
         return (
@@ -3728,7 +3730,7 @@ class GenerationEngine:
             "缺少依据时用动作和现场结果呈现，不要用精确数字制造伪连续性。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
-            f"本场约写 {scene_card.get('target_words')} 字，生成期计划控制在 {minimum}-{maximum} 字，"
+            f"本场约写 {effective_target} 字，生成期计划控制在 {minimum}-{maximum} 字，"
             f"最多允许自然波动到 {allowed_maximum} 字；超过这个上限就是不合格。"
             "达到事件结果后立即收束；如果已经完成目标，"
             "不得继续补写日常、环境、回忆或重复反应来凑字数。"
@@ -4242,11 +4244,23 @@ class GenerationEngine:
                             "不能让第一人称裸露在叙述句中。保留事实，不删掉信息。"
                         )
                     if candidate:
-                        feedback += (
-                            "\n上一版候选正文（可能未完或超长，只用于本次生成期重写；"
-                            "不要从末尾续写，不要原样复制；请完整重写并收束到本场预算内）：\n"
-                            f"{candidate[:6000]}"
-                        )
+                        structural_compression = previous_issue_codes.intersection({
+                            "scene_overlong",
+                            "scene_chapter_budget_overrun",
+                            "scene_reader_budget_overrun",
+                        })
+                        if structural_compression:
+                            feedback += (
+                                "\n上一版候选已超出本场或本章预算，本次禁止复述、照抄或从其末尾续写；"
+                                "请依据本场契约、已确认状态和上一场交接点从头重写，先完成目标→阻碍→选择→结果，"
+                                "达到结果立即收束，严格服从本次较短的有效字数预算。"
+                            )
+                        else:
+                            feedback += (
+                                "\n上一版候选正文（可能未完或含局部问题，只用于本次生成期重写；"
+                                "不要从末尾续写，不要原样复制；请完整重写并收束到本场预算内）：\n"
+                                f"{candidate[:6000]}"
+                            )
                     continue
                 raise AIGatewayError(
                     f"scene {index} failed generation contract after bounded retry: "

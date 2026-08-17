@@ -983,6 +983,26 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "生成期计划控制在 216-624 字，最多允许自然波动到 769 字" in prompt
 
 
+def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_plan():
+    engine = GenerationEngine.__new__(GenerationEngine)
+
+    prompt = engine._build_scene_generation_prompt(
+        chapter_number=1,
+        context={"context_layers": {}, "rendered_context": ""},
+        scene_plan={"chapter_title": "预算收束"},
+        scene_card={"target_words": 1200, "content": "完成一次现场推进"},
+        scene_index=2,
+        scene_count=3,
+        previous_scene_tail="门缝里的光忽然熄灭。",
+        current_state={},
+        previous_handoffs=[],
+        max_scene_chars=960,
+    )
+
+    assert "本场约写 960 字" in prompt
+    assert "本场约写 1200 字" not in prompt
+
+
 def test_scene_serial_retries_repeated_name_opening_across_accepted_scenes():
     accepted = "\n\n".join(
         ["苏长庚抬手压住门缝，听见里面的脚步停了。" for _ in range(8)]
