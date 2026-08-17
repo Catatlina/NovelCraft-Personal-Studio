@@ -11,6 +11,7 @@ from app.v7.generation.generation_engine import (
     AIGatewayError,
     DeAIPipeline,
     GenerationEngine,
+    SCENE_PROVIDER_TOKEN_CAP,
     SceneDirector,
     ensure_unique_chapter_title,
     validate_tomato_chapter_title,
@@ -923,6 +924,24 @@ def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():
         max_scene_chars=850,
         token_margin=1.35,
     ) == int(850 * 1.35)
+
+
+def test_scene_truncation_retry_can_grow_past_the_old_fixed_ceiling():
+    from types import SimpleNamespace
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.ai_gateway = SimpleNamespace(provider="deepseek")
+    card = {"target_words": 1600}
+
+    retry_limit = engine._scene_generation_max_tokens(
+        card,
+        scene_index=3,
+        max_scene_chars=2200,
+        token_margin=1.35,
+    )
+
+    assert retry_limit == SCENE_PROVIDER_TOKEN_CAP
+    assert retry_limit > 1600
 
 
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
