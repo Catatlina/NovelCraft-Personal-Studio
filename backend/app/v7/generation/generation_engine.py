@@ -3099,13 +3099,31 @@ class GenerationEngine:
         """Return the write-time length contract for one scene.
 
         Length is a pacing control, not a post-write truncation rule.  The
-        first scene receives a tighter upper bound so routine setup cannot
-        crowd out the first concrete event.
+        opening target is capped separately; the generous bound prevents a
+        normal Chinese scene from being rejected merely for natural detail.
         """
         target_words = max(1, int(scene_card.get("target_words") or 300))
         minimum = max(120, int(target_words * 0.45))
-        maximum = max(minimum + 100, int(target_words * (1.8 if scene_index == 1 else 1.2)))
+        maximum = max(minimum + 100, int(target_words * 1.35))
         return minimum, maximum
+
+    @classmethod
+    def _scene_generation_max_tokens(
+        cls,
+        scene_card: dict[str, Any],
+        *,
+        scene_index: int,
+    ) -> int:
+        """Keep the Provider token ceiling in the same scale as scene chars.
+
+        ``chinese_word_count`` is a character budget, while the old scene
+        call had a fixed 700-token floor.  That floor was larger than the
+        short scene contracts, so DeepSeek naturally returned a 600-700
+        character scene and the application rejected it as overlong.  The
+        token ceiling now derives from the accepted character envelope.
+        """
+        _minimum, maximum = cls._scene_length_bounds(scene_card, scene_index=scene_index)
+        return max(240, min(1600, int(maximum * 0.95)))
 
     @staticmethod
     def _scene_naturalness_flags(
@@ -3362,12 +3380,9 @@ class GenerationEngine:
                         + third_person_generation_contract()
                         + content_generation_contract(self.quality_profile)
                     ),
-                    max_tokens=max(
-                        700,
-                        min(
-                            1900,
-                            int(max(260, card["target_words"] * 1.35) * 0.62),
-                        ),
+                    max_tokens=self._scene_generation_max_tokens(
+                        card,
+                        scene_index=index,
                     ),
                     temperature=0.82,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
@@ -3427,6 +3442,9 @@ class GenerationEngine:
                 "name": card["name"],
                 "target_words": card["target_words"],
                 "word_count": chinese_word_count(accepted_scene),
+                "min_scene_chars": self._scene_length_bounds(card, scene_index=index)[0],
+                "max_scene_chars": self._scene_length_bounds(card, scene_index=index)[1],
+                "max_provider_tokens": self._scene_generation_max_tokens(card, scene_index=index),
                 "attempts": 2 if feedback else 1,
                 "naturalness_metrics": scene_metrics,
                 "handoff": handoff,

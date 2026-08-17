@@ -814,6 +814,7 @@ def test_generation_uses_serial_scene_handoffs_and_skips_full_chapter_rewrite():
     assert result["scene_serial"]["generation_mode"] == "scene_serial"
     assert result["generation_quality"]["scene_serial"]["handoff_count"] == 4
     assert engine.deai_pipeline.calls == []
+    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] == 230
 
 
 def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract():
@@ -848,7 +849,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
 
     assert "前220字内必须出现" in prompt
     assert "不能连续用日常拖慢开局" in prompt
-    assert "生成期必须控制在 216-864 字" in prompt
+    assert "生成期必须控制在 216-648 字" in prompt
 
 
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
