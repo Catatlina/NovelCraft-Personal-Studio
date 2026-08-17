@@ -86,8 +86,11 @@ SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 1.25
 SCENE_OPENAI_TOKEN_CHAR_MARGIN = 1.10
 SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 1.35
 SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20
-SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.64
-SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.78
+# The retry must have enough completion headroom to finish a Chinese scene.
+# The prompt and hard character envelope perform the compression; an overly
+# small token cap turns a valid pacing repair into provider truncation.
+SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 1.10
+SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 1.00
 SCENE_PROVIDER_TOKEN_CAP = 6000
 
 

@@ -11,6 +11,7 @@ from app.v7.generation.generation_engine import (
     AIGatewayError,
     DeAIPipeline,
     GenerationEngine,
+    SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN,
     SCENE_PROVIDER_TOKEN_CAP,
     SceneDirector,
     ensure_unique_chapter_title,
@@ -979,6 +980,23 @@ def test_scene_truncation_retry_can_grow_past_the_old_fixed_ceiling():
         token_margin=1.35,
     )
     assert large_scene_retry_limit == SCENE_PROVIDER_TOKEN_CAP
+
+
+def test_scene_overlong_retry_keeps_completion_headroom():
+    from types import SimpleNamespace
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.ai_gateway = SimpleNamespace(provider="deepseek")
+
+    retry_limit = engine._scene_generation_max_tokens(
+        {"target_words": 600},
+        scene_index=2,
+        max_scene_chars=850,
+        token_margin=SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN,
+    )
+
+    assert retry_limit == int(850 * 1.10)
+    assert retry_limit > int(850 * 0.64)
 
 
 def test_scene_budget_guard_rejects_candidate_that_consumes_future_scene_minimums():
