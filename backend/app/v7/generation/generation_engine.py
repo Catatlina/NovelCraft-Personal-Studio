@@ -105,7 +105,7 @@ SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
 # chapter-level target reservation remains the hard ceiling.
 SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
 READER_SCENE_TARGET_MAX_RATIO = 1.10
-READER_SCENE_VARIANCE_CHARS = 64
+READER_SCENE_VARIANCE_CHARS = 96
 
 
 def chinese_word_count(text: str) -> int:
