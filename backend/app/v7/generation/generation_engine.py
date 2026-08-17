@@ -3714,6 +3714,10 @@ class GenerationEngine:
                         "scene_reader_budget_overrun",
                     })
                     and attempt >= 2
+                    and not (
+                        "scene_reader_budget_overrun" in previous_issue_codes
+                        and "scene_provider_truncated" in previous_issue_codes
+                    )
                 ):
                     # A repeated truncation means the Provider is not
                     # self-terminating at the nominal beat length. Enter a
