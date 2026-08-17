@@ -3607,7 +3607,10 @@ class GenerationEngine:
         # reserved only their minimum length, allowing the first scenes to
         # consume the reader target and leaving the climax with no room.
         planning_max_chars = (
-            min(chapter_max_chars, int(target_word_count * 1.10))
+            min(
+                chapter_max_chars,
+                int(target_word_count * 1.10) + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
+            )
             if target_word_count >= 1800
             else chapter_max_chars
         )
@@ -3984,6 +3987,7 @@ class GenerationEngine:
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
         minimum_chapter_chars = int(reader_budget["minimum_chars"])
         maximum_chapter_chars = int(reader_budget["maximum_chars"])
+        generation_hard_max_chars = maximum_chapter_chars + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS
         # The canonical path is scene-serial, but this legacy token value is
         # still part of the returned provenance and repair contract.
         generation_max_tokens = max(
@@ -4186,7 +4190,7 @@ class GenerationEngine:
                 context=context,
                 scene_plan=scene_plan,
                 target_word_count=target_word_count,
-                chapter_max_chars=maximum_chapter_chars,
+                chapter_max_chars=generation_hard_max_chars,
             )
             add_usage(step, serial_result.get("usage") or {})
             text = str(serial_result.get("text") or "").strip()
@@ -4374,6 +4378,7 @@ class GenerationEngine:
         final_text = deai_result["processed_text"]
         word_count = chinese_word_count(final_text)
         generation_failures = [*preflight_failures, *continuation_failures]
+        generation_warnings: list[dict[str, Any]] = []
         methodology_validation = validate_writing_workflow(writing_workflow)
         if methodology_required and not methodology_validation.get("passed"):
             generation_failures.append({
@@ -4405,17 +4410,25 @@ class GenerationEngine:
                     ),
                 }
             )
-        if word_count > maximum_chapter_chars:
+        if word_count > generation_hard_max_chars:
             generation_failures.append(
                 {
                     "code": "chapter_too_long",
                     "severity": "high",
                     "message": (
                         f"最终正文 {word_count} 字，超过本章最大生成阈值 "
-                        f"{maximum_chapter_chars} 字"
+                        f"{generation_hard_max_chars} 字"
                     ),
                 }
             )
+        elif word_count > maximum_chapter_chars:
+            generation_warnings.append({
+                "code": "chapter_natural_length_variance",
+                "message": (
+                    f"最终正文 {word_count} 字，超过读者预算 {maximum_chapter_chars} 字，"
+                    f"但处于允许的自然波动范围 {generation_hard_max_chars} 字内"
+                ),
+            })
         deai_gate = deai_result.get("quality_gate") or {}
         if deai_gate.get("passed") is False:
             generation_failures.append(
@@ -4509,6 +4522,8 @@ class GenerationEngine:
             "passed": not generation_failures,
             "minimum_chars": minimum_chapter_chars,
             "maximum_chars": maximum_chapter_chars,
+            "generation_hard_max_chars": generation_hard_max_chars,
+            "warnings": generation_warnings,
             "reader_chapter_budget": reader_budget,
             "failures": generation_failures,
             "continuations": continuations,
