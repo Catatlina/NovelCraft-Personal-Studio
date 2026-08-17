@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.15.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.16.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -4240,7 +4240,15 @@ class GenerationEngine:
                 }
                 if attempt < 2:
                     feedback = "；".join(
-                        str(item.get("message") or item.get("code"))
+                        (
+                            str(item.get("message") or item.get("code"))
+                            + (
+                                "；诊断证据："
+                                + json.dumps(item.get("evidence"), ensure_ascii=False)
+                                if item.get("evidence")
+                                else ""
+                            )
+                        )
                         for item in issues[:5]
                     )
                     if any(
@@ -4265,6 +4273,16 @@ class GenerationEngine:
                             "本次完整重写首段，不得以身体部位、疼痛、发闷、轰鸣或‘像有人’起笔；"
                             "必须让指定的物件、动作、对白、外部事件或环境变化先推动人物行动，"
                             "保留本场事实和因果，不要把原文首句换个同义词。"
+                        )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "dash_density"
+                        for item in issues
+                    ):
+                        feedback += (
+                            "\n破折号生成期修复硬要求：叙述中的破折号全部改用句号、逗号、冒号或具体动作承接；"
+                            "只有对白确有打断、停顿或转折时才保留极少量破折号；首段不得用破折号制造模板节奏，"
+                            "不要把正常对白改成生硬短句，也不要用连续破折号代替人物动作。"
                         )
                     if any(
                         isinstance(item, dict)
