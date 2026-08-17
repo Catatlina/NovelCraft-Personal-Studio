@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.4.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.5.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -3132,12 +3132,13 @@ class GenerationEngine:
         """Return the write-time length contract for one scene.
 
         Length is a pacing control, not a post-write truncation rule.  The
-        opening target is capped separately; the generous bound prevents a
-        normal Chinese scene from being rejected merely for natural detail.
+        opening target is capped separately. A scene may breathe, but it must
+        still end near its planned beat so a routine setup scene cannot consume
+        the chapter's pacing budget and leave review to discover the problem.
         """
         target_words = max(1, int(scene_card.get("target_words") or 300))
         minimum = max(120, int(target_words * 0.45))
-        maximum = max(minimum + 100, int(target_words * 1.35))
+        maximum = max(minimum + 100, int(target_words * 1.25))
         return minimum, maximum
 
     def _scene_generation_max_tokens(
@@ -3393,7 +3394,8 @@ class GenerationEngine:
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
             f"本场约写 {scene_card.get('target_words')} 字，生成期必须控制在 {minimum}-{maximum} 字；"
-            "达到事件结果后立即收束，不要为了达到字数重复冲突或补写日常。"
+            "这个上限是硬约束，不是建议。达到事件结果后立即收束；如果已经完成目标，"
+            "不得继续补写日常、环境、回忆或重复反应来凑字数。"
             f"{retry_block}"
         )
 
@@ -3524,7 +3526,7 @@ class GenerationEngine:
                         candidate,
                         accepted_text="\n\n".join(scene_texts),
                     ))
-                min_scene_chars, max_scene_chars = self._scene_length_bounds(
+                min_scene_chars, pacing_max_scene_chars = self._scene_length_bounds(
                     card,
                     scene_index=index,
                 )
@@ -3551,32 +3553,17 @@ class GenerationEngine:
                         "severity": "high",
                         "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
                     })
-                if candidate_word_count > max_scene_chars:
-                    warning = {
+                if candidate_word_count > pacing_max_scene_chars:
+                    issues.append({
                         "code": "scene_overlong",
-                        "severity": "medium",
+                        "severity": "high",
                         "message": (
-                            f"场景有 {candidate_word_count} 字，超过 beat 目标上限 {max_scene_chars} 字；"
-                            "保留正文，记录为生成期节奏观察项"
+                            f"场景有 {candidate_word_count} 字，超过 beat 目标上限 "
+                            f"{pacing_max_scene_chars} 字；必须在生成期收束本场"
                         ),
                         "word_count": candidate_word_count,
-                        "max_scene_chars": max_scene_chars,
-                    }
-                    attempt_warnings.append(warning)
-                    # A beat target is a pacing reference, not a truncation
-                    # command.  The platform-level chapter envelope is the
-                    # hard boundary; only an extreme runaway scene should
-                    # consume a bounded repair attempt here.
-                    if candidate_word_count > max_scene_chars * 2:
-                        issues.append({
-                            **warning,
-                            "code": "scene_extreme_overlong",
-                            "severity": "high",
-                            "message": (
-                                f"场景有 {candidate_word_count} 字，超过合理上限 {max_scene_chars * 2} 字；"
-                                "必须在生成期收束"
-                            ),
-                        })
+                        "max_scene_chars": pacing_max_scene_chars,
+                    })
                 if not issues:
                     accepted_scene = candidate
                     scene_warnings = attempt_warnings

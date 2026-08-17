@@ -911,7 +911,18 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
 
     assert "前180字内必须出现" in prompt
     assert "不能连续用日常拖慢开局" in prompt
-    assert "生成期必须控制在 216-648 字" in prompt
+    assert "生成期必须控制在 216-600 字" in prompt
+
+
+def test_scene_length_bounds_make_pacing_budget_a_generation_contract():
+    minimum, maximum = GenerationEngine._scene_length_bounds(
+        {"target_words": 600},
+        scene_index=3,
+    )
+
+    assert minimum == 270
+    assert maximum == 750
+    assert maximum < 600 * 1.35
 
 
 def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():
