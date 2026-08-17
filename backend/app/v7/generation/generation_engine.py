@@ -3307,16 +3307,18 @@ class GenerationEngine:
         # completion budget.  Keep the character envelope as the hard pacing
         # contract, but let the real provider finish a large scene naturally;
         # 6000 remains the gateway's global completion safety ceiling.
-        # A repair margin below 1.0 is useful for asking the Provider to
-        # compress an overlong scene, but it must not create a token ceiling
-        # below the character envelope. Chinese prose can consume roughly
-        # one completion token per character; otherwise a valid repair is
-        # turned into a provider truncation before it can finish.
+        # A repair margin below 1.0 is intentional: an overlong candidate
+        # needs a genuinely smaller completion ceiling. The prompt still
+        # carries the character envelope, while this token ceiling prevents a
+        # Provider that ignores the prose instruction from returning the same
+        # long scene three times. The retry loop handles a rare truncation by
+        # making one bounded upward adjustment instead of jumping back to the
+        # initial expansion margin.
         return max(
             240,
             min(
                 SCENE_PROVIDER_TOKEN_CAP,
-                max(int(maximum), int(maximum * margin)),
+                int(maximum * margin),
             ),
         )
 
@@ -3706,7 +3708,9 @@ class GenerationEngine:
             scene_metrics: dict[str, Any] = {}
             scene_warnings: list[dict[str, Any]] = []
             previous_issue_codes: set[str] = set()
+            compression_mode = False
             attempts_used = 0
+            candidate = ""
             min_scene_chars, _planned_max_scene_chars = self._scene_length_bounds(
                 card,
                 scene_index=index,
@@ -3718,8 +3722,27 @@ class GenerationEngine:
             for attempt in range(3):
                 attempt_warnings: list[dict[str, Any]] = []
                 provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
+                overlong_margin = (
+                    SCENE_OPENAI_OVERLONG_REPAIR_MARGIN
+                    if provider == "openai"
+                    else SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN
+                )
                 if attempt == 0:
                     repair_margin = None
+                elif compression_mode:
+                    if "scene_provider_truncated" in previous_issue_codes:
+                        # Keep a compressed contract after a truncation; do
+                        # not use the normal truncation expansion, which can
+                        # recreate the original overlong candidate.
+                        repair_margin = min(
+                            0.98,
+                            overlong_margin + 0.10 * attempt,
+                        )
+                    else:
+                        repair_margin = max(
+                            0.68,
+                            overlong_margin - 0.08 * (attempt - 1),
+                        )
                 elif "scene_provider_truncated" in previous_issue_codes:
                     repair_margin = (
                         (
@@ -3749,6 +3772,23 @@ class GenerationEngine:
                     attempt_max_scene_chars = min(
                         scene_max_chars,
                         pacing_max_scene_chars,
+                    )
+                if (
+                    candidate
+                    and compression_mode
+                    and "scene_provider_truncated" not in previous_issue_codes
+                ):
+                    # Use the previous concrete size as feedback. This is a
+                    # generation-time compression contract, not a text slice:
+                    # the next Provider call must write a shorter complete
+                    # scene with the same causal result.
+                    previous_candidate_chars = chinese_word_count(candidate)
+                    attempt_max_scene_chars = min(
+                        attempt_max_scene_chars,
+                        max(
+                            min_scene_chars,
+                            int(previous_candidate_chars * 0.80),
+                        ),
                     )
                 if (
                     previous_issue_codes.intersection({
@@ -3907,6 +3947,19 @@ class GenerationEngine:
                         excess_chars=excess,
                     ):
                         issues = []
+                if (
+                    not truncated
+                    and any(
+                        isinstance(item, dict)
+                        and item.get("code") in {
+                            "scene_overlong",
+                            "scene_chapter_budget_overrun",
+                            "scene_reader_budget_overrun",
+                        }
+                        for item in issues
+                    )
+                ):
+                    compression_mode = True
                 if not issues:
                     accepted_scene = candidate
                     scene_warnings = attempt_warnings
