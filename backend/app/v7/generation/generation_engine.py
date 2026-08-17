@@ -3173,9 +3173,9 @@ class GenerationEngine:
             # event. Four-to-six tiny beats make a real model write past the
             # beat envelope, then leave the final beat with an unusable
             # remainder. Keep the opening card intact and coalesce the
-            # middle beats until the reader-budget chapter has at most two
-            # serial scenes: opening/承接 and complete escalation/result.
-            while len(cards) > 2:
+            # middle beats until the reader-budget chapter has at most three
+            # serial scenes: opening, escalation, consequence/hook.
+            while len(cards) > 3:
                 pair_index = min(
                     range(1, len(cards) - 1),
                     key=lambda index: cards[index]["target_words"]
@@ -3691,28 +3691,39 @@ class GenerationEngine:
                     max_scene_chars=attempt_max_scene_chars,
                     token_margin=repair_margin,
                 )
-                result = await self.ai_gateway.generate(
-                    self._build_scene_generation_prompt(
-                        chapter_number=chapter_number,
-                        context=context,
-                        scene_plan=scene_plan,
-                        scene_card=card,
-                        scene_index=index,
-                        scene_count=len(cards),
-                        previous_scene_tail=scene_texts[-1][-1200:] if scene_texts else (
-                            (context.get("context_layers") or {}).get("previous_tail") or ""
-                        ),
-                        current_state=current_state,
-                        previous_handoffs=handoffs,
-                        retry_feedback=feedback,
-                        max_scene_chars=attempt_max_scene_chars,
+                scene_prompt = self._build_scene_generation_prompt(
+                    chapter_number=chapter_number,
+                    context=context,
+                    scene_plan=scene_plan,
+                    scene_card=card,
+                    scene_index=index,
+                    scene_count=len(cards),
+                    previous_scene_tail=scene_texts[-1][-1200:] if scene_texts else (
+                        (context.get("context_layers") or {}).get("previous_tail") or ""
                     ),
-                    system_prompt=(
-                        "你是稳定写作同一本长篇小说的中文网文作者。只输出本场正文，"
-                        "不输出任何工程说明；优先保证人物声音、动作因果、现场感和自然节奏。"
+                    current_state=current_state,
+                    previous_handoffs=handoffs,
+                    retry_feedback=feedback,
+                    max_scene_chars=attempt_max_scene_chars,
+                )
+                scene_system_prompt = (
+                    "你是稳定写作同一本长篇小说的中文网文作者。只输出本场正文，"
+                    "不输出任何工程说明；优先保证人物声音、动作因果、现场感和自然节奏。"
+                    + third_person_generation_contract()
+                    + content_generation_contract(self.quality_profile)
+                )
+                if attempt and candidate:
+                    scene_system_prompt = (
+                        "你是中文网文的生成期压缩编辑。当前不是自由扩写，必须在保留人物、"
+                        "事实顺序、动作因果和本场结果的前提下，完整重写上一版候选正文；"
+                        "删除重复反应、重复环境、解释性总结和无关支线，不能从末尾续写，"
+                        "不能把超长正文原样复制。只输出压缩后的完整正文，不输出说明。"
                         + third_person_generation_contract()
                         + content_generation_contract(self.quality_profile)
-                    ),
+                    )
+                result = await self.ai_gateway.generate(
+                    scene_prompt,
+                    system_prompt=scene_system_prompt,
                     max_tokens=scene_token_limit,
                     temperature=0.66 if attempt else 0.82,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
