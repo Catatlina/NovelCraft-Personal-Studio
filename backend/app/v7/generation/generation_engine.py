@@ -3739,10 +3739,11 @@ class GenerationEngine:
                             overlong_margin + 0.10 * attempt,
                         )
                     else:
-                        repair_margin = max(
-                            0.68,
-                            overlong_margin - 0.08 * (attempt - 1),
-                        )
+                        # Keep the same compact ratio for repeated overlong
+                        # attempts. Shrinking it again compounds with the
+                        # candidate-size cap below and can make a short final
+                        # scene truncate before its handoff is complete.
+                        repair_margin = overlong_margin
                 elif "scene_provider_truncated" in previous_issue_codes:
                     repair_margin = (
                         (
@@ -3805,6 +3806,7 @@ class GenerationEngine:
                         not future_minimum_chars
                         and "scene_provider_truncated" in previous_issue_codes
                     )
+                    and not compression_mode
                 ):
                     # A repeated truncation means the Provider is not
                     # self-terminating at the nominal beat length. Enter a
