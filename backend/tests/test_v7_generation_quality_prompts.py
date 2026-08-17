@@ -982,6 +982,8 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "破折号只在对白中确有停顿、打断或转折时使用" in prompt
     assert "人物重返已经出现过的地点、门、物件或线索时" in prompt
     assert "重大袭击、对抗或爆发结束后" in prompt
+    assert "关键异常、开门、封印松动、袭击、修炼变化或新能力必须先写可见前提/征兆" in prompt
+    assert "碑文、幻象、梦境或他人话语里的数字/年代属于原说话者" in prompt
     assert "生成期计划控制在 216-624 字，最多允许自然波动到 769 字" in prompt
 
 
@@ -1003,6 +1005,28 @@ def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_p
 
     assert "本场约写 960 字" in prompt
     assert "本场约写 1200 字" not in prompt
+
+
+def test_scene_card_preserves_trigger_and_causal_link_from_plan():
+    cards = GenerationEngine._normalise_scene_cards(
+        {
+            "beats": [
+                {
+                    "name": "开门",
+                    "target_words": 600,
+                    "content": "门缝出现冷风",
+                    "scene_card": {
+                        "trigger": "上一场账册出现新字",
+                        "causal_link": "新字让主角判断封印正在松动",
+                    },
+                }
+            ]
+        },
+        target_word_count=600,
+    )
+
+    assert cards[0]["trigger"] == "上一场账册出现新字"
+    assert cards[0]["causal_link"] == "新字让主角判断封印正在松动"
 
 
 def test_scene_serial_retries_repeated_name_opening_across_accepted_scenes():

@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.14.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.15.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -1290,7 +1290,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             '"goal":"本场目标","obstacle":"本场阻碍","choice":"人物选择",'
             '"turn":"本场转折","state_change":"明确状态变化",'
             '"knowledge_boundary":"人物此时能知道/不能知道什么",'
-            '"handoff":"下一场可直接承接的落点"}}],\n'
+            '"handoff":"下一场可直接承接的落点",'
+            '"trigger":"触发本场关键事件的可见前提",'
+            '"causal_link":"前因如何在正文中导致本场结果"}}],\n'
             '  "pov_character": "视角人物",\n'
             '  "pov_policy": "third_person_narrative",\n'
             '  "pacing": "slow|medium|fast",\n'
@@ -1310,7 +1312,9 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             '"next_pressure":"章末新增压力","setup_refs":[]},\n'
             '  "payoff_phases": ["pressure", "build", "burst", "feedback", "aftershock"],\n'
             '  "chapter_contract": {"core_problem":"本章核心问题","observable_payoff":"可见兑现","cost":"代价/余波","next_inevitable_event":"下一必然压力"},\n'
-            '  "causal_ledger": [{"event":"事件","knower":"知情边界","motive":"为什么现在","cost":"代价","next_effect":"下一影响"}],\n'
+            '  "causal_ledger": [{"event":"事件","trigger":"可见前提","knower":"知情边界",'
+            '"motive":"为什么现在","visible_link":"读者如何看出前因导致结果",'
+            '"cost":"代价","next_effect":"下一影响"}],\n'
             '  "state_delta": {"changed":["变化"],"unchanged":["不变"]},\n'
             '  "confidence": 0.85\n'
             "}\n"
@@ -1323,6 +1327,10 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             "因果/动机是硬要求：每个 beat 的 content 和 scene_card.choice 都必须回答人物为什么在此刻行动；"
             "如果重返上一章或前面场景出现过的地点、门、物件或线索，必须写清触发信息→当前目标→主动决定，"
             "禁止只用‘鬼使神差’、‘下意识’、‘不知为何’或‘心血来潮’充当唯一动机。"
+            "每个关键异常、开门、封印松动、袭击、修炼变化或新能力都必须写 trigger 和 causal_link："
+            "先给读者一个可见前提/征兆，再让人物判断并作出选择，最后让结果明确反馈；"
+            "不能让门、敌人、法器或规则无前提突然出现，也不能把碑文、幻象、梦境或他人话语里的数字/年代"
+            "直接改写成主角自己的经历，必须保留文字的说话者和归属。"
             "重大袭击、对抗或爆发后的下一 beat，必须先写一个可见的即时后果（伤势、资源损失、环境变化、旁观者反应、"
             "敌我状态变化或短暂喘息）再进入长段解释/师徒对话；不能从战斗结果直接跳到讲设定。"
             "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
@@ -1346,7 +1354,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             max_tokens=4200,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.6.0",
+            prompt_version="1.7.0",
         )
         plan = self._repair_generation_phase_labels(result["data"]) or result["data"]
         usage = dict(result.get("usage") or {})
@@ -1369,6 +1377,8 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "每个 beat 必须写清人物此刻为什么行动；重返已有地点/物件时必须写触发信息、当前目标和主动决定，"
                 "不得用‘鬼使神差’、‘下意识’或‘不知为何’代替动机；重大冲突后先写即时后果或喘息，"
                 "再进入解释性对话，不能从结果直接跳到讲设定；"
+                "关键异常、开门、封印松动、袭击、修炼变化或新能力必须补充可见前提和因果连接；"
+                "碑文、幻象、梦境或他人话语中的数字/年代属于原说话者，不得改成主角自己的经历；"
                 "chapter_type 必须是 normal、aftermath、relationship、suspense 之一。\n"
                 f"校验错误：{contract_error}\n"
                 f"原始计划：{json.dumps(plan, ensure_ascii=False)}\n"
@@ -1380,7 +1390,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 max_tokens=3600,
                 temperature=0.0,
                 prompt_name="v7.generation.scene_plan.repair",
-                prompt_version="1.2.0",
+                prompt_version="1.3.0",
             )
             repair_usage = repaired.get("usage") or {}
             usage = {
@@ -3174,6 +3184,12 @@ class GenerationEngine:
                     scene_card.get("knowledge_boundary") or raw.get("knowledge_boundary") or ""
                 )[:240],
                 "handoff": str(scene_card.get("handoff") or raw.get("handoff") or "")[:240],
+                "trigger": str(
+                    scene_card.get("trigger") or raw.get("trigger") or ""
+                )[:240],
+                "causal_link": str(
+                    scene_card.get("causal_link") or raw.get("causal_link") or ""
+                )[:240],
                 "opening_constraint": opening_constraint,
             })
         if opening_excess and len(cards) > 1:
@@ -3217,6 +3233,8 @@ class GenerationEngine:
                     ("state_change", 240),
                     ("knowledge_boundary", 240),
                     ("handoff", 240),
+                    ("trigger", 240),
+                    ("causal_link", 240),
                 ):
                     values = [str(left.get(key) or "").strip(), str(right.get(key) or "").strip()]
                     merged[key] = "；".join(value for value in values if value)[:limit]
@@ -3729,6 +3747,10 @@ class GenerationEngine:
             "不得只用‘鬼使神差’、‘下意识’、‘不知为何’或‘心血来潮’带过。重大袭击、对抗或爆发结束后，"
             "先写一个可见的即时后果或短暂喘息（伤势、资源损失、环境变化、旁观者反应或敌我状态变化），"
             "再进入长段解释、师徒对话或规则说明；不得从战斗结果直接跳到讲设定。"
+            "关键异常、开门、封印松动、袭击、修炼变化或新能力必须先写可见前提/征兆，再写人物判断和主动选择，"
+            "最后落到读者可见的结果或反馈；如果场景卡没有前提，先在正文补出一个来自已确认事实的具体触发，"
+            "不能让门、敌人、法器或规则无前提突然出现。碑文、幻象、梦境或他人话语里的数字/年代属于原说话者，"
+            "不得把它改写成主角自己的经历。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
             "叙述保持第三人称；门上字、碑文、账册、书信、纸条等直接文字若出现‘我/吾/我们’，"
