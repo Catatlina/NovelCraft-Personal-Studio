@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.6.2"
+SCENE_SERIAL_GENERATION_VERSION = "2.6.3"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -89,11 +89,11 @@ SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20
 # The retry must have enough completion headroom to finish a Chinese scene.
 # The prompt and hard character envelope perform the compression; an overly
 # small token cap turns a valid pacing repair into provider truncation.
-# A 1.10 retry still produced 1,488 chars against an 1,146-char envelope in
-# production; 0.64 previously truncated a smaller scene.  Keep the repair
-# budget between those observed failure modes and let the prompt do the prose
-# compression.
-SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.86
+# A 1.10 retry produced 1,488 chars against a 1,146-char envelope, while 0.86
+# produced 1,148 chars against a 1,099-char envelope without truncation.  Use
+# the next measured compression step and keep the prompt responsible for prose
+# compression rather than truncating the result after the fact.
+SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.82
 SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.90
 SCENE_PROVIDER_TOKEN_CAP = 6000
 SCENE_TARGET_MAX_RATIO = 1.30
