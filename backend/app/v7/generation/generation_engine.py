@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.6.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.6.1"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -3598,7 +3598,15 @@ class GenerationEngine:
                     continue
                 raise AIGatewayError(
                     f"scene {index} failed generation contract after bounded retry: "
-                    + "; ".join(str(item.get("code")) for item in issues)
+                    + "; ".join(
+                        (
+                            f"{item.get('code')}[{item.get('word_count')}字>"
+                            f"{item.get('max_scene_chars')}字]"
+                        )
+                        if isinstance(item, dict) and item.get("code") == "scene_overlong"
+                        else str(item.get("code"))
+                        for item in issues
+                    )
                 )
 
             handoff, handoff_usage = await self._extract_scene_handoff(
