@@ -176,7 +176,7 @@ class PlotEngine(BaseEngine):
                 # writer. Keep its provenance version distinct from the old
                 # planning prompt so production traces cannot silently mix
                 # pre-contract and post-contract decisions.
-                prompt_version="1.4.0",
+                prompt_version="1.4.1",
             )
             ai_payload = ai["data"] or {}
             self.record_usage(ai["usage"])
@@ -343,7 +343,7 @@ class PlotEngine(BaseEngine):
   "reader_promise": "本章给读者的情绪/信息承诺，以及读者为什么要继续追读",
   "emotional_target": "情绪曲线：开场情绪 -> 中段转折 -> 章末情绪",
   "reader_experience_plan": {{"reader_emotion":"读者在现场感受到什么","information_to_feel":"信息如何通过事件落地","scene_payoff":"本章兑现","avoid":["同构写法"]}},
-  "prose_texture_plan": {{"information_delivery":"动作/对白/物件/反馈","rhythm":"句段节奏","voice_anchor":"人物声音抓手"}},
+  "prose_texture_plan": {{"information_delivery":"动作/对白/物件/反馈","rhythm":"句段节奏","voice_anchor":"人物声音抓手","narrator_bias":"限知叙述只挑哪些细节、哪些信息暂不解释","sensory_anchor":"本章反复但不机械的具体感官/物件","subtext":"人物不直说、由动作或对白露出的真实意图"}},
   "opening_anchor": "本章开头必须承接上一章尾部的具体动作、地点或未决问题",
   "hook": "章末必须落到具体动作、发现或选择的追读钩子",
   "payoff_contract": {{"reader_promise":"读者本章要等什么","pressure":"当前压力", "active_choice":"主角主动选择", "payoff_type":"兑现类型", "visible_result":"可见结果", "witness_reaction":"他人反应", "cost":"代价/余波", "next_pressure":"章末新增压力", "setup_refs":[]}},
@@ -370,8 +370,15 @@ pressure、build、burst、feedback、aftershock 五个阶段；至少一个节�
 build，内容要有试探、准备、取舍或蓄力，不能把连续施压当作 build。
 每个 suggested_beats 必须填写完整 scene_card，不能返回空对象或省略字段；场景卡必须让写作者能直接执行，
 至少写清地点、时间、人物目标、可见阻碍、主动选择、转折、状态变化、知情边界、承接点、触发前提和因果连接。
+handoff 不能只写“决定去某地”或“准备调查”，必须写成下一场可直接落笔的过渡动作：谁在什么时间因什么结果离开、到达、等待、寻找，
+或在途中携带什么物件、听见/看见什么线索；如果下一场改变地点、时间或人物组合，必须把移动、等待或进入现场写进 handoff。
+后一场的 trigger 必须与前一场的 state_change 或 handoff 相连；上一场若有失败、受伤、争执或重大信息，下一场的新危机/新解释前必须先安排可见余波、
+短暂喘息或主动选择，禁止从“决定去某地”直接跳成“已经在某地遭遇袭击”。
 如果节拍包含知识展示、求助、指点或关系互动，必须同时设计一个会改变关系、资源、风险、认知或位置的阻碍/选择/结果；
 禁止只写“求助—指点—恍然大悟”“聊天—解释—离开”这类没有现场阻力和代价的平铺节拍。
+prose_texture_plan 不能只写“自然、细腻、节奏有变化”等空话；必须为本章指定一个限知叙述偏向、一个具体感官/物件锚点和至少一处人物潜台词。
+正文不要把每段都写成“现象→判断→解释→总结”的完整闭环；允许信息暂不解释、动作被打断、人物答非所问或只露出半个结果，
+但不能故意加入错别字、病句或与人物无关的怪癖来伪造人工痕迹。
 标题必须是读者会看到的短标题，不得写成剧情摘要或操作说明；禁止出现“第X章”、
 “本章”、“主角在……发现……”、“读者将……”等元叙述模板。若与上一章标题相近，
 改用本章具体事件、物件、冲突或情绪意象命名。"""

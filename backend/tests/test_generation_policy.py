@@ -117,6 +117,9 @@ def test_pre_generation_plot_prompt_inherits_the_same_contract():
     assert "不得出现敏感、违法、色情、仇恨、极端或露骨暴力表达" in prompt
     assert "每个 suggested_beats 必须填写完整 scene_card" in prompt
     assert "禁止只写“求助—指点—恍然大悟”" in prompt
+    assert "handoff 不能只写“决定去某地”" in prompt
+    assert "禁止从“决定去某地”直接跳成“已经在某地遭遇袭击”" in prompt
+    assert "prose_texture_plan 不能只写“自然、细腻、节奏有变化”等空话" in prompt
 
 
 def test_v7_runtime_adds_mechanic_specific_directive_for_non_simulator_cheats():
