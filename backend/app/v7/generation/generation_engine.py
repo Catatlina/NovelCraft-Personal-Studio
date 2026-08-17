@@ -3170,6 +3170,65 @@ class GenerationEngine:
                     share = round(opening_excess * card["target_words"] / later_words)
                     distributed += share
                 card["target_words"] += share
+        if target_word_count >= 1800 and len(cards) > 3:
+            # Provider scene calls need enough room to finish a complete
+            # event. Four-to-six tiny beats make a real model write past the
+            # beat envelope, then leave the final beat with an unusable
+            # remainder. Keep the opening card intact and coalesce the
+            # middle beats until the reader-budget chapter has at most three
+            # serial scenes: opening, escalation, consequence/hook.
+            while len(cards) > 3:
+                pair_index = min(
+                    range(1, len(cards) - 1),
+                    key=lambda index: cards[index]["target_words"]
+                    + cards[index + 1]["target_words"],
+                )
+                left = cards[pair_index]
+                right = cards[pair_index + 1]
+                merged = dict(left)
+                merged["name"] = f"{left['name']} / {right['name']}"[:80]
+                for key, limit in (
+                    ("purpose", 160),
+                    ("content", 800),
+                    ("emotion", 80),
+                    ("goal", 240),
+                    ("obstacle", 240),
+                    ("choice", 240),
+                    ("turn", 240),
+                    ("state_change", 240),
+                    ("knowledge_boundary", 240),
+                    ("handoff", 240),
+                ):
+                    values = [str(left.get(key) or "").strip(), str(right.get(key) or "").strip()]
+                    merged[key] = "；".join(value for value in values if value)[:limit]
+                merged["target_words"] = left["target_words"] + right["target_words"]
+                phases = []
+                for phase in (
+                    list(left.get("payoff_phases") or [])
+                    + ([left.get("payoff_phase")] if left.get("payoff_phase") else [])
+                    + list(right.get("payoff_phases") or [])
+                    + ([right.get("payoff_phase")] if right.get("payoff_phase") else [])
+                ):
+                    if phase and phase not in phases:
+                        phases.append(phase)
+                merged["payoff_phases"] = phases
+                merged["payoff_phase"] = right.get("payoff_phase") or left.get("payoff_phase")
+                merged["location"] = right.get("location") or left.get("location") or ""
+                merged["time"] = right.get("time") or left.get("time") or ""
+                merged["characters"] = list(dict.fromkeys(
+                    list(left.get("characters") or []) + list(right.get("characters") or [])
+                ))[:8]
+                merged["opening_constraint"] = left.get("opening_constraint") or ""
+                cards[pair_index : pair_index + 2] = [merged]
+            for index, card in enumerate(cards, start=1):
+                card["scene_index"] = index
+                if index == 2:
+                    card["opening_constraint"] = (
+                        "前两句继续上一场的动作或后果；前半场必须把上一场的异常转成新的选择、代价或风险，"
+                        "不得重新解释背景。"
+                    )
+                elif index > 2:
+                    card["opening_constraint"] = ""
         # Keep the plan's declared scale visible to the writer, but do not
         # silently change the chapter scale merely to satisfy an opening cap.
         planned_words = sum(card["target_words"] for card in cards) or 1
