@@ -85,6 +85,10 @@ SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # naturally detailed scene that the chapter-level gate must reject later.
 SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 0.72
 SCENE_OPENAI_TOKEN_CHAR_MARGIN = 0.86
+SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 0.84
+SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 0.94
+SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.64
+SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.78
 
 
 def chinese_word_count(text: str) -> int:
@@ -3142,6 +3146,7 @@ class GenerationEngine:
         *,
         scene_index: int,
         max_scene_chars: int | None = None,
+        token_margin: float | None = None,
     ) -> int:
         """Keep the Provider token ceiling in the same scale as scene chars.
 
@@ -3162,7 +3167,7 @@ class GenerationEngine:
             int(max_scene_chars) if max_scene_chars is not None else nominal_maximum,
         )
         provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
-        margin = (
+        margin = token_margin if token_margin is not None else (
             SCENE_OPENAI_TOKEN_CHAR_MARGIN
             if provider == "openai"
             else SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN
@@ -3427,6 +3432,27 @@ class GenerationEngine:
             scene_warnings: list[dict[str, Any]] = []
             for attempt in range(2):
                 attempt_warnings: list[dict[str, Any]] = []
+                provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
+                if attempt == 0:
+                    repair_margin = None
+                elif "scene_provider_truncated" in feedback:
+                    repair_margin = (
+                        SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN
+                        if provider == "openai"
+                        else SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN
+                    )
+                else:
+                    repair_margin = (
+                        SCENE_OPENAI_OVERLONG_REPAIR_MARGIN
+                        if provider == "openai"
+                        else SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN
+                    )
+                scene_token_limit = self._scene_generation_max_tokens(
+                    card,
+                    scene_index=index,
+                    max_scene_chars=scene_max_chars,
+                    token_margin=repair_margin,
+                )
                 result = await self.ai_gateway.generate(
                     self._build_scene_generation_prompt(
                         chapter_number=chapter_number,
@@ -3449,12 +3475,8 @@ class GenerationEngine:
                         + third_person_generation_contract()
                         + content_generation_contract(self.quality_profile)
                     ),
-                    max_tokens=self._scene_generation_max_tokens(
-                        card,
-                        scene_index=index,
-                        max_scene_chars=scene_max_chars,
-                    ),
-                    temperature=0.82,
+                    max_tokens=scene_token_limit,
+                    temperature=0.66 if attempt else 0.82,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
                     prompt_version=SCENE_SERIAL_GENERATION_VERSION,
                     expand_on_truncation=False,
@@ -3471,7 +3493,7 @@ class GenerationEngine:
                         "code": "scene_provider_truncated",
                         "severity": "high",
                         "message": (
-                            f"Provider 在本场 {self._scene_generation_max_tokens(card, scene_index=index, max_scene_chars=scene_max_chars)} token 上限截断；"
+                            f"Provider 在本场 {scene_token_limit} token 上限截断；"
                             "必须压缩表达后重新生成，不能扩大预算"
                         ),
                     })

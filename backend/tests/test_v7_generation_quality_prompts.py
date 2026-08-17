@@ -917,6 +917,12 @@ def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():
     assert deepseek_limit == int(850 * 0.72)
     assert openai_limit == int(850 * 0.86)
     assert deepseek_limit < openai_limit
+    assert engine._scene_generation_max_tokens(
+        card,
+        scene_index=2,
+        max_scene_chars=850,
+        token_margin=0.84,
+    ) == int(850 * 0.84)
 
 
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
