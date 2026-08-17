@@ -13,6 +13,7 @@ from app.v7.generation.generation_engine import (
     GenerationEngine,
     SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN,
     SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN,
+    SCENE_MIXED_TRUNCATION_OVERLONG_REPAIR_MARGIN,
     SCENE_NATURAL_LENGTH_TOLERANCE,
     SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
     SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS,
@@ -1276,6 +1277,7 @@ def test_final_scene_variance_never_starves_a_future_scene_or_exceeds_absolute_b
 
 def test_scene_truncation_retry_has_a_bounded_escalation():
     assert SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN == 1.70
+    assert SCENE_MIXED_TRUNCATION_OVERLONG_REPAIR_MARGIN == 1.10
 
 
 def test_scene_budget_guard_rejects_candidate_that_consumes_future_scene_minimums():

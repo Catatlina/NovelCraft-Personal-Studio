@@ -97,6 +97,10 @@ SCENE_OPENAI_FINAL_TRUNCATION_REPAIR_MARGIN = 1.50
 # still fail the generation contract.
 SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.86
 SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.90
+# If a scene was truncated before a complete-but-overlong retry arrived, the
+# next compression still needs enough completion headroom to finish.  The
+# ordinary overlong ratio is safe only when truncation was never observed.
+SCENE_MIXED_TRUNCATION_OVERLONG_REPAIR_MARGIN = 1.10
 SCENE_PROVIDER_TOKEN_CAP = 6000
 SCENE_TARGET_MAX_RATIO = 1.30
 SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
@@ -3956,6 +3960,7 @@ class GenerationEngine:
             scene_warnings: list[dict[str, Any]] = []
             previous_issue_codes: set[str] = set()
             compression_mode = False
+            truncation_seen = False
             final_scene_variance = False
             attempts_used = 0
             candidate = ""
@@ -3978,7 +3983,9 @@ class GenerationEngine:
                 if attempt == 0:
                     repair_margin = None
                 elif compression_mode:
-                    if "scene_provider_truncated" in previous_issue_codes:
+                    if truncation_seen:
+                        repair_margin = SCENE_MIXED_TRUNCATION_OVERLONG_REPAIR_MARGIN
+                    elif "scene_provider_truncated" in previous_issue_codes:
                         # Keep a compressed contract after a truncation; do
                         # not use the normal truncation expansion, which can
                         # recreate the original overlong candidate.
@@ -4110,6 +4117,8 @@ class GenerationEngine:
                 truncated = bool(result.get("truncated")) or str(
                     result.get("finish_reason") or ""
                 ).lower() == "length"
+                if truncated:
+                    truncation_seen = True
                 candidate = str(result.get("text") or "").strip()
                 scene_metrics = analyze_deai_patterns(candidate)
                 issues = []
@@ -4418,7 +4427,9 @@ class GenerationEngine:
                                 if isinstance(item, dict) and item.get("code") == "scene_reader_budget_overrun"
                                 else (
                                     f"{item.get('code')}[token_limit={scene_token_limit},"
-                                    f"max_chars={attempt_max_scene_chars}]"
+                                    f"max_chars={attempt_max_scene_chars},"
+                                    f"attempt={item.get('evidence', {}).get('attempt') if isinstance(item.get('evidence'), dict) else '?'},"
+                                    f"candidate={item.get('evidence', {}).get('candidate_chars') if isinstance(item.get('evidence'), dict) else '?'}]"
                                     if isinstance(item, dict) and item.get("code") == "scene_provider_truncated"
                                     else (
                                         f"{item.get('code')}[evidence="
