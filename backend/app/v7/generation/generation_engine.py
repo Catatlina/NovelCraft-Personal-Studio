@@ -3124,9 +3124,10 @@ class GenerationEngine:
                 # pacing: a 600-word routine beat delayed the first anomaly.
                 # Keep this as a generation contract instead of repairing a
                 # finished chapter with a detector-oriented rewrite.
-                opening_cap = max(320, min(480, int(target_word_count * 0.16)))
-                opening_excess = max(0, target_words - opening_cap)
-                target_words = opening_cap
+                if target_word_count >= 1800:
+                    opening_cap = max(320, min(480, int(target_word_count * 0.16)))
+                    opening_excess = max(0, target_words - opening_cap)
+                    target_words = opening_cap
                 opening_constraint = (
                     "前两句必须出现正在发生的动作、具体异常或明确目标；"
                     "前180字内必须发生会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
