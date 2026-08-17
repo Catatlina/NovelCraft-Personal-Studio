@@ -104,6 +104,10 @@ SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
 # boundary was rejecting otherwise natural scenes by a few dozen characters;
 # chapter-level target reservation remains the hard ceiling.
 SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
+# A chapter-level boundary needs a little more room than one paragraph. This
+# is still a bounded reader variance, not permission to approach the platform
+# ceiling or pad a chapter after its result is complete.
+CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS = 128
 
 
 def chinese_word_count(text: str) -> int:
@@ -3609,7 +3613,7 @@ class GenerationEngine:
         planning_max_chars = (
             min(
                 chapter_max_chars,
-                int(target_word_count * 1.10) + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
+                int(target_word_count * 1.10) + CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS,
             )
             if target_word_count >= 1800
             else chapter_max_chars
@@ -3719,6 +3723,10 @@ class GenerationEngine:
                     and attempt >= 2
                     and not (
                         "scene_reader_budget_overrun" in previous_issue_codes
+                        and "scene_provider_truncated" in previous_issue_codes
+                    )
+                    and not (
+                        not future_minimum_chars
                         and "scene_provider_truncated" in previous_issue_codes
                     )
                 ):
@@ -3987,7 +3995,7 @@ class GenerationEngine:
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
         minimum_chapter_chars = int(reader_budget["minimum_chars"])
         maximum_chapter_chars = int(reader_budget["maximum_chars"])
-        generation_hard_max_chars = maximum_chapter_chars + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS
+        generation_hard_max_chars = maximum_chapter_chars + CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS
         # The canonical path is scene-serial, but this legacy token value is
         # still part of the returned provenance and repair contract.
         generation_max_tokens = max(
