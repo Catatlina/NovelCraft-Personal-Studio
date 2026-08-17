@@ -1364,10 +1364,33 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "model": repair_usage.get("model") or usage.get("model"),
             }
             plan = self._repair_generation_phase_labels(repaired["data"]) or repaired["data"]
-            self.validate_scene_plan_contract(
-                plan,
-                target_word_count=target_word_count,
-            )
+            try:
+                self.validate_scene_plan_contract(
+                    plan,
+                    target_word_count=target_word_count,
+                )
+            except AIGatewayError:
+                # Keep the failure closed, but repair a phase omission at the
+                # planning boundary when the existing payoff helper can add a
+                # bounded structural beat.  This changes no prose or story
+                # fact; it gives the real writer an explicit feedback/retort
+                # slot instead of paying for repeated provider retries that
+                # omit the same enum again.
+                phase_repair = repair_payoff_beat_structure(plan.get("beats"))
+                if not phase_repair.get("after", {}).get("passed"):
+                    raise
+                plan = dict(plan)
+                plan["beats"] = phase_repair["beats"]
+                plan["generation_phase_repair"] = {
+                    "applied": list(phase_repair.get("repaired_phases") or []),
+                    "source": "deterministic_pre_generation_structure_repair",
+                    "before": phase_repair.get("before") or {},
+                    "after": phase_repair.get("after") or {},
+                }
+                self.validate_scene_plan_contract(
+                    plan,
+                    target_word_count=target_word_count,
+                )
         # The planner can choose the focal character, never the product-wide
         # narrative mode.  This prevents a learned/project POV field from
         # silently re-enabling first-person prose.

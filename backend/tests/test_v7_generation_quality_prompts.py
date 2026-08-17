@@ -545,6 +545,48 @@ def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():
     assert result["chapter_title"] == "补上的余波"
 
 
+def test_scene_plan_uses_bounded_structural_repair_after_provider_repeats_missing_feedback():
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, _prompt, **_kwargs):
+            self.calls += 1
+            phases = ["pressure", "build", "burst", "aftershock"]
+            return {
+                "data": {
+                    "chapter_title": "缺了一拍",
+                    "chapter_type": "normal",
+                    "hook": "门外有人敲响第三下",
+                    "beats": [
+                        {
+                            "name": f"beat-{i}",
+                            "content": "继续推进并留下具体后果",
+                            "target_words": 500,
+                            "payoff_phase": phase,
+                        }
+                        for i, phase in enumerate(phases)
+                    ],
+                },
+                "usage": {"tokens_input": 1, "tokens_output": 1, "cost": 0.0, "model": "test"},
+            }
+
+    gateway = Gateway()
+    result = asyncio.run(SceneDirector(None, gateway).plan_scene(
+        1,
+        {"rendered_context": ""},
+        target_word_count=3000,
+        quality_profile={},
+    ))
+
+    assert gateway.calls == 2
+    assert result["generation_phase_repair"]["applied"] == ["feedback"]
+    assert any(
+        "feedback" in (beat.get("payoff_phases") or [])
+        for beat in result["beats"]
+    )
+
+
 def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     prompt = GenerationEngine._build_generation_prompt(
         None,
