@@ -1242,6 +1242,13 @@ def test_truncated_scene_never_enters_overlong_envelope_shrink_mode():
     ) is False
 
 
+def test_style_only_scene_retry_does_not_need_the_previous_candidate_body():
+    assert GenerationEngine._is_style_only_retry({"repeated_paragraph_opening"}) is True
+    assert GenerationEngine._is_style_only_retry({"dash_density", "ai_phrase"}) is True
+    assert GenerationEngine._is_style_only_retry({"scene_overlong"}) is False
+    assert GenerationEngine._is_style_only_retry({"repeated_paragraph_opening", "scene_overlong"}) is False
+
+
 def test_scene_length_soft_overflow_is_bounded_by_reader_pacing_contract():
     assert SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS == 64
 

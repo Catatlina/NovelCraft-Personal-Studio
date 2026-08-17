@@ -3433,6 +3433,18 @@ class GenerationEngine:
         )
 
     @staticmethod
+    def _is_style_only_retry(previous_issue_codes: set[str]) -> bool:
+        """Return whether a retry can be regenerated from contracts alone."""
+        return bool(previous_issue_codes) and previous_issue_codes.issubset({
+            "dash_density",
+            "ai_phrase",
+            "uniform_cadence",
+            "repeated_paragraph_opening",
+            "repeated_tic",
+            "structural_ai_smell",
+        })
+
+    @staticmethod
     def _final_scene_budget_variance_allowed(
         *,
         projected_chars: int,
@@ -4067,14 +4079,24 @@ class GenerationEngine:
                     + content_generation_contract(self.quality_profile)
                 )
                 if attempt and candidate:
-                    scene_system_prompt = (
-                        "你是中文网文的生成期压缩编辑。当前不是自由扩写，必须在保留人物、"
-                        "事实顺序、动作因果和本场结果的前提下，完整重写上一版候选正文；"
-                        "删除重复反应、重复环境、解释性总结和无关支线，不能从末尾续写，"
-                        "不能把超长正文原样复制。只输出压缩后的完整正文，不输出说明。"
-                        + third_person_generation_contract()
-                        + content_generation_contract(self.quality_profile)
-                    )
+                    style_only_retry = self._is_style_only_retry(previous_issue_codes)
+                    if style_only_retry:
+                        scene_system_prompt = (
+                            "你是中文网文的生成期表达修复编辑。必须依据本场 scene_card、已确认状态和"
+                            "上一场交接点，从头重新写出完整正文；不要复制上一版的句式、段首、动作顺序或段落结构，"
+                            "不要从上一版末尾续写。事件、人物和因果必须保留，表达必须重新组织；只输出正文，不输出说明。"
+                            + third_person_generation_contract()
+                            + content_generation_contract(self.quality_profile)
+                        )
+                    else:
+                        scene_system_prompt = (
+                            "你是中文网文的生成期压缩编辑。当前不是自由扩写，必须在保留人物、"
+                            "事实顺序、动作因果和本场结果的前提下，完整重写上一版候选正文；"
+                            "删除重复反应、重复环境、解释性总结和无关支线，不能从末尾续写，"
+                            "不能把超长正文原样复制。只输出压缩后的完整正文，不输出说明。"
+                            + third_person_generation_contract()
+                            + content_generation_contract(self.quality_profile)
+                        )
                 result = await self.ai_gateway.generate(
                     scene_prompt,
                     system_prompt=scene_system_prompt,
@@ -4353,11 +4375,17 @@ class GenerationEngine:
                             "scene_chapter_budget_overrun",
                             "scene_reader_budget_overrun",
                         })
+                        style_only_retry = self._is_style_only_retry(previous_issue_codes)
                         if structural_compression:
                             feedback += (
                                 "\n上一版候选已超出本场或本章预算，本次禁止复述、照抄或从其末尾续写；"
                                 "请依据本场契约、已确认状态和上一场交接点从头重写，先完成目标→阻碍→选择→结果，"
                                 "达到结果立即收束，严格服从本次较短的有效字数预算。"
+                            )
+                        elif style_only_retry:
+                            feedback += (
+                                "\n上一版只用于定位表达缺陷，不要复制其句式、段首、动作顺序或段落结构；"
+                                "请依据 scene_card 和上次诊断证据从头重写，保留事实与因果，不要续写。"
                             )
                         else:
                             feedback += (
@@ -4392,7 +4420,12 @@ class GenerationEngine:
                                     f"{item.get('code')}[token_limit={scene_token_limit},"
                                     f"max_chars={attempt_max_scene_chars}]"
                                     if isinstance(item, dict) and item.get("code") == "scene_provider_truncated"
-                                    else str(item.get("code"))
+                                    else (
+                                        f"{item.get('code')}[evidence="
+                                        f"{json.dumps(item.get('evidence'), ensure_ascii=False)}]"
+                                        if item.get("evidence")
+                                        else str(item.get("code"))
+                                    )
                                 )
                             )
                         )
