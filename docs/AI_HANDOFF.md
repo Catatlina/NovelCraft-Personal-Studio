@@ -1,16 +1,18 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-11
+> 更新时间：2026-08-17
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
-## 2026-08-17 最新代码质量复核与继续任务交接（当前批次）
+## 2026-08-17 最新代码质量复核、生产样本与登录态验收（当前批次）
 
-- **最新代码**：分支 `agent/publishing-v0.9.2` 已提交并推送，当前提交为 `1832158`。旧工作区未提交改动仍保存在 `stash@{0}`，未丢弃。
+- **最新代码**：分支 `agent/publishing-v0.9.2` 已提交并推送，当前提交为 `bb04e5a`；后端披露 provenance 修复为 `188197b`。旧工作区未提交改动仍保存在 `stash@{0}`，未丢弃。
 - **本轮代码修复**：修正 `statistics_v1` 到局部修复引擎之间缺失句子正文导致风险检测失效的问题；修正局部替换判定、跨章节风险去重、AI局部修复失败静默降级、整章重写阈值计算；修正空 synopsis 门禁异常、AI披露自动确认、无记录确认成功、`publish_ready` 缺少七道阻断门禁证据、平台 `policy_version` 未持久化、人工编辑 `editor_id` 未记录、空章节状态更新成功等问题。
 - **范围与安全修复**：发布准备 API 现在对章节、小说、变体、平台配置、AI披露执行项目成员和跨作品关联校验；真实长跑脚本改为读取 `contents.seq`，使用 V7 返回的真实 `v6_content_id`，读取真实平台配置/作品元数据，门禁证据写入失败即退出，不再使用硬编码验收对象或伪造哈希。新增真实 Provider AI披露草稿、语义爽点评估、Alembic Prompt/route 种子和前端发布准备页。
 - **本地验证**：后端全量 `1121 passed, 138 skipped, 1 xpassed, 2 warnings`；v0.9.2自测 `60 passed`；前端 `57 passed`、TypeScript 和生产构建通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py`、`bash scripts/ai_development_gate.sh`、Python 编译与 `git diff --check` 均通过。此前失败基线来自本机 PostgreSQL/Redis 未启动；补齐服务后当前全量测试退出码为 0。
-- **生产部署**：生产 `/opt/NovelCraft-Personal-Studio` 当前代码为 `1832158`，Alembic 为 `nc_v11_disclosure_payoff (head)`；`publishing.ai_disclosure`、`publishing.payoff_semantic` Prompt/route 已落库；API/Worker/Beat/数据库/Redis/Frontend 容器运行。`GET /api/v1/publishing/gates/definitions` 实际返回 `401 authentication required`，确认路由注册和认证门禁。部署前备份：`backups/pre-deploy-v11-20260817-103222.sql.gz`，gzip 校验通过。
-- **当前边界**：生产未调用真实 Provider 生成 AI 披露或语义爽点评估，也未写入生产正文；公网 healthz 曾观察到 Cloudflare `/login` 的 `302`，不作为公网健康检查验收证据。现有《重生后我靠签到系统在侯府杀疯了》第6章为 `needs_rewrite`，因此20章真实 Provider 长跑仍为**未开始**。
-- **下一步**：由用户选择修复现有书的前置质量问题，或明确授权创建正确配置的新书；随后使用 `scripts/v092_20_chapter_run.py` 做真实 Provider 长跑。前端页面需再做登录态浏览器流程验收，AI披露和语义爽点评估需用真实生产样本验收。
+- **生产部署**：生产 `/opt/NovelCraft-Personal-Studio` 当前代码为 `bb04e5a`，Alembic 为 `nc_v11_disclosure_payoff (head)`；`publishing.ai_disclosure`、`publishing.payoff_semantic` Prompt/route 已落库；API/Worker/Beat/数据库/Redis/Frontend 容器运行。`GET /api/v1/publishing/gates/definitions` 实际返回 `401 authentication required`，确认路由注册和认证门禁。披露 provenance 修复部署前备份：`backups/pre-deploy-disclosure-provenance-20260817.sql.gz`，gzip 校验通过。
+- **真实 Provider 样本**：生产第6章语义评估 `semantic_score=85.0`、`payoff_count=1`、`ending_pressure=true`，来源为 `v6.complete`；披露变体 `Provider真实样本-20260817-v2` 为 `generated/provider`，模型来源 `deepseek-chat`，当前仍是 `draft`，未人工确认或发布。该样本证明真实调用链可用，不代表20章长跑完成。
+- **登录态前端验收**：当前公网地址为 `https://starlume.xyjin.xyz/`。登录后 `#/publish` 能加载真实项目、作品、变体、披露状态和章节选择；浅色/深色主题均复验，浅色主题卡片文字对比度问题已由 `bb04e5a` 修复并上线。
+- **当前边界**：现有《重生后我靠签到系统在侯府杀疯了》第6章为 `needs_rewrite`，因此20章真实 Provider 长跑仍为**未开始**；本轮没有修改生产正文或跳过 V7 阻断。单样本披露/语义与登录态页面为**已验收**，但发布确认、七道门禁全流程和20章长跑仍未验收。
+- **下一步**：先修复现有书的前置质量问题，或明确授权创建正确配置的新书；随后使用 `scripts/v092_20_chapter_run.py` 做真实 Provider 长跑。若要完成发布闭环，还需在登录态页面运行七道门禁、确认披露并按策略逐项处理阻断项。
 
 ## 2026-08-11 v0.9.2 出版准备层开发（已部署，分支 agent/publishing-v0.9.2）
 
