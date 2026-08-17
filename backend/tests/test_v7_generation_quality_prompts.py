@@ -973,6 +973,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "从具体物件的异常起笔" in prompt
     assert "不能连续用日常拖慢开局" in prompt
     assert "前600字内必须让人物感知一个具体威胁" in prompt
+    assert "碑文、账册、书信、纸条等直接文字" in prompt
     assert "同一个两字人名不能连续占据多个段首" in prompt
     assert "破折号只在对白中确有停顿、打断或转折时使用" in prompt
     assert "生成期计划控制在 216-624 字，最多允许自然波动到 769 字" in prompt

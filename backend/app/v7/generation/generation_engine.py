@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.9.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.10.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -3685,6 +3685,8 @@ class GenerationEngine:
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
+            "叙述保持第三人称；门上字、碑文、账册、书信、纸条等直接文字若出现‘我/吾/我们’，"
+            "必须用中文引号标明直接文字，不能裸写成叙述者的第一人称。"
             "段落起笔要自然轮换：同一个两字人名不能连续占据多个段首，也不能在本场段落中占多数；"
             "可根据现场需要从动作、物件、声音、环境、对白或他人反应起笔，但不要为了轮换硬塞无关描写，"
             "更不能把人名全部替换成‘他/她’。"
@@ -4003,6 +4005,18 @@ class GenerationEngine:
                             ),
                             "evidence": opening_failure.get("evidence"),
                         })
+                if not truncated:
+                    scene_pov_metrics = analyze_third_person_narrative(candidate)
+                    if not scene_pov_metrics.get("passed"):
+                        issues.append({
+                            "code": "scene_first_person_narrative",
+                            "severity": "high",
+                            "message": (
+                                "本场叙述泄漏第一人称，必须在生成期修复；"
+                                "碑文、账册、字条等直接文字必须用中文引号标明，不能裸写在叙述句中。"
+                            ),
+                            "evidence": scene_pov_metrics,
+                        })
                 if truncated:
                     issues.append({
                         "code": "scene_provider_truncated",
@@ -4183,6 +4197,17 @@ class GenerationEngine:
                             "本次完整重写首段，不得以身体部位、疼痛、发闷、轰鸣或‘像有人’起笔；"
                             "必须让指定的物件、动作、对白、外部事件或环境变化先推动人物行动，"
                             "保留本场事实和因果，不要把原文首句换个同义词。"
+                        )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "scene_first_person_narrative"
+                        for item in issues
+                    ):
+                        feedback += (
+                            "\n第三人称修复硬要求：叙述者只能使用‘他/她/人物姓名’等第三人称；"
+                            "如果门上字、碑文、账册、书信或纸条本身出现‘我/吾/我们’，"
+                            "必须把整段直接文字放进中文引号，或改成第三人称转述，"
+                            "不能让第一人称裸露在叙述句中。保留事实，不删掉信息。"
                         )
                     if candidate:
                         feedback += (
