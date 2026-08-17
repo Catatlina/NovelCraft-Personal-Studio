@@ -89,6 +89,24 @@ def test_first_chapter_no_previous_state_observation_is_advisory():
     assert gate["quality_repair_contract"]["blocking_categories"] == []
 
 
+def test_chinese_minor_first_chapter_observation_stays_advisory():
+    gate = evaluate_editor_review_gate(
+        _strong_review(
+            issues=[{
+                "dimension": "continuity",
+                "severity": "轻微",
+                "description": "上一章结尾状态为空，但本章符合细纲开场，不存在跨章跳跃。",
+            }]
+        ),
+        chars=2600,
+        minimum_chars=2000,
+    )
+
+    assert gate["passed"] is True
+    assert gate["quality_repair_contract"]["blocking_categories"] == []
+    assert gate["quality_repair_contract"]["risks"][0]["severity"] == "low"
+
+
 def test_continuity_without_evidence_is_fail_closed():
     contract = build_quality_repair_contract(
         _strong_review(),

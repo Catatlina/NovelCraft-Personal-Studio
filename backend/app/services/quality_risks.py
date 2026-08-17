@@ -114,6 +114,21 @@ _MATERIAL_REVIEW_HINTS = (
     "拖沓",
 )
 
+_SEVERITY_ALIASES = {
+    "high": "high",
+    "medium": "medium",
+    "low": "low",
+    "高": "high",
+    "严重": "high",
+    "中": "medium",
+    "中等": "medium",
+    "一般": "medium",
+    "低": "low",
+    "轻微": "low",
+    "提示": "low",
+    "建议": "low",
+}
+
 
 def _text(value: Any) -> str:
     if isinstance(value, dict):
@@ -126,8 +141,9 @@ def _text(value: Any) -> str:
 def _severity(issue: Any, text: str) -> str:
     if isinstance(issue, dict):
         explicit = str(issue.get("severity") or "").lower().strip()
-        if explicit in {"high", "medium", "low"}:
-            return explicit
+        normalized = _SEVERITY_ALIASES.get(explicit, explicit)
+        if normalized in {"high", "medium", "low"}:
+            return normalized
     lowered = text.lower()
     return "medium" if any(hint.lower() in lowered for hint in _MEDIUM_HINTS) else "low"
 
@@ -137,7 +153,7 @@ def _is_advisory_review_observation(issue: Any, text: str) -> bool:
     if not isinstance(issue, dict):
         return False
     explicit = str(issue.get("severity") or "").lower().strip()
-    if explicit != "medium":
+    if _SEVERITY_ALIASES.get(explicit, explicit) != "medium":
         return False
     lowered = text.lower()
     return (

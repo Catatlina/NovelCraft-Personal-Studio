@@ -239,6 +239,30 @@ def test_reader_experience_is_visible_but_not_a_substitute_for_hard_gate():
     assert len(result["reader_experience_warnings"]) == 2
 
 
+def test_first_chapter_minor_continuity_observation_does_not_block_v7_gate():
+    result = evaluate_review(
+        {
+            "overall_score": 90,
+            "dimension_scores": {
+                "consistency": 90,
+                "character_voice": 90,
+                "plot_logic": 90,
+                "pacing": 90,
+                "writing_quality": 90,
+                "constraint_compliance": 90,
+            },
+            "issues": [{
+                "dimension": "continuity",
+                "severity": "轻微",
+                "description": "上一章结尾状态为空，但本章符合细纲开场，不存在跨章跳跃。",
+            }],
+        }
+    )
+
+    assert result["passed"] is True
+    assert result["failures"] == []
+
+
 def test_v6_bridge_uses_stable_generation_key_and_tiptap_body():
     novel_id = "novel-1"
     assert generation_key(novel_id, 3) == generation_key(novel_id, 3)
