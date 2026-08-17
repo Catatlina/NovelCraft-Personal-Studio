@@ -3878,11 +3878,13 @@ class GenerationEngine:
                 opening_instruction += "前半场必须把上一场落点转成新的选择、代价或风险。"
         retry_block = f"\n【上次场景未通过，必须在本次生成中修复】\n{retry_feedback}\n" if retry_feedback else ""
         paragraph_opening_contract = (
-            "【自然段首编排（生成期执行，不要输出清单）】"
-            "本场如果自然形成 8 段或以上，至少把 6 段的起笔分散到动作、物件、声音、环境变化、对白或他人反应；"
-            "相邻段落不得用同一个两字姓名起笔，同一姓名最多出现在约四分之一的段首。"
+            "【自然段首编排（硬结构，生成期执行，不要输出清单）】"
+            "本场如果自然形成 8 段或以上，每连续 8 段中同一个两字姓名最多只能作为 2 段的首词，"
+            "至少要分散使用动作、物件、声音、环境变化、对白或他人反应起笔；"
+            "相邻段落不得用同一个两字姓名起笔，同一姓名全场最多出现在四分之一的段首。"
             "需要写主角时，优先先写正在发生的动作、视线、手中物件或现场后果，再在句中带出姓名；"
-            "不要为了达标硬塞无关描写，也不要把所有姓名机械替换成‘他/她’，段落必须仍然服务于本场目标和压力。"
+            "输出前自行检查段首分布；不要为了达标硬塞无关描写，也不要把所有姓名机械替换成‘他/她’，"
+            "段落必须仍然服务于本场目标和压力。"
         )
         minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
         allowed_maximum = self._scene_allowed_max_chars(scene_card, scene_index=scene_index)
@@ -4453,10 +4455,22 @@ class GenerationEngine:
                         and item.get("code") == "repeated_paragraph_opening"
                         for item in issues
                     ):
+                        opening_evidence = scene_metrics.get("repeated_paragraph_opening") or {}
+                        opening_name = str(opening_evidence.get("opening") or "").strip()
+                        paragraph_count = len(
+                            [
+                                item
+                                for item in re.split(r"\n{2,}|\n", candidate)
+                                if item.strip()
+                            ]
+                        )
+                        max_opening_count = max(1, int(paragraph_count * 0.25))
                         feedback += (
-                            "\n段首修复硬要求：本次完整重写时至少把一半段落改为从动作、物件、"
-                            "声音、环境、对白或他人反应起笔；同一人物姓名不得连续作为段首，"
-                            "不要只把姓名替换成‘他/她’，也不要删掉事件或合并段落。"
+                            "\n段首修复硬要求：本次完整重写必须重新安排段落结构；"
+                            f"上一版共约 {paragraph_count} 段，‘{opening_name}’有 {int(opening_evidence.get('count') or 0)} 段首命中，"
+                            f"本次最多允许 {max_opening_count} 段以该姓名起笔。"
+                            "每连续 8 段最多 2 段用同一姓名起笔，其他段落从动作、物件、声音、环境、对白或他人反应起笔；"
+                            "不要只把姓名替换成‘他/她’，不要删掉事件、合并段落或照抄上一版。"
                         )
                     if any(
                         isinstance(item, dict)
