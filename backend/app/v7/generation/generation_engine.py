@@ -3173,9 +3173,9 @@ class GenerationEngine:
             # event. Four-to-six tiny beats make a real model write past the
             # beat envelope, then leave the final beat with an unusable
             # remainder. Keep the opening card intact and coalesce the
-            # middle beats until the reader-budget chapter has at most three
-            # serial scenes: opening, escalation, consequence/hook.
-            while len(cards) > 3:
+            # middle beats until the reader-budget chapter has at most two
+            # serial scenes: opening/承接 and complete escalation/result.
+            while len(cards) > 2:
                 pair_index = min(
                     range(1, len(cards) - 1),
                     key=lambda index: cards[index]["target_words"]

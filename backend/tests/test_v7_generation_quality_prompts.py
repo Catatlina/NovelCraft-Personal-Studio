@@ -974,7 +974,7 @@ def test_scene_serial_rescales_provider_plan_to_reader_target_before_writing():
         target_word_count=2700,
     )
 
-    assert len(cards) == 3
+    assert len(cards) == 2
     assert sum(card["target_words"] for card in cards) == 2700
     assert all(card["target_share"] > 0 for card in cards)
 
