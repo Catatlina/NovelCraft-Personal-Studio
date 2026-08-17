@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.6.4"
+SCENE_SERIAL_GENERATION_VERSION = "2.6.5"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -98,6 +98,7 @@ SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.90
 SCENE_PROVIDER_TOKEN_CAP = 6000
 SCENE_TARGET_MAX_RATIO = 1.30
 SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
+SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 32
 
 
 def chinese_word_count(text: str) -> int:
@@ -3159,7 +3160,8 @@ class GenerationEngine:
         )
         return max(
             planned_maximum,
-            int(planned_maximum * SCENE_NATURAL_LENGTH_TOLERANCE),
+            int(planned_maximum * SCENE_NATURAL_LENGTH_TOLERANCE)
+            + SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
         )
 
     def _scene_generation_max_tokens(
