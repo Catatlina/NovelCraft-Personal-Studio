@@ -873,7 +873,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
 
     assert cards[0]["target_words"] == 480
     assert "前两句" in cards[0]["opening_constraint"]
-    assert "前220字" in cards[0]["opening_constraint"]
+    assert "前180字" in cards[0]["opening_constraint"]
     assert "前两句" in cards[1]["opening_constraint"]
     assert sum(card["target_share"] for card in cards) == 1.0
 
@@ -890,7 +890,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
         previous_handoffs=[],
     )
 
-    assert "前220字内必须出现" in prompt
+    assert "前180字内必须出现" in prompt
     assert "不能连续用日常拖慢开局" in prompt
     assert "生成期必须控制在 216-648 字" in prompt
 
@@ -914,15 +914,15 @@ def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():
         max_scene_chars=850,
     )
 
-    assert deepseek_limit == int(850 * 0.72)
-    assert openai_limit == int(850 * 0.86)
-    assert deepseek_limit < openai_limit
+    assert deepseek_limit == int(850 * 0.95)
+    assert openai_limit == int(850 * 0.90)
+    assert deepseek_limit > openai_limit
     assert engine._scene_generation_max_tokens(
         card,
         scene_index=2,
         max_scene_chars=850,
-        token_margin=0.84,
-    ) == int(850 * 0.84)
+        token_margin=0.98,
+    ) == int(850 * 0.98)
 
 
 def test_story_director_defaults_to_generation_first_without_post_write_rework():

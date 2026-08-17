@@ -79,14 +79,13 @@ logger = logging.getLogger(__name__)
 CHAPTER_STATE_TYPE = "chapter"
 SCENE_SERIAL_GENERATION_VERSION = "2.1.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
-# DeepSeek's Chinese output in the first real acceptance run averaged more
-# than one non-whitespace character per provider output token.  Keep the
-# request below the character envelope so the provider does not write a
-# naturally detailed scene that the chapter-level gate must reject later.
-SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 0.72
-SCENE_OPENAI_TOKEN_CHAR_MARGIN = 0.86
-SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 0.84
-SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 0.94
+# The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
+# generation inside that platform envelope instead of imposing an unrelated
+# narrower rejection threshold on naturally detailed Chinese scenes.
+SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 0.95
+SCENE_OPENAI_TOKEN_CHAR_MARGIN = 0.90
+SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 0.98
+SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 0.98
 SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.64
 SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.78
 
@@ -3065,7 +3064,7 @@ class GenerationEngine:
                 target_words = min(target_words, opening_cap)
                 opening_constraint = (
                     "前两句必须出现正在发生的动作、具体异常或明确目标；"
-                    "前220字内必须发生会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
+                    "前180字内必须发生会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
                     "日常交代最多两个短段，不能用扫地、环境、回忆或设定连续铺满开头；"
                     "第一场结尾必须留下可见的动作、发现、选择或压力变化。"
                 )
@@ -3154,9 +3153,9 @@ class GenerationEngine:
         call had a fixed 700-token floor.  That floor was larger than the
         short scene contracts, so DeepSeek naturally returned a 600-700
         character scene and the application rejected it as overlong.  The
-        first real long-run also showed that a 0.95 token/character estimate
-        was still too loose for DeepSeek.  The ceiling now uses a provider-
-        conservative margin and the current chapter budget.
+        ceiling now derives from the current scene envelope and lets the
+        Provider finish a natural scene; the chapter-level contract remains
+        responsible for the platform-wide 5,000-character limit.
         """
         _minimum, nominal_maximum = self._scene_length_bounds(
             scene_card,
@@ -3333,7 +3332,7 @@ class GenerationEngine:
                 )
             opening_instruction += (
                 "这是生成期节奏硬约束：前两句必须有动作、具体异常或明确目标；"
-                "前220字内必须出现会改变判断、位置、关系、资源或风险的具体事件；"
+                "前180字内必须出现会改变判断、位置、关系、资源或风险的具体事件；"
                 "日常铺垫最多两个短段，背景信息必须藏进动作、对白或物件，不能连续用日常拖慢开局。"
             )
         else:
@@ -3368,6 +3367,8 @@ class GenerationEngine:
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结。"
+            "除非全书硬事实、已确认状态或本场契约明确给出，不要自行补写具体年份、持续年数、伤势来源、功法层级或系统规则；"
+            "缺少依据时用动作和现场结果呈现，不要用精确数字制造伪连续性。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
             f"本场约写 {scene_card.get('target_words')} 字，生成期必须控制在 {minimum}-{maximum} 字；"
@@ -3525,21 +3526,20 @@ class GenerationEngine:
                         "max_scene_chars": max_scene_chars,
                     }
                     attempt_warnings.append(warning)
-                    # The current scene budget already reserves the minimum
-                    # space required by later scenes.  Exceeding it makes the
-                    # chapter impossible to keep inside its hard envelope;
-                    # retry the scene with explicit generation feedback
-                    # instead of accepting prose that will fail only after
-                    # the whole chapter is assembled.
-                    issues.append({
-                        **warning,
-                        "code": "scene_chapter_budget_overrun",
-                        "severity": "high",
-                        "message": (
-                            f"场景有 {candidate_word_count} 字，超过本章当前生成预算 {max_scene_chars} 字；"
-                            "必须在生成期收束，不得依赖章节完成后的截断或重写"
-                        ),
-                    })
+                    # A beat target is a pacing reference, not a truncation
+                    # command.  The platform-level chapter envelope is the
+                    # hard boundary; only an extreme runaway scene should
+                    # consume a bounded repair attempt here.
+                    if candidate_word_count > max_scene_chars * 2:
+                        issues.append({
+                            **warning,
+                            "code": "scene_extreme_overlong",
+                            "severity": "high",
+                            "message": (
+                                f"场景有 {candidate_word_count} 字，超过合理上限 {max_scene_chars * 2} 字；"
+                                "必须在生成期收束"
+                            ),
+                        })
                 if not issues:
                     accepted_scene = candidate
                     scene_warnings = attempt_warnings
@@ -3616,13 +3616,11 @@ class GenerationEngine:
         minimum_chapter_chars = max(600, int(target_word_count * 0.72))
         maximum_chapter_chars = max(
             minimum_chapter_chars + 200,
-            int(target_word_count * 1.45),
+            int(target_word_count * 1.65),
         )
-        # DeepSeek's tokenisation can produce substantially more Chinese
-        # characters than the nominal token count. A fixed 4000-token cap
-        # therefore let a 3000-character chapter expand past the 4350-char
-        # product ceiling. Derive the cap from the hard ceiling so the first
-        # draft is length-safe instead of relying on a later rejection.
+        # Keep the legacy whole-chapter budget aligned with the same platform
+        # envelope.  The canonical path below is scene-serial, but this value
+        # remains part of the returned provenance and repair contract.
         generation_max_tokens = max(
             900,
             min(3200, int(maximum_chapter_chars * 0.58)),
@@ -4339,7 +4337,7 @@ class GenerationEngine:
         minimum_chars = int(previous_quality.get("minimum_chars") or 600)
         maximum_chars = int(
             previous_quality.get("maximum_chars")
-            or max(minimum_chars + 200, int(generation.get("target_word_count") or 3000) * 1.45)
+            or max(minimum_chars + 200, int(generation.get("target_word_count") or 3000) * 1.65)
         )
         failures: list[dict[str, Any]] = []
         if word_count < minimum_chars:
@@ -4540,7 +4538,7 @@ class GenerationEngine:
             "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"
             f"节拍安排：\n{beat_lines}\n\n"
             f"请写出约 {target_word_count} 个汉字的完整章节正文，合理范围为"
-            f" {max(600, int(target_word_count * 0.72))}-{max(max(600, int(target_word_count * 0.72)) + 200, int(target_word_count * 1.45))} 字；"
+            f" {max(600, int(target_word_count * 0.72))}-{max(max(600, int(target_word_count * 0.72)) + 200, int(target_word_count * 1.65))} 字；"
             "完成节拍和章尾钩子后立即收束，不要为了凑字数继续解释或重复描写。"
             f"必须与前情提要和已有设定保持一致，不得与【必须遵守的约束】冲突。"
             "节拍完整性是硬要求：节拍表列出的关键过桥、交易、对抗、修炼或设定揭示，必须在正文中写出可见的动作过程、阻碍和结果，"
