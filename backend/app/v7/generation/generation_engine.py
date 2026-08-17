@@ -107,7 +107,7 @@ SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
 # A chapter-level boundary needs a little more room than one paragraph. This
 # is still a bounded reader variance, not permission to approach the platform
 # ceiling or pad a chapter after its result is complete.
-CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS = 128
+CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS = 192
 
 
 def chinese_word_count(text: str) -> int:
@@ -3610,14 +3610,7 @@ class GenerationEngine:
         # Reserve the planned size of all future scenes.  The old scheduler
         # reserved only their minimum length, allowing the first scenes to
         # consume the reader target and leaving the climax with no room.
-        planning_max_chars = (
-            min(
-                chapter_max_chars,
-                int(target_word_count * 1.10) + CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS,
-            )
-            if target_word_count >= 1800
-            else chapter_max_chars
-        )
+        planning_max_chars = chapter_max_chars
 
         def add_call_usage(call_usage: dict[str, Any]) -> None:
             usage["tokens_input"] += int(call_usage.get("tokens_input") or 0)
