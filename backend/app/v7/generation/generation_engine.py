@@ -82,7 +82,12 @@ SCENE_SERIAL_GENERATION_VERSION = "2.18.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
-SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 1.25
+# DeepSeek's initial completion allowance was too generous for the capped
+# opening scene: a 480-character target with a 1.25 margin produced an 843-
+# character candidate before the scene contract could stop it. Keep the first
+# call close to the actual prose envelope; truncation retries have their own
+# larger, evidence-based margins below.
+SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 1.05
 SCENE_OPENAI_TOKEN_CHAR_MARGIN = 1.10
 SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 1.35
 SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20

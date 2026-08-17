@@ -1000,7 +1000,7 @@ def test_generation_uses_serial_scene_handoffs_and_skips_full_chapter_rewrite():
     assert result["scene_serial"]["generation_mode"] == "scene_serial"
     assert result["generation_quality"]["scene_serial"]["handoff_count"] == 4
     assert engine.deai_pipeline.calls == []
-    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] == 292
+    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] == 245
 
 
 def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract():
@@ -1209,9 +1209,9 @@ def test_scene_token_budget_uses_provider_margin_and_current_chapter_envelope():
         max_scene_chars=850,
     )
 
-    assert deepseek_limit == int(850 * 1.25)
+    assert deepseek_limit == int(850 * 1.05)
     assert openai_limit == int(850 * 1.10)
-    assert deepseek_limit > openai_limit
+    assert deepseek_limit < openai_limit
     assert engine._scene_generation_max_tokens(
         card,
         scene_index=2,
