@@ -52,3 +52,63 @@ def test_shared_sync_stream_normalises_sse_and_usage(monkeypatch):
     assert payload["stream"] is True
     assert payload["messages"][-1] == {"role": "user", "content": "正文"}
     assert captured["request"].headers["Authorization"] == "Bearer test-key"
+
+
+def test_openai_compatible_payload_supports_gpt56_luna(monkeypatch):
+    import app.services.unified_gateway as gateway_module
+    from app.services.unified_gateway import UnifiedAIGateway
+
+    captured = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {"content": '{"ok":true}'},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 4},
+            }
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            captured.update({"url": url, **kwargs})
+            return _Response()
+
+    async def _run():
+        return await UnifiedAIGateway(
+            provider="openai",
+            api_key="test-openai-key",
+            base_url="https://api.openai.com/v1/",
+            model="gpt-5.6-luna",
+        ).complete_async(
+            "正文",
+            system_prompt="系统",
+            temperature=0.82,
+            max_tokens=2048,
+            json_mode=True,
+            client_factory=_Client,
+        )
+
+    import asyncio
+
+    result = asyncio.run(_run())
+    assert result.content == '{"ok":true}'
+    assert result.prompt_tokens == 9
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["json"]["model"] == "gpt-5.6-luna"
+    assert captured["json"]["max_completion_tokens"] == 2048
+    assert "temperature" not in captured["json"]
+    assert captured["json"]["response_format"] == {"type": "json_object"}

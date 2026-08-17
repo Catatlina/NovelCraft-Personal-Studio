@@ -124,6 +124,41 @@ def chapter_status(novel_id: str, chapter_number: int) -> str | None:
     return str(row["status"]) if row else None
 
 
+def assert_clean_long_run_target(novel_id: str) -> None:
+    """Refuse a long run whose target carries historical prose or V7 state.
+
+    A failed predecessor must never be treated as a valid starting point for
+    a 20-chapter acceptance run.  The caller should create a dedicated blank
+    acceptance copy instead of deleting an author's working manuscript.
+    """
+    chapter_row = _fetchone(
+        """
+        SELECT COUNT(*) AS count
+        FROM contents
+        WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+        """,
+        (novel_id,),
+    )
+    chapter_count = int((chapter_row or {}).get("count") or 0)
+    state_count = 0
+    try:
+        state_row = _fetchone(
+            "SELECT COUNT(*) AS count FROM v7_story_states WHERE novel_id=%s",
+            (novel_id,),
+        )
+        state_count = int((state_row or {}).get("count") or 0)
+    except Exception:
+        # Older deployments may not have the V7 table yet.  The content
+        # check remains mandatory; generation itself will fail closed later.
+        state_count = 0
+    if chapter_count or state_count:
+        raise RuntimeError(
+            "20章长跑必须从清空历史的验收副本开始: "
+            f"active_chapters={chapter_count}, v7_states={state_count}; "
+            "拒绝在旧正文上续跑"
+        )
+
+
 async def generate_one_chapter(
     novel_id: str, project_id: str, user_id: str, chapter_number: int
 ) -> dict[str, Any]:
@@ -257,7 +292,10 @@ async def main() -> None:
     args = parse_args()
     if args.target_chapters < 1:
         raise ValueError("--target-chapters必须大于0")
+    assert_clean_long_run_target(args.novel_id)
     start_chapter = resolve_start_chapter(args.novel_id, args.start_chapter)
+    if start_chapter != 1:
+        raise RuntimeError(f"清空历史后的长跑必须从第1章开始，当前起始章={start_chapter}")
     if start_chapter > args.target_chapters:
         raise ValueError("起始章节已经超过目标章节，未执行长跑")
 

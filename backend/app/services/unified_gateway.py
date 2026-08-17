@@ -2,7 +2,7 @@
 
 The application still has synchronous (V6) and asynchronous (V7) callers,
 but provider HTTP semantics must not drift between them.  This module owns the
-OpenAI-compatible DeepSeek request shape, timeout behaviour and response
+OpenAI-compatible provider request shapes, timeout behaviour and response
 normalisation.  Ledger, prompt provenance and budget accounting live in
 ``ai_runtime`` so both adapters close the same execution contract.
 """
@@ -36,7 +36,7 @@ class ProviderResponse:
 
 
 class UnifiedAIGateway:
-    """Canonical OpenAI-compatible provider transport.
+    """Canonical OpenAI-compatible provider transport for DeepSeek and OpenAI.
 
     V6 calls :meth:`complete_sync` or :meth:`stream_sync`; V7 calls
     :meth:`complete_async`.  The caller remains responsible for its local
@@ -69,7 +69,7 @@ class UnifiedAIGateway:
         max_tokens: int,
         json_mode: bool,
     ) -> dict[str, Any]:
-        if self.provider != "deepseek":
+        if self.provider not in {"deepseek", "openai"}:
             raise UnifiedGatewayError(
                 f"unsupported shared provider transport: {self.provider}"
             )
@@ -82,9 +82,16 @@ class UnifiedAIGateway:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        if self.provider == "openai":
+            # GPT-5.6 uses the Chat Completions-compatible completion limit;
+            # temperature is intentionally omitted because the reasoning
+            # family owns sampling defaults and rejects legacy controls on
+            # some deployments.  Luna still receives a real provider call.
+            payload["max_completion_tokens"] = max_tokens
+        else:
+            payload["temperature"] = temperature
+            payload["max_tokens"] = max_tokens
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -119,7 +126,7 @@ class UnifiedAIGateway:
     ) -> ProviderResponse:
         """Send one synchronous provider request for V6 workers."""
         if not self.api_key:
-            raise UnifiedGatewayError("DEEPSEEK_API_KEY is not configured")
+            raise UnifiedGatewayError(f"{self.provider.upper()}_API_KEY is not configured")
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(
@@ -166,7 +173,7 @@ class UnifiedAIGateway:
         message shape and usage handling identical for both V6 modes and V7.
         """
         if not self.api_key:
-            raise UnifiedGatewayError("DEEPSEEK_API_KEY is not configured")
+            raise UnifiedGatewayError(f"{self.provider.upper()}_API_KEY is not configured")
         payload = self._payload(
             prompt,
             system_prompt=system_prompt,
@@ -232,7 +239,7 @@ class UnifiedAIGateway:
     ) -> ProviderResponse:
         """Send one asynchronous provider request for V7 engines."""
         if not self.api_key:
-            raise UnifiedGatewayError("DEEPSEEK_API_KEY is not configured")
+            raise UnifiedGatewayError(f"{self.provider.upper()}_API_KEY is not configured")
         client_type = client_factory or httpx.AsyncClient
         timeout = httpx.Timeout(
             connect=self.timeout,

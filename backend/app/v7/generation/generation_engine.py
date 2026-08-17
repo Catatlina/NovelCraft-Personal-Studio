@@ -2306,12 +2306,16 @@ class AIGateway:
         self.novel_id = novel_id
         self.project_id = project_id
         provider_config = provider_config or {}
-        self.provider = provider_config.get("provider") or "deepseek"
+        configured_model = str(provider_config.get("model") or "")
+        inferred_provider = (
+            "openai" if configured_model.startswith("gpt-5.6") else "deepseek"
+        )
+        self.provider = provider_config.get("provider") or inferred_provider
         self.api_key = provider_config.get("api_key") or os.getenv(
             f"{self.provider.upper()}_API_KEY", ""
         )
         self.base_url = provider_config.get("base_url") or self._default_base_url(self.provider)
-        self.default_model = provider_config.get("model") or os.getenv(
+        self.default_model = configured_model or os.getenv(
             f"{self.provider.upper()}_MODEL", "deepseek-chat"
         )
         self.timeout = float(os.getenv("V7_AI_TIMEOUT", "180"))
@@ -2346,6 +2350,12 @@ class AIGateway:
             "v7.generation.chapter": "gen_next_chapter",
             "v7.generation.continuation": "gen_next_chapter",
             "v7.generation.scene_plan": "write_chapter_draft",
+            # Scene prose and handoffs are part of the canonical chapter
+            # writer.  Resolve them through the same editable route so a
+            # real OpenAI-compatible model (for example GPT-5.6 Luna) can be
+            # selected without a second generation path.
+            "v7.generation.scene": "gen_next_chapter",
+            "v7.generation.scene_handoff": "gen_next_chapter",
             "v7.generation.final_humanize": "final_humanize",
             "v7.generation.chapter_repair": "write_polish",
             "v7.memory.": "extract_story_facts",
