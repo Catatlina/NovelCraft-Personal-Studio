@@ -1075,8 +1075,8 @@ def test_scene_overlong_retry_keeps_completion_headroom():
         token_margin=SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN,
     )
 
-    assert retry_limit == int(850 * 0.86)
-    assert retry_limit > int(850 * 0.64)
+    assert retry_limit == 850
+    assert retry_limit >= 850
 
 
 def test_scene_truncation_retry_has_a_bounded_escalation():

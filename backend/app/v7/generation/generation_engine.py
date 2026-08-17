@@ -104,8 +104,8 @@ SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
 # boundary was rejecting otherwise natural scenes by a few dozen characters;
 # chapter-level target reservation remains the hard ceiling.
 SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
-READER_SCENE_TARGET_MAX_RATIO = 1.05
-READER_SCENE_VARIANCE_CHARS = 32
+READER_SCENE_TARGET_MAX_RATIO = 1.10
+READER_SCENE_VARIANCE_CHARS = 64
 
 
 def chinese_word_count(text: str) -> int:
@@ -3264,7 +3264,18 @@ class GenerationEngine:
         # completion budget.  Keep the character envelope as the hard pacing
         # contract, but let the real provider finish a large scene naturally;
         # 6000 remains the gateway's global completion safety ceiling.
-        return max(240, min(SCENE_PROVIDER_TOKEN_CAP, int(maximum * margin)))
+        # A repair margin below 1.0 is useful for asking the Provider to
+        # compress an overlong scene, but it must not create a token ceiling
+        # below the character envelope. Chinese prose can consume roughly
+        # one completion token per character; otherwise a valid repair is
+        # turned into a provider truncation before it can finish.
+        return max(
+            240,
+            min(
+                SCENE_PROVIDER_TOKEN_CAP,
+                max(int(maximum), int(maximum * margin)),
+            ),
+        )
 
     @staticmethod
     def _scene_exceeds_chapter_budget(
