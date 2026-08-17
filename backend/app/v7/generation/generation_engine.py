@@ -3748,7 +3748,16 @@ class GenerationEngine:
                     if isinstance(item, dict)
                 }
                 if attempt < 2:
-                    feedback = "；".join(str(item.get("message") or item.get("code")) for item in issues[:5])
+                    feedback = "；".join(
+                        str(item.get("message") or item.get("code"))
+                        for item in issues[:5]
+                    )
+                    if candidate:
+                        feedback += (
+                            "\n上一版候选正文（可能未完或超长，只用于本次生成期重写；"
+                            "不要从末尾续写，不要原样复制；请完整重写并收束到本场预算内）：\n"
+                            f"{candidate[:6000]}"
+                        )
                     continue
                 raise AIGatewayError(
                     f"scene {index} failed generation contract after bounded retry: "
