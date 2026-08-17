@@ -72,6 +72,23 @@ def test_medium_reassuring_provider_observation_is_a_warning_not_a_blocker():
     assert gate["quality_repair_contract"]["risks"][0]["severity"] == "low"
 
 
+def test_first_chapter_no_previous_state_observation_is_advisory():
+    gate = evaluate_editor_review_gate(
+        _strong_review(
+            issues=[{
+                "dimension": "plot_logic",
+                "severity": "medium",
+                "description": "上一章结尾状态为空，无法验证承接；但开头符合细纲，未发现跳跃或断层。",
+            }]
+        ),
+        chars=2600,
+        minimum_chars=2000,
+    )
+
+    assert gate["passed"] is True
+    assert gate["quality_repair_contract"]["blocking_categories"] == []
+
+
 def test_continuity_without_evidence_is_fail_closed():
     contract = build_quality_repair_contract(
         _strong_review(),
