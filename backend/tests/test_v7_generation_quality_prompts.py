@@ -1094,6 +1094,21 @@ def test_scene_budget_guard_rejects_candidate_that_consumes_future_scene_minimum
     ) is False
 
 
+def test_reader_budget_rebalances_future_scene_targets_before_rewriting_current_prose():
+    cards = [
+        {"target_words": 638},
+        {"target_words": 1221},
+        {"target_words": 1404},
+    ]
+
+    assert GenerationEngine._rebalance_future_scene_targets(
+        cards,
+        future_start=2,
+        excess_chars=293,
+    ) is True
+    assert cards[2]["target_words"] == 1111
+
+
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
     import inspect
     from app.v7.director.story_director import StoryDirector

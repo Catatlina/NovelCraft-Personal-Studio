@@ -3331,6 +3331,45 @@ class GenerationEngine:
         )
 
     @staticmethod
+    def _rebalance_future_scene_targets(
+        cards: list[dict[str, Any]],
+        *,
+        future_start: int,
+        excess_chars: int,
+    ) -> bool:
+        """Move natural length variance into future scene allocations.
+
+        A Provider can finish a current event above its planned share while
+        the chapter still has room. Shrinking a later target is preferable to
+        rewriting a coherent scene, provided every future scene keeps its
+        generation minimum. Return False when the future cards have no slack.
+        """
+        if excess_chars <= 0:
+            return True
+        future_cards = cards[future_start:]
+        capacity = []
+        for card in future_cards:
+            target = max(1, int(card.get("target_words") or 1))
+            minimum = max(120, int(target * 0.45))
+            capacity.append((card, max(0, target - minimum)))
+        if sum(slack for _card, slack in capacity) < excess_chars:
+            return False
+        remaining = excess_chars
+        for card, slack in reversed(capacity):
+            reduction = min(slack, remaining)
+            card["target_words"] = max(
+                1,
+                int(card.get("target_words") or 1) - reduction,
+            )
+            remaining -= reduction
+            if remaining <= 0:
+                break
+        planned_words = sum(int(card.get("target_words") or 0) for card in cards) or 1
+        for card in cards:
+            card["target_share"] = round(card["target_words"] / planned_words, 4)
+        return remaining <= 0
+
+    @staticmethod
     def _scene_naturalness_flags(
         text: str,
         *,
@@ -3800,6 +3839,23 @@ class GenerationEngine:
                         "word_count": candidate_word_count,
                         "max_scene_chars": pacing_max_scene_chars,
                     })
+                if (
+                    len(issues) == 1
+                    and issues[0].get("code") == "scene_reader_budget_overrun"
+                    and not truncated
+                ):
+                    excess = (
+                        accepted_chars
+                        + candidate_word_count
+                        + future_target_chars
+                        - planning_max_chars
+                    )
+                    if self._rebalance_future_scene_targets(
+                        cards,
+                        future_start=index,
+                        excess_chars=excess,
+                    ):
+                        issues = []
                 if not issues:
                     accepted_scene = candidate
                     scene_warnings = attempt_warnings
