@@ -951,7 +951,15 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     prompt = engine._build_scene_generation_prompt(
         chapter_number=1,
         context={"context_layers": {}, "rendered_context": ""},
-        scene_plan={"chapter_title": "藏经阁的门"},
+        scene_plan={
+            "chapter_title": "藏经阁的门",
+            "opening_plan": {
+                "mode": "object",
+                "label": "物件异常开场",
+                "directive": "从具体物件的异常起笔。",
+                "forbidden_recent_modes": ["action"],
+            },
+        },
         scene_card=cards[0],
         scene_index=1,
         scene_count=2,
@@ -961,6 +969,8 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     )
 
     assert "前180字内必须出现" in prompt
+    assert "本章指定开场类型：物件异常开场（object）" in prompt
+    assert "从具体物件的异常起笔" in prompt
     assert "不能连续用日常拖慢开局" in prompt
     assert "前600字内必须让人物感知一个具体威胁" in prompt
     assert "同一个两字人名不能连续占据多个段首" in prompt

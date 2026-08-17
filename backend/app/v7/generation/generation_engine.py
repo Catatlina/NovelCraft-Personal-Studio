@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.8.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.9.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -3624,6 +3624,12 @@ class GenerationEngine:
             style_block += f"\n【作者已确认样本文风（只学表达，不复制内容）】\n{sample_prose}"
         handoff_block = json.dumps(previous_handoffs[-3:], ensure_ascii=False)[:3600]
         progress_block = json.dumps(current_state, ensure_ascii=False)[:3600]
+        opening_plan = scene_plan.get("opening_plan") or context_layers.get("opening_plan") or {}
+        opening_mode_block = (
+            f"{opening_prompt_block(opening_plan)}\n"
+            if scene_index == 1
+            else ""
+        )
         opening_instruction = ""
         if scene_index == 1:
             if previous_scene_tail or (context.get("context_layers") or {}).get("previous_tail"):
@@ -3672,6 +3678,7 @@ class GenerationEngine:
             f"【上一场末尾原文】\n{previous_scene_tail or '本章开端，承接全书上一章结尾。'}\n\n"
             f"【已确认的写入状态】\n{progress_block}\n\n"
             f"【前面场景的状态交接】\n{handoff_block or '无'}\n\n"
+            f"{opening_mode_block}"
             f"{opening_instruction}\n"
             f"{contract_block}\n"
             "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
@@ -3938,6 +3945,26 @@ class GenerationEngine:
                 candidate = str(result.get("text") or "").strip()
                 scene_metrics = analyze_deai_patterns(candidate)
                 issues = []
+                if not truncated and index == 1:
+                    opening_plan = scene_plan.get("opening_plan") or (
+                        context.get("context_layers") or {}
+                    ).get("opening_plan") or {}
+                    opening_gate = inspect_opening(
+                        candidate,
+                        requested_mode=opening_plan.get("mode"),
+                        chapter_number=chapter_number,
+                        recent_modes=opening_plan.get("forbidden_recent_modes") or [],
+                    )
+                    for opening_failure in opening_gate.get("flags") or []:
+                        issues.append({
+                            "code": "scene_opening_contract",
+                            "severity": "high",
+                            "message": (
+                                "首场开场类型未执行，必须在生成期按指定类型完整重写："
+                                f"{opening_failure.get('message')}"
+                            ),
+                            "evidence": opening_failure.get("evidence"),
+                        })
                 if truncated:
                     issues.append({
                         "code": "scene_provider_truncated",
@@ -4105,6 +4132,19 @@ class GenerationEngine:
                             "\n段首修复硬要求：本次完整重写时至少把一半段落改为从动作、物件、"
                             "声音、环境、对白或他人反应起笔；同一人物姓名不得连续作为段首，"
                             "不要只把姓名替换成‘他/她’，也不要删掉事件或合并段落。"
+                        )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "scene_opening_contract"
+                        for item in issues
+                    ):
+                        opening_plan = scene_plan.get("opening_plan") or {}
+                        feedback += (
+                            "\n开场类型修复硬要求：这是本章第一场，必须从指定类型直接起笔；"
+                            f"指定类型为‘{opening_plan.get('label') or opening_plan.get('mode') or '动作'}’。"
+                            "本次完整重写首段，不得以身体部位、疼痛、发闷、轰鸣或‘像有人’起笔；"
+                            "必须让指定的物件、动作、对白、外部事件或环境变化先推动人物行动，"
+                            "保留本场事实和因果，不要把原文首句换个同义词。"
                         )
                     if candidate:
                         feedback += (
