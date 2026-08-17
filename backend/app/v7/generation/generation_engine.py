@@ -82,10 +82,10 @@ SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
 # narrower rejection threshold on naturally detailed Chinese scenes.
-SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 0.95
-SCENE_OPENAI_TOKEN_CHAR_MARGIN = 0.90
-SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 0.98
-SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 0.98
+SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 1.25
+SCENE_OPENAI_TOKEN_CHAR_MARGIN = 1.10
+SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 1.35
+SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20
 SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.64
 SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.78
 
@@ -3147,15 +3147,15 @@ class GenerationEngine:
         max_scene_chars: int | None = None,
         token_margin: float | None = None,
     ) -> int:
-        """Keep the Provider token ceiling in the same scale as scene chars.
+        """Give the Provider enough completion headroom for a scene.
 
         ``chinese_word_count`` is a character budget, while the old scene
         call had a fixed 700-token floor.  That floor was larger than the
         short scene contracts, so DeepSeek naturally returned a 600-700
-        character scene and the application rejected it as overlong.  The
-        ceiling now derives from the current scene envelope and lets the
-        Provider finish a natural scene; the chapter-level contract remains
-        responsible for the platform-wide 5,000-character limit.
+        character scene and the application rejected it as overlong.  Token
+        headroom is intentionally larger than the character envelope because
+        Chinese completion tokens are not a character limit.  The chapter-
+        level contract remains responsible for the platform-wide limit.
         """
         _minimum, nominal_maximum = self._scene_length_bounds(
             scene_card,
