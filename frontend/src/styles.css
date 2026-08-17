@@ -2764,3 +2764,97 @@ body {
 .v7-metric-grid-4 {
   grid-template-columns: repeat(4, 1fr);
 }
+
+/* Theme guard: the Demo parity layer above is shared by both themes. Keep its
+   dark control-room surfaces from leaking into the light workspace. */
+[data-theme="light"] body {
+  background:
+    radial-gradient(circle at 82% -12%, rgba(91, 102, 219, .08), transparent 30rem),
+    var(--bg-base);
+}
+
+[data-theme="light"] .app-sidebar {
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  border-right-color: var(--border-subtle);
+}
+
+[data-theme="light"] .nav-item.active {
+  color: var(--brand-600);
+  background: var(--brand-50);
+  border-color: color-mix(in srgb, var(--brand-500) 28%, transparent);
+}
+
+[data-theme="light"] .app-header {
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  border-bottom-color: var(--border-subtle);
+}
+
+[data-theme="light"] .command-trigger {
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .user-avatar {
+  color: #fff;
+  background: var(--brand-500);
+}
+
+[data-theme="light"] .card,
+[data-theme="light"] .starlume-card,
+[data-theme="light"] .surface {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  background-image: none;
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] .book-project-card,
+[data-theme="light"] .quick-tools button,
+[data-theme="light"] .activity-list,
+[data-theme="light"] .wizard-promise {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .form-input,
+[data-theme="light"] .search-box,
+[data-theme="light"] .wizard-field textarea,
+[data-theme="light"] .wizard-field input,
+[data-theme="light"] .wizard-field select,
+[data-theme="light"] .settings-field input,
+[data-theme="light"] .lexicon-phrase-row > input,
+[data-theme="light"] .lexicon-add-row > input,
+[data-theme="light"] .library-page .book-library-idea-wrap,
+[data-theme="light"] .ranking-page .form-input {
+  background: var(--bg-base);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .progress-overview,
+[data-theme="light"] .ranking-page > .card,
+[data-theme="light"] .ranking-page details.card,
+[data-theme="light"] .dashboard-kpi,
+[data-theme="light"] .dashboard-books-table {
+  background: var(--bg-surface);
+  background-image: none;
+}
+
+[data-theme="light"] .dashboard-kpi-track,
+[data-theme="light"] .progress-track,
+[data-theme="light"] .dashboard-book-progress {
+  background: var(--border-subtle);
+}
+
+[data-theme="light"] .dashboard-books-table-head,
+[data-theme="light"] .dashboard-book-row,
+[data-theme="light"] .book-library-actions {
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .dashboard-book-row:hover,
+[data-theme="light"] .node-list > button:hover {
+  background: var(--bg-hover);
+}
