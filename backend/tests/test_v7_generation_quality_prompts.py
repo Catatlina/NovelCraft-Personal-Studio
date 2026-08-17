@@ -409,6 +409,32 @@ def test_scene_plan_repairs_semantically_incomplete_provider_plan():
     assert result["_usage"]["tokens_output"] == 10
 
 
+def test_generation_phase_repair_only_adds_provable_aftershock_label():
+    plan = {
+        "chapter_title": "门后的声音",
+        "chapter_type": "suspense",
+        "hook": "楼梯口的人亮出钥匙",
+        "payoff_contract": {"next_pressure": "钥匙对应的门在身后打开"},
+        "beats": [
+            {"name": "压迫", "content": "确认门内有人", "payoff_phase": "pressure", "target_words": 300},
+            {"name": "试探", "content": "试探锁孔", "payoff_phase": "build", "target_words": 300},
+            {"name": "反击", "content": "门板撞开", "payoff_phase": "burst", "target_words": 300},
+            {"name": "反馈", "content": "楼道灯亮起", "payoff_phase": "feedback", "target_words": 300},
+        ],
+    }
+
+    repaired = SceneDirector._repair_generation_phase_labels(plan)
+    assert repaired is not None
+    assert repaired["beats"][-1]["payoff_phases"] == ["feedback", "aftershock"]
+    assert SceneDirector.validate_scene_plan_contract(
+        repaired,
+        target_word_count=1200,
+    )["passed"] is True
+
+    no_anchor = {**plan, "hook": "", "payoff_contract": {}}
+    assert SceneDirector._repair_generation_phase_labels(no_anchor) is None
+
+
 def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():
     class Gateway:
         def __init__(self):

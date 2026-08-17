@@ -908,6 +908,71 @@ class SceneDirector:
         }
 
     @staticmethod
+    def _repair_generation_phase_labels(plan: Any) -> dict[str, Any] | None:
+        """Repair only a provable phase-label omission before prose generation.
+
+        A real Provider can return a coherent five-beat story while omitting
+        one enum label.  The previous flow paid for a second Provider repair
+        and still failed when that label was omitted again.  This helper does
+        not invent plot facts or prose: it adds ``aftershock`` only when the
+        final beat already has a concrete content/hook/next-pressure anchor.
+        Any other missing phase remains fail-closed and still requires a real
+        Provider repair.
+        """
+        if not isinstance(plan, dict) or not isinstance(plan.get("beats"), list):
+            return None
+        required = {"pressure", "build", "burst", "feedback", "aftershock"}
+        phases: set[str] = set()
+        for beat in plan["beats"]:
+            if not isinstance(beat, dict):
+                return None
+            values = beat.get("payoff_phases")
+            if not isinstance(values, list):
+                values = [beat.get("payoff_phase")]
+            phases.update(
+                str(value).strip().lower()
+                for value in values
+                if str(value or "").strip()
+            )
+        missing = required - phases
+        if missing != {"aftershock"}:
+            return None
+        final_beat = plan["beats"][-1]
+        if not isinstance(final_beat, dict) or not str(final_beat.get("content") or "").strip():
+            return None
+        payoff_contract = plan.get("payoff_contract") or {}
+        chapter_contract = plan.get("chapter_contract") or {}
+        has_next_anchor = any(
+            str(value or "").strip()
+            for value in (
+                plan.get("hook"),
+                payoff_contract.get("next_pressure") if isinstance(payoff_contract, dict) else "",
+                chapter_contract.get("next_inevitable_event")
+                if isinstance(chapter_contract, dict)
+                else "",
+                (final_beat.get("scene_card") or {}).get("handoff")
+                if isinstance(final_beat.get("scene_card"), dict)
+                else "",
+            )
+        )
+        if not has_next_anchor:
+            return None
+        repaired = dict(plan)
+        repaired["beats"] = [dict(beat) for beat in plan["beats"]]
+        final_copy = repaired["beats"][-1]
+        phase_values = final_copy.get("payoff_phases")
+        if not isinstance(phase_values, list):
+            phase_values = [final_copy.get("payoff_phase")] if final_copy.get("payoff_phase") else []
+        if "aftershock" not in phase_values:
+            phase_values.append("aftershock")
+        final_copy["payoff_phases"] = phase_values
+        repaired["generation_phase_repair"] = {
+            "applied": ["aftershock"],
+            "reason": "final beat already carries a concrete chapter-end hook or next-pressure anchor",
+        }
+        return repaired
+
+    @staticmethod
     def _adopt_plot_brief(
         chapter_number: int,
         target_word_count: int,
@@ -1208,7 +1273,8 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             "}\n"
             "beats 数量 4-6 个，各 beat 的 target_words 之和应接近目标字数；每个 beat 必须增加 payoff_phase 或 payoff_phases，"
             "严格覆盖 pressure/build/burst/feedback/aftershock 五个阶段，允许一个 beat 承担两个阶段；"
-            "至少有一个 beat 明确写 build（压制后的试探、准备、取舍或蓄力），不能把连续的压力描述冒充 build。"
+            "至少有一个 beat 明确写 build（压制后的试探、准备、取舍或蓄力），不能把连续的压力描述冒充 build；"
+            "最后一个 beat 必须明确写出 aftershock，并让 content、scene_card.handoff 或 payoff_contract.next_pressure 之一落到具体的章末后果/下一压力。"
             "每个 beat 都必须提供 scene_card：明确地点、时间、在场人物、目标、阻碍、选择、转折、状态变化、"
             "知情边界和下一场承接点；这些字段服务于连续写作，不要写成泛泛的剧情摘要。"
             "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
@@ -1234,7 +1300,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             prompt_name="v7.generation.scene_plan",
             prompt_version="1.5.0",
         )
-        plan = result["data"]
+        plan = self._repair_generation_phase_labels(result["data"]) or result["data"]
         usage = dict(result.get("usage") or {})
         try:
             self.validate_scene_plan_contract(
@@ -1275,7 +1341,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 + float(repair_usage.get("cost") or 0.0),
                 "model": repair_usage.get("model") or usage.get("model"),
             }
-            plan = repaired["data"]
+            plan = self._repair_generation_phase_labels(repaired["data"]) or repaired["data"]
             self.validate_scene_plan_contract(
                 plan,
                 target_word_count=target_word_count,
