@@ -324,6 +324,14 @@ def generate_ai_disclosure_for_variant(
             metadata = json.loads(metadata)
         except json.JSONDecodeError:
             metadata = {}
+    source_models = metadata.get("source_models") if isinstance(metadata, dict) else None
+    if not isinstance(source_models, list) or not source_models:
+        route_row = db.execute(
+            "SELECT model FROM model_routes WHERE task_type = %s AND is_active = TRUE ORDER BY updated_at DESC LIMIT 1",
+            ("publishing_ai_disclosure",),
+        ).fetchone()
+        if route_row and route_row.get("model"):
+            source_models = [str(route_row["model"])]
     draft = generate_disclosure_text(
         project_id=str(variant["project_id"]),
         variant_id=variant_id,
@@ -331,7 +339,7 @@ def generate_ai_disclosure_for_variant(
         variant_synopsis=str(variant.get("synopsis") or ""),
         platform=str(variant.get("platform") or ""),
         ai_usage_policy=str(profile.get("ai_usage_policy") or "unknown"),
-        source_models=metadata.get("source_models") if isinstance(metadata, dict) else None,
+        source_models=source_models,
         chapter_context=str(chapter_id or ""),
         user_id=user_id,
     )

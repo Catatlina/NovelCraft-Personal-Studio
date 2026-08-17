@@ -135,7 +135,11 @@ def generate_disclosure_text(
     if len(text) < 20:
         raise RuntimeError("Provider生成的AI披露文案过短")
     models = output.get("ai_models_used") or []
-    if not isinstance(models, list) or any(not str(model).strip() for model in models):
+    if (
+        not isinstance(models, list)
+        or not models
+        or any(not str(model).strip() for model in models)
+    ):
         raise RuntimeError("Provider生成的AI模型清单无效")
     estimate = output.get("usage_estimate")
     if estimate is not None and not 0 <= float(estimate) <= 100:

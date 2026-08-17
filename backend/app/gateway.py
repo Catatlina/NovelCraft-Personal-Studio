@@ -172,7 +172,7 @@ class _AiDisclosureOutput(_LenientOutput):
     """Provider-backed publication disclosure; confirmation remains human-gated."""
 
     disclosure_text: str = Field(min_length=20)
-    ai_models_used: list[str] = Field(default_factory=list)
+    ai_models_used: list[str] = Field(min_length=1)
     usage_estimate: float | None = Field(default=None, ge=0, le=100)
     rationale: str = ""
 

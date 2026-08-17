@@ -91,3 +91,25 @@ def test_provider_disclosure_is_validated_and_kept_as_draft(monkeypatch):
     assert result["disclosure_text"].startswith("本作品")
     assert result["ai_models_used"] == ["deepseek-chat"]
     assert result["provenance"]["task_type"] == "publishing_ai_disclosure"
+
+
+def test_provider_disclosure_rejects_missing_model_provenance(monkeypatch):
+    monkeypatch.setattr(
+        "app.v7.quality.semantic_assessments._complete",
+        lambda **_: {
+            "disclosure_text": "本作品在资料整理和文字辅助环节使用了人工智能工具，最终内容由作者人工确认。",
+            "ai_models_used": [],
+            "usage_estimate": None,
+            "rationale": "没有提供模型来源",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="模型清单无效"):
+        generate_disclosure_text(
+            project_id="project-1",
+            variant_id="variant-1",
+            variant_title="测试作品",
+            variant_synopsis="一个关于选择与代价的故事",
+            platform="fanqie",
+            ai_usage_policy="required_disclosure",
+        )
