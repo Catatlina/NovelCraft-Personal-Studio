@@ -963,6 +963,22 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "生成期计划控制在 216-624 字，最多允许自然波动到 737 字" in prompt
 
 
+def test_scene_serial_rescales_provider_plan_to_reader_target_before_writing():
+    cards = GenerationEngine._normalise_scene_cards(
+        {
+            "beats": [
+                {"name": f"节拍{i}", "target_words": 900, "content": "推进", "payoff_phase": "pressure"}
+                for i in range(4)
+            ]
+        },
+        target_word_count=2700,
+    )
+
+    assert sum(card["target_words"] for card in cards) == 2700
+    assert cards[0]["target_words"] < 900
+    assert all(card["target_share"] > 0 for card in cards)
+
+
 def test_scene_length_bounds_make_pacing_budget_a_generation_contract():
     minimum, maximum = GenerationEngine._scene_length_bounds(
         {"target_words": 600},

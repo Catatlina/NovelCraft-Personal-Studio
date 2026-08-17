@@ -1032,8 +1032,14 @@ class SceneDirector:
             share = target_word_count // len(normalised)
             for b in normalised:
                 b["target_words"] = share
-        elif abs(planned - target_word_count) > target_word_count * 0.5:
-            # Rescale rather than discard: the shape is useful, the sizing is not.
+        elif (
+            target_word_count >= 1800
+            and abs(planned - target_word_count) > target_word_count * 0.10
+        ):
+            # Rescale rather than discard: the shape is useful, but a provider
+            # plan that drifts materially from the reader budget must not let
+            # early scenes consume the final scene's space.  Deliberately
+            # short synthetic targets stay untouched for focused unit tests.
             factor = target_word_count / planned
             for b in normalised:
                 b["target_words"] = max(200, int(b["target_words"] * factor))
