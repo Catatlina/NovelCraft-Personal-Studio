@@ -3770,6 +3770,36 @@ class GenerationEngine:
             remaining_planned_budget = (
                 planning_max_chars - accepted_chars - future_target_chars
             )
+            if target_word_count >= 1800 and future_target_chars:
+                # If the planner leaves the current beat less than its normal
+                # completion envelope, move only slack from later beats before
+                # calling the Provider. This preserves a complete current
+                # event and keeps the chapter inside the reader budget; it is
+                # preferable to forcing a valid scene into a truncation-sized
+                # envelope and asking a later audit to repair the damage.
+                required_reallocation = max(
+                    0,
+                    nominal_max_scene_chars - remaining_planned_budget,
+                )
+                if required_reallocation and self._rebalance_future_scene_targets(
+                    cards,
+                    future_start=index,
+                    excess_chars=required_reallocation,
+                ):
+                    future_minimum_chars = sum(
+                        self._scene_length_bounds(future_card, scene_index=future_index)[0]
+                        for future_index, future_card in enumerate(cards[index:], start=index + 1)
+                    )
+                    remaining_scene_budget = (
+                        chapter_max_chars - accepted_chars - future_minimum_chars
+                    )
+                    future_target_chars = sum(
+                        int(future_card.get("target_words") or 0)
+                        for future_card in cards[index:]
+                    )
+                    remaining_planned_budget = (
+                        planning_max_chars - accepted_chars - future_target_chars
+                    )
             if target_word_count >= 1800 and remaining_planned_budget < minimum_scene_chars:
                 raise AIGatewayError(
                     "scene serial reader budget exhausted before the next scene: "
