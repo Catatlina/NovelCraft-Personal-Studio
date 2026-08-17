@@ -168,6 +168,49 @@ def test_plain_gateway_never_returns_provider_truncated_prose(monkeypatch):
     assert requested_limits == [100, 700]
 
 
+def test_bounded_scene_truncation_does_not_expand_provider_budget(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.v7.generation import generation_engine as generation_module
+
+    gateway = object.__new__(AIGateway)
+    gateway.provider = "deepseek"
+    gateway.api_key = "configured-for-test"
+    gateway.base_url = "https://example.invalid/v1"
+    gateway.default_model = "deepseek-chat"
+    gateway.timeout = 1
+    gateway.max_retries = 3
+    gateway.db = None
+    gateway.novel_id = None
+    gateway.project_id = None
+    gateway.tracer = None
+    gateway._route_resolved = False
+    requested_limits = []
+
+    class FakeGateway:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def complete_async(self, _prompt, **kwargs):
+            requested_limits.append(kwargs["max_tokens"])
+            return SimpleNamespace(
+                content="场景被截断",
+                prompt_tokens=5,
+                completion_tokens=100,
+                finish_reason="length",
+            )
+
+    monkeypatch.setattr(generation_module, "UnifiedAIGateway", FakeGateway)
+    result = asyncio.run(gateway.generate(
+        "写一个场景",
+        max_tokens=100,
+        expand_on_truncation=False,
+    ))
+
+    assert result["truncated"] is True
+    assert requested_limits == [100]
+
+
 def test_provider_opening_repair_only_replaces_first_paragraph():
     class Gateway:
         async def generate_json(self, *_args, **_kwargs):

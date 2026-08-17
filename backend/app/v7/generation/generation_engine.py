@@ -2723,6 +2723,7 @@ class AIGateway:
         client_mutation_id: str | None = None,
         task_type: str | None = None,
         reject_truncated: bool = True,
+        expand_on_truncation: bool = True,
     ) -> dict[str, Any]:
         """Call the LLM. Raises AIGatewayError after all retries fail."""
         await self._resolve_model_route(task_type or prompt_name)
@@ -2836,6 +2837,26 @@ class AIGateway:
                 if isinstance(exc, BudgetAccountingError):
                     break
                 if isinstance(exc, AIGatewayTruncatedError):
+                    if not expand_on_truncation:
+                        try:
+                            await self._record_failed_provenance(
+                                prompt=prompt,
+                                system_prompt=system_prompt,
+                                history=history,
+                                prompt_name=prompt_name,
+                                prompt_version=prompt_version,
+                                json_mode=json_mode,
+                                attempt=attempt,
+                                logical_mutation_id=logical_mutation_id,
+                                model_name=model,
+                                error=exc,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "V7 bounded scene truncation provenance could not be persisted",
+                                exc_info=True,
+                            )
+                        return {**result_payload, "truncated": True}
                     next_limit = min(
                         6000,
                         max(request_max_tokens + 600, int(request_max_tokens * 1.5)),
@@ -2865,6 +2886,8 @@ class AIGateway:
                 if attempt < self.max_retries:
                     await asyncio.sleep(min(2 ** attempt, 8))
 
+        if isinstance(last_error, AIGatewayTruncatedError) and not expand_on_truncation:
+            raise last_error
         raise AIGatewayError(
             f"LLM call failed after {self.max_retries} attempts: {last_error}"
         ) from last_error
@@ -3167,7 +3190,6 @@ class GenerationEngine:
         retry_codes = {
             "ai_phrase",
             "uniform_cadence",
-            "repeated_paragraph_opening",
             "repeated_tic",
             "structural_ai_smell",
         }
@@ -3435,14 +3457,29 @@ class GenerationEngine:
                     temperature=0.82,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
                     prompt_version=SCENE_SERIAL_GENERATION_VERSION,
+                    expand_on_truncation=False,
                 )
                 add_call_usage(result)
+                truncated = bool(result.get("truncated")) or str(
+                    result.get("finish_reason") or ""
+                ).lower() == "length"
                 candidate = str(result.get("text") or "").strip()
                 scene_metrics = analyze_deai_patterns(candidate)
-                issues = self._scene_naturalness_flags(
-                    candidate,
-                    accepted_text="\n\n".join(scene_texts),
-                )
+                issues = []
+                if truncated:
+                    issues.append({
+                        "code": "scene_provider_truncated",
+                        "severity": "high",
+                        "message": (
+                            f"Provider 在本场 {self._scene_generation_max_tokens(card, scene_index=index, max_scene_chars=scene_max_chars)} token 上限截断；"
+                            "必须压缩表达后重新生成，不能扩大预算"
+                        ),
+                    })
+                else:
+                    issues.extend(self._scene_naturalness_flags(
+                        candidate,
+                        accepted_text="\n\n".join(scene_texts),
+                    ))
                 min_scene_chars, max_scene_chars = self._scene_length_bounds(
                     card,
                     scene_index=index,
