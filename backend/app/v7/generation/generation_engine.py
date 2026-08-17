@@ -100,7 +100,10 @@ SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.90
 SCENE_PROVIDER_TOKEN_CAP = 6000
 SCENE_TARGET_MAX_RATIO = 1.30
 SCENE_NATURAL_LENGTH_TOLERANCE = 1.13
-SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 32
+# Keep a small rounding/paragraph variance allowance.  A 32-character
+# boundary was rejecting otherwise natural scenes by a few dozen characters;
+# chapter-level target reservation remains the hard ceiling.
+SCENE_NATURAL_LENGTH_TOLERANCE_CHARS = 64
 
 
 def chinese_word_count(text: str) -> int:
