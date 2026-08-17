@@ -3491,6 +3491,14 @@ class GenerationEngine:
         scene_outputs: list[dict[str, Any]] = []
         handoffs: list[dict[str, Any]] = []
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+        # Reserve the planned size of all future scenes.  The old scheduler
+        # reserved only their minimum length, allowing the first scenes to
+        # consume the reader target and leaving the climax with no room.
+        planning_max_chars = (
+            min(chapter_max_chars, int(target_word_count * 1.10))
+            if target_word_count >= 1800
+            else chapter_max_chars
+        )
 
         def add_call_usage(call_usage: dict[str, Any]) -> None:
             usage["tokens_input"] += int(call_usage.get("tokens_input") or 0)
@@ -3508,6 +3516,10 @@ class GenerationEngine:
                 self._scene_length_bounds(future_card, scene_index=future_index)[0]
                 for future_index, future_card in enumerate(cards[index:], start=index + 1)
             )
+            future_target_chars = sum(
+                int(future_card.get("target_words") or 0)
+                for future_card in cards[index:]
+            )
             remaining_scene_budget = chapter_max_chars - accepted_chars - future_minimum_chars
             if remaining_scene_budget < minimum_scene_chars:
                 raise AIGatewayError(
@@ -3515,7 +3527,21 @@ class GenerationEngine:
                     f"scene={index}, accepted_chars={accepted_chars}, "
                     f"chapter_max_chars={chapter_max_chars}"
                 )
-            scene_max_chars = min(nominal_max_scene_chars, remaining_scene_budget)
+            remaining_planned_budget = (
+                planning_max_chars - accepted_chars - future_target_chars
+            )
+            if target_word_count >= 1800 and remaining_planned_budget < minimum_scene_chars:
+                raise AIGatewayError(
+                    "scene serial reader budget exhausted before the next scene: "
+                    f"scene={index}, accepted_chars={accepted_chars}, "
+                    f"future_target_chars={future_target_chars}, "
+                    f"planning_max_chars={planning_max_chars}"
+                )
+            scene_max_chars = min(
+                nominal_max_scene_chars,
+                remaining_scene_budget,
+                remaining_planned_budget if target_word_count >= 1800 else remaining_scene_budget,
+            )
             feedback = ""
             accepted_scene = ""
             scene_metrics: dict[str, Any] = {}
