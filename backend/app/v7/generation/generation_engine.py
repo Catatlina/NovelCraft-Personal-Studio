@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.11.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.12.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -3126,7 +3126,7 @@ class GenerationEngine:
                 # finished chapter with a detector-oriented rewrite.
                 opening_cap = max(320, min(480, int(target_word_count * 0.16)))
                 opening_excess = max(0, target_words - opening_cap)
-                target_words = min(target_words, opening_cap)
+                target_words = opening_cap
                 opening_constraint = (
                     "前两句必须出现正在发生的动作、具体异常或明确目标；"
                     "前180字内必须发生会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
@@ -3239,6 +3239,15 @@ class GenerationEngine:
                     )
                 elif index > 2:
                     card["opening_constraint"] = ""
+        if target_word_count >= 1800:
+            planned_total = sum(card["target_words"] for card in cards)
+            excess = max(0, planned_total - target_word_count)
+            if excess and len(cards) > 1:
+                GenerationEngine._rebalance_future_scene_targets(
+                    cards,
+                    future_start=1,
+                    excess_chars=excess,
+                )
         # Keep the plan's declared scale visible to the writer, but do not
         # silently change the chapter scale merely to satisfy an opening cap.
         planned_words = sum(card["target_words"] for card in cards) or 1

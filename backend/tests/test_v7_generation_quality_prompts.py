@@ -1032,6 +1032,22 @@ def test_scene_serial_rescales_provider_plan_to_reader_target_before_writing():
     assert all(card["target_share"] > 0 for card in cards)
 
 
+def test_scene_serial_keeps_a_complete_opening_when_provider_plan_starts_too_small():
+    cards = GenerationEngine._normalise_scene_cards(
+        {
+            "beats": [
+                {"name": "开场", "target_words": 300, "content": "异常"},
+                {"name": "推进", "target_words": 1200, "content": "推进"},
+                {"name": "收束", "target_words": 1200, "content": "钩子"},
+            ]
+        },
+        target_word_count=2700,
+    )
+
+    assert cards[0]["target_words"] >= 400
+    assert sum(card["target_words"] for card in cards) <= 2700
+
+
 def test_scene_length_bounds_make_pacing_budget_a_generation_contract():
     minimum, maximum = GenerationEngine._scene_length_bounds(
         {"target_words": 600},
