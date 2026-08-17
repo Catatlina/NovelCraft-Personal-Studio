@@ -78,7 +78,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.10.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.11.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -3630,6 +3630,23 @@ class GenerationEngine:
             if scene_index == 1
             else ""
         )
+        chapter_contract = scene_plan.get("chapter_contract") or {}
+        payoff_contract = scene_plan.get("payoff_contract") or {}
+        causal_ledger = scene_plan.get("causal_ledger") or []
+        causal_contract_block = ""
+        if chapter_contract or payoff_contract or causal_ledger:
+            causal_contract_block = (
+                "【本章因果闭环与代价】\n"
+                f"{json.dumps({
+                    'chapter_contract': chapter_contract,
+                    'payoff_contract': payoff_contract,
+                    'causal_ledger': causal_ledger[:6],
+                }, ensure_ascii=False)[:5200]}\n"
+                "本场若触发契约中的选择、突破、指点、开启、使用能力或其他关键动作，"
+                "必须在本场或紧接下一场写出完整链条：触发动作→当场可见/可感知反馈→人物确认这就是代价或规则后果→新的压力。"
+                "代价不能只在旁白中与结果并列宣布；至少落到一个具体物件、身体变化、规则变化、他人反应或资源损失，"
+                "并让人物行为或对白对这个反馈作出反应。\n"
+            )
         opening_instruction = ""
         if scene_index == 1:
             if previous_scene_tail or (context.get("context_layers") or {}).get("previous_tail"):
@@ -3681,6 +3698,7 @@ class GenerationEngine:
             f"{opening_mode_block}"
             f"{opening_instruction}\n"
             f"{contract_block}\n"
+            f"{causal_contract_block}"
             "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"

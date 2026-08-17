@@ -959,6 +959,9 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
                 "directive": "从具体物件的异常起笔。",
                 "forbidden_recent_modes": ["action"],
             },
+            "chapter_contract": {"cost": "封印磨损加速"},
+            "payoff_contract": {"visible_result": "门上字迹", "cost": "封印磨损加速"},
+            "causal_ledger": [{"event": "指点弟子", "cost": "封印磨损加速"}],
         },
         scene_card=cards[0],
         scene_index=1,
@@ -971,6 +974,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "前180字内必须出现" in prompt
     assert "本章指定开场类型：物件异常开场（object）" in prompt
     assert "从具体物件的异常起笔" in prompt
+    assert "触发动作→当场可见/可感知反馈→人物确认这就是代价或规则后果" in prompt
     assert "不能连续用日常拖慢开局" in prompt
     assert "前600字内必须让人物感知一个具体威胁" in prompt
     assert "碑文、账册、书信、纸条等直接文字" in prompt
