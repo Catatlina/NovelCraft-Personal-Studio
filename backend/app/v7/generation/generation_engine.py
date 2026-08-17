@@ -77,7 +77,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.2.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.3.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
 # generation inside that platform envelope instead of imposing an unrelated
@@ -88,7 +88,7 @@ SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 1.35
 SCENE_OPENAI_TRUNCATION_REPAIR_MARGIN = 1.20
 SCENE_DEEPSEEK_OVERLONG_REPAIR_MARGIN = 0.64
 SCENE_OPENAI_OVERLONG_REPAIR_MARGIN = 0.78
-SCENE_PROVIDER_TOKEN_CAP = 2400
+SCENE_PROVIDER_TOKEN_CAP = 6000
 
 
 def chinese_word_count(text: str) -> int:
@@ -3172,11 +3172,12 @@ class GenerationEngine:
             if provider == "openai"
             else SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN
         )
-        # The previous 1600-token ceiling made the bounded truncation retry
-        # ineffective for larger scenes: both the first call and its repair
-        # were silently sent with the same ceiling.  Keep the character
-        # envelope as the hard pacing contract, but give the real provider
-        # enough completion headroom to finish the scene naturally.
+        # The previous fixed 1600/2400-token ceilings made the bounded
+        # truncation retry ineffective for larger scenes: both the first call
+        # and its repair could be silently sent below the character-derived
+        # completion budget.  Keep the character envelope as the hard pacing
+        # contract, but let the real provider finish a large scene naturally;
+        # 6000 remains the gateway's global completion safety ceiling.
         return max(240, min(SCENE_PROVIDER_TOKEN_CAP, int(maximum * margin)))
 
     @staticmethod

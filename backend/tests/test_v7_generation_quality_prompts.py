@@ -940,8 +940,16 @@ def test_scene_truncation_retry_can_grow_past_the_old_fixed_ceiling():
         token_margin=1.35,
     )
 
-    assert retry_limit == SCENE_PROVIDER_TOKEN_CAP
-    assert retry_limit > 1600
+    assert retry_limit == int(2200 * 1.35)
+    assert retry_limit > 2400
+
+    large_scene_retry_limit = engine._scene_generation_max_tokens(
+        card,
+        scene_index=3,
+        max_scene_chars=4500,
+        token_margin=1.35,
+    )
+    assert large_scene_retry_limit == SCENE_PROVIDER_TOKEN_CAP
 
 
 def test_story_director_defaults_to_generation_first_without_post_write_rework():
