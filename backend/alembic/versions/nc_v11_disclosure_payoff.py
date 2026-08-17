@@ -11,7 +11,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
+    # Use the driver directly: SQLAlchemy's text() parser treats JSON example
+    # colons inside the dollar-quoted prompt as bind parameters (e.g. `:null`).
+    op.get_bind().exec_driver_sql(
         r"""
         INSERT INTO prompts (name, version, model, template, golden_cases)
         VALUES (
@@ -74,7 +76,7 @@ $chapter_text
 
 
 def downgrade() -> None:
-    op.execute(
+    op.get_bind().exec_driver_sql(
         """
         DELETE FROM model_routes
         WHERE task_type IN ('publishing_ai_disclosure', 'publishing_payoff_semantic');
