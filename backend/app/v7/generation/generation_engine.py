@@ -3565,7 +3565,13 @@ class GenerationEngine:
                         scene_max_chars,
                         pacing_max_scene_chars,
                     )
-                if "scene_provider_truncated" in previous_issue_codes and attempt >= 2:
+                if (
+                    previous_issue_codes.intersection({
+                        "scene_provider_truncated",
+                        "scene_chapter_budget_overrun",
+                    })
+                    and attempt >= 2
+                ):
                     # A repeated truncation means the Provider is not
                     # self-terminating at the nominal beat length. Enter a
                     # compact generation mode instead of repeatedly raising
@@ -3687,10 +3693,18 @@ class GenerationEngine:
                         )
                         if isinstance(item, dict) and item.get("code") == "scene_overlong"
                         else (
+                            (
+                                f"{item.get('code')}[accepted={accepted_chars},"
+                                f"candidate={candidate_word_count},future_min={future_minimum_chars},"
+                                f"chapter_max={chapter_max_chars}]"
+                            )
+                            if isinstance(item, dict) and item.get("code") == "scene_chapter_budget_overrun"
+                            else (
                             f"{item.get('code')}[token_limit={scene_token_limit},"
                             f"max_chars={attempt_max_scene_chars}]"
                             if isinstance(item, dict) and item.get("code") == "scene_provider_truncated"
                             else str(item.get("code"))
+                            )
                         )
                         for item in issues
                     )
