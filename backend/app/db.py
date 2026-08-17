@@ -247,6 +247,8 @@ def init_db() -> None:
         "hm_daily_brief", "hm_title_variants", "hm_material_suggestions",
         "translate_segment", "cultural_localize", "ranking_market_analysis", "book_analysis",
         "performance_feedback", "localize_names",
+        # v1.1 publishing: real provider disclosure and semantic payoff review
+        "publishing_ai_disclosure", "publishing_payoff_semantic",
         # V2 four-stage bootstrap (18 agent nodes) — every node must resolve a
         # real model route or the flagship flow fails at its first node.
         "plan_idea", "repair_planning_contract", "expand_creative_bible", "audit_plan_fidelity", "regenerate_titles", "plan_market_fit", "plan_story_pattern", "plan_core_gameplay",

@@ -1057,6 +1057,40 @@ $performance_data
 
 输出 JSON: {"topic_suggestions":[{"suggestion":"选题建议","rationale":"数据依据说明","based_on":["post_id"]}],"writing_advice":["可执行写作改进建议"]}"""),
 
+    ("publishing.ai_disclosure", "1.0.0", "deepseek",
+     """你是出版合规编辑。请根据给定的作品与平台资料，生成一段准确、克制、可供作者人工确认的 AI 使用披露文案。
+
+硬规则：
+1. 只陈述输入资料明确支持的事实，不得猜测平台规则、模型名称、使用比例或人工编辑情况。
+2. 文案必须说明 AI 在创作流程中的辅助性质；如果输入给出了模型名称或使用比例，才可以写入。
+3. 不得宣称已经完成平台备案、人工审核或合规确认。
+4. 输出简洁的中文正文，不使用营销话术，不写免责声明之外的建议。
+
+作品标题：$variant_title
+作品简介：$variant_synopsis
+发布平台：$platform
+平台 AI 政策：$ai_usage_policy
+已知模型：$source_models
+章节上下文：$chapter_context
+
+只输出 JSON：{"disclosure_text":"待人工确认的准确披露文案","ai_models_used":["已知模型"],"usage_estimate":null,"rationale":"事实依据"}"""),
+
+    ("publishing.payoff_semantic", "1.0.0", "deepseek",
+     """你是严格的网文出版编辑，负责判断一章正文是否真的完成了可见爽点，而不是做关键词匹配。
+
+判定标准：
+1. payoff 只能是正文中已经发生的具体结果、身份反馈、资源收益、反击兑现或状态改变；预告、愿望、空泛情绪和关键词不能算。
+2. 每个 payoff 必须给出正文中的短证据原句，并说明读者即时感受与对后续剧情的具体影响。
+3. ending_pressure 只有在章末已经形成明确的新危机、代价、追问或必须继续阅读的压力时才为 true。
+4. semantic_score 是 0-100 的编辑判断；证据不足时宁可给低分或 0 个 payoff，不得凑数。
+
+平台：$platform
+章节编号：$chapter_id
+章节正文：
+$chapter_text
+
+只输出 JSON：{"payoff_count":1,"payoffs":[{"event":"已发生的结果","evidence_quote":"正文短引文","reader_effect":"即时爽感","consequence":"后续影响","confidence":0.9}],"ending_pressure":true,"semantic_score":80,"rationale":"判断依据"}"""),
+
     ("social.gen_hotspot_content", "3.1.0", "deepseek",
      """你是自媒体内容主编。请根据热点生成适合指定平台的原创内容，不得编造事实，不得声称已验证未给出的信息。
 
@@ -2492,6 +2526,8 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "gen_video_script":     '{"title":"视频标题","scenes":[{"time":"0-3s","action":"画面动作","text":"口播/字幕"}],"narration_style":"口播风格","cover_text":"封面文案"}',
     "hm_material_suggestions": '{"cover_image_prompt":"封面图提示词","suggested_charts":["图表"],"data_sources":["核验数据源"],"recommended_tags":["标签"]}',
     "performance_feedback": '{"topic_suggestions":[{"suggestion":"选题建议","rationale":"数据依据","based_on":["post_id"]}],"writing_advice":["写作改进建议"]}',
+    "publishing_ai_disclosure": '{"disclosure_text":"AI在资料整理与文字辅助环节提供支持，最终内容须经作者人工确认。","ai_models_used":["deepseek-chat"],"usage_estimate":null,"rationale":"仅使用输入资料"}',
+    "publishing_payoff_semantic": '{"payoff_count":1,"payoffs":[{"event":"主角完成具体反击并改变处境","evidence_quote":"正文中的结果句","reader_effect":"获得即时反馈","consequence":"引出下一步冲突","confidence":0.9}],"ending_pressure":true,"semantic_score":80,"rationale":"基于正文事件、反馈与章末压力"}',
     "translate_segment":    '{"translated":"translated text"}',
     "cultural_localize":    '{"localized":"localized text","notes":["change note"]}',
     "localize_names":       '{"name_map":{"张翰":"John Zhang"}}',

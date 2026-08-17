@@ -164,14 +164,36 @@ class _RhythmOutput(_StrictOutput):
     sections: list[dict[str, Any]]
 
 
-# ── V2 four-stage bootstrap output models ──────────────────────────────────
-# Real models are non-deterministic and often add extra fields; per the
-# 2026-07-13 audit remediation these tolerate extras (ignore) while still
-# requiring the fields downstream nodes consume.
 class _LenientOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class _AiDisclosureOutput(_LenientOutput):
+    """Provider-backed publication disclosure; confirmation remains human-gated."""
+
+    disclosure_text: str = Field(min_length=20)
+    ai_models_used: list[str] = Field(default_factory=list)
+    usage_estimate: float | None = Field(default=None, ge=0, le=100)
+    rationale: str = ""
+
+
+class _SemanticPayoffItem(_LenientOutput):
+    event: str = Field(min_length=2)
+    evidence_quote: str = Field(min_length=2)
+    reader_effect: str = Field(min_length=2)
+    consequence: str = Field(min_length=2)
+    confidence: float = Field(ge=0, le=1)
+
+
+class _SemanticPayoffOutput(_LenientOutput):
+    payoff_count: int = Field(ge=0)
+    payoffs: list[_SemanticPayoffItem] = Field(default_factory=list)
+    ending_pressure: bool
+    semantic_score: float = Field(ge=0, le=100)
+    rationale: str = ""
+
+
+# ── V2 four-stage bootstrap output models ──────────────────────────────────
 # V6.1.2 structured 7-dim review (closed-loop routing source).
 # score_7dim is fixed {dim:{score,reason}} (never flat {style:85}); issues are
 # structured objects carrying type/severity/location/repair_scope/confidence so
@@ -574,6 +596,8 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "review_ooc": _OocOutput,
     "review_consistency": _ConsistencyOutput,
     "review_rhythm": _RhythmOutput,
+    "publishing_ai_disclosure": _AiDisclosureOutput,
+    "publishing_payoff_semantic": _SemanticPayoffOutput,
     # V2 four-stage bootstrap (18 agent nodes)
     "plan_idea": _PlanIdeaOutput,
     "repair_planning_contract": _PlanningContractRepairOutput,

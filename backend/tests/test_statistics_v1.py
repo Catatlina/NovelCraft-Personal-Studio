@@ -108,7 +108,7 @@ def test_avg_sentence_length():
 def test_empty_string():
     result = compute_statistics("")
     assert result.total_chars == 0
-    assert result.chapter_count == 1  # 无标题空段
+    assert result.chapter_count == 0  # 空文本按冻结规范不构造虚拟章节
 
 
 def test_json_serializable():

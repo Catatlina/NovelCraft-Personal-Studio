@@ -202,22 +202,31 @@ def test_local_repair():
     # 3.1 AI味检测
     ai_text = "此时此刻，林辰不禁感到震惊。仿佛命运一般，他不由得握紧了拳头。总而言之，这是一个新的开始。"
     risks = repair_mod.detect_risk_sentences(ai_text)
-    # 至少应该检测到一些AI味模式
-    assert_true(len(risks) >= 0, f"风险检测应运行，检测到{len(risks)}处")
+    assert_true(len(risks) >= 1, f"应检测到AI味风险，实际{len(risks)}处")
 
     # 3.2 标点异常检测
     punct_text = "这是一句话。。这是另一句话，，还有第三句。"
     risks_punct = repair_mod.detect_risk_sentences(punct_text)
     punct_types = [r.risk_type for r in risks_punct]
-    assert_true("punctuation" in punct_types or len(risks_punct) >= 0, "应检测到标点异常")
+    assert_true("punctuation" in punct_types, "应检测到标点异常")
 
     # 3.3 修复流水线
     result = repair_mod.local_repair_pipeline(ai_text, max_rounds=2, max_repairs_per_round=3)
     assert_true(result.rounds_used >= 1, f"应至少运行1轮，实际{result.rounds_used}")
     assert_true(result.max_rounds == 2, "max_rounds应为2")
+    assert_true(result.repaired_text != ai_text, "检测到风险后应产生局部修复结果")
 
     # 3.4 should_use_full_rewrite
     assert_true(not repair_mod.should_use_full_rewrite([], "test"), "无风险时不应整章重写")
+
+    # 3.5 空简介不能让平台门禁抛出未绑定变量异常
+    report = gates_mod.run_all_gates(
+        chapter_id="test-empty-synopsis",
+        text=SAMPLE_CHAPTER,
+        platform_profile={"platform": "fanqie", "policy_status": "confirmed", "ai_usage_policy": "allowed"},
+        metadata={"title": "测试标题", "synopsis": "", "tags": ["重生"], "category": "都市"},
+    )
+    assert_true(not report.gates["platform_compliance"].passed, "空简介应明确阻断平台合规")
 
     print(f"  ✅ 局部修复测试完成 (累计{_passed})")
 

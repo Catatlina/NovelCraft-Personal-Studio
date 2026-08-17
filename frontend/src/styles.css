@@ -208,6 +208,42 @@ th { color: var(--text-muted); font-size: 13px; }
 .editor-chapter-item.active { color: var(--brand-500); background: rgba(91,102,219,0.1); font-weight: 500; }
 @media (max-width: 900px) { .editor-pro { grid-template-columns: 1fr; } .editor-left, .editor-right { display: none; } }
 
+/* ─── Publishing preparation ─── */
+.publishing-page { max-width: 1420px; margin: 0 auto; }
+.publishing-page .eyebrow { display: flex; align-items: center; gap: 6px; color: var(--brand-500); font-size: 11px; font-weight: 700; letter-spacing: .1em; margin-bottom: 9px; }
+.publishing-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, .85fr); gap: 16px; align-items: start; }
+.publishing-side { display: flex; flex-direction: column; gap: 16px; }
+.publishing-main-card { min-width: 0; }
+.publishing-variant-list { display: flex; flex-direction: column; gap: 8px; }
+.publishing-variant { width: 100%; min-height: 56px; justify-content: space-between; text-align: left; padding: 10px 12px; background: var(--bg-base); border-color: var(--border-subtle); }
+.publishing-variant > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+.publishing-variant small { color: var(--text-muted); font-size: 11px; }
+.publishing-variant.selected { color: var(--brand-500); border-color: var(--brand-500); background: var(--brand-50); }
+.publishing-section-divider { height: 1px; background: var(--border-subtle); margin: 22px 0; }
+.publishing-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.publishing-field-wide { grid-column: 1 / -1; }
+.publishing-form-grid textarea { min-height: 94px; }
+.publishing-readiness-list { display: flex; flex-direction: column; gap: 7px; margin: 14px 0; }
+.publishing-readiness-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-secondary); font-size: 12px; }
+.publishing-readiness-row > span { display: inline-flex; align-items: center; gap: 7px; }
+.publishing-readiness-row svg { color: var(--success); }
+.publishing-readiness-row:has(svg:first-child) small { color: var(--danger); }
+.publishing-readiness-row .dot { width: 7px; height: 7px; margin: 0 4px; border-radius: 50%; background: var(--text-muted); }
+.publishing-readiness-row small { color: var(--text-muted); }
+.publishing-meta-line { color: var(--text-muted); font-size: 11px; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.publishing-full-button { width: 100%; justify-content: center; margin-top: 14px; }
+.publishing-disclosure-text { min-height: 72px; padding: 11px; color: var(--text-secondary); background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 10px; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.publishing-chapter-note { margin-top: 9px; font-size: 11px; }
+.publishing-alert, .publishing-notice { display: flex; align-items: center; gap: 7px; margin-bottom: 16px; }
+.publishing-notice { padding: 10px 12px; color: var(--success); background: var(--success-soft); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); border-radius: 10px; font-size: 12px; }
+.publishing-empty { max-width: 640px; margin: 50px auto; text-align: center; }
+.publishing-empty h2 { margin: 10px 0 5px; }
+.publishing-empty p { color: var(--text-muted); font-size: 13px; }
+.spin { animation: publishing-spin 1s linear infinite; }
+@keyframes publishing-spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) { .publishing-layout { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .publishing-form-grid { grid-template-columns: 1fr; } .publishing-field-wide { grid-column: auto; } }
+
 /* ─── Starlume AI — calm, spacious novel workspace ─── */
 :root {
   color-scheme: light;

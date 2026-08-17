@@ -14,6 +14,7 @@ import { cacheDelete, cacheGet, cacheSet, deleteMutation, enqueueMutation, listM
 import { WorkspaceDashboard } from "./components/WorkspaceDashboard";
 import { RankingCenter } from "./components/RankingCenter";
 import { NotFoundPage } from "./components/NotFoundPage";
+import { PublishingPreparation } from "./components/PublishingPreparation";
 import { buildAiEditPreview, normalizeParagraphBreaks } from "./lib/editorPreview";
 import { cleanNovelTitle } from "./lib/titleDisplay";
 import { selectRefreshedChapter, shouldSyncEditorText, sortChapterItems } from "./lib/chapterRefresh";
@@ -37,7 +38,7 @@ type Tab = AppTab;
 
 const API = "";
 const Editor = React.lazy(() => import("./components/Editor").then(module => ({ default: module.Editor })));
-const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "settings", "ranking", "v7", "genre-manager"]);
+const PUBLIC_TABS = new Set<Tab>(["dashboard", "wizard", "library", "progress", "editor", "review", "publish", "settings", "ranking", "v7", "genre-manager"]);
 const LEGACY_TAB_REDIRECTS: Record<string, Tab> = {
   home: "dashboard",
   overview: "dashboard",
@@ -1217,7 +1218,7 @@ export default function App() {
       novels={novels.map(n => ({ id: n.id, title: cleanNovelTitle(n.title, "待命名作品") }))}
       currentNovelId={novel?.id}
       onNovelChange={(novelId) => { void activateNovel(novelId); }}
-      showSelector={tab === "progress" || tab === "editor" || tab === "review"}>
+      showSelector={tab === "progress" || tab === "editor" || tab === "review" || tab === "publish"}>
       {error && <div className="error">{error}</div>}
       {routeNotFound ? <NotFoundPage onNavigate={setTab} /> : <>
       {tab === "dashboard" && <WorkspaceDashboard projectId={project?.id} currentNovelTitle={novel?.title} run={run} chaptersCount={chapters.length} aiCalls={aiCalls} userEmail={userEmail} onNavigate={setTab} />}
@@ -1277,7 +1278,8 @@ export default function App() {
           }
         }
         setTab("editor");
-      }} />}
+       }} />}
+      {tab === "publish" && <PublishingPreparation projectId={project?.id} novelId={novel?.id} novelTitle={novel?.title} chapters={chapters} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
             <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText: updateEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />

@@ -57,6 +57,12 @@ AI_WRAPPER_CALLS = {
     "generate_v7_chapter",
     "generate_v7_chapter_sync",
     "_generate_v7_chapter_worker",
+    # v1.1 publishing boundary: these wrappers all delegate to app.gateway.complete
+    # and retain provider failure/provenance instead of manufacturing output.
+    "_complete",
+    "generate_disclosure_text",
+    "generate_ai_disclosure_for_variant",
+    "generate_disclosure_api",
     # Canonical V7 review boundary: the async service constructs the V7
     # ReviewEngine and its AIGateway, while these helpers only bridge into it.
     "review_chapter_v7",

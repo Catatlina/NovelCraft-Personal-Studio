@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from ..quality.statistics_v1 import compute_statistics
-from ..quality.publishing_gates import run_all_gates, PublishingGateReport
+from ..quality.publishing_gates import GATE_DEFINITIONS, run_all_gates, PublishingGateReport
+from ..quality.semantic_assessments import assess_payoff_semantically, generate_disclosure_text
 
 
 def _now() -> str:
@@ -135,13 +136,14 @@ def create_platform_profile(db, project_id: str, platform: str, profile_name: st
         f"""
         INSERT INTO platform_publication_profiles
             (id, project_id, platform, profile_name, policy_status, ai_usage_policy,
-             word_count_min, word_count_max, chapter_word_min, chapter_word_max, extra_metadata)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             policy_version, word_count_min, word_count_max, chapter_word_min, chapter_word_max, extra_metadata)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (profile_id, project_id, platform, profile_name,
          values.get("policy_status", "unknown"),
          values.get("ai_usage_policy", "unknown"),
+         values.get("policy_version", ""),
          values.get("word_count_min"), values.get("word_count_max"),
          values.get("chapter_word_min"), values.get("chapter_word_max"),
          json.dumps(extra, ensure_ascii=False)),
@@ -191,10 +193,40 @@ def update_variant_status(db, variant_id: str, new_status: str) -> dict[str, Any
     if not can_transition(current, new_status):
         raise ValueError(f"非法状态转换: {current} → {new_status}")
 
-    db.execute(
-        "UPDATE publication_variants SET publication_status = %s, updated_at = now() WHERE id = %s",
-        (new_status, variant_id),
-    )
+    if new_status == "publish_ready":
+        rows = db.execute(
+            """
+            SELECT DISTINCT ON (gate_key) gate_key, passed
+            FROM quality_gate_results
+            WHERE variant_id = %s
+            ORDER BY gate_key, created_at DESC
+            """,
+            (variant_id,),
+        ).fetchall()
+        latest = {str(row["gate_key"]): dict(row) for row in rows}
+        failed = [
+            key for key, definition in GATE_DEFINITIONS.items()
+            if definition["is_blocking"]
+            and (key not in latest or not latest[key].get("passed"))
+        ]
+        if failed:
+            raise ValueError(f"尚未满足publish_ready门禁: {', '.join(failed)}")
+
+    if new_status == "published":
+        db.execute(
+            "UPDATE publication_variants SET publication_status = %s, published_at = now(), updated_at = now() WHERE id = %s",
+            (new_status, variant_id),
+        )
+    elif current == "published":
+        db.execute(
+            "UPDATE publication_variants SET publication_status = %s, published_at = NULL, updated_at = now() WHERE id = %s",
+            (new_status, variant_id),
+        )
+    else:
+        db.execute(
+            "UPDATE publication_variants SET publication_status = %s, updated_at = now() WHERE id = %s",
+            (new_status, variant_id),
+        )
     return {"variant_id": variant_id, "old_status": current, "new_status": new_status}
 
 
@@ -206,19 +238,26 @@ def create_ai_disclosure(
     disclosure_text: str = "",
     ai_models_used: Optional[list[str]] = None,
     ai_usage_estimate: Optional[float] = None,
+    generation_method: str = "auto",
+    generated_by: Optional[str] = None,
 ) -> dict[str, Any]:
     """创建AI披露记录。"""
+    if not get_variant(db, variant_id):
+        raise ValueError(f"变体不存在: {variant_id}")
     record_id = _new_id()
-    status = "confirmed" if disclosure_text else "generated"
+    # 生成文本不等于人工确认；publish_ready 必须经过显式 confirm 接口。
+    status = "generated" if disclosure_text.strip() else "pending"
+    if generation_method not in {"auto", "manual", "provider", "template"}:
+        raise ValueError(f"无效的AI披露生成方式: {generation_method}")
     db.execute(
         """
         INSERT INTO ai_disclosure_records
             (id, variant_id, chapter_id, disclosure_status, disclosure_text,
-             generation_method, ai_usage_estimate, ai_models_used)
-        VALUES (%s, %s, %s, %s, %s, 'auto', %s, %s)
+             generation_method, generated_by, ai_usage_estimate, ai_models_used)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
-        (record_id, variant_id, chapter_id, status, disclosure_text,
+        (record_id, variant_id, chapter_id, status, disclosure_text, generation_method, generated_by,
          ai_usage_estimate, json.dumps(ai_models_used or [], ensure_ascii=False)),
     )
     # 同步更新变体的披露状态
@@ -226,7 +265,7 @@ def create_ai_disclosure(
         "UPDATE publication_variants SET ai_disclosure_status = %s, ai_disclosure_text = %s, updated_at = now() WHERE id = %s",
         (status, disclosure_text, variant_id),
     )
-    return {"disclosure_id": record_id, "status": status}
+    return {"disclosure_id": record_id, "status": status, "disclosure_text": disclosure_text}
 
 
 def confirm_ai_disclosure(db, disclosure_id: str, confirmed_by: str = "user") -> dict[str, Any]:
@@ -235,18 +274,78 @@ def confirm_ai_disclosure(db, disclosure_id: str, confirmed_by: str = "user") ->
         """
         UPDATE ai_disclosure_records
         SET disclosure_status = 'confirmed', confirmed_by = %s, confirmed_at = now(), updated_at = now()
-        WHERE id = %s
+        WHERE id = %s AND NULLIF(BTRIM(disclosure_text), '') IS NOT NULL
         RETURNING variant_id
         """,
         (confirmed_by, disclosure_id),
     )
     row = db.fetchone()
-    if row:
-        db.execute(
-            "UPDATE publication_variants SET ai_disclosure_status = 'confirmed', updated_at = now() WHERE id = %s",
-            (row["variant_id"],),
-        )
+    if not row:
+        raise ValueError(f"AI披露记录不存在: {disclosure_id}")
+    db.execute(
+        "UPDATE publication_variants SET ai_disclosure_status = 'confirmed', updated_at = now() WHERE id = %s",
+        (row["variant_id"],),
+    )
     return {"disclosure_id": disclosure_id, "status": "confirmed"}
+
+
+def generate_ai_disclosure_for_variant(
+    db,
+    variant_id: str,
+    chapter_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Generate a provider-backed disclosure draft and leave it unconfirmed."""
+    row = db.execute(
+        """
+        SELECT v.*, n.project_id AS project_id
+        FROM publication_variants v
+        JOIN contents n ON n.id = v.novel_id AND n.type = 'novel' AND n.is_deleted = FALSE
+        WHERE v.id = %s
+        """,
+        (variant_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"变体不存在: {variant_id}")
+    variant = dict(row)
+    profile = None
+    if variant.get("platform_profile_id"):
+        profile_row = db.execute(
+            "SELECT * FROM platform_publication_profiles WHERE id = %s AND is_active = TRUE",
+            (variant["platform_profile_id"],),
+        ).fetchone()
+        profile = dict(profile_row) if profile_row else None
+    if profile is None:
+        profile = get_platform_profile(db, str(variant["project_id"]), str(variant["platform"]))
+    profile = profile or {}
+    metadata = variant.get("extra_metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    draft = generate_disclosure_text(
+        project_id=str(variant["project_id"]),
+        variant_id=variant_id,
+        variant_title=str(variant.get("title") or variant.get("variant_name") or ""),
+        variant_synopsis=str(variant.get("synopsis") or ""),
+        platform=str(variant.get("platform") or ""),
+        ai_usage_policy=str(profile.get("ai_usage_policy") or "unknown"),
+        source_models=metadata.get("source_models") if isinstance(metadata, dict) else None,
+        chapter_context=str(chapter_id or ""),
+        user_id=user_id,
+    )
+    record = create_ai_disclosure(
+        db,
+        variant_id=variant_id,
+        chapter_id=chapter_id,
+        disclosure_text=draft["disclosure_text"],
+        ai_models_used=draft["ai_models_used"],
+        ai_usage_estimate=draft["ai_usage_estimate"],
+        generation_method="provider",
+        generated_by=user_id,
+    )
+    return {**record, "rationale": draft.get("rationale", ""), "provenance": draft["provenance"]}
 
 
 # ── 人工编辑记录 ──────────────────────────────────────────────
@@ -263,19 +362,20 @@ def record_human_editing(
     chars_removed: int = 0,
     human_confirmed: bool = False,
     editor_name: str = "",
+    editor_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """记录人工编辑（用于allowed_with_human_editing政策）。"""
     record_id = _new_id()
     db.execute(
         """
         INSERT INTO human_editing_records
-            (id, chapter_id, variant_id, edit_type, repaired_sentence_indices,
+            (id, chapter_id, variant_id, editor_id, edit_type, repaired_sentence_indices,
              repaired_paragraph_indices, before_sha256, after_sha256,
              chars_added, chars_removed, human_confirmed, editor_name)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
-        (record_id, chapter_id, variant_id, edit_type,
+        (record_id, chapter_id, variant_id, editor_id, edit_type,
          json.dumps(repaired_sentences or [], ensure_ascii=False),
          json.dumps(repaired_paragraphs or [], ensure_ascii=False),
          before_sha256, after_sha256, chars_added, chars_removed,
@@ -311,6 +411,7 @@ def run_publishing_gates_for_chapter(
     existing_review_score: Optional[float] = None,
     external_score: Optional[float] = None,
     external_flagged: bool = False,
+    user_id: Optional[str] = None,
 ) -> PublishingGateReport:
     """对章节运行七道门禁，保存结果，更新变体状态。"""
     # 获取平台配置
@@ -331,6 +432,19 @@ def run_publishing_gates_for_chapter(
             })
             external_flagged = external_flagged or variant.get("external_ai_flagged", False)
             external_score = external_score if external_score is not None else variant.get("external_ai_score")
+
+    semantic_payoff = None
+    if project_id and platform:
+        # A configured publication run is intentionally provider-backed.  Any
+        # missing route, provider outage, or malformed response propagates and
+        # prevents a misleading quality result from being persisted.
+        semantic_payoff = assess_payoff_semantically(
+            project_id=str(project_id),
+            chapter_id=str(chapter_id),
+            text=text,
+            platform=str(platform),
+            user_id=user_id,
+        )
 
     # 检查人工编辑
     human_editing_confirmed = has_confirmed_human_editing(db, chapter_id, variant_id)
@@ -357,6 +471,7 @@ def run_publishing_gates_for_chapter(
         existing_review_score=existing_review_score,
         human_editing_confirmed=human_editing_confirmed,
         disclosure_record=disclosure_record,
+        semantic_payoff=semantic_payoff,
         external_score=external_score,
         external_flagged=external_flagged,
     )
@@ -399,6 +514,9 @@ def update_chapter_publishing_status(db, chapter_id: str, new_status: str) -> di
     """更新contents表的publishing_status字段。"""
     if new_status not in PUBLISHING_STATES:
         raise ValueError(f"无效状态: {new_status}")
+    row = db.execute("SELECT id FROM contents WHERE id = %s", (chapter_id,)).fetchone()
+    if not row:
+        raise ValueError(f"章节不存在: {chapter_id}")
     db.execute(
         "UPDATE contents SET publishing_status = %s, updated_at = now() WHERE id = %s",
         (new_status, chapter_id),

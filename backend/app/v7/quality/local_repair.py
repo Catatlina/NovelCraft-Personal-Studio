@@ -50,6 +50,7 @@ AWKWARD_PATTERNS = [
 @dataclass
 class RiskSentence:
     """风险句子定位。"""
+    chapter_index: int
     sentence_index: int
     paragraph_index: int
     char_start: int
@@ -112,6 +113,7 @@ def detect_risk_sentences(text: str, stats: Optional[StatisticsResult] = None) -
                 if pattern.search(sent_text):
                     score = min(90, 50 + len(sent_text) * 0.1)
                     risks.append(RiskSentence(
+                        chapter_index=ch.chapter_index,
                         sentence_index=sent_idx,
                         paragraph_index=para_idx,
                         char_start=sent.get("char_start", 0),
@@ -127,6 +129,7 @@ def detect_risk_sentences(text: str, stats: Optional[StatisticsResult] = None) -
             for pattern, risk_type, reason in AWKWARD_PATTERNS:
                 if pattern.search(sent_text):
                     risks.append(RiskSentence(
+                        chapter_index=ch.chapter_index,
                         sentence_index=sent_idx,
                         paragraph_index=para_idx,
                         char_start=sent.get("char_start", 0),
@@ -140,6 +143,7 @@ def detect_risk_sentences(text: str, stats: Optional[StatisticsResult] = None) -
             # 超长句（节奏问题）
             if sent["char_count"] > 120:
                 risks.append(RiskSentence(
+                    chapter_index=ch.chapter_index,
                     sentence_index=sent_idx,
                     paragraph_index=para_idx,
                     char_start=sent.get("char_start", 0),
@@ -151,10 +155,11 @@ def detect_risk_sentences(text: str, stats: Optional[StatisticsResult] = None) -
                 ))
 
     # 去重（同一句子多个问题只保留最高分）
-    seen: dict[int, RiskSentence] = {}
+    seen: dict[tuple[int, int], RiskSentence] = {}
     for r in risks:
-        if r.sentence_index not in seen or r.risk_score > seen[r.sentence_index].risk_score:
-            seen[r.sentence_index] = r
+        key = (r.chapter_index, r.sentence_index)
+        if key not in seen or r.risk_score > seen[key].risk_score:
+            seen[key] = r
 
     return sorted(seen.values(), key=lambda x: x.risk_score, reverse=True)
 
@@ -195,7 +200,7 @@ def apply_local_repair(
                 if len(parts) == 2:
                     fixed = parts[0] + "。" + parts[1]
 
-        if fixed != original and fixed in repaired:
+        if fixed != original and original in repaired:
             repaired = repaired.replace(original, fixed, 1)
             risk.suggested_fix = fixed
             made.append(risk)
@@ -240,7 +245,11 @@ def local_repair_pipeline(
                         current = current.replace(risk.text, fixed, 1)
                         all_repairs.append(risk)
                 except Exception as e:
-                    log.append(f"  AI修复失败: {e}，回退规则修复")
+                    # A configured AI repair provider must fail explicitly;
+                    # silently degrading to a different repair path would
+                    # make the caller believe the requested AI operation ran.
+                    log.append(f"  AI修复失败: {e}")
+                    raise RuntimeError("AI局部修复失败") from e
 
         # 规则级修复（补充AI未处理的）
         remaining = [r for r in top_risks if not r.suggested_fix]
@@ -273,15 +282,15 @@ def local_repair_pipeline(
     )
 
 
-def should_use_full_rewrite(risks: list[RiskSentence], text_length: int) -> bool:
+def should_use_full_rewrite(risks: list[RiskSentence], text: str) -> bool:
     """判断是否应该回退到整章重写（仅作为最后兜底）。
 
     条件：风险句超过正文句子数的50%，或风险总分极高。
     """
     if not risks:
         return False
-    stats = compute_statistics(text_length if isinstance(text_length, str) else "")
-    total_sentences = stats.total_sentences if isinstance(text_length, str) else 100
+    stats = compute_statistics(text)
+    total_sentences = stats.total_sentences
     risk_ratio = len(risks) / max(total_sentences, 1)
     avg_score = sum(r.risk_score for r in risks) / len(risks)
     return risk_ratio > 0.5 or (avg_score > 80 and len(risks) > 10)

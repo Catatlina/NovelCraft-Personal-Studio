@@ -198,8 +198,17 @@ def gate_payoff_density(
     text: str,
     stats: StatisticsResult,
     payoff_markers: Optional[list[str]] = None,
+    semantic_assessment: Optional[dict[str, Any]] = None,
 ) -> GateResult:
-    """爽点密度门禁。每章至少1个可见兑现标记。"""
+    """爽点密度门禁。
+
+    Configured publication runs must provide a validated provider assessment;
+    the deterministic keyword path remains available only to legacy callers and
+    isolated unit tests that do not have project/platform context.
+    """
+    if semantic_assessment is not None:
+        return _gate_semantic_payoff(semantic_assessment)
+
     issues = []
     # 启发式：检测结果类词汇
     result_patterns = [
@@ -239,6 +248,59 @@ def gate_payoff_density(
         is_blocking=True,
         issues=issues,
         evidence={"payoff_markers": found[:10], "has_suspense_ending": has_suspense},
+    )
+
+
+def _gate_semantic_payoff(assessment: dict[str, Any]) -> GateResult:
+    """Turn a provider assessment into a fail-closed gate result."""
+    issues: list[dict[str, Any]] = []
+    try:
+        payoff_count = int(assessment.get("payoff_count", -1))
+        payoffs = assessment.get("payoffs")
+        semantic_score = float(assessment.get("semantic_score", -1))
+        ending_pressure = bool(assessment.get("ending_pressure"))
+    except (TypeError, ValueError):
+        payoff_count, payoffs, semantic_score, ending_pressure = -1, None, -1.0, False
+
+    valid_evidence = isinstance(payoffs, list) and payoff_count == len(payoffs)
+    if not valid_evidence:
+        issues.append({"type": "invalid_semantic_evidence", "message": "Provider语义证据结构无效"})
+    if payoff_count < 1:
+        issues.append({"type": "no_semantic_payoff", "message": "Provider未确认本章有具体兑现结果"})
+    if not ending_pressure:
+        issues.append({"type": "no_next_chapter_pressure", "message": "Provider未确认章末存在下一章压力"})
+    if semantic_score < 60:
+        issues.append({"type": "semantic_score_below_threshold", "message": "Provider语义爽点评分低于60"})
+    if valid_evidence:
+        for item in payoffs:
+            if not isinstance(item, dict) or any(
+                not str(item.get(key) or "").strip()
+                for key in ("event", "evidence_quote", "reader_effect", "consequence")
+            ):
+                issues.append({"type": "missing_payoff_evidence", "message": "Provider payoff 缺少事件、原文证据或后果"})
+                valid_evidence = False
+                break
+
+    passed = valid_evidence and payoff_count >= 1 and ending_pressure and semantic_score >= 60
+    return GateResult(
+        gate_key="payoff_density",
+        gate_name=GATE_DEFINITIONS["payoff_density"]["name"],
+        passed=passed,
+        score=semantic_score if semantic_score >= 0 else 0.0,
+        threshold=60.0,
+        is_blocking=True,
+        issues=issues,
+        evidence={
+            "mode": "semantic_provider",
+            "payoff_count": payoff_count,
+            "payoffs": payoffs if isinstance(payoffs, list) else [],
+            "ending_pressure": ending_pressure,
+            "semantic_score": semantic_score,
+            "rationale": str(assessment.get("rationale") or ""),
+            "provenance": assessment.get("provenance", {}),
+        },
+        runner="v6.gateway",
+        gate_version="v1.1",
     )
 
 
@@ -357,6 +419,8 @@ def gate_platform_compliance(
     title = meta.get("title", "")
     synopsis = meta.get("synopsis", "")
     tags = meta.get("tags", [])
+    has_conflict = False
+    has_protagonist = False
 
     # 书名点击欲（简单启发：长度2-10字，含冲突/悬念词）
     if len(title) < 2 or len(title) > 20:
@@ -511,6 +575,7 @@ def run_all_gates(
     existing_review_score: Optional[float] = None,
     continuity_errors: Optional[list[dict[str, Any]]] = None,
     payoff_markers: Optional[list[str]] = None,
+    semantic_payoff: Optional[dict[str, Any]] = None,
     disclosure_record: Optional[dict[str, Any]] = None,
     human_editing_confirmed: bool = False,
     external_score: Optional[float] = None,
@@ -523,7 +588,7 @@ def run_all_gates(
     gates = {
         "content_quality": gate_content_quality(text, stats, existing_review_score),
         "continuity": gate_continuity(text, stats, continuity_errors),
-        "payoff_density": gate_payoff_density(text, stats, payoff_markers),
+        "payoff_density": gate_payoff_density(text, stats, payoff_markers, semantic_payoff),
         "readability": gate_readability(text, stats),
         "platform_compliance": gate_platform_compliance(text, stats, platform_profile, metadata),
         "ai_disclosure": gate_ai_disclosure(platform_profile, disclosure_record, human_editing_confirmed),

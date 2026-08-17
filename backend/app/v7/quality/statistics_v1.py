@@ -223,27 +223,53 @@ def compute_statistics(text: str) -> StatisticsResult:
         paragraphs = _split_paragraphs(body)
         all_sentences: list[str] = []
         para_details = []
+        sentence_details = []
+        body_search_cursor = 0
         for p_idx, para in enumerate(paragraphs):
+            paragraph_start = body.find(para, body_search_cursor)
+            if paragraph_start < 0:
+                paragraph_start = body_search_cursor
+            body_search_cursor = paragraph_start + len(para)
             sentences = _split_sentences(para)
             all_sentences.extend(sentences)
             para_details.append({
                 "index": p_idx,
                 "char_count": len(para),
                 "sentence_count": len(sentences),
-                "start_byte": _utf8_byte_offset(body, body.find(para) if para in body else 0),
+                "start_byte": _utf8_byte_offset(body, paragraph_start),
             })
+
+            sentence_search_cursor = 0
+            for sent in sentences:
+                sentence_start_in_para = para.find(sent, sentence_search_cursor)
+                if sentence_start_in_para < 0:
+                    # Ellipsis normalization can make the split result differ
+                    # from the source text. Keep a deterministic best-effort
+                    # coordinate while retaining the exact sentence text.
+                    sentence_start_in_para = sentence_search_cursor
+                sentence_start = paragraph_start + sentence_start_in_para
+                sentence_end = sentence_start + len(sent)
+                sentence_details.append({
+                    "index": len(sentence_details),
+                    "text": sent,
+                    "char_count": len(sent),
+                    "paragraph_index": p_idx,
+                    "char_start": sentence_start,
+                    "char_end": sentence_end,
+                })
+                sentence_search_cursor = sentence_start_in_para + len(sent)
 
         dialogues = _extract_dialogues(body)
         dialogue_chars = sum(len(d[0]) for d in dialogues)
 
         sent_details = []
-        for s_idx, sent in enumerate(all_sentences):
-            sent_details.append({
-                "index": s_idx,
-                "char_count": len(sent),
-                "has_dialogue": any(d[1] >= body.find(sent) and d[2] <= body.find(sent) + len(sent)
-                                    for d in dialogues) if sent in body else False,
-            })
+        for sentence in sentence_details:
+            sentence = dict(sentence)
+            sentence["has_dialogue"] = any(
+                d[1] >= sentence["char_start"] and d[2] <= sentence["char_end"]
+                for d in dialogues
+            )
+            sent_details.append(sentence)
 
         diag_details = []
         for d_idx, (content, d_start, d_end) in enumerate(dialogues):

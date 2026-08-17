@@ -2,6 +2,16 @@
 > 更新时间：2026-08-11
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-17 最新代码质量复核与继续任务交接（当前批次）
+
+- **最新代码**：已从 `origin` 拉取 `agent/publishing-v0.9.2` 最新提交 `5f83a7f`。旧工作区未提交改动已保存在 `stash@{0}`，未丢弃；当前修复仍在本地工作树，尚未 commit、push 或部署。
+- **本轮代码修复**：修正 `statistics_v1` 到局部修复引擎之间缺失句子正文导致风险检测失效的问题；修正局部替换判定、跨章节风险去重、AI局部修复失败静默降级、整章重写阈值计算；修正空 synopsis 门禁异常、AI披露自动确认、无记录确认成功、`publish_ready` 缺少七道阻断门禁证据、平台 `policy_version` 未持久化、人工编辑 `editor_id` 未记录、空章节状态更新成功等问题。
+- **范围与安全修复**：发布准备 API 现在对章节、小说、变体、平台配置、AI披露执行项目成员和跨作品关联校验；新增 API 范围回归测试。真实长跑脚本改为读取 `contents.seq`，使用 V7 返回的真实 `v6_content_id`，读取真实平台配置/作品元数据，门禁证据写入失败即退出，不再使用硬编码验收对象或伪造哈希。新增真实 Provider AI披露草稿、语义爽点评估、Alembic Prompt/route 种子和前端发布准备页。
+- **本地验证**：后端全量 `1121 passed, 138 skipped, 1 xpassed, 2 warnings`；发布语义/API专项 `28 passed`；v0.9.2自测 `60 passed`；前端 `57 passed`、TypeScript 和生产构建通过；`verify_ai_truthfulness.py`、`verify_delivery_claims.py`、`bash scripts/ai_development_gate.sh`、Python 编译与 `git diff --check` 均通过。
+- **全量回归边界**：此前 `911 passed, 149 failed, 138 skipped, 1 xpassed, 54 errors` 是本机 PostgreSQL/Redis 未启动时的环境结果；补齐本机服务后，当前全量测试已恢复为上面的退出码 0 结果。2 个警告为现有依赖弃用提示，不影响本批测试结论。
+- **生产只读核对**：生产 `/opt/NovelCraft-Personal-Studio` 当前代码为 `353271f`，Alembic 为 `nc_v092_publishing_preparation (head)`，API/Worker/Beat/数据库/Redis 容器均运行；本轮本地修复尚未部署。生产章节实际使用 `contents.seq`，现有《重生后我靠签到系统在侯府杀疯了》第6章为 `needs_rewrite`，因此 V7 仍会在进入下一章前阻断。公网 healthz 本次返回 Cloudflare 到 `/login` 的 `302`，未据此宣称公网健康检查通过。
+- **下一步**：先提交、推送并部署本批代码和 `nc_v11_disclosure_payoff` 迁移；生产只读复核通过后，再由用户选择修复现有书的前置质量问题或明确授权创建正确配置的新书，随后使用 `scripts/v092_20_chapter_run.py` 做真实 Provider 长跑。当前不能宣称20章长跑已开始或验收。
+
 ## 2026-08-11 v0.9.2 出版准备层开发（已部署，分支 agent/publishing-v0.9.2）
 
 ### 已完成代码（已提交、已部署到生产）

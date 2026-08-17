@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.api.v1.config import require_admin, require_admin_reads
 from app.db import connect, encode, decode
-from app.core.authz import ok
+from app.core.authz import ensure_project_member, ok, require_member
 
 from app.v7.quality.statistics_v1 import compute_statistics
 from app.v7.quality.publishing_gates import run_all_gates, GATE_DEFINITIONS
@@ -25,6 +25,7 @@ from app.v7.services.publishing_service import (
     confirm_ai_disclosure,
     get_platform_profile,
     get_variant,
+    generate_ai_disclosure_for_variant,
     has_confirmed_human_editing,
     record_human_editing,
     run_publishing_gates_for_chapter,
@@ -70,6 +71,7 @@ class PlatformProfileCreateRequest(BaseModel):
     platform: str
     profile_name: str
     policy_status: Optional[str] = "unknown"
+    policy_version: Optional[str] = ""
     ai_usage_policy: Optional[str] = "unknown"
     word_count_min: Optional[int] = None
     word_count_max: Optional[int] = None
@@ -84,6 +86,11 @@ class DisclosureCreateRequest(BaseModel):
     disclosure_text: str = ""
     ai_models_used: Optional[list[str]] = None
     ai_usage_estimate: Optional[float] = None
+
+
+class DisclosureGenerateRequest(BaseModel):
+    variant_id: str
+    chapter_id: Optional[str] = None
 
 
 class HumanEditingRequest(BaseModel):
@@ -106,6 +113,62 @@ class LocalRepairRequest(BaseModel):
     max_repairs_per_round: int = Field(default=3, ge=1, le=5)
 
 
+def _load_chapter_scope(db, chapter_id: str, user: dict, *, write: bool) -> dict[str, Any]:
+    """Resolve a chapter and enforce its owning project scope."""
+    row = db.execute(
+        """SELECT id, project_id, parent_id, type
+           FROM contents
+           WHERE id=%s AND is_deleted=FALSE""",
+        (chapter_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="chapter not found")
+    chapter = dict(row)
+    if chapter.get("type") != "chapter":
+        raise HTTPException(status_code=400, detail="content is not a chapter")
+    require_member(db, str(chapter["project_id"]), user, write=write)
+    return chapter
+
+
+def _load_variant_scope(db, variant_id: str, user: dict, *, write: bool) -> dict[str, Any]:
+    """Resolve a variant through its novel and enforce project scope."""
+    row = db.execute(
+        """SELECT v.*, n.project_id AS novel_project_id, n.type AS novel_type
+           FROM publication_variants v
+           JOIN contents n ON n.id=v.novel_id AND n.type='novel' AND n.is_deleted=FALSE
+           WHERE v.id=%s""",
+        (variant_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="变体不存在")
+    variant = dict(row)
+    require_member(db, str(variant["novel_project_id"]), user, write=write)
+    return variant
+
+
+def _assert_variant_chapter_scope(
+    chapter: dict[str, Any], variant: dict[str, Any], chapter_id: str
+) -> None:
+    if str(chapter.get("parent_id") or "") != str(variant.get("novel_id") or ""):
+        raise HTTPException(status_code=409, detail="章节与发布变体不属于同一作品")
+
+
+def _load_disclosure_scope(db, disclosure_id: str, user: dict, *, write: bool) -> dict[str, Any]:
+    row = db.execute(
+        """SELECT d.id, d.variant_id, v.novel_id, n.project_id
+           FROM ai_disclosure_records d
+           JOIN publication_variants v ON v.id=d.variant_id
+           JOIN contents n ON n.id=v.novel_id AND n.type='novel' AND n.is_deleted=FALSE
+           WHERE d.id=%s""",
+        (disclosure_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="AI披露记录不存在")
+    disclosure = dict(row)
+    require_member(db, str(disclosure["project_id"]), user, write=write)
+    return disclosure
+
+
 # ── 统计快照 ──────────────────────────────────────────────────
 @router.post("/statistics")
 def compute_chapter_statistics(req: StatisticsRequest, user: dict = Depends(require_admin_reads)):
@@ -119,6 +182,7 @@ def save_chapter_statistics(chapter_id: str, req: StatisticsRequest, user: dict 
     """计算并保存章节统计快照。"""
     db = connect()
     try:
+        _load_chapter_scope(db, chapter_id, user, write=True)
         result = save_statistics_snapshot(db, chapter_id, req.text)
         db.commit()
         return ok(result, message="统计快照已保存")
@@ -138,17 +202,25 @@ def run_publishing_gates(req: GateRunRequest, user: dict = Depends(require_admin
     """运行七道发布准备门禁，保存结果并更新状态。"""
     db = connect()
     try:
+        chapter = _load_chapter_scope(db, req.chapter_id, user, write=True)
+        chapter_project_id = str(chapter["project_id"])
+        if req.project_id and str(req.project_id) != chapter_project_id:
+            raise HTTPException(status_code=409, detail="章节与项目不属于同一范围")
+        if req.variant_id:
+            variant = _load_variant_scope(db, req.variant_id, user, write=True)
+            _assert_variant_chapter_scope(chapter, variant, req.chapter_id)
         report = run_publishing_gates_for_chapter(
             db=db,
             chapter_id=req.chapter_id,
             text=req.text,
             variant_id=req.variant_id,
-            project_id=req.project_id,
+            project_id=req.project_id or chapter_project_id,
             platform=req.platform,
             metadata=req.metadata,
             existing_review_score=req.existing_review_score,
             external_score=req.external_score,
             external_flagged=req.external_flagged,
+            user_id=user.get("id"),
         )
         db.commit()
         return ok(report.to_dict(), message="七道门禁运行完成")
@@ -161,6 +233,10 @@ def get_gate_results(chapter_id: str, variant_id: Optional[str] = None, user: di
     """获取章节最新门禁结果。"""
     db = connect()
     try:
+        chapter = _load_chapter_scope(db, chapter_id, user, write=False)
+        if variant_id:
+            variant = _load_variant_scope(db, variant_id, user, write=False)
+            _assert_variant_chapter_scope(chapter, variant, chapter_id)
         if variant_id:
             rows = db.execute(
                 "SELECT * FROM quality_gate_results WHERE chapter_id = %s AND variant_id = %s ORDER BY created_at DESC",
@@ -183,6 +259,7 @@ def list_platform_profiles(project_id: str, user: dict = Depends(require_admin_r
     """列出项目的平台发布配置。"""
     db = connect()
     try:
+        ensure_project_member(db, project_id, user)
         rows = db.execute(
             "SELECT * FROM platform_publication_profiles WHERE project_id = %s AND is_active = TRUE ORDER BY platform, profile_name",
             (project_id,),
@@ -197,15 +274,21 @@ def create_platform_profile_api(req: PlatformProfileCreateRequest, user: dict = 
     """创建平台发布配置。"""
     db = connect()
     try:
+        ensure_project_member(db, req.project_id, user, {"owner", "editor"})
+        extra_metadata = dict(req.extra_metadata or {})
+        # Keep policy_version a first-class field even if an older client sent
+        # it inside extra_metadata.
+        extra_metadata.pop("policy_version", None)
         result = create_platform_profile(
             db, req.project_id, req.platform, req.profile_name,
             policy_status=req.policy_status,
+            policy_version=req.policy_version,
             ai_usage_policy=req.ai_usage_policy,
             word_count_min=req.word_count_min,
             word_count_max=req.word_count_max,
             chapter_word_min=req.chapter_word_min,
             chapter_word_max=req.chapter_word_max,
-            **(req.extra_metadata or {}),
+            **extra_metadata,
         )
         db.commit()
         return ok(result, message="平台配置已创建")
@@ -219,6 +302,24 @@ def create_variant_api(req: VariantCreateRequest, user: dict = Depends(require_a
     """为基础小说创建平台发布变体。"""
     db = connect()
     try:
+        novel = db.execute(
+            "SELECT project_id, type FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+            (req.novel_id,),
+        ).fetchone()
+        if not novel:
+            raise HTTPException(status_code=404, detail="novel not found")
+        ensure_project_member(db, str(novel["project_id"]), user, {"owner", "editor"})
+        if req.platform_profile_id:
+            profile = db.execute(
+                "SELECT project_id, platform FROM platform_publication_profiles WHERE id=%s AND is_active=TRUE",
+                (req.platform_profile_id,),
+            ).fetchone()
+            if not profile:
+                raise HTTPException(status_code=404, detail="platform profile not found")
+            if str(profile["project_id"]) != str(novel["project_id"]):
+                raise HTTPException(status_code=409, detail="平台配置与小说不属于同一项目")
+            if str(profile["platform"]) != req.platform:
+                raise HTTPException(status_code=409, detail="平台配置与变体平台不一致")
         result = create_publication_variant(
             db, req.novel_id, req.platform, req.variant_name,
             req.platform_profile_id, req.metadata,
@@ -234,6 +335,7 @@ def get_variant_api(variant_id: str, user: dict = Depends(require_admin_reads)):
     """获取发布变体详情。"""
     db = connect()
     try:
+        _load_variant_scope(db, variant_id, user, write=False)
         variant = get_variant(db, variant_id)
         if not variant:
             raise HTTPException(status_code=404, detail="变体不存在")
@@ -247,6 +349,13 @@ def list_variants_by_novel(novel_id: str, user: dict = Depends(require_admin_rea
     """列出小说的所有发布变体。"""
     db = connect()
     try:
+        novel = db.execute(
+            "SELECT project_id FROM contents WHERE id=%s AND type='novel' AND is_deleted=FALSE",
+            (novel_id,),
+        ).fetchone()
+        if not novel:
+            raise HTTPException(status_code=404, detail="novel not found")
+        ensure_project_member(db, str(novel["project_id"]), user)
         rows = db.execute(
             "SELECT * FROM publication_variants WHERE novel_id = %s ORDER BY platform, variant_name",
             (novel_id,),
@@ -261,6 +370,7 @@ def update_variant_status_api(variant_id: str, req: VariantStatusRequest, user: 
     """更新变体发布状态（带状态机校验）。"""
     db = connect()
     try:
+        _load_variant_scope(db, variant_id, user, write=True)
         result = update_variant_status(db, variant_id, req.new_status)
         db.commit()
         return ok(result, message="状态已更新")
@@ -276,12 +386,58 @@ def create_disclosure_api(req: DisclosureCreateRequest, user: dict = Depends(req
     """创建AI披露记录。"""
     db = connect()
     try:
+        variant = _load_variant_scope(db, req.variant_id, user, write=True)
+        if req.chapter_id:
+            chapter = _load_chapter_scope(db, req.chapter_id, user, write=True)
+            _assert_variant_chapter_scope(chapter, variant, req.chapter_id)
         result = create_ai_disclosure(
             db, req.variant_id, req.chapter_id,
             req.disclosure_text, req.ai_models_used, req.ai_usage_estimate,
+            generation_method="manual",
+            generated_by=user.get("id"),
         )
         db.commit()
         return ok(result, message="AI披露记录已创建")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.post("/disclosures/generate")
+def generate_disclosure_api(req: DisclosureGenerateRequest, user: dict = Depends(require_admin)):
+    """通过真实Provider生成AI披露草稿；不会自动确认。"""
+    db = connect()
+    try:
+        variant = _load_variant_scope(db, req.variant_id, user, write=True)
+        if req.chapter_id:
+            chapter = _load_chapter_scope(db, req.chapter_id, user, write=True)
+            _assert_variant_chapter_scope(chapter, variant, req.chapter_id)
+        result = generate_ai_disclosure_for_variant(
+            db,
+            variant_id=req.variant_id,
+            chapter_id=req.chapter_id,
+            user_id=user.get("id"),
+        )
+        db.commit()
+        return ok(result, message="AI披露草稿已生成，待人工确认")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.get("/disclosures/variant/{variant_id}")
+def get_latest_disclosure_api(variant_id: str, user: dict = Depends(require_admin_reads)):
+    """读取变体最新披露记录，供发布准备页恢复确认流程。"""
+    db = connect()
+    try:
+        _load_variant_scope(db, variant_id, user, write=False)
+        row = db.execute(
+            "SELECT id AS disclosure_id, disclosure_status, disclosure_text FROM ai_disclosure_records WHERE variant_id = %s ORDER BY created_at DESC LIMIT 1",
+            (variant_id,),
+        ).fetchone()
+        return ok(dict(row) if row else {}, message="最新AI披露")
     finally:
         db.close()
 
@@ -291,9 +447,12 @@ def confirm_disclosure_api(disclosure_id: str, user: dict = Depends(require_admi
     """人工确认AI披露。"""
     db = connect()
     try:
+        _load_disclosure_scope(db, disclosure_id, user, write=True)
         result = confirm_ai_disclosure(db, disclosure_id, user.get("email", "user"))
         db.commit()
         return ok(result, message="AI披露已确认")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     finally:
         db.close()
 
@@ -304,12 +463,17 @@ def record_human_editing_api(req: HumanEditingRequest, user: dict = Depends(requ
     """记录人工编辑（用于allowed_with_human_editing政策）。"""
     db = connect()
     try:
+        chapter = _load_chapter_scope(db, req.chapter_id, user, write=True)
+        if req.variant_id:
+            variant = _load_variant_scope(db, req.variant_id, user, write=True)
+            _assert_variant_chapter_scope(chapter, variant, req.chapter_id)
         result = record_human_editing(
             db, req.chapter_id, req.variant_id, req.edit_type,
             req.before_sha256, req.after_sha256,
             req.repaired_sentences, req.repaired_paragraphs,
             req.chars_added, req.chars_removed,
             req.human_confirmed, req.editor_name or user.get("email", ""),
+            user.get("id"),
         )
         db.commit()
         return ok(result, message="人工编辑记录已保存")
@@ -350,9 +514,12 @@ def update_chapter_status_api(
     """更新章节出版准备状态。"""
     db = connect()
     try:
+        _load_chapter_scope(db, chapter_id, user, write=True)
         result = update_chapter_publishing_status(db, chapter_id, req.new_status)
         db.commit()
         return ok(result, message="章节出版状态已更新")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         db.close()
 
@@ -363,6 +530,7 @@ def check_publish_readiness(variant_id: str, user: dict = Depends(require_admin_
     """检查变体是否满足publish_ready条件。"""
     db = connect()
     try:
+        _load_variant_scope(db, variant_id, user, write=False)
         variant = get_variant(db, variant_id)
         if not variant:
             raise HTTPException(status_code=404, detail="变体不存在")
