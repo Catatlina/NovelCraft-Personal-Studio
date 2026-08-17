@@ -16,6 +16,7 @@ from app.v7.generation.generation_engine import (
     SCENE_NATURAL_LENGTH_TOLERANCE,
     SCENE_NATURAL_LENGTH_TOLERANCE_CHARS,
     SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS,
+    CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS,
     SCENE_PROVIDER_TOKEN_CAP,
     SCENE_TARGET_MAX_RATIO,
     SceneDirector,
@@ -1091,6 +1092,27 @@ def test_scene_overlong_retry_keeps_completion_headroom():
 
 def test_scene_length_soft_overflow_is_bounded_by_reader_pacing_contract():
     assert SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS == 64
+
+
+def test_final_scene_variance_never_starves_a_future_scene_or_exceeds_absolute_bound():
+    assert GenerationEngine._final_scene_budget_variance_allowed(
+        projected_chars=3192 + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS,
+        chapter_max_chars=3192,
+        future_minimum_chars=0,
+        future_target_chars=0,
+    ) is True
+    assert GenerationEngine._final_scene_budget_variance_allowed(
+        projected_chars=3192 + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS + 1,
+        chapter_max_chars=3192,
+        future_minimum_chars=0,
+        future_target_chars=0,
+    ) is False
+    assert GenerationEngine._final_scene_budget_variance_allowed(
+        projected_chars=3192 + 10,
+        chapter_max_chars=3192,
+        future_minimum_chars=1,
+        future_target_chars=0,
+    ) is False
 
 
 def test_scene_truncation_retry_has_a_bounded_escalation():

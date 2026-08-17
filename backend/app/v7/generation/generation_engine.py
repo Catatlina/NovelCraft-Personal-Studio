@@ -112,6 +112,10 @@ SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS = 64
 # is still a bounded reader variance, not permission to approach the platform
 # ceiling or pad a chapter after its result is complete.
 CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS = 192
+# A complete final scene may need a little more room for its consequence and
+# hook. This is an absolute generation allowance only when no future scene is
+# being starved; it is not a new chapter target or a platform ceiling.
+CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS = 192
 
 
 def chinese_word_count(text: str) -> int:
@@ -3341,6 +3345,22 @@ class GenerationEngine:
         )
 
     @staticmethod
+    def _final_scene_budget_variance_allowed(
+        *,
+        projected_chars: int,
+        chapter_max_chars: int,
+        future_minimum_chars: int,
+        future_target_chars: int,
+    ) -> bool:
+        """Allow a bounded complete final scene without hiding budget drift."""
+        return (
+            future_minimum_chars == 0
+            and future_target_chars == 0
+            and projected_chars
+            <= chapter_max_chars + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS
+        )
+
+    @staticmethod
     def _rebalance_future_scene_targets(
         cards: list[dict[str, Any]],
         *,
@@ -3713,6 +3733,7 @@ class GenerationEngine:
             scene_warnings: list[dict[str, Any]] = []
             previous_issue_codes: set[str] = set()
             compression_mode = False
+            final_scene_variance = False
             attempts_used = 0
             candidate = ""
             min_scene_chars, _planned_max_scene_chars = self._scene_length_bounds(
@@ -3971,6 +3992,38 @@ class GenerationEngine:
                         excess_chars=excess,
                     ):
                         issues = []
+                budget_issue_codes = {
+                    "scene_chapter_budget_overrun",
+                    "scene_reader_budget_overrun",
+                }
+                if (
+                    not truncated
+                    and issues
+                    and all(
+                        isinstance(item, dict)
+                        and item.get("code") in budget_issue_codes
+                        for item in issues
+                    )
+                    and self._final_scene_budget_variance_allowed(
+                        projected_chars=projected_chapter_chars,
+                        chapter_max_chars=chapter_max_chars,
+                        future_minimum_chars=future_minimum_chars,
+                        future_target_chars=future_target_chars,
+                    )
+                ):
+                    final_scene_variance = True
+                    attempt_warnings.append({
+                        "code": "final_scene_natural_length_variance",
+                        "severity": "low",
+                        "message": (
+                            f"完整最后场景使章节达到 {projected_chapter_chars} 字，"
+                            f"略超生成预算 {chapter_max_chars} 字；未挤占后续场景，"
+                            "保留结局并记录长度警告"
+                        ),
+                        "projected_chars": projected_chapter_chars,
+                        "chapter_max_chars": chapter_max_chars,
+                    })
+                    issues = []
                 if (
                     not truncated
                     and any(
@@ -4076,6 +4129,7 @@ class GenerationEngine:
             "scene_outputs": scene_outputs,
             "scene_handoffs": handoffs,
             "scene_state": current_state,
+            "final_scene_natural_variance": final_scene_variance,
             "usage": usage,
             "generation_mode": "scene_serial",
             "generation_version": SCENE_SERIAL_GENERATION_VERSION,
@@ -4109,6 +4163,9 @@ class GenerationEngine:
         minimum_chapter_chars = int(reader_budget["minimum_chars"])
         maximum_chapter_chars = int(reader_budget["maximum_chars"])
         generation_hard_max_chars = maximum_chapter_chars + CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS
+        generation_absolute_max_chars = (
+            generation_hard_max_chars + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS
+        )
         # The canonical path is scene-serial, but this legacy token value is
         # still part of the returned provenance and repair contract.
         generation_max_tokens = max(
@@ -4531,17 +4588,38 @@ class GenerationEngine:
                     ),
                 }
             )
-        if word_count > generation_hard_max_chars:
+        if word_count > generation_absolute_max_chars:
             generation_failures.append(
                 {
                     "code": "chapter_too_long",
                     "severity": "high",
                     "message": (
                         f"最终正文 {word_count} 字，超过本章最大生成阈值 "
-                        f"{generation_hard_max_chars} 字"
+                        f"{generation_absolute_max_chars} 字"
                     ),
                 }
             )
+        elif word_count > generation_hard_max_chars:
+            if serial_result.get("final_scene_natural_variance"):
+                generation_warnings.append({
+                    "code": "chapter_final_scene_natural_length_variance",
+                    "message": (
+                        f"最终正文 {word_count} 字，超过常规生成阈值 "
+                        f"{generation_hard_max_chars} 字，但最后场景完整且未挤占后续场景，"
+                        f"仍处于绝对上限 {generation_absolute_max_chars} 字内"
+                    ),
+                })
+            else:
+                generation_failures.append(
+                    {
+                        "code": "chapter_too_long",
+                        "severity": "high",
+                        "message": (
+                            f"最终正文 {word_count} 字，超过本章常规生成阈值 "
+                            f"{generation_hard_max_chars} 字且没有最后场景自然波动证据"
+                        ),
+                    }
+                )
         elif word_count > maximum_chapter_chars:
             generation_warnings.append({
                 "code": "chapter_natural_length_variance",
@@ -4644,6 +4722,7 @@ class GenerationEngine:
             "minimum_chars": minimum_chapter_chars,
             "maximum_chars": maximum_chapter_chars,
             "generation_hard_max_chars": generation_hard_max_chars,
+            "generation_absolute_max_chars": generation_absolute_max_chars,
             "warnings": generation_warnings,
             "reader_chapter_budget": reader_budget,
             "failures": generation_failures,
