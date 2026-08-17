@@ -58,7 +58,11 @@ from ..quality.consistency_checker import (
     ConsistencyChecker,
     format_consistency_issues,
 )
-from ...services.quality_profiles import quality_profile_metadata, select_quality_profile
+from ...services.quality_profiles import (
+    quality_profile_metadata,
+    reader_chapter_budget,
+    select_quality_profile,
+)
 
 AGENT_LOOP_STEPS: tuple[str, ...] = (
     "perceive",
@@ -278,6 +282,12 @@ class StoryDirector:
         by default so a failed audit cannot silently turn into repeated prose
         rewrites or hide a generation defect.
         """
+        requested_target_word_count = target_word_count
+        reader_budget = reader_chapter_budget(
+            self.quality_profile,
+            requested_target=target_word_count,
+        )
+        target_word_count = int(reader_budget["target_word_count"])
         run_id = await self.tracer.start_run(
             "chapter_generation",
             trigger="manual",
@@ -287,6 +297,8 @@ class StoryDirector:
                 "prompt": prompt,
                 "outline": outline,
                 "target_word_count": target_word_count,
+                "requested_target_word_count": requested_target_word_count,
+                "reader_chapter_budget": reader_budget,
             },
         )
 
@@ -468,6 +480,7 @@ class StoryDirector:
                 "review_score": observation["review_score"],
                 "dimension_scores": observation["dimension_scores"],
                 "generation_quality": generation.get("generation_quality") or {},
+                "reader_chapter_budget": reader_budget,
                 "reader_experience": observation.get("reader_experience", {}),
                 "issues": observation.get("issues", []),
                 "strengths": observation.get("strengths", []),

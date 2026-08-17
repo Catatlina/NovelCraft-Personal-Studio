@@ -2,6 +2,7 @@ from app.services.quality_profiles import (
     compile_quality_directive,
     profile_from_context,
     quality_profile_metadata,
+    reader_chapter_budget,
     select_quality_profile,
 )
 
@@ -43,6 +44,18 @@ def test_quality_directive_is_bounded_and_does_not_ban_single_punctuation():
     assert "爽点契约" in directive
     assert "标点不设禁用清单" in directive
     assert "禁止所有标点" not in directive
+
+
+def test_reader_chapter_budget_uses_reader_range_not_platform_ceiling():
+    profile = select_quality_profile(platform="番茄", genre="玄幻", subgenre="传统升级流")
+
+    budget = reader_chapter_budget(profile, requested_target=3000)
+
+    assert budget["recommended_range"] == [2000, 2700]
+    assert budget["target_word_count"] == 2700
+    assert budget["maximum_chars"] == 3000
+    assert budget["maximum_chars"] < 5000
+    assert "reader_chapter_budget" in quality_profile_metadata(profile)
 
 
 def test_quality_directive_uses_shared_opening_plan_without_body_default():

@@ -48,6 +48,7 @@ from ...services.content_policy import analyze_content_policy, content_generatio
 from ...services.quality_profiles import (
     compile_quality_directive,
     quality_profile_metadata,
+    reader_chapter_budget,
     select_quality_profile,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
@@ -77,11 +78,10 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.7.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.8.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
-# The current Fanqie profile allows 2,000-5,000 characters per chapter. Keep
-# generation inside that platform envelope instead of imposing an unrelated
-# narrower rejection threshold on naturally detailed Chinese scenes.
+# Platform limits are not reader targets.  The active quality profile now
+# derives a reader-facing chapter budget before planning and prose generation.
 SCENE_DEEPSEEK_TOKEN_CHAR_MARGIN = 1.25
 SCENE_OPENAI_TOKEN_CHAR_MARGIN = 1.10
 SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN = 1.35
@@ -3693,15 +3693,16 @@ class GenerationEngine:
         """
         if not hasattr(self, "quality_profile"):
             self.quality_profile = select_quality_profile()
-        usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
-        minimum_chapter_chars = max(600, int(target_word_count * 0.72))
-        maximum_chapter_chars = max(
-            minimum_chapter_chars + 200,
-            int(target_word_count * 1.65),
+        reader_budget = reader_chapter_budget(
+            self.quality_profile,
+            requested_target=target_word_count,
         )
-        # Keep the legacy whole-chapter budget aligned with the same platform
-        # envelope.  The canonical path below is scene-serial, but this value
-        # remains part of the returned provenance and repair contract.
+        target_word_count = int(reader_budget["target_word_count"])
+        usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+        minimum_chapter_chars = int(reader_budget["minimum_chars"])
+        maximum_chapter_chars = int(reader_budget["maximum_chars"])
+        # The canonical path is scene-serial, but this legacy token value is
+        # still part of the returned provenance and repair contract.
         generation_max_tokens = max(
             900,
             min(3200, int(maximum_chapter_chars * 0.58)),
@@ -4225,6 +4226,7 @@ class GenerationEngine:
             "passed": not generation_failures,
             "minimum_chars": minimum_chapter_chars,
             "maximum_chars": maximum_chapter_chars,
+            "reader_chapter_budget": reader_budget,
             "failures": generation_failures,
             "continuations": continuations,
             "continuation_limit": continuation_limit,
@@ -4416,9 +4418,13 @@ class GenerationEngine:
         word_count = chinese_word_count(final_text)
         previous_quality = generation.get("generation_quality") or {}
         minimum_chars = int(previous_quality.get("minimum_chars") or 600)
+        fallback_budget = reader_chapter_budget(
+            getattr(self, "quality_profile", None),
+            requested_target=int(generation.get("target_word_count") or 3000),
+        )
         maximum_chars = int(
             previous_quality.get("maximum_chars")
-            or max(minimum_chars + 200, int(generation.get("target_word_count") or 3000) * 1.65)
+            or fallback_budget["maximum_chars"]
         )
         failures: list[dict[str, Any]] = []
         if word_count < minimum_chars:
@@ -4501,6 +4507,11 @@ class GenerationEngine:
     ) -> str:
         beats = scene_plan.get("beats") or []
         quality_profile = getattr(self, "quality_profile", None) or select_quality_profile()
+        reader_budget = reader_chapter_budget(
+            quality_profile,
+            requested_target=target_word_count,
+        )
+        effective_target = int(reader_budget["target_word_count"])
         quality_directive = compile_quality_directive(
             quality_profile,
             chapter_number=chapter_number,
@@ -4618,8 +4629,9 @@ class GenerationEngine:
             "【连续性硬门禁】上一章结尾、交接契约和本章第一场必须处于同一"
             "时间线/地点/人物状态；除非正文明确给出过渡，不得跳场。\n"
             f"节拍安排：\n{beat_lines}\n\n"
-            f"请写出约 {target_word_count} 个汉字的完整章节正文，合理范围为"
-            f" {max(600, int(target_word_count * 0.72))}-{max(max(600, int(target_word_count * 0.72)) + 200, int(target_word_count * 1.65))} 字；"
+            f"请写出约 {effective_target} 个汉字的完整章节正文；"
+            f"读者推荐预算为 {reader_budget['recommended_range'][0]}-{reader_budget['recommended_range'][1]} 字，"
+            f"本次生成硬范围为 {reader_budget['minimum_chars']}-{reader_budget['maximum_chars']} 字；"
             "完成节拍和章尾钩子后立即收束，不要为了凑字数继续解释或重复描写。"
             f"必须与前情提要和已有设定保持一致，不得与【必须遵守的约束】冲突。"
             "节拍完整性是硬要求：节拍表列出的关键过桥、交易、对抗、修炼或设定揭示，必须在正文中写出可见的动作过程、阻碍和结果，"

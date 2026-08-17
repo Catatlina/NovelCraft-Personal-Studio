@@ -31,6 +31,8 @@ from ..v7.quality.readability_contract import render_readability_plan
 
 QUALITY_PROFILE_SCHEMA_VERSION = "webnovel-quality-profile-v1"
 
+READER_CHAPTER_BUDGET_SCHEMA_VERSION = "reader-chapter-budget-v1"
+
 _PLATFORM_ALIASES = {
     "fanqie": "fanqie",
     "番茄": "fanqie",
@@ -118,6 +120,74 @@ _STYLE_PLUGIN_ALIASES = {
     "xuanhuan_longlife": "xuanhuan_longlife",
     "xianxia_longlife": "xuanhuan_longlife",
 }
+
+
+def reader_chapter_budget(
+    profile: dict[str, Any] | None = None,
+    requested_target: int | None = None,
+) -> dict[str, Any]:
+    """Derive a reader-facing chapter budget before prose generation.
+
+    Platform limits are ceilings, not writing targets.  The report packs
+    already contain soft chapter ranges for both the selected genre and
+    platform; use their overlap as the recommended reader range and keep a
+    small, explicit natural-variance allowance for the generation contract.
+    Short synthetic/unit-test targets remain valid so the helper does not
+    turn a deliberately small test fixture into a production-sized chapter.
+    """
+    active = profile if isinstance(profile, dict) else select_quality_profile()
+    soft_metrics = active.get("report_soft_metrics") or {}
+    genre_metrics = soft_metrics.get("genre") or {}
+    platform_metrics = soft_metrics.get("platform") or {}
+
+    def _range(value: Any) -> tuple[int, int] | None:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            return None
+        try:
+            low, high = int(value[0]), int(value[1])
+        except (TypeError, ValueError):
+            return None
+        if low <= 0 or high < low:
+            return None
+        return low, high
+
+    genre_range = _range(genre_metrics.get("chapter_chars_target"))
+    platform_range = _range(platform_metrics.get("chapter_chars_target"))
+    if genre_range and platform_range:
+        low = max(genre_range[0], platform_range[0])
+        high = min(genre_range[1], platform_range[1])
+        if low > high:
+            low, high = genre_range
+    else:
+        low, high = genre_range or platform_range or (1800, 2800)
+
+    requested = max(1, int(requested_target or 3000))
+    short_override = requested < low
+    effective_target = requested if short_override else min(requested, high)
+    if short_override:
+        minimum = max(600, int(effective_target * 0.72))
+        maximum = max(minimum + 200, int(effective_target * 1.65))
+    else:
+        # A chapter may breathe slightly beyond the report baseline, but it
+        # must not expand to the platform's 5,000-character ceiling merely to
+        # satisfy a nominal target.
+        minimum = max(600, int(effective_target * 0.72), int(low * 0.90))
+        maximum = max(
+            minimum + 200,
+            min(high + 300, int(effective_target * 1.12)),
+        )
+
+    return {
+        "schema_version": READER_CHAPTER_BUDGET_SCHEMA_VERSION,
+        "source": "quality_profile_report_soft_metrics",
+        "recommended_range": [low, high],
+        "requested_target": requested,
+        "target_word_count": effective_target,
+        "minimum_chars": minimum,
+        "maximum_chars": maximum,
+        "short_target_override": short_override,
+        "rationale": "读者预算优先于平台上限；完成节拍和章末钩子后立即收束",
+    }
 
 
 _PLATFORM_PROFILES: dict[str, dict[str, Any]] = {
@@ -929,6 +999,7 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "report_pack_id": profile.get("report_pack_id", ""),
         "report_hard_contracts": list(profile.get("report_hard_contracts") or []),
         "report_soft_metrics": deepcopy(profile.get("report_soft_metrics") or {}),
+        "reader_chapter_budget": reader_chapter_budget(profile),
         "report_validator_targets": list(profile.get("report_validator_targets") or []),
         "report_provenance": deepcopy(profile.get("report_provenance") or {}),
         "provenance": list(profile.get("provenance") or []),

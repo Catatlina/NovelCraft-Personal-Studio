@@ -568,6 +568,8 @@ def test_generation_prompt_carries_reader_promise_and_cross_chapter_hooks():
     assert "揭开门后异常的一层真相" in prompt
     assert "手仍按在门缝上" in prompt
     assert "每约 800-1200 字" in prompt
+    assert "读者推荐预算为 1800-2700 字" in prompt
+    assert "本次生成硬范围为 1944-3000 字" in prompt
     assert "章末必须把钩子落实" in prompt
     assert "压制→蓄力→爆发→反馈→余波" in prompt
     assert "反馈必须落到对手、组织、资源、规则或旁观者的可见变化" in prompt
