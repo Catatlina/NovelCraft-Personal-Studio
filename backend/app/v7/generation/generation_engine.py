@@ -52,6 +52,7 @@ from ...services.quality_profiles import (
     select_quality_profile,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
+from ..quality.generation_naturalness import inspect_generation_naturalness
 from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
 from ..quality.opening_variation import (
     build_opening_history,
@@ -3542,6 +3543,9 @@ class GenerationEngine:
             "repeated_paragraph_opening",
             "repeated_tic",
             "structural_ai_smell",
+            "scene_explanatory_narration",
+            "scene_metaphor_density",
+            "scene_repeated_action_loop",
         })
 
     @staticmethod
@@ -3617,6 +3621,7 @@ class GenerationEngine:
             return [{"code": "scene_empty", "message": "Provider returned an empty scene"}]
         flags: list[dict[str, Any]] = []
         metrics = analyze_deai_patterns(candidate)
+        generation_naturalness = inspect_generation_naturalness(candidate)
         retry_codes = {
             "dash_density",
             "ai_phrase",
@@ -3629,6 +3634,12 @@ class GenerationEngine:
             if (
                 isinstance(flag, dict)
                 and flag.get("code") in retry_codes
+                and str(flag.get("severity") or "").lower() in {"medium", "high"}
+            ):
+                flags.append(flag)
+        for flag in generation_naturalness.get("flags") or []:
+            if (
+                isinstance(flag, dict)
                 and str(flag.get("severity") or "").lower() in {"medium", "high"}
             ):
                 flags.append(flag)
@@ -4142,6 +4153,19 @@ class GenerationEngine:
             "输出前自行检查段首分布；不要为了达标硬塞无关描写，也不要把所有姓名机械替换成‘他/她’，"
             "段落必须仍然服务于本场目标和压力。"
         )
+        natural_generation_contract = (
+            "【真人可读正文协议（生成期执行）】"
+            "本场只围绕一个正在发生的问题推进：让一个具体动作或对白改变现场，再写人物如何应对，"
+            "完成一次选择和可见结果后就收束，不要在同一场并列讲设定、回忆、人物履历和主题。"
+            "信息不要一次交代完；允许人物漏听、误判、答非所问、把话说到一半改口，"
+            "但每个停顿都必须留下现场压力或下一步选择。"
+            "旁白不替读者解释刚刚发生的事情，不写‘这意味着/这说明/他意识到/他心里清楚/不是梦或错觉’式结论；"
+            "把结论落到物件位置、动作停顿、资源损失、他人反应或新的限制。"
+            "非对白只保留最必要的一处比喻，优先写具体颜色、声音、触感、位置和动作；"
+            "不要连续使用‘像……一样/仿佛/如同’，也不要用重复拿起、放回、转身来填充犹豫。"
+            "对话不承担完整说明任务：角色可以避答、打断、说错重点，信息通过说话目的和现场反应逐步露出。"
+            "段落长短随压力变化，避免每段都完整走完‘现象→判断→解释→总结’，也不要为了显得像真人加入无关闲笔。"
+        )
         minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
         allowed_maximum = self._scene_allowed_max_chars(scene_card, scene_index=scene_index)
         maximum = max(
@@ -4171,6 +4195,7 @@ class GenerationEngine:
             f"{opening_instruction}\n"
             f"{contract_block}\n"
             f"{causal_contract_block}"
+            f"{natural_generation_contract}\n"
             f"{paragraph_opening_contract}\n"
             "本场必须把‘目标→阻碍→人物选择→可见结果/代价’写成现场发生的动作，"
             "让信息从对白、动作、物件、感官和他人反应中自然露出；不要把因果解释成提纲。"
@@ -4781,6 +4806,35 @@ class GenerationEngine:
                             "本次完整重写首段，不得以身体部位、疼痛、发闷、轰鸣或‘像有人’起笔；"
                             "必须让指定的物件、动作、对白、外部事件或环境变化先推动人物行动，"
                             "保留本场事实和因果，不要把原文首句换个同义词。"
+                        )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "scene_explanatory_narration"
+                        for item in issues
+                    ):
+                        feedback += (
+                            "\n解释腔修复硬要求：删除旁白替读者下结论的句子，不能只换成同义词；"
+                            "不要写‘这意味着/这说明/他意识到/他心里清楚/不是梦或错觉’式结论，"
+                            "把信息改成一个具体物件变化、人物临时决定、答非所问或尚未完成的念头；"
+                            "事件发生后不要立刻解释它的意义。"
+                        )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "scene_metaphor_density"
+                        for item in issues
+                    ):
+                        feedback += (
+                            "\n比喻密度修复硬要求：完整重写本场时，非对白最多保留一处确有必要的比喻；"
+                            "其余改成可观察的颜色、位置、触感、声音、动作或后果，不用‘像……一样/仿佛/如同’串联情绪。"
+                        )
+                    if any(
+                        isinstance(item, dict)
+                        and item.get("code") == "scene_repeated_action_loop"
+                        for item in issues
+                    ):
+                        feedback += (
+                            "\n动作回环修复硬要求：不要重复‘放回/拿起/转身/回头’来表示犹豫；"
+                            "保留一次动作，另一处必须改成新的信息、阻碍、选择或可见后果，不能原地重述。"
                         )
                     if any(
                         isinstance(item, dict)

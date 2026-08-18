@@ -8,6 +8,7 @@ import pytest
 from app.prompt_registry import PROMPT_SEEDS, render_prompt
 from app.services.quality_risks import build_quality_repair_contract
 from app.v7.quality.deai_metrics import analyze_deai_patterns
+from app.v7.quality.generation_naturalness import inspect_generation_naturalness
 from app.v7.generation.generation_engine import (
     AIGateway,
     AIGatewayError,
@@ -358,6 +359,25 @@ def test_natural_measure_phrase_counts_as_an_object_opening():
         recent_modes=["action"],
     )
     assert result["passed"] is True
+
+
+def test_generation_naturalness_blocks_explanation_metaphor_and_action_loops():
+    text = (
+        "不是灰尘，而是门缝里透出的一线光。他终于意识到这意味着封印松动，"
+        "那光像冬天的月亮，也像有人在门后吐息。苏长庚把竹帚放回墙角，又重新拿起，"
+        "转身走开后又回头。"
+    )
+
+    report = inspect_generation_naturalness(text)
+    codes = {item["code"] for item in report["flags"]}
+    assert "scene_explanatory_narration" in codes
+    assert "scene_metaphor_density" not in codes  # short snippets do not overfire
+    assert "scene_repeated_action_loop" in codes
+
+    long_text = text + "具体动作落在门锁、灰尘和台阶上。" * 40
+    long_report = inspect_generation_naturalness(long_text)
+    long_codes = {item["code"] for item in long_report["flags"]}
+    assert "scene_metaphor_density" in long_codes
 
 
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
