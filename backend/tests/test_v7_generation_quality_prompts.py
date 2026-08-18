@@ -305,6 +305,19 @@ def test_action_opening_with_environmental_consequences_is_not_misclassified():
     assert result["observed_mode"] == "action"
 
 
+def test_action_opening_with_late_body_feedback_is_not_misclassified():
+    text = "竹扫帚划到第七十七道砖缝时，苏长庚的脚底忽然震了一下。"
+
+    assert classify_opening(text) == "action"
+    result = inspect_opening(
+        text,
+        requested_mode="action",
+        chapter_number=1,
+    )
+    assert result["passed"] is True
+    assert result["observed_mode"] == "action"
+
+
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     first = build_readability_plan(
         1,

@@ -66,7 +66,7 @@ _ENVIRONMENT_RE = re.compile(
     r"(?:雨|雾|风|雪|潮气|热浪|冷气|天光|灯光|地面|楼道|院子|街道|海面|山谷).{0,20}(?:压|卷|散|落|亮|暗|晃|漫|逼|涌|变)"
 )
 _ACTION_RE = re.compile(
-    r"(?:抬手|转身|推开|推门|进门|冲出|拔出|按住|抓住|扣下|迈步|迈进|拎起|握紧|扑|躲|拦|挡|撕|砸|掏出|站起|跪|回头|走向|往.{0,8}走|上楼|下楼|决定|开口)"
+    r"(?:抬手|转身|推开|推门|进门|冲出|拔出|按住|抓住|扣下|迈步|迈进|拎起|握紧|扑|躲|拦|挡|撕|砸|掏出|站起|跪|回头|走向|往.{0,8}走|上楼|下楼|决定|开口|划|扫|擦|踩|弯腰|俯身|抬头|伸手|捡起|掀|扯|提|拉|拽|踢|翻|掩|靠|贴)"
 )
 
 
@@ -80,9 +80,15 @@ def classify_opening(text: Any) -> str:
     sample = _opening_sample(text, 220)
     if not sample:
         return "unknown"
+    leading = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", sample)
     if _DIALOGUE_RE.search(sample):
         return "dialogue"
-    if _BODY_RE.search(sample[:180]):
+    # A body sensation is an opening shape only when the body cue starts the
+    # opening.  A later consequence such as "扫帚划过砖缝，脚底震了一下"
+    # must remain an action opening; matching any body phrase in the first
+    # 180 characters caused real-provider false blocks.
+    body_match = _BODY_RE.search(leading[:180])
+    if body_match and body_match.start() <= 8:
         return "body_sensation"
     if _EXTERNAL_EVENT_RE.search(sample[:180]):
         return "external_event"
