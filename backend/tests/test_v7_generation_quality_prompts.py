@@ -332,6 +332,21 @@ def test_object_opening_is_not_reclassified_by_a_later_action():
     assert result["observed_mode"] == "object"
 
 
+def test_later_action_does_not_hide_an_unfulfilled_object_opening():
+    text = "清晨，藏经阁还没亮透，苏长庚的帚尖已经落在第七层台阶上。门缝里的光随后才亮起来。"
+
+    assert classify_opening(text) == "unknown"
+    result = inspect_opening(
+        text,
+        requested_mode="object",
+        chapter_number=2,
+        recent_modes=["action"],
+    )
+    assert result["passed"] is False
+    assert any(item["code"] == "opening_mode_mismatch" for item in result["flags"])
+    assert not any(item["code"] == "opening_mode_repetition" for item in result["flags"])
+
+
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     first = build_readability_plan(
         1,

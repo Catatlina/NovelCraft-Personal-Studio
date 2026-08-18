@@ -66,7 +66,7 @@ _ENVIRONMENT_RE = re.compile(
     r"(?:雨|雾|风|雪|潮气|热浪|冷气|天光|灯光|地面|楼道|院子|街道|海面|山谷).{0,20}(?:压|卷|散|落|亮|暗|晃|漫|逼|涌|变)"
 )
 _ACTION_RE = re.compile(
-    r"(?:抬手|转身|推开|推门|进门|冲出|拔出|按住|抓住|扣下|迈步|迈进|拎起|握紧|扑|躲|拦|挡|撕|砸|掏出|站起|跪|回头|走向|往.{0,8}走|上楼|下楼|决定|开口|划|扫|擦|踩|弯腰|俯身|抬头|伸手|捡起|掀|扯|提|拉|拽|踢|翻|掩|靠|贴)"
+    r"(?:抬手|转身|推开|推门|进门|冲出|拔出|按住|抓住|扣下|迈步|迈进|抬脚|走近|靠近|拎起|握紧|扑|躲|拦|挡|撕|砸|掏出|取出|站起|跪|回头|走向|往.{0,8}走|上楼|下楼|决定|开口|划|扫|擦|踩|弯腰|俯身|抬头|伸手|捡起|拾起|掀|扯|提|拉|拽|踢|翻|掩|靠|贴|收回|压住|放下|抓起|蹲下|退后|退开|直起|停住|停下)"
 )
 
 
@@ -75,29 +75,44 @@ def _opening_sample(text: Any, limit: int = 360) -> str:
     return compact[:limit]
 
 
+def _opening_head(text: Any, limit: int = 160) -> str:
+    """Return the first sentence where the opening operator is actually chosen."""
+    sample = _opening_sample(text, limit=360)
+    first_sentence = re.split(r"[。！？!?\n]", sample, maxsplit=1)[0]
+    return first_sentence[:limit].strip()
+
+
 def classify_opening(text: Any) -> str:
     """Classify only the dominant surface form of the opening."""
     sample = _opening_sample(text, 220)
-    if not sample:
+    head = _opening_head(sample)
+    if not head:
         return "unknown"
-    leading = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", sample)
-    if _DIALOGUE_RE.search(sample):
+    leading = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", head)
+    if _DIALOGUE_RE.search(head):
         return "dialogue"
     # A body sensation is an opening shape only when the body cue starts the
     # opening.  A later consequence such as "扫帚划过砖缝，脚底震了一下"
     # must remain an action opening; matching any body phrase in the first
     # 180 characters caused real-provider false blocks.
-    body_match = _BODY_RE.search(leading[:180])
+    body_match = _BODY_RE.search(leading)
     if body_match and body_match.start() <= 8:
         return "body_sensation"
-    if _EXTERNAL_EVENT_RE.search(sample[:180]):
-        return "external_event"
-    if _OBJECT_RE.search(sample[:180]):
-        return "object"
-    if _ACTION_RE.search(sample[:180]):
-        return "action"
-    if _ENVIRONMENT_RE.search(sample[:180]):
-        return "environment"
+    surface_matches = [
+        (match.start(), priority, mode)
+        for priority, (mode, pattern) in enumerate(
+            (
+                ("external_event", _EXTERNAL_EVENT_RE),
+                ("object", _OBJECT_RE),
+                ("action", _ACTION_RE),
+                ("environment", _ENVIRONMENT_RE),
+            )
+        )
+        for match in [pattern.search(head)]
+        if match is not None
+    ]
+    if surface_matches:
+        return min(surface_matches)[2]
     return "unknown"
 
 
@@ -202,9 +217,18 @@ def opening_prompt_block(plan: dict[str, Any] | None) -> str:
     label = plan.get("label") or OPENING_MODE_LABELS.get(mode, mode)
     directive = plan.get("directive") or OPENING_MODE_DIRECTIVES.get(mode, "")
     recent = "、".join(str(item) for item in (plan.get("forbidden_recent_modes") or [])) or "无"
+    first_sentence_directive = {
+        "action": "首句必须直接出现正在发生的动作、决定或争执，并造成一个可见变化。",
+        "dialogue": "首句必须直接是带目的的对白或对白冲突，不得先写环境和日常动作。",
+        "object": "首句必须直接出现具体物件及其异常、变化或结果；后文的动作不能代替物件开场。",
+        "external_event": "首句必须直接出现外部事件、来客、警报、消息或现场变化，并迫使人物回应。",
+        "environment": "首句必须直接出现会改变人物选择的环境变化，不得只是静态风景。",
+        "body_sensation": "首句必须直接出现核心身体异常，并立即落到事件和选择。",
+    }.get(mode, "首句必须让指定开场类型可被直接识别。")
     return (
         "【开场多样性硬约束】\n"
         f"本章指定开场类型：{label}（{mode}）。{directive}\n"
+        f"{first_sentence_directive}\n"
         f"最近三章已使用开场类型：{recent}；本章不要重复这些类型。\n"
         "前300字必须出现具体压力、异常、目标或选择，并完成一次可见推进；"
         "先写正在发生的事，不写醒来、疼痛、空泛环境或背景说明作为默认开场。\n"
@@ -226,6 +250,14 @@ def inspect_opening(
     recent = [str(mode) for mode in (recent_modes or []) if mode in OPENING_MODES]
     first_sentence = re.split(r"[。！？!?\n]", sample, maxsplit=1)[0]
     flags: list[dict[str, Any]] = []
+
+    if requested in OPENING_MODES and observed != requested:
+        flags.append({
+            "code": "opening_mode_mismatch",
+            "severity": "high",
+            "message": f"指定开场类型为 {requested}，但首句实际呈现为 {observed}",
+            "evidence": first_sentence[:120],
+        })
 
     if observed == "body_sensation" and requested != "body_sensation":
         flags.append({
