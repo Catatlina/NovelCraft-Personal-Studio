@@ -3803,6 +3803,115 @@ class GenerationEngine:
             })
         return flags
 
+    async def _generate_structured_plain_scene_candidate(
+        self,
+        *,
+        chapter_number: int,
+        scene_index: int,
+        context: dict[str, Any],
+        scene_card: dict[str, Any],
+        previous_scene_tail: str,
+        current_state: dict[str, Any],
+        previous_handoffs: list[dict[str, Any]],
+        min_scene_chars: int,
+        max_scene_chars: int,
+    ) -> dict[str, Any]:
+        """Generate one plain scene through a structured, low-variance path.
+
+        A whole-scene prose prompt lets the Provider spend its first tokens on
+        atmosphere and then decorate every turn with the same image pattern.
+        This fallback asks for paragraph-sized factual beats instead.  The
+        Provider still writes every sentence; the application only validates
+        the JSON shape and joins the returned paragraphs.  It is used once
+        after a naturalness failure, not as a post-write humanizer.
+        """
+        layers = context.get("context_layers") or {}
+        facts = {
+            "current_time": layers.get("current_time") or current_state.get("time") or "",
+            "current_location": layers.get("current_location") or current_state.get("location") or "",
+            "known_facts": current_state.get("known_facts") or [],
+            "open_threads": current_state.get("open_threads") or [],
+        }
+        prompt = (
+            "只写一个连续的中文网文场景，输出严格 JSON，不要 Markdown、解释或写作说明。"
+            "这是一次现场写作，不是提纲。先让人物做事，信息在动作、对白、物件变化和可感知结果中出现；"
+            "情绪通过人物做了什么、没做什么来表现，不替人物解释心理。"
+            "每个段落只落到一个具体现场点，允许答非所问、拿错、找不到、被打断，事情可以暂时没做完。"
+            "语言保持平、快、干，不做修辞联想，不用抽象总结，不为了完整而补齐因果。"
+            f"\n第{chapter_number}章第{scene_index}场，正文长度控制在 {min_scene_chars}-{max_scene_chars} 字。"
+            f"\n【本场契约】{json.dumps(scene_card, ensure_ascii=False)}"
+            f"\n【已确认事实】{json.dumps(facts, ensure_ascii=False)}"
+            f"\n【上一场末尾】{previous_scene_tail or '本章开端，直接从本场动作起笔。'}"
+            f"\n【前场交接】{json.dumps(previous_handoffs[-2:], ensure_ascii=False)}"
+            "\n返回：{\"paragraphs\":[\"正文段落1\",\"正文段落2\",\"正文段落3\"]}。"
+            "paragraphs 必须是 4-9 个非空字符串；每个字符串只能是一段，不得含换行；"
+            "必须完成一次目标、阻碍、选择和现场结果，然后停在下一步压力上。"
+        )
+        usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+        try:
+            result = await self.ai_gateway.generate_json(
+                prompt,
+                system_prompt=(
+                    "你是中文网文的现场写作者，只返回合法 JSON。"
+                    "正文必须具体、克制、可继续阅读；不要写作者判断，不要解释写作方法。"
+                ),
+                max_tokens=min(SCENE_PROVIDER_TOKEN_CAP, max(900, int(max_scene_chars * 1.20))),
+                temperature=0.28,
+                prompt_name="v7.generation.scene.structured_plain",
+                prompt_version="1.0.0",
+            )
+            usage.update(result.get("usage") or {})
+        except Exception as exc:
+            return {
+                "accepted": False,
+                "reason": f"structured_plain_provider_error:{type(exc).__name__}",
+                "usage": usage,
+            }
+
+        data = result.get("data") if isinstance(result, dict) else None
+        paragraphs = data.get("paragraphs") if isinstance(data, dict) else None
+        if not isinstance(paragraphs, list) or not 4 <= len(paragraphs) <= 9:
+            return {
+                "accepted": False,
+                "reason": "structured_plain_invalid_paragraphs",
+                "usage": usage,
+            }
+        cleaned = [str(item or "").strip() for item in paragraphs]
+        if any(not item or "\n" in item or "\r" in item for item in cleaned):
+            return {
+                "accepted": False,
+                "reason": "structured_plain_invalid_text",
+                "usage": usage,
+            }
+        candidate = "\n\n".join(cleaned)
+        candidate_chars = chinese_word_count(candidate)
+        naturalness = inspect_generation_naturalness(candidate)
+        if not min_scene_chars <= candidate_chars <= max_scene_chars or not naturalness.get("passed"):
+            return {
+                "accepted": False,
+                "reason": "structured_plain_quality_rejected",
+                "candidate_chars": candidate_chars,
+                "naturalness": naturalness,
+                "usage": usage,
+            }
+        return {
+            "accepted": True,
+            "text": candidate,
+            "candidate_chars": candidate_chars,
+            "naturalness": naturalness,
+            "usage": usage,
+            "provider_result": {
+                "text": candidate,
+                "provider": getattr(self.ai_gateway, "provider", ""),
+                "model": usage.get("model"),
+                "tokens_input": usage.get("tokens_input", 0),
+                "tokens_output": usage.get("tokens_output", 0),
+                "cost": usage.get("cost", 0.0),
+                "finish_reason": "stop",
+                "truncated": False,
+            },
+        }
+
     @staticmethod
     def _local_segment_issue_codes(issues: list[dict[str, Any]]) -> set[str]:
         """Return issues that can be repaired without rewriting the scene."""
@@ -4563,6 +4672,11 @@ class GenerationEngine:
                     max_scene_chars=attempt_max_scene_chars,
                     token_margin=repair_margin,
                 )
+                style_only_retry = bool(
+                    attempt
+                    and candidate
+                    and self._is_style_only_retry(previous_issue_codes)
+                )
                 scene_prompt = self._build_scene_generation_prompt(
                     chapter_number=chapter_number,
                     context=context,
@@ -4588,11 +4702,6 @@ class GenerationEngine:
                     "不输出任何工程说明；优先保证人物声音、动作因果、现场感和自然节奏。"
                     + third_person_generation_contract()
                     + content_generation_contract(self.quality_profile)
-                )
-                style_only_retry = bool(
-                    attempt
-                    and candidate
-                    and self._is_style_only_retry(previous_issue_codes)
                 )
                 if attempt and candidate:
                     if style_only_retry:
@@ -4620,20 +4729,38 @@ class GenerationEngine:
                             + third_person_generation_contract()
                             + content_generation_contract(self.quality_profile)
                         )
-                result = await self.ai_gateway.generate(
-                    scene_prompt,
-                    system_prompt=scene_system_prompt,
-                    max_tokens=scene_token_limit,
-                    # The previous 0.82 first pass made DeepSeek reach for
-                    # decorative image chains while still following the same
-                    # paragraph cadence.  Keep independent repairs varied,
-                    # but start the actual prose writer closer to the route's
-                    # 0.7 default so the hard scene protocol remains legible.
-                    temperature=(0.38 if style_only_retry else 0.58) if attempt else 0.62,
-                    prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
-                    prompt_version=SCENE_SERIAL_GENERATION_VERSION,
-                    expand_on_truncation=False,
-                )
+                structured_plain = None
+                if style_only_retry and attempt == 1:
+                    structured_plain = await self._generate_structured_plain_scene_candidate(
+                        chapter_number=chapter_number,
+                        scene_index=index,
+                        context=context,
+                        scene_card=card,
+                        previous_scene_tail=scene_texts[-1][-1200:] if scene_texts else (
+                            (context.get("context_layers") or {}).get("previous_tail") or ""
+                        ),
+                        current_state=current_state,
+                        previous_handoffs=handoffs,
+                        min_scene_chars=min_scene_chars,
+                        max_scene_chars=attempt_max_scene_chars,
+                    )
+                    add_call_usage(structured_plain.get("usage") or {})
+                if structured_plain and structured_plain.get("accepted"):
+                    result = structured_plain["provider_result"]
+                else:
+                    result = await self.ai_gateway.generate(
+                        scene_prompt,
+                        system_prompt=scene_system_prompt,
+                        max_tokens=scene_token_limit,
+                        # The previous high-temperature first pass made
+                        # DeepSeek reach for decorative image chains. Keep
+                        # the ordinary writer conservative and reserve the
+                        # structured plain path for a naturalness failure.
+                        temperature=(0.38 if style_only_retry else 0.58) if attempt else 0.62,
+                        prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
+                        prompt_version=SCENE_SERIAL_GENERATION_VERSION,
+                        expand_on_truncation=False,
+                    )
                 add_call_usage(result)
                 truncated = bool(result.get("truncated")) or str(
                     result.get("finish_reason") or ""

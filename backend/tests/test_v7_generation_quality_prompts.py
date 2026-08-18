@@ -445,6 +445,42 @@ def test_scene_retry_feedback_does_not_replay_failed_prose_examples():
     assert "像取不尽似的" not in json.dumps(evidence, ensure_ascii=False)
 
 
+def test_structured_plain_scene_path_accepts_complete_factual_paragraphs():
+    class FakeGateway:
+        provider = "deepseek"
+
+        async def generate_json(self, prompt, **kwargs):
+            assert "现场写作" in prompt
+            return {
+                "data": {
+                    "paragraphs": [
+                        "门栓先动了一下。苏长庚把手收回来，侧身挡住楼梯口，扫帚柄横在门前。",
+                        "门后没有回答，门缝下漫出一线水，沿着石缝往外走，沾湿了他的鞋尖。",
+                        "他低头看了眼手里的纸包，把纸包交给身后的人，又把灯芯往上拨了一格。",
+                        "‘拿稳。’他说完退开半步，楼梯口的灯灭了，门里的水也停在了台阶边。",
+                    ]
+                },
+                "usage": {"tokens_input": 10, "tokens_output": 20, "cost": 0.1, "model": "deepseek-chat"},
+            }
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.ai_gateway = FakeGateway()
+    result = asyncio.run(engine._generate_structured_plain_scene_candidate(
+        chapter_number=1,
+        scene_index=1,
+        context={"context_layers": {}},
+        scene_card={"target_words": 180, "content": "完成一次现场选择"},
+        previous_scene_tail="",
+        current_state={},
+        previous_handoffs=[],
+        min_scene_chars=120,
+        max_scene_chars=500,
+    ))
+
+    assert result["accepted"] is True
+    assert result["text"].count("\n\n") == 3
+
+
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     first = build_readability_plan(
         1,
