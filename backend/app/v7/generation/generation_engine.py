@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.19.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.20.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -3553,6 +3553,66 @@ class GenerationEngine:
         })
 
     @staticmethod
+    def _safe_scene_retry_evidence(issue: dict[str, Any]) -> dict[str, Any] | None:
+        """Keep failed prose examples out of the next Writer prompt.
+
+        The old retry feedback serialised detector evidence verbatim.  That
+        included the exact bad similes and conclusion phrases emitted by the
+        previous candidate, which gave the next Provider a highly salient
+        phrase bank to imitate.  A generation critic should communicate the
+        defect category and its size, not replay the defective prose.
+        """
+        code = str(issue.get("code") or "")
+        evidence = issue.get("evidence")
+        if code == "scene_metaphor_density":
+            return {
+                "count": int(evidence.get("count") or 0)
+                if isinstance(evidence, dict)
+                else None,
+                "baseline": "non_dialogue_simile_zero",
+            }
+        if code == "scene_explanatory_narration":
+            kinds = []
+            if isinstance(evidence, list):
+                kinds = sorted({
+                    str(item.get("kind") or "")
+                    for item in evidence
+                    if isinstance(item, dict) and item.get("kind")
+                })
+            return {"kinds": kinds, "baseline": "narrator_conclusion_zero"}
+        if code == "scene_repeated_action_loop":
+            kinds = []
+            if isinstance(evidence, list):
+                kinds = sorted({
+                    str(item.get("kind") or "")
+                    for item in evidence
+                    if isinstance(item, dict) and item.get("kind")
+                })
+            return {"kinds": kinds, "baseline": "new_choice_or_consequence"}
+        if code == "structural_ai_smell":
+            if not isinstance(evidence, dict):
+                return None
+            dimensions = evidence.get("failed_dimensions") or []
+            names = [
+                str(item.get("name") or "")
+                for item in dimensions
+                if isinstance(item, dict) and item.get("name")
+            ]
+            return {
+                "overall_score": evidence.get("overall_score"),
+                "failed_dimensions": names[:5],
+            }
+        if code == "repeated_paragraph_opening":
+            if not isinstance(evidence, dict):
+                return None
+            return {
+                "opening": str(evidence.get("opening") or "")[:2],
+                "count": evidence.get("count"),
+                "paragraph_count": evidence.get("paragraph_count"),
+            }
+        return None
+
+    @staticmethod
     def _final_scene_budget_variance_allowed(
         *,
         projected_chars: int,
@@ -4803,14 +4863,15 @@ class GenerationEngine:
                 }
                 if attempt < 2:
                     feedback = "；".join(
-                        (
-                            str(item.get("message") or item.get("code"))
-                            + (
-                                "；诊断证据："
-                                + json.dumps(item.get("evidence"), ensure_ascii=False)
-                                if item.get("evidence")
-                                else ""
+                        str(item.get("message") or item.get("code"))
+                        + (
+                            "；风险摘要："
+                            + json.dumps(
+                                self._safe_scene_retry_evidence(item),
+                                ensure_ascii=False,
                             )
+                            if self._safe_scene_retry_evidence(item)
+                            else ""
                         )
                         for item in issues[:5]
                     )

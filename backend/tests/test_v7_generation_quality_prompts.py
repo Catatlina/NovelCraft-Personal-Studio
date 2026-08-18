@@ -412,6 +412,8 @@ def test_generation_protocol_uses_strict_baseline_and_selected_route():
     assert "generation-style-protocol-v2" in protocol
     assert "物件与后果推进" in protocol
     assert "非对白比喻为 0" in protocol
+    assert "平、快、干" in protocol
+    assert "拿错、找不到、被打断" in protocol
     assert "不复制词句" in protocol
     assert "门栓先动了一下" in protocol
 
@@ -427,6 +429,19 @@ def test_generation_naturalness_flags_one_non_dialogue_simile_at_scene_scale():
 
     report = inspect_generation_naturalness(text.replace("水痕", "像水一样的痕迹"))
     assert any(item["code"] == "scene_metaphor_density" for item in report["flags"])
+
+
+def test_scene_retry_feedback_does_not_replay_failed_prose_examples():
+    evidence = GenerationEngine._safe_scene_retry_evidence({
+        "code": "scene_metaphor_density",
+        "evidence": {
+            "count": 8,
+            "examples": ["像取不尽似的", "像是被什么从下面顶出来的"],
+        },
+    })
+
+    assert evidence == {"count": 8, "baseline": "non_dialogue_simile_zero"}
+    assert "像取不尽似的" not in json.dumps(evidence, ensure_ascii=False)
 
 
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
