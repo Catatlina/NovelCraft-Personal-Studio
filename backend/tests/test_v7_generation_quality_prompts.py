@@ -318,6 +318,20 @@ def test_action_opening_with_late_body_feedback_is_not_misclassified():
     assert result["observed_mode"] == "action"
 
 
+def test_object_opening_is_not_reclassified_by_a_later_action():
+    text = "门缝里的光变了。苏长庚抬脚走近，伸手去碰那道裂痕。"
+
+    assert classify_opening(text) == "object"
+    result = inspect_opening(
+        text,
+        requested_mode="object",
+        chapter_number=2,
+        recent_modes=["action"],
+    )
+    assert result["passed"] is True
+    assert result["observed_mode"] == "object"
+
+
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     first = build_readability_plan(
         1,
