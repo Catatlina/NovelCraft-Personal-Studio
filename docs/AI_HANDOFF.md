@@ -2,6 +2,17 @@
 > 更新时间：2026-08-17
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-17 生成协议融合：特征卡 + 局部 Best-of-3（当前批次）
+
+- **生成优先原则已落代码**：Writer 只接收自然叙事规则、作者/品类元数据和统计特征卡，不再把正/负样本文字原文直接塞入正文 Prompt；特征卡带样本 SHA-256、标签、检测器/Provider 元数据，明确 `raw_samples_in_prompt=false`。
+- **样本登记入口已接线**：`POST /api/v1/author-style/{project_id}/prose-samples` 复用现有 `style_cards.author_card`，保存 `positive_samples` / `negative_samples`、检测器、分数、Provider、来源和哈希；单条样本与总量有长度/数量上限，项目成员权限校验沿用现有风格卡接口。
+- **生成期 Critic 已接入场景串行链**：对候选正文只返回段落索引、风险类别和锁定段落集合；低风险段落保持不变，高风险段最多四段进入局部候选，不触发整章后置重写。
+- **局部候选门禁已接入**：高风险表达问题最多独立生成 3 个候选，按内部风险、篇幅比例、重复段和特征卡距离择优；风险上升、篇幅异常、段落边界破坏或未降低风险的候选全部拒绝。内部统计只用于选择，不是朱雀分数，也不宣称95/5/0。
+- **验证证据**：容器化目标回归 `92 passed`（作者风格、生成质量、联网研究、生成策略）；Python 编译与 `git diff --check` 通过。本批尚未部署前，生产未使用这套新候选链。
+- **当前边界**：这是一层生成期质量控制，不等于朱雀外部检测适配；真实 Provider 只允许在部署后做一次受控单章验证，20章长跑仍须另建 `active_chapters=0` 清空历史副本，不能复用已有诊断章。
+
+- **实现文件**：`backend/app/v7/quality/prose_generation.py`、`backend/app/v7/generation/generation_engine.py`、`backend/app/services/author_style.py`、`backend/app/api/v1/author_style.py`。
+
 ## 2026-08-17 联网创作真实搜索验证与生成期修复（当前批次）
 
 - **作品开关**：生产原作 `4ee9db30-98c7-40d5-9484-12432efed69e` 已通过 `PUT /api/v1/novels/{novel_id}/generation-settings` 切换为 `web_research_mode=required`；生产 healthz 已确认 Tavily provider 和 Key 配置存在。

@@ -9,11 +9,14 @@
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 
-from app.db import connect, encode, new_id
+from app.db import connect, decode, encode, new_id
 from app.services.style_learn import _extract_motifs, learn_style
 
 _MAX_LEN = 4000  # 单条信号文本上限，防止巨量正文写库
+_MAX_PROSE_SAMPLE_COUNT = 12
+_MAX_PROSE_SAMPLE_LEN = 12000
 
 
 def _clip(text: str, limit: int = _MAX_LEN) -> str:
@@ -95,6 +98,101 @@ def merge_style_card(base: dict, summary: dict) -> dict:
     if summary.get("edit_preference") and summary["edit_preference"] != "insufficient_data":
         merged["edit_preference"] = summary["edit_preference"]
     return merged
+
+
+def normalize_prose_samples(raw_samples: list[dict] | None) -> list[dict]:
+    """Normalize externally reviewed prose samples for the generation profile.
+
+    The raw text is retained only in the protected style-card store so the
+    feature-card builder can derive statistics later. It is never rendered in
+    a Writer prompt. Duplicate samples are collapsed by SHA-256.
+    """
+    result: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_samples or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("content") or "").strip()
+        if not text:
+            continue
+        text = text[:_MAX_PROSE_SAMPLE_LEN]
+        label = str(item.get("label") or "positive").strip().lower()
+        label = "negative" if label in {"negative", "bad", "high_risk", "risk"} else "positive"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        score = item.get("score")
+        try:
+            score = round(float(score), 4) if score is not None else None
+        except (TypeError, ValueError):
+            score = None
+        result.append({
+            "text": text,
+            "label": label,
+            "sha256": digest,
+            "detector": str(item.get("detector") or "").strip()[:120],
+            "provider": str(item.get("provider") or "").strip()[:120],
+            "source": str(item.get("source") or "external_review").strip()[:120],
+            "score": score,
+        })
+    return result
+
+
+def merge_prose_samples(author_card: dict | None, samples: list[dict] | None) -> dict:
+    """Merge reviewed samples into the author card with bounded retention."""
+    card = dict(author_card) if isinstance(author_card, dict) else {}
+    existing = []
+    for key in ("positive_samples", "negative_samples"):
+        value = card.get(key)
+        if isinstance(value, list):
+            existing.extend(value)
+    merged = normalize_prose_samples(existing + list(samples or []))
+    positives = [item for item in merged if item["label"] == "positive"][:_MAX_PROSE_SAMPLE_COUNT]
+    negatives = [item for item in merged if item["label"] == "negative"][:_MAX_PROSE_SAMPLE_COUNT]
+    card["positive_samples"] = positives
+    card["negative_samples"] = negatives
+    card["prose_sample_policy"] = {
+        "schema_version": "prose-samples-v1",
+        "positive_count": len(positives),
+        "negative_count": len(negatives),
+        "raw_text_in_writer_prompt": False,
+    }
+    return card
+
+
+def save_prose_samples(project_id: str, samples: list[dict] | None) -> dict:
+    """Persist reviewed samples in the existing protected author-card row."""
+    normalised = normalize_prose_samples(samples)
+    if not normalised:
+        return {"recorded": 0, "positive_count": 0, "negative_count": 0}
+    db = connect()
+    try:
+        row = db.execute(
+            "SELECT id, author_card FROM style_cards "
+            "WHERE project_id=%s ORDER BY updated_at DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        author_card = decode(row.get("author_card"), {}) if row else {}
+        updated = merge_prose_samples(author_card, normalised)
+        if row:
+            db.execute(
+                "UPDATE style_cards SET author_card=%s, updated_at=now() WHERE id=%s",
+                (encode(updated), row["id"]),
+            )
+        else:
+            db.execute(
+                "INSERT INTO style_cards (id, project_id, author_card) VALUES (%s, %s, %s)",
+                (new_id("sc"), project_id, encode(updated)),
+            )
+        db.commit()
+        return {
+            "recorded": len(normalised),
+            "positive_count": len(updated.get("positive_samples") or []),
+            "negative_count": len(updated.get("negative_samples") or []),
+        }
+    finally:
+        db.close()
 
 
 def learn_from_signals(samples: list[str], raw_signals: list) -> dict:

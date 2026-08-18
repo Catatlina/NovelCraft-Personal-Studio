@@ -1,4 +1,6 @@
 import asyncio
+import json
+import re
 from contextlib import asynccontextmanager
 
 import pytest
@@ -29,6 +31,14 @@ from app.v7.quality.opening_variation import (
     classify_opening,
     inspect_opening,
     select_opening_plan,
+)
+from app.v7.quality.prose_generation import (
+    apply_segment_replacements,
+    build_generation_critic_report,
+    build_prose_feature_card,
+    feature_card_from_style_card,
+    render_prose_feature_card,
+    sanitise_style_card_for_prompt,
 )
 from app.v7.quality.readability_contract import build_readability_plan, render_readability_plan
 
@@ -1140,6 +1150,126 @@ def test_scene_serial_catches_repeated_name_opening_in_a_short_scene():
     flags = GenerationEngine._scene_naturalness_flags(candidate)
 
     assert any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
+
+
+def test_prose_feature_card_uses_sample_statistics_without_verbatim_payload():
+    card = build_prose_feature_card([
+        {"text": "门锁先响了。雨水沿着窗框往下淌。她没有回答，只把纸条折回去。", "label": "positive"},
+        {"text": "真正的问题是他已经明白了一切。也就是说，事情只能这样发展。", "label": "negative"},
+    ], provider="deepseek", detector="zhuque")
+
+    rendered = render_prose_feature_card(card)
+    assert card["schema_version"] == "prose-feature-card-v1"
+    assert card["positive_sample_count"] == 1
+    assert card["negative_sample_count"] == 1
+    assert card["source_hashes"]
+    assert "门锁先响了" not in rendered
+    assert "真正的问题是" not in rendered
+    assert "只学习统计质地" in rendered
+
+    prompt_card = sanitise_style_card_for_prompt({
+        "author_card": {
+            "sample_prose": "门锁先响了。",
+            "voice": "克制",
+        }
+    })
+    assert "sample_prose" not in json.dumps(prompt_card, ensure_ascii=False)
+    assert prompt_card["prose_feature_card"]["positive_sample_count"] == 1
+
+    engine = GenerationEngine.__new__(GenerationEngine)
+    prompt = engine._build_scene_generation_prompt(
+        chapter_number=1,
+        context={
+            "context_layers": {
+                "style_card": {"author_card": {"sample_prose": "门锁先响了。"}},
+            },
+            "rendered_context": "",
+        },
+        scene_plan={"chapter_title": "现场", "prose_texture_plan": {}},
+        scene_card={"target_words": 300, "content": "完成一次选择"},
+        scene_index=1,
+        scene_count=1,
+        previous_scene_tail="",
+        current_state={},
+        previous_handoffs=[],
+    )
+    assert "门锁先响了" not in prompt
+    assert "自然叙事特征卡" in prompt
+
+
+def test_generation_critic_locks_low_risk_paragraphs_and_replaces_only_risk_ranges():
+    source = "\n\n".join([
+        "顾沉抬手按住门缝，听见里面的脚步停了。",
+        "顾沉把手机扣在掌心，示意身后的人别出声。",
+        "雨声敲在窗纸上，屋里的火光轻轻一晃。",
+    ])
+    report = build_generation_critic_report(source)
+    assert report["segments"]
+    assert 2 in report["locked_paragraph_indexes"]
+
+    repaired = apply_segment_replacements(
+        source,
+        [{"paragraph_index": 1, "text": "门把手在掌心里转了半圈，顾沉没有立刻松开。"}],
+    )
+    assert repaired is not None
+    assert "顾沉抬手按住门缝" in repaired
+    assert "门把手在掌心里转了半圈" in repaired
+    assert "雨声敲在窗纸上" in repaired
+
+
+def test_local_segment_candidates_are_best_of_three_and_reject_regression():
+    class Gateway:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_json(self, prompt, **_kwargs):
+            self.calls += 1
+            match = re.search(r"需要修订的局部段落：(\[.*\])\n只输出", prompt, re.DOTALL)
+            segments = json.loads(match.group(1))
+            if self.calls == 1:
+                text_prefix = "顾沉"
+            else:
+                text_prefix = ("门锁", "雨声", "窗边", "纸条")[self.calls - 2]
+            return {
+                "data": {
+                    "replacements": [
+                        {
+                            "paragraph_index": item["paragraph_index"],
+                            "text": f"{text_prefix}留下了新的现场结果，人物没有急着解释。",
+                        }
+                        for item in segments
+                    ]
+                },
+                "usage": {"tokens_input": 1, "tokens_output": 1, "cost": 0.01, "model": "test"},
+            }
+
+    source = "\n\n".join([
+        *[f"顾沉把第{i}件物品压在桌上，屋里没有人回答。" for i in range(8)],
+        "雨水顺着窗框落下，灯影在地面上晃了一下。",
+        "门轴发出轻响，走廊里的脚步停住了。",
+        "赵宁把纸条塞回袖口，没有解释。",
+        "火星从灯芯上跳开，照出一小块湿痕。",
+        "楼下传来车门合上的声音，随后归于安静。",
+        "桌角的灰尘被风卷起，又落回原处。",
+    ])
+    engine = GenerationEngine.__new__(GenerationEngine)
+    engine.ai_gateway = Gateway()
+    result = asyncio.run(engine._generate_best_local_segment_candidate(
+        chapter_number=1,
+        scene_index=1,
+        context={"context_layers": {}},
+        scene_card={"name": "局部修订", "target_words": 800},
+        source_text=source,
+        metrics=analyze_deai_patterns(source),
+        issues=[{"code": "repeated_paragraph_opening", "severity": "medium"}],
+    ))
+
+    assert engine.ai_gateway.calls == 3
+    assert result["accepted"] is True
+    assert result["reason"] == "best_of_3"
+    assert result["locked_paragraph_count"] >= 1
+    assert "顾沉把第7件物品" in result["text"]
+    assert "门锁留下了新的现场结果" in result["text"] or "雨声留下了新的现场结果" in result["text"]
 
 
 def test_scene_serial_rescales_provider_plan_to_reader_target_before_writing():

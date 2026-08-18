@@ -42,6 +42,19 @@ class LikeBody(BaseModel):
     text: str = ""
 
 
+class ProseSampleIn(BaseModel):
+    text: str
+    label: str = "positive"
+    detector: str = ""
+    score: float | None = None
+    provider: str = ""
+    source: str = "external_review"
+
+
+class ProseSamplesBody(BaseModel):
+    samples: list[ProseSampleIn] = []
+
+
 @router.post("/{project_id}/signals")
 def post_signals(project_id: str, body: SignalsBody, user: dict = Depends(get_current_user)):
     require_project_member(project_id, user, write=True)
@@ -77,6 +90,21 @@ def trigger_learning(project_id: str, user: dict = Depends(get_current_user)):
     require_project_member(project_id, user, write=True)
     task_id = _dispatch_style_learning(project_id)
     return {"code": 0, "message": "ok", "data": {"task_id": task_id, "status": "dispatched"}}
+
+
+@router.post("/{project_id}/prose-samples")
+def post_prose_samples(
+    project_id: str,
+    body: ProseSamplesBody,
+    user: dict = Depends(get_current_user),
+):
+    """Register externally reviewed positive/negative samples for generation."""
+    require_project_member(project_id, user, write=True)
+    result = author_style.save_prose_samples(
+        project_id,
+        [sample.model_dump() for sample in body.samples],
+    )
+    return {"code": 0, "message": "ok", "data": result}
 
 
 @router.get("/{project_id}/card")

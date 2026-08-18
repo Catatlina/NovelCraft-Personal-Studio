@@ -2,7 +2,9 @@
 from app.services.author_style import (
     learn_from_signals,
     merge_style_card,
+    merge_prose_samples,
     normalize_signals,
+    normalize_prose_samples,
     persist_card,
     record_signals,
     summarize_signals,
@@ -80,6 +82,24 @@ def test_merge_keeps_base_and_adds_signals():
     assert merged["avg_sentence_length"] == 22.0
     assert merged["author_signals"]["signal_count"] == 1
     assert "月色" in merged["common_motifs"]
+
+
+def test_prose_samples_keep_labels_and_deduplicate_without_losing_metadata():
+    samples = normalize_prose_samples([
+        {"text": "低风险正文", "label": "positive", "detector": "zhuque", "score": 0.34},
+        {"text": "低风险正文", "label": "positive", "detector": "zhuque", "score": 0.34},
+        {"text": "高风险正文", "label": "negative", "detector": "zhuque", "score": 0.81},
+    ])
+    assert len(samples) == 2
+    assert samples[0]["sha256"]
+    assert samples[0]["detector"] == "zhuque"
+    assert samples[1]["label"] == "negative"
+
+    merged = merge_prose_samples({"voice": "克制"}, samples)
+    assert merged["voice"] == "克制"
+    assert len(merged["positive_samples"]) == 1
+    assert len(merged["negative_samples"]) == 1
+    assert merged["prose_sample_policy"]["raw_text_in_writer_prompt"] is False
 
 
 # ── learn_from_signals（Learning Agent 确定性核心）─────────────────────

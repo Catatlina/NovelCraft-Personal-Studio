@@ -59,6 +59,14 @@ from ..quality.opening_variation import (
     opening_prompt_block,
     select_opening_plan,
 )
+from ..quality.prose_generation import (
+    apply_segment_replacements,
+    build_generation_critic_report,
+    feature_card_from_style_card,
+    render_prose_feature_card,
+    sanitise_style_card_for_prompt,
+    validate_segment_replacement_payload,
+)
 from ..quality.readability_contract import (
     build_readability_plan,
     readability_plan_metadata,
@@ -753,9 +761,10 @@ class ContextAssembler:
 
         style_card = layers.get("style_card")
         if style_card:
+            prompt_style_card = sanitise_style_card_for_prompt(style_card)
             blocks.append(
                 "【V6作者风格卡（只约束表达，不改变剧情事实）】\n"
-                + json.dumps(style_card, ensure_ascii=False, separators=(",", ":"))
+                + json.dumps(prompt_style_card, ensure_ascii=False, separators=(",", ":"))
             )
 
         # 品类风格卡与约束（第8层）
@@ -765,7 +774,11 @@ class ContextAssembler:
             if genre_style:
                 blocks.append(
                     "【品类风格卡（品类专属写作风格）】\n"
-                    + json.dumps(genre_style, ensure_ascii=False, separators=(",", ":"))
+                    + json.dumps(
+                        sanitise_style_card_for_prompt(genre_style),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
                 )
 
             genre_constraints = genre.get("constraints") or []
@@ -3715,6 +3728,250 @@ class GenerationEngine:
         return flags
 
     @staticmethod
+    def _local_segment_issue_codes(issues: list[dict[str, Any]]) -> set[str]:
+        """Return issues that can be repaired without rewriting the scene."""
+        return {
+            str(item.get("code") or "")
+            for item in issues
+            if isinstance(item, dict)
+        }.intersection({
+            "dash_density",
+            "ai_phrase",
+            "repeated_paragraph_opening",
+            "repeated_tic",
+            "scene_meta_leakage",
+        })
+
+    @staticmethod
+    def _segment_candidate_score(
+        candidate: str,
+        baseline: str,
+        *,
+        feature_card: dict[str, Any] | None = None,
+    ) -> tuple[tuple[int, int, float], dict[str, Any]]:
+        """Score a local candidate by unresolved internal risks only.
+
+        The score is a selection aid, not an external AI-detector result.  A
+        candidate that grows or raises the internal risk score is rejected;
+        local replacements therefore cannot silently make a clean segment
+        worse while chasing a different style signal.
+        """
+        candidate_metrics = analyze_deai_patterns(candidate)
+        baseline_metrics = analyze_deai_patterns(baseline)
+        candidate_flags = {
+            str(item.get("code"))
+            for item in (candidate_metrics.get("flags") or [])
+            if isinstance(item, dict)
+            and str(item.get("severity") or "").lower() in {"medium", "high"}
+        }
+        baseline_flags = {
+            str(item.get("code"))
+            for item in (baseline_metrics.get("flags") or [])
+            if isinstance(item, dict)
+            and str(item.get("severity") or "").lower() in {"medium", "high"}
+        }
+        candidate_local_flags = {
+            code
+            for segment in (build_generation_critic_report(candidate, candidate_metrics).get("segments") or [])
+            for code in (segment.get("risk_codes") or [])
+        }
+        baseline_local_flags = {
+            code
+            for segment in (build_generation_critic_report(baseline, baseline_metrics).get("segments") or [])
+            for code in (segment.get("risk_codes") or [])
+        }
+        candidate_flags.update(candidate_local_flags)
+        baseline_flags.update(baseline_local_flags)
+        size_ratio = len(re.sub(r"\s+", "", candidate)) / max(
+            1,
+            len(re.sub(r"\s+", "", baseline)),
+        )
+        risk_delta = int(candidate_metrics.get("risk_score") or 0) - int(
+            baseline_metrics.get("risk_score") or 0
+        )
+        rejected = (
+            risk_delta > 0
+            or size_ratio < 0.72
+            or size_ratio > 1.30
+            or float((candidate_metrics.get("duplicate_paragraphs") or {}).get("duplicate_ratio") or 0.0) > 0.01
+        )
+        unresolved = len(candidate_flags)
+        # A feature card is only a tie-breaker. It never overrides the
+        # no-regression guard or causes a fixed target cadence.
+        texture_distance = 0.0
+        profile = (feature_card or {}).get("positive_profile") or {}
+        if profile:
+            candidate_mean = float(candidate_metrics.get("sentence_length_mean") or 0.0)
+            target_mean = float(profile.get("sentence_length_p50") or 0.0)
+            if target_mean:
+                texture_distance = abs(candidate_mean - target_mean) / target_mean
+        key = (
+            999 if rejected else unresolved,
+            999 if rejected else int(candidate_metrics.get("risk_score") or 0),
+            999.0 if rejected else round(texture_distance + abs(1.0 - size_ratio) * 0.15, 4),
+        )
+        return key, {
+            "risk_score": int(candidate_metrics.get("risk_score") or 0),
+            "baseline_risk_score": int(baseline_metrics.get("risk_score") or 0),
+            "risk_delta": risk_delta,
+            "unresolved_flags": sorted(candidate_flags),
+            "baseline_flags": sorted(baseline_flags),
+            "size_ratio": round(size_ratio, 4),
+            "rejected": rejected,
+            "metrics": candidate_metrics,
+        }
+
+    async def _generate_best_local_segment_candidate(
+        self,
+        *,
+        chapter_number: int,
+        scene_index: int,
+        context: dict[str, Any],
+        scene_card: dict[str, Any],
+        source_text: str,
+        metrics: dict[str, Any],
+        issues: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Generate three independent local variants for high-risk paragraphs.
+
+        The rest of the scene is immutable.  This is intentionally bounded to
+        one generation-time pass and uses the internal critic only to locate
+        candidate paragraphs; the Writer never sees a Zhuque target or score.
+        """
+        issue_codes = self._local_segment_issue_codes(issues)
+        if not issue_codes:
+            return {"text": source_text, "accepted": False, "reason": "no_local_issue"}
+        critic = build_generation_critic_report(source_text, metrics)
+        segments = critic.get("segments") or []
+        if not segments:
+            return {"text": source_text, "accepted": False, "reason": "no_local_segments"}
+        expected_indexes = {
+            int(item["paragraph_index"])
+            for item in segments
+            if isinstance(item, dict) and str(item.get("paragraph_index")).isdigit()
+        }
+        if not expected_indexes:
+            return {"text": source_text, "accepted": False, "reason": "no_valid_segments"}
+
+        paragraphs = [item.strip() for item in re.split(r"\n{2,}|\n", source_text) if item.strip()]
+        feature_card = feature_card_from_style_card(
+            (context.get("context_layers") or {}).get("style_card") or {}
+        )
+        feature_block = render_prose_feature_card(feature_card)
+        guidance = {
+            "repeated_paragraph_opening": "不要让段落都从姓名起笔；优先从正在发生的动作、物件、声音、环境或他人反应起笔。",
+            "explicit_explanation": "删除替读者总结意义的句子，把结论改成一个可见动作、选择或后果。",
+            "dash_density": "叙述优先使用句号、逗号和具体动作承接；只有对白确有打断时才保留破折号。",
+            "repeated_tic": "保留必要反应，但把至少一处模板动作换成具体视线、手部动作、停顿后的决定或现场后果。",
+            "scene_meta_leakage": "删除写作工程说明，只保留人物正在经历的现场。",
+        }
+        segment_payload = []
+        for item in segments:
+            index = int(item["paragraph_index"])
+            segment_payload.append({
+                "paragraph_index": index,
+                "text": paragraphs[index],
+                "before": paragraphs[index - 1][-180:] if index > 0 else "",
+                "after": paragraphs[index + 1][:180] if index + 1 < len(paragraphs) else "",
+                "repair_goal": "；".join(
+                    guidance.get(code, "保持自然、具体、可读")
+                    for code in item.get("risk_codes") or []
+                ),
+            })
+        strategies = (
+            "偏动作推进：让现场行为先落地",
+            "偏人物即时反应：保留误判、避答或临时决定",
+            "偏物件与环境反馈：让具体痕迹承担信息",
+        )
+        usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
+        candidates: list[dict[str, Any]] = []
+        for strategy in strategies:
+            prompt = (
+                "只做局部正文修订，不要重写整场。下面列出的段落是需要处理的局部片段，"
+                "未列出的段落必须保持不变。保留所有人物、事实、因果、时间顺序和信息边界，"
+                "不要新增剧情，不要删掉段落，不要把文字改成标准模板。\n"
+                f"本场契约：{json.dumps(scene_card, ensure_ascii=False)}\n"
+                f"本次组织方式：{strategy}\n"
+                f"{feature_block}\n"
+                "自然叙事原则：事件先于解释；人物可以答非所问、误判或停在半句话；"
+                "不要总结主题，不要为了显得像真人加入错别字、无意义动作或怪癖。\n"
+                f"需要修订的局部段落：{json.dumps(segment_payload, ensure_ascii=False)}\n"
+                "只输出 JSON：{\"replacements\":[{\"paragraph_index\":整数,\"text\":\"完整替换段落\"}]}。"
+                "replacements 必须覆盖全部列出的 paragraph_index，每个 text 只能是一段，不能含换行。"
+            )
+            result = await self.ai_gateway.generate_json(
+                prompt,
+                system_prompt=(
+                    "你是中文网文的局部表达编辑，只返回严格 JSON。"
+                    "只处理给定段落，不输出解释，不改写未列出的内容。"
+                ),
+                max_tokens=min(1800, max(420, len(json.dumps(segment_payload, ensure_ascii=False)) // 2)),
+                temperature=0.72 + (0.05 if "即时" in strategy else 0.0),
+                prompt_name="v7.generation.segment_candidates",
+                prompt_version="1.0.0",
+            )
+            call_usage = result.get("usage") or {}
+            usage["tokens_input"] += int(call_usage.get("tokens_input") or 0)
+            usage["tokens_output"] += int(call_usage.get("tokens_output") or 0)
+            usage["cost"] += float(call_usage.get("cost") or 0.0)
+            usage["model"] = call_usage.get("model") or usage["model"]
+            replacements = validate_segment_replacement_payload(
+                result.get("data"),
+                expected_indexes,
+            )
+            if replacements is None:
+                continue
+            candidate_text = apply_segment_replacements(source_text, replacements)
+            if not candidate_text:
+                continue
+            key, evidence = self._segment_candidate_score(
+                candidate_text,
+                source_text,
+                feature_card=feature_card,
+            )
+            candidates.append({
+                "strategy": strategy,
+                "text": candidate_text,
+                "key": key,
+                "evidence": evidence,
+            })
+        _baseline_key, baseline_evidence = self._segment_candidate_score(
+            source_text,
+            source_text,
+            feature_card=feature_card,
+        )
+        if not candidates:
+            return {
+                "text": source_text,
+                "accepted": False,
+                "reason": "no_valid_candidate",
+                "candidate_count": 0,
+                "locked_paragraph_count": len(critic.get("locked_paragraph_indexes") or []),
+                "usage": usage,
+            }
+        candidates.sort(key=lambda item: item["key"])
+        winner = candidates[0]
+        winner_flags = set(winner["evidence"].get("unresolved_flags") or [])
+        baseline_flags = set(baseline_evidence.get("unresolved_flags") or [])
+        accepted = (
+            not winner["evidence"].get("rejected")
+            and winner["evidence"].get("risk_score", 0) <= baseline_evidence.get("risk_score", 0)
+            and (winner_flags < baseline_flags or winner["evidence"].get("risk_delta", 0) < 0)
+        )
+        return {
+            "text": winner["text"] if accepted else source_text,
+            "accepted": accepted,
+            "reason": "best_of_3" if accepted else "all_candidates_rejected_by_no_regression",
+            "candidate_count": len(candidates),
+            "locked_paragraph_count": len(critic.get("locked_paragraph_indexes") or []),
+            "risk_segment_count": len(segments),
+            "baseline": baseline_evidence,
+            "winner": winner["evidence"],
+            "winner_strategy": winner["strategy"],
+            "usage": usage,
+        }
+
+    @staticmethod
     def _merge_scene_state(
         current: dict[str, Any],
         handoff: dict[str, Any],
@@ -3798,16 +4055,14 @@ class GenerationEngine:
     ) -> str:
         context_layers = context.get("context_layers") or {}
         style_card = context_layers.get("style_card") or {}
-        author_card = style_card.get("author_card") if isinstance(style_card, dict) else {}
-        author_card = author_card if isinstance(author_card, dict) else {}
-        sample_prose = str(
-            author_card.get("sample_prose")
-            or style_card.get("sample_prose")
-            or ""
-        )[:1800]
-        style_block = json.dumps(style_card, ensure_ascii=False, separators=(",", ":"))[:4200]
-        if sample_prose:
-            style_block += f"\n【作者已确认样本文风（只学表达，不复制内容）】\n{sample_prose}"
+        prompt_style_card = sanitise_style_card_for_prompt(style_card)
+        style_block = json.dumps(
+            prompt_style_card,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )[:4200]
+        feature_card = feature_card_from_style_card(style_card)
+        feature_block = render_prose_feature_card(feature_card)
         handoff_block = json.dumps(previous_handoffs[-3:], ensure_ascii=False)[:3600]
         progress_block = json.dumps(current_state, ensure_ascii=False)[:3600]
         opening_plan = scene_plan.get("opening_plan") or context_layers.get("opening_plan") or {}
@@ -3905,6 +4160,7 @@ class GenerationEngine:
             f"第{scene_index}/{scene_count}场。\n"
             f"【全书硬事实与前情】\n{context.get('rendered_context') or '无'}\n\n"
             f"【作者风格约束】\n{style_block or '暂无已确认样本；不要伪造固定口癖。'}\n\n"
+            f"{feature_block}\n\n"
             f"【本章叙述质地与人物声音（生成前执行）】\n{prose_texture_block or '缺失；先按限知、潜台词和信息延后原则组织正文。'}\n\n"
             f"【本场契约】\n{json.dumps(scene_card, ensure_ascii=False)}\n\n"
             f"【上一场末尾原文】\n{previous_scene_tail or '本章开端，承接全书上一章结尾。'}\n\n"
@@ -4073,6 +4329,8 @@ class GenerationEngine:
             feedback = ""
             accepted_scene = ""
             scene_metrics: dict[str, Any] = {}
+            scene_critic: dict[str, Any] = {}
+            scene_candidate_selection: dict[str, Any] = {}
             scene_warnings: list[dict[str, Any]] = []
             previous_issue_codes: set[str] = set()
             compression_mode = False
@@ -4292,6 +4550,44 @@ class GenerationEngine:
                         candidate,
                         accepted_text="\n\n".join(scene_texts),
                     ))
+                if not truncated and candidate:
+                    scene_critic = build_generation_critic_report(candidate, scene_metrics)
+                    issue_codes = {
+                        str(item.get("code") or "")
+                        for item in issues
+                        if isinstance(item, dict)
+                    }
+                    local_codes = self._local_segment_issue_codes(issues)
+                    if (
+                        attempt == 0
+                        and issue_codes
+                        and local_codes
+                        and issue_codes.issubset(local_codes)
+                    ):
+                        segment_selection = await self._generate_best_local_segment_candidate(
+                            chapter_number=chapter_number,
+                            scene_index=index,
+                            context=context,
+                            scene_card=card,
+                            source_text=candidate,
+                            metrics=scene_metrics,
+                            issues=issues,
+                        )
+                        add_call_usage(segment_selection.get("usage") or {})
+                        scene_candidate_selection = segment_selection
+                        if segment_selection.get("accepted"):
+                            candidate = str(segment_selection.get("text") or candidate).strip()
+                            scene_metrics = analyze_deai_patterns(candidate)
+                            scene_critic = build_generation_critic_report(candidate, scene_metrics)
+                            issues = [
+                                item
+                                for item in issues
+                                if str(item.get("code") or "") not in local_codes
+                            ]
+                            issues.extend(self._scene_naturalness_flags(
+                                candidate,
+                                accepted_text="\n\n".join(scene_texts),
+                            ))
                 candidate_word_count = chinese_word_count(candidate)
                 projected_chapter_chars = accepted_chars + candidate_word_count
                 # A truncated completion is an incomplete candidate, not an
@@ -4599,6 +4895,8 @@ class GenerationEngine:
                 "attempts": attempts_used or (2 if feedback else 1),
                 "generation_warnings": scene_warnings,
                 "naturalness_metrics": scene_metrics,
+                "generation_critic": scene_critic,
+                "segment_candidate_selection": scene_candidate_selection,
                 "handoff": handoff,
             })
 
