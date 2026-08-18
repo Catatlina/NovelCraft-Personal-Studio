@@ -4375,6 +4375,11 @@ class GenerationEngine:
             for attempt in range(3):
                 attempt_warnings: list[dict[str, Any]] = []
                 provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
+                naturalness_retry = bool(
+                    attempt
+                    and previous_issue_codes
+                    and self._is_style_only_retry(previous_issue_codes)
+                )
                 overlong_margin = (
                     SCENE_OPENAI_OVERLONG_REPAIR_MARGIN
                     if provider == "openai"
@@ -4413,6 +4418,15 @@ class GenerationEngine:
                             else SCENE_DEEPSEEK_TRUNCATION_REPAIR_MARGIN
                         )
                     )
+                elif naturalness_retry:
+                    # Naturalness repairs must still be complete prose.  The
+                    # old overlong margin (0.86) was intended for a known
+                    # over-budget candidate, but it also applied to a style
+                    # retry and cut DeepSeek below the space needed to finish
+                    # the scene.  Keep the reader character envelope as the
+                    # hard limit; only lower the token ceiling after an
+                    # actual length failure.
+                    repair_margin = 1.15
                 else:
                     repair_margin = (
                         SCENE_OPENAI_OVERLONG_REPAIR_MARGIN
