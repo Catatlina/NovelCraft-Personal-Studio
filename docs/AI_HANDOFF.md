@@ -1,6 +1,16 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-17
+> 更新时间：2026-08-18
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
+
+## 2026-08-18 生成期节奏修复、生产部署与单章真实 Provider 验证（当前批次）
+
+- **代码已提交、推送、部署**：分支 `agent/publishing-v0.9.2` 当前提交 `39ff597`；生产 `/opt/NovelCraft-Personal-Studio` 已快进到该提交并完成 Compose 重建。部署前备份 `backups/pre-deploy-39ff597-20260818.sql.gz`，`299172715` bytes，gzip 校验通过；Alembic 仍为 `nc_v11_disclosure_payoff (head)`。
+- **部署健康证据**：公网 `https://starlume.xyjin.xyz/api/v1/healthz` 返回 `database=ok`、`redis=ok`、`worker=ok: 1 online`、`ai_provider=deepseek`、`web_research_provider=tavily`；API、Frontend、Postgres、Redis healthcheck 为 healthy。
+- **根因修复**：`58e7fd1` 修正了“动作后出现脚底震动”被开场检查器误判为 `body_sensation` 的问题；`39ff597` 又把第一场生成预算收紧为 400–420 字，并将“前120字出现变化、前420字出现可见后果/选择/新风险、日常最多一个短段”写入生成期场景契约。该策略不依赖后置整章重写。
+- **回归证据**：生产 API 容器临时源码副本执行作者风格、生成质量、联网研究、生成策略目标测试 `93 passed`；Python 编译与 `git diff --check` 通过。
+- **受控真实 Provider 单章**：在全新空历史副本 `b9ca26eb-e891-4156-984a-56bb76c2481f`（创建时 `active_chapters=0`、`v7_states=0`）执行一次目标章节数为1的真实 DeepSeek 流程。第1章 `f00e1934-d711-407c-b9b6-6cab8fb04859` 生成 `status=completed`，正文 `3277` 字，V6 状态 `reviewed`；V7 审阅 `90.0`，pacing `88`、plot_logic `92`、consistency `90`、writing_quality `90`，开场门禁通过，联网研究 `live/miss`、6张卡、10个来源。
+- **单章发布门禁结果**：七道门禁已真实执行，`5/7` 通过；`content_quality=90`、`payoff_density=75`、continuity/readability/external_risk 通过。`platform_compliance` 因平台示例策略 `policy_status=stale` 阻断，`ai_disclosure` 因未完成披露确认阻断，所以 `publish_ready=false`。这证明生成和门禁链路真实可用，不等于正式发布完成。
+- **当前边界**：这只是部署后单章真实 Provider 验证，**20章清空历史长跑仍未开始**；没有使用上述副本继续生成第2章，也没有复用前两次失败副本。朱雀外部 `95/5/0` 仍无真实接口/报告证据，内部风险分不能替代朱雀分数。
 
 ## 2026-08-17 生成协议融合：特征卡 + 局部 Best-of-3（当前批次）
 
