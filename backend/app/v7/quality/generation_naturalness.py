@@ -24,7 +24,6 @@ _SIMILE_RE = re.compile(
 )
 _REPEATED_ACTION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("put_back_loop", r"(?:放回|放下|靠回|重新握起|重新拿起|收回).{0,80}(?:放回|放下|靠回|重新握起|重新拿起|收回)"),
-    ("turn_back_loop", r"(?:转身|回头|退后|走开).{0,80}(?:转身|回头|退后|走开)"),
 )
 
 

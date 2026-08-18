@@ -4485,13 +4485,25 @@ class GenerationEngine:
                     + third_person_generation_contract()
                     + content_generation_contract(self.quality_profile)
                 )
+                style_only_retry = bool(
+                    attempt
+                    and candidate
+                    and self._is_style_only_retry(previous_issue_codes)
+                )
                 if attempt and candidate:
-                    style_only_retry = self._is_style_only_retry(previous_issue_codes)
                     if style_only_retry:
+                        route = (
+                            "本轮改用动作与对白推进：先让人物做事或说半句话，"
+                            "用现场阻碍改变动作，不用旁白解释。"
+                            if attempt == 1
+                            else "本轮改用物件与后果推进：只保留一个可观察异常，"
+                            "让人物试错或作出选择，不用比喻和总结句串联。"
+                        )
                         scene_system_prompt = (
                             "你是中文网文的生成期表达修复编辑。必须依据本场 scene_card、已确认状态和"
                             "上一场交接点，从头重新写出完整正文；不要复制上一版的句式、段首、动作顺序或段落结构，"
-                            "不要从上一版末尾续写。事件、人物和因果必须保留，表达必须重新组织；只输出正文，不输出说明。"
+                            "不要从上一版末尾续写。事件、人物和因果必须保留，表达必须重新组织；"
+                            f"{route}只输出正文，不输出说明。"
                             + third_person_generation_contract()
                             + content_generation_contract(self.quality_profile)
                         )
@@ -4508,7 +4520,7 @@ class GenerationEngine:
                     scene_prompt,
                     system_prompt=scene_system_prompt,
                     max_tokens=scene_token_limit,
-                    temperature=0.66 if attempt else 0.82,
+                    temperature=(0.80 if style_only_retry else 0.66) if attempt else 0.82,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
                     prompt_version=SCENE_SERIAL_GENERATION_VERSION,
                     expand_on_truncation=False,

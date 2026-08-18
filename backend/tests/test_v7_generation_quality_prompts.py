@@ -380,6 +380,16 @@ def test_generation_naturalness_blocks_explanation_metaphor_and_action_loops():
     assert "scene_metaphor_density" in long_codes
 
 
+def test_generation_naturalness_does_not_treat_two_characters_turning_as_a_loop():
+    text = (
+        "赵小胖回头看了一眼。苏长庚背对着他，扫帚一下一下扫着。"
+        "赵小胖张了张嘴，最终没再出声，转身走了。"
+    )
+
+    codes = {item["code"] for item in inspect_generation_naturalness(text)["flags"]}
+    assert "scene_repeated_action_loop" not in codes
+
+
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     first = build_readability_plan(
         1,
