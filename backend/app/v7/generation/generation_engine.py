@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.20.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.21.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -4226,10 +4226,10 @@ class GenerationEngine:
             "但每个停顿都必须留下现场压力或下一步选择。"
             "旁白不替读者解释刚刚发生的事情，不写‘这意味着/这说明/他意识到/他心里清楚/不是梦或错觉’式结论；"
             "把结论落到物件位置、动作停顿、资源损失、他人反应或新的限制。"
-            "非对白本轮不使用比喻，优先写具体颜色、声音、触感、位置和动作；"
-            "不要用‘像/仿佛/如同/宛如/犹如’替代现场，不要用重复拿起、放回、转身来填充犹豫。"
+            "非对白本轮不使用类比，优先写具体颜色、声音、触感、位置和动作；"
+            "不要把感觉改写成形容性联想，也不要用重复拿起、放回、转身来填充犹豫。"
             "对话不承担完整说明任务：角色可以避答、打断、说错重点，信息通过说话目的和现场反应逐步露出。"
-            "段落长短随压力变化，避免每段都完整走完‘现象→判断→解释→总结’，也不要为了显得像真人加入无关闲笔。"
+            "段落长短随压力变化，避免每段都完整走完‘现象→判断→解释→总结’，也不要为了制造人工痕迹加入无关闲笔。"
         )
         minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
         allowed_maximum = self._scene_allowed_max_chars(scene_card, scene_index=scene_index)
@@ -4280,10 +4280,10 @@ class GenerationEngine:
             "人物只能使用已确认的知识，不能让旁观者替作者总结情绪。句子长短、段落长度和起笔方式要有真实变化，"
             "不要把每个段落都写成‘现象→判断→解释→总结’的完整闭环；允许信息暂不解释、动作被打断、人物答非所问、"
             "一句话说到一半改口，或只露出半个结果，但必须服务于人物目标、现场压力和读者追读。"
-            "对白要像具体人物在此刻说话，少用整齐的排比、万能反应和抽象总结；每个主要人物至少保留一处不直说的潜台词，"
+            "对白要符合具体人物此刻的说话目的，少用整齐的排比、万能反应和抽象总结；每个主要人物至少保留一处不直说的潜台词，"
             "通过停顿、避答、反问、错拿物件或临时改动作露出，而不是由旁白解释。"
             "优先使用本场 prose_texture_plan 指定的限知叙述偏向、感官/物件锚点和人物潜台词；"
-            "不要平均分配信息，不要连续使用‘像……一样’的比喻或同一组情绪词，也不要故意加入错别字、病句或无关怪癖伪造人工痕迹。"
+            "不要平均分配信息，不要连续使用形容性联想或同一组情绪词，也不要故意加入错别字、病句或无关怪癖伪造人工痕迹。"
             "叙述保持第三人称；门上字、碑文、账册、书信、纸条等直接文字若出现‘我/吾/我们’，"
             "必须用中文引号标明直接文字，不能裸写成叙述者的第一人称。"
             "段落起笔要自然轮换：同一个两字人名不能连续占据多个段首，也不能在本场段落中占多数；"
@@ -4610,7 +4610,7 @@ class GenerationEngine:
                     # paragraph cadence.  Keep independent repairs varied,
                     # but start the actual prose writer closer to the route's
                     # 0.7 default so the hard scene protocol remains legible.
-                    temperature=(0.72 if style_only_retry else 0.62) if attempt else 0.68,
+                    temperature=(0.38 if style_only_retry else 0.58) if attempt else 0.62,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
                     prompt_version=SCENE_SERIAL_GENERATION_VERSION,
                     expand_on_truncation=False,
@@ -4906,7 +4906,7 @@ class GenerationEngine:
                         feedback += (
                             "\n开场类型修复硬要求：这是本章第一场，必须从指定类型直接起笔；"
                             f"指定类型为‘{opening_plan.get('label') or opening_plan.get('mode') or '动作'}’。"
-                            "本次完整重写首段，不得以身体部位、疼痛、发闷、轰鸣或‘像有人’起笔；"
+                            "本次完整重写首段，不得以身体部位、疼痛、发闷、轰鸣或模糊联想起笔；"
                             "必须让指定的物件、动作、对白、外部事件或环境变化先推动人物行动，"
                             "保留本场事实和因果，不要把原文首句换个同义词。"
                         )
@@ -4927,8 +4927,8 @@ class GenerationEngine:
                         for item in issues
                     ):
                         feedback += (
-                            "\n比喻修复硬要求：完整重写本场时，非对白一个比喻也不要保留；"
-                            "全部改成可观察的颜色、位置、触感、声音、动作或后果，不用‘像/仿佛/如同/宛如/犹如’串联情绪。"
+                            "\n类比修复硬要求：完整重写本场时，非对白不保留形容性联想；"
+                            "全部改成可观察的颜色、位置、触感、声音、动作或后果，不用联想串联情绪。"
                         )
                     if any(
                         isinstance(item, dict)

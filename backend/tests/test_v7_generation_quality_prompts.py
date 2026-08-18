@@ -411,7 +411,8 @@ def test_generation_protocol_uses_strict_baseline_and_selected_route():
 
     assert "generation-style-protocol-v2" in protocol
     assert "物件与后果推进" in protocol
-    assert "非对白比喻为 0" in protocol
+    assert "非对白不使用类比" in protocol
+    assert "仿佛" not in protocol
     assert "平、快、干" in protocol
     assert "拿错、找不到、被打断" in protocol
     assert "不复制词句" in protocol
