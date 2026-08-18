@@ -319,6 +319,18 @@ def test_action_opening_with_late_body_feedback_is_not_misclassified():
     assert result["observed_mode"] == "action"
 
 
+def test_natural_action_opening_with_a_pause_is_classified_as_action():
+    text = "帚尖抵住台阶边缘，苏长庚手腕一顿。楼上的门缝里没有声音。"
+
+    assert classify_opening(text) == "action"
+    result = inspect_opening(
+        text,
+        requested_mode="action",
+        chapter_number=1,
+    )
+    assert result["passed"] is True
+
+
 def test_object_opening_is_not_reclassified_by_a_later_action():
     text = "门缝里的光变了。苏长庚抬脚走近，伸手去碰那道裂痕。"
 
