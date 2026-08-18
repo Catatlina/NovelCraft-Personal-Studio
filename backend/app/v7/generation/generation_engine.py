@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.22.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.23.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -4730,7 +4730,22 @@ class GenerationEngine:
                             + content_generation_contract(self.quality_profile)
                         )
                 structured_plain = None
-                if style_only_retry and attempt == 1:
+                structured_plain_retry = bool(
+                    attempt == 1
+                    and previous_issue_codes.intersection({
+                        "scene_explanatory_narration",
+                        "scene_metaphor_density",
+                        "scene_repeated_action_loop",
+                        "structural_ai_smell",
+                        "repeated_paragraph_opening",
+                        "uniform_cadence",
+                        "repeated_tic",
+                        "dash_density",
+                        "ai_phrase",
+                    })
+                    and "scene_provider_truncated" not in previous_issue_codes
+                )
+                if structured_plain_retry:
                     structured_plain = await self._generate_structured_plain_scene_candidate(
                         chapter_number=chapter_number,
                         scene_index=index,
