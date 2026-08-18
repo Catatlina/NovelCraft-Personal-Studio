@@ -4,6 +4,14 @@
 
 ## 2026-08-18 生成期节奏修复、生产部署与单章真实 Provider 验证（当前批次）
 
+## 2026-08-18 生成质量复盘、豆包协议融合与最新真实验证（当前结论）
+
+- **最新代码与部署**：分支 `agent/publishing-v0.9.2` 当前提交 `78fb69d`，已推送并部署；生产迁移仍为 `nc_v11_disclosure_payoff (head)`，公网 `/api/v1/healthz` 的数据库、Redis、Worker、AI 与联网研究均健康。
+- **已融合到生成期**：增加正向自然叙事协议（不把“过检测”告诉 Writer）、事件/动作/对白/物件后果四类生成路径、失败候选隔离、低温度重试和结构化纯叙事 Provider 候选。候选只在生成阶段产生，后置审计仍不承担主修复职责。
+- **真实验证证据**：在清空历史副本上连续做了受控单章验证；最新 `78fb69d` 结果为 `生成成功=0/1`。第1场仍命中 `scene_metaphor_density`，检测到7处比喻表达，且候选约890字超过该场715字预算，V7 正确阻断，未持久化失败正文。
+- **根因判断**：豆包经验中的“正样本、负样本只作规则、局部候选、冻结低风险、禁止恶化”方向正确，但仅靠当前生产唯一 Provider `deepseek-chat` 的自由文本生成仍不能稳定实现零比喻和95/5/0；当前没有生产 GPT/Luna API key 或可用路由做真实 A/B。
+- **当前边界**：单章稳定生成门槛尚未重新通过，20章清空历史长跑因此仍未开始；不能把 `39ff597` 之前的单章通过证据升级为本轮新代码的稳定结论，也不能宣称朱雀95/5/0。
+
 - **代码已提交、推送、部署**：分支 `agent/publishing-v0.9.2` 当前提交 `39ff597`；生产 `/opt/NovelCraft-Personal-Studio` 已快进到该提交并完成 Compose 重建。部署前备份 `backups/pre-deploy-39ff597-20260818.sql.gz`，`299172715` bytes，gzip 校验通过；Alembic 仍为 `nc_v11_disclosure_payoff (head)`。
 - **部署健康证据**：公网 `https://starlume.xyjin.xyz/api/v1/healthz` 返回 `database=ok`、`redis=ok`、`worker=ok: 1 online`、`ai_provider=deepseek`、`web_research_provider=tavily`；API、Frontend、Postgres、Redis healthcheck 为 healthy。
 - **根因修复**：`58e7fd1` 修正了“动作后出现脚底震动”被开场检查器误判为 `body_sensation` 的问题；`39ff597` 又把第一场生成预算收紧为 400–420 字，并将“前120字出现变化、前420字出现可见后果/选择/新风险、日常最多一个短段”写入生成期场景契约。该策略不依赖后置整章重写。
