@@ -347,6 +347,19 @@ def test_later_action_does_not_hide_an_unfulfilled_object_opening():
     assert not any(item["code"] == "opening_mode_repetition" for item in result["flags"])
 
 
+def test_natural_measure_phrase_counts_as_an_object_opening():
+    text = "那卷黄绸裹着的东西静静躺在门内正中央，边缘散着几块碎玉。"
+
+    assert classify_opening(text) == "object"
+    result = inspect_opening(
+        text,
+        requested_mode="object",
+        chapter_number=2,
+        recent_modes=["action"],
+    )
+    assert result["passed"] is True
+
+
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():
     first = build_readability_plan(
         1,
