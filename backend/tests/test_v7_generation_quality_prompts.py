@@ -1037,9 +1037,11 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
         target_word_count=3000,
     )
 
-    assert cards[0]["target_words"] == 480
+    assert cards[0]["target_words"] == 420
+    assert "前120字内" in cards[0]["opening_constraint"]
+    assert "前420字内" in cards[0]["opening_constraint"]
     assert "前两句" in cards[0]["opening_constraint"]
-    assert "前180字" in cards[0]["opening_constraint"]
+    assert "前120字" in cards[0]["opening_constraint"]
     assert "前两句" in cards[1]["opening_constraint"]
     assert sum(card["target_share"] for card in cards) == 1.0
 
@@ -1067,12 +1069,12 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
         previous_handoffs=[],
     )
 
-    assert "前180字内必须出现" in prompt
+    assert "前120字内必须出现" in prompt
     assert "本章指定开场类型：物件异常开场（object）" in prompt
     assert "从具体物件的异常起笔" in prompt
     assert "触发动作→当场可见/可感知反馈→人物确认这就是代价或规则后果" in prompt
     assert "不能连续用日常拖慢开局" in prompt
-    assert "前600字内必须让人物感知一个具体威胁" in prompt
+    assert "前420字内必须让人物感知一个具体威胁" in prompt
     assert "碑文、账册、书信、纸条等直接文字" in prompt
     assert "同一个两字人名不能连续占据多个段首" in prompt
     assert "破折号只在对白中确有停顿、打断或转折时使用" in prompt
@@ -1087,7 +1089,7 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "重大袭击、对抗或爆发结束后" in prompt
     assert "关键异常、开门、封印松动、袭击、修炼变化或新能力必须先写可见前提/征兆" in prompt
     assert "碑文、幻象、梦境或他人话语里的数字/年代属于原说话者" in prompt
-    assert "生成期计划控制在 216-624 字，最多允许自然波动到 769 字" in prompt
+    assert "生成期计划控制在 189-546 字，最多允许自然波动到 680 字" in prompt
 
 
 def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_plan():

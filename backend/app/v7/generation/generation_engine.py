@@ -3270,13 +3270,14 @@ class GenerationEngine:
                 # Keep this as a generation contract instead of repairing a
                 # finished chapter with a detector-oriented rewrite.
                 if target_word_count >= 1800:
-                    opening_cap = max(320, min(480, int(target_word_count * 0.16)))
+                    opening_cap = max(400, min(420, int(target_word_count * 0.14)))
                     opening_excess = max(0, target_words - opening_cap)
                     target_words = opening_cap
                 opening_constraint = (
                     "前两句必须出现正在发生的动作、具体异常或明确目标；"
-                    "前180字内必须发生会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
-                    "日常交代最多两个短段，不能用扫地、环境、回忆或设定连续铺满开头；"
+                    "前120字内必须出现会改变人物判断、位置、关系、资源或风险的具体阻碍/发现；"
+                    "日常交代最多一个短段，不能用扫地、环境、回忆或设定连续铺满开头；"
+                    "前420字内必须让异常造成可见后果、主动选择或新的风险，不能只停留在‘似乎不对’；"
                     "第一场结尾必须留下可见的动作、发现、选择或压力变化。"
                 )
             elif index == 2:
@@ -4112,9 +4113,9 @@ class GenerationEngine:
                 )
             opening_instruction += (
                 "这是生成期节奏硬约束：前两句必须有动作、具体异常或明确目标；"
-                "前180字内必须出现会改变判断、位置、关系、资源或风险的具体事件；"
-                "日常铺垫最多两个短段，背景信息必须藏进动作、对白或物件，不能连续用日常拖慢开局；"
-                "异常不能只作为奇观或氛围，前600字内必须让人物感知一个具体威胁、禁忌、代价、"
+                "前120字内必须出现会改变判断、位置、关系、资源或风险的具体事件；"
+                "日常铺垫最多一个短段，背景信息必须藏进动作、对白或物件，不能连续用日常拖慢开局；"
+                "异常不能只作为奇观或氛围，前420字内必须让人物感知一个具体威胁、禁忌、代价、"
                 "被发现风险或会改变选择的后果，并通过动作、对白、物件或身体反应落地。"
             )
         else:
