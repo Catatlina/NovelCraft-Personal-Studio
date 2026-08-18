@@ -8,7 +8,11 @@ import pytest
 from app.prompt_registry import PROMPT_SEEDS, render_prompt
 from app.services.quality_risks import build_quality_repair_contract
 from app.v7.quality.deai_metrics import analyze_deai_patterns
-from app.v7.quality.generation_naturalness import inspect_generation_naturalness
+from app.v7.quality.generation_naturalness import (
+    inspect_generation_naturalness,
+    render_generation_style_protocol,
+    select_generation_style_path,
+)
 from app.v7.generation.generation_engine import (
     AIGateway,
     AIGatewayError,
@@ -400,6 +404,29 @@ def test_generation_naturalness_does_not_treat_two_characters_turning_as_a_loop(
 
     codes = {item["code"] for item in inspect_generation_naturalness(text)["flags"]}
     assert "scene_repeated_action_loop" not in codes
+
+
+def test_generation_protocol_uses_strict_baseline_and_selected_route():
+    protocol = render_generation_style_protocol("object_consequence")
+
+    assert "generation-style-protocol-v2" in protocol
+    assert "物件与后果推进" in protocol
+    assert "非对白比喻为 0" in protocol
+    assert "不复制词句" in protocol
+    assert "门栓先动了一下" in protocol
+
+
+def test_generation_style_repairs_change_the_prose_path():
+    assert select_generation_style_path(1, 1, 0) == "event_action_dialogue"
+    assert select_generation_style_path(1, 1, 1) == "event_action_dialogue"
+    assert select_generation_style_path(1, 1, 2) == "plain_factual"
+
+
+def test_generation_naturalness_flags_one_non_dialogue_simile_at_scene_scale():
+    text = "门把手先动了一下。苏长庚没有推门，先看向脚边的水痕。" + "他没有回答。" * 80
+
+    report = inspect_generation_naturalness(text.replace("水痕", "像水一样的痕迹"))
+    assert any(item["code"] == "scene_metaphor_density" for item in report["flags"])
 
 
 def test_readability_plan_is_deterministic_and_changes_delivery_texture():

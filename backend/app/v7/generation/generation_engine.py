@@ -52,7 +52,11 @@ from ...services.quality_profiles import (
     select_quality_profile,
 )
 from ..quality.deai_metrics import analyze_deai_patterns
-from ..quality.generation_naturalness import inspect_generation_naturalness
+from ..quality.generation_naturalness import (
+    inspect_generation_naturalness,
+    render_generation_style_protocol,
+    select_generation_style_path,
+)
 from ..quality.novel_reviewer_reference import render_ai_flavor_guidance
 from ..quality.opening_variation import (
     build_opening_history,
@@ -87,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.18.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.19.0"
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -4064,6 +4068,7 @@ class GenerationEngine:
         previous_handoffs: list[dict[str, Any]],
         retry_feedback: str = "",
         max_scene_chars: int | None = None,
+        generation_path: str = "event_action_dialogue",
     ) -> str:
         context_layers = context.get("context_layers") or {}
         style_card = context_layers.get("style_card") or {}
@@ -4161,8 +4166,8 @@ class GenerationEngine:
             "但每个停顿都必须留下现场压力或下一步选择。"
             "旁白不替读者解释刚刚发生的事情，不写‘这意味着/这说明/他意识到/他心里清楚/不是梦或错觉’式结论；"
             "把结论落到物件位置、动作停顿、资源损失、他人反应或新的限制。"
-            "非对白只保留最必要的一处比喻，优先写具体颜色、声音、触感、位置和动作；"
-            "不要连续使用‘像……一样/仿佛/如同’，也不要用重复拿起、放回、转身来填充犹豫。"
+            "非对白本轮不使用比喻，优先写具体颜色、声音、触感、位置和动作；"
+            "不要用‘像/仿佛/如同/宛如/犹如’替代现场，不要用重复拿起、放回、转身来填充犹豫。"
             "对话不承担完整说明任务：角色可以避答、打断、说错重点，信息通过说话目的和现场反应逐步露出。"
             "段落长短随压力变化，避免每段都完整走完‘现象→判断→解释→总结’，也不要为了显得像真人加入无关闲笔。"
         )
@@ -4234,6 +4239,7 @@ class GenerationEngine:
             f"最多允许自然波动到 {allowed_maximum} 字；超过这个上限就是不合格。"
             "达到事件结果后立即收束；如果已经完成目标，"
             "不得继续补写日常、环境、回忆或重复反应来凑字数。"
+            f"\n\n{render_generation_style_protocol(generation_path)}"
             f"{retry_block}"
         )
 
@@ -4492,6 +4498,11 @@ class GenerationEngine:
                     previous_handoffs=handoffs,
                     retry_feedback=feedback,
                     max_scene_chars=attempt_max_scene_chars,
+                    generation_path=select_generation_style_path(
+                        chapter_number,
+                        index,
+                        attempt,
+                    ),
                 )
                 scene_system_prompt = (
                     "你是稳定写作同一本长篇小说的中文网文作者。只输出本场正文，"
@@ -4534,7 +4545,12 @@ class GenerationEngine:
                     scene_prompt,
                     system_prompt=scene_system_prompt,
                     max_tokens=scene_token_limit,
-                    temperature=(0.80 if style_only_retry else 0.66) if attempt else 0.82,
+                    # The previous 0.82 first pass made DeepSeek reach for
+                    # decorative image chains while still following the same
+                    # paragraph cadence.  Keep independent repairs varied,
+                    # but start the actual prose writer closer to the route's
+                    # 0.7 default so the hard scene protocol remains legible.
+                    temperature=(0.72 if style_only_retry else 0.62) if attempt else 0.68,
                     prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
                     prompt_version=SCENE_SERIAL_GENERATION_VERSION,
                     expand_on_truncation=False,
@@ -4850,8 +4866,8 @@ class GenerationEngine:
                         for item in issues
                     ):
                         feedback += (
-                            "\n比喻密度修复硬要求：完整重写本场时，非对白最多保留一处确有必要的比喻；"
-                            "其余改成可观察的颜色、位置、触感、声音、动作或后果，不用‘像……一样/仿佛/如同’串联情绪。"
+                            "\n比喻修复硬要求：完整重写本场时，非对白一个比喻也不要保留；"
+                            "全部改成可观察的颜色、位置、触感、声音、动作或后果，不用‘像/仿佛/如同/宛如/犹如’串联情绪。"
                         )
                     if any(
                         isinstance(item, dict)
