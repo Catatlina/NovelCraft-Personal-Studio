@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.25.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.26.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -141,7 +141,11 @@ CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS = 192
 # A complete final scene may need a little more room for its consequence and
 # hook. This is an absolute generation allowance only when no future scene is
 # being starved; it is not a new chapter target or a platform ceiling.
-CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS = 192
+# A complete closing scene may need room for its immediate consequence and
+# hook even when an earlier scene consumed more of the chapter allocation than
+# planned. Keep this materially below a platform-sized chapter: it is a
+# bounded final-scene allowance, not permission to pad or continue indefinitely.
+CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS = 480
 
 
 def chinese_word_count(text: str) -> int:

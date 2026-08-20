@@ -2,7 +2,13 @@
 > 更新时间：2026-08-20
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
-## 2026-08-20 M7 最新复验快照（本地修复待部署）
+## 2026-08-20 M7 最新复验快照（最后场景预算修复待部署）
+
+- 最新生产提交为 `aadb354`，生产已完成重建并健康运行；Alembic 为 `nc_starlume_authoring (head)`，公网 healthz 返回 200，authoring 未认证访问返回 401。原生产脏文件仍保留。
+- 全新空副本 `0a1e6ea2-3634-4680-a3b7-7001a20d74a4` 启动前 `active_chapters=0`、无历史章节；真实 DeepSeek 三章目标在第1章生成期停止，未写入第1章，原作未修改。
+- 新根因：第1章第3场 `accepted=2269,candidate=1276,future_min=0,chapter_max=3192`，最后场景候选完整但超过现有最后场景自然波动上限，触发 `scene_chapter_budget_overrun`；不是旧章节污染，也不是 `scene_reader_budget_overrun`。
+- 本地修复为 `SCENE_SERIAL_GENERATION_VERSION=2.26.0`，最后完整场景自然波动额度由 192 提至 480 字，并新增 3545 字边界回归；该额度仅在无后续场景且候选完整时生效，平台级章节上限和其他质量门禁不放宽。定向 `102 passed`；后端全量 `1185 passed, 138 skipped, 1 xpassed, 2 warnings`；提交后的新空副本复验仍待完成。
+- 当前结论：三章真实 Provider **未通过**，20章仍**未开始**；不续跑该副本、不以自动错误响应或健康状态宣称验收。披露人工确认、两位盲评、七道门禁和正式发布闭环仍未验收。
 
 - `d28a09f` 已推送并部署；生产备份 `backups/pre-deploy-density-fix-20260820-150320.sql.gz` gzip 校验通过，迁移为 `nc_starlume_authoring (head)`，healthz 正常。
 - 全新空副本 `b3cc7b91-74c6-4dd6-a122-aa2a003eea7a` 启动前为 0 个活动章节、0 个 V7 状态；真实 DeepSeek 三章目标只完成到第1章：正文 3320 字、连续性 `continuous`、自动评审 91 分，但状态为 `needs_rewrite` / `v7_quality_gate_failed`。

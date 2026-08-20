@@ -1723,6 +1723,15 @@ def test_final_scene_variance_never_starves_a_future_scene_or_exceeds_absolute_b
     ) is False
 
 
+def test_final_scene_variance_covers_a_complete_3500_char_chapter_without_future_scenes():
+    assert GenerationEngine._final_scene_budget_variance_allowed(
+        projected_chars=3545,
+        chapter_max_chars=3192,
+        future_minimum_chars=0,
+        future_target_chars=0,
+    ) is True
+
+
 def test_scene_truncation_retry_has_a_bounded_escalation():
     assert SCENE_DEEPSEEK_FINAL_TRUNCATION_REPAIR_MARGIN == 1.70
     assert SCENE_MIXED_TRUNCATION_OVERLONG_REPAIR_MARGIN == 1.10

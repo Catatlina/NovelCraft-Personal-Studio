@@ -2,6 +2,12 @@
 
 ## 2026-08-20 M7 最新真实 Provider 复验（已部署但未通过）
 
+- 最新生产提交为 `aadb354`，已完成 Docker 重建、迁移和健康检查；生产 Alembic 为 `nc_starlume_authoring (head)`，公网 healthz 返回 200，API/Worker/Beat/Frontend/数据库/Redis 均健康。原生产脏文件未清理。
+- 在全新副本 `0a1e6ea2-3634-4680-a3b7-7001a20d74a4` 上执行真实 DeepSeek 三章目标；启动前 `active_chapters=0`、历史章节已清空，原作未修改。第1章未落正文，第2/3章未启动。
+- 新阻断根因：第1章第3场已接受 2269 字，候选 1276 字，后续场景最低需求为 0，生成期章节上限为 3192 字；候选完整但超过章节总预算，有限重试后命中 `scene_chapter_budget_overrun`。这不是场景读者目标的第二硬门禁，而是最后场景的有界自然波动额度不足。
+- 已完成本地最小修复：将最后完整场景的自然波动额度从 192 调整为 480 字，仍要求无后续场景、正文完整、不得接近平台级上限；版本升级为 `SCENE_SERIAL_GENERATION_VERSION=2.26.0`，新增 3545 字边界回归测试。定向测试 `102 passed`，后端全量 `1185 passed, 138 skipped, 1 xpassed, 2 warnings`；待提交、部署和新空副本单次复验。
+- 当前结论：三章真实 Provider **未通过**，20章真实 Provider **未开始**；本次失败后不续用副本、不重复盲跑。披露人工确认、两位盲评、七道门禁完整发布闭环仍未验收。
+
 - `d28a09f` 已提交、推送并部署；生产备份为 `backups/pre-deploy-density-fix-20260820-150320.sql.gz`（gzip 校验通过），Alembic 为 `nc_starlume_authoring (head)`，公网 healthz、容器和新 authoring 路由均正常。
 - 按“先清空历史再长跑”创建全新副本 `b3cc7b91-74c6-4dd6-a122-aa2a003eea7a`；启动前 `active_chapters=0`、V7 状态为 0，源作品未修改。使用真实生产 DeepSeek 执行目标三章，未继续使用已有章节副本。
 - 真实结果：第 1 章生成正文 3320 字，连续性 `continuous`、自动评审 91 分，但 `v7_quality_gate_failed`，原因是“动作开场”门禁把前 100 字内进入抬手处置的短环境引子判为 `unknown`；开场修复 Provider 又因严格单段契约报 `AIGatewayError`。第 2、3 章未启动，副本只保留第 1 章 `needs_rewrite`。
