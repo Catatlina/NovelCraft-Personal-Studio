@@ -1,5 +1,13 @@
 # Starlume AI — 真实进度
 
+## 2026-08-20 M7 最新真实 Provider 复验（已部署但未通过）
+
+- `d28a09f` 已提交、推送并部署；生产备份为 `backups/pre-deploy-density-fix-20260820-150320.sql.gz`（gzip 校验通过），Alembic 为 `nc_starlume_authoring (head)`，公网 healthz、容器和新 authoring 路由均正常。
+- 按“先清空历史再长跑”创建全新副本 `b3cc7b91-74c6-4dd6-a122-aa2a003eea7a`；启动前 `active_chapters=0`、V7 状态为 0，源作品未修改。使用真实生产 DeepSeek 执行目标三章，未继续使用已有章节副本。
+- 真实结果：第 1 章生成正文 3320 字，连续性 `continuous`、自动评审 91 分，但 `v7_quality_gate_failed`，原因是“动作开场”门禁把前 100 字内进入抬手处置的短环境引子判为 `unknown`；开场修复 Provider 又因严格单段契约报 `AIGatewayError`。第 2、3 章未启动，副本只保留第 1 章 `needs_rewrite`。
+- 已定位并本地修复：仅对“原首句未分类、前 160 字内出现可见动作”的短环境引子按动作开场处理；真正静态开场、动作过晚、身体疼痛模板仍阻断。定向回归 `78 passed`，最终后端全量 `1180 passed, 138 skipped, 1 xpassed, 2 warnings`；修复仍待提交、部署和新空副本复验。
+- 当前结论：三章真实 Provider **未通过**，20 章长跑**未开始**；不把自动 91 分、单章正文或生产健康状态解释成三章/人工质量验收。
+
 ## 2026-08-20 辅助创作控制面本地实现（M1–M6 已接线/可用）
 
 - 新增持久化 AI 会话、确定性编辑器上下文、最小故事 Bible、GPT/DeepSeek/豆包角色路由、豆包真实适配器、章节级写作事件和人工发布回执；正文仍以 `contents` 为唯一真相源。

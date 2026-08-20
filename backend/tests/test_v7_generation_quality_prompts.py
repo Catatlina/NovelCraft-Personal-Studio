@@ -335,6 +335,44 @@ def test_natural_action_opening_with_a_pause_is_classified_as_action():
     assert result["passed"] is True
 
 
+def test_action_opening_allows_short_scene_lead_before_early_visible_action():
+    text = (
+        "午后的日头正毒，外门广场的青石砖被晒得发烫。"
+        "周衡站在高台上，抬手示意执事弟子把顾沉押上来。"
+    )
+
+    assert classify_opening(text) == "unknown"
+    result = inspect_opening(
+        text,
+        requested_mode="action",
+        chapter_number=1,
+    )
+    assert result["passed"] is True
+    assert result["observed_mode"] == "action"
+
+
+def test_action_opening_does_not_accept_action_that_arrives_too_late():
+    text = (
+        "午后的日头正毒，外门广场的青石砖被晒得发烫。"
+        "人群围在高台下，没人说话。"
+        "风从山门方向吹来，卷起一层灰，落在每个人的鞋面上。"
+        "高台边的旗角被风吹得一下一下拍在木杆上。"
+        "执事弟子站在台阶两侧，目光始终落在广场中央。"
+        "有人低声咳了一下，很快又把声音压了回去。"
+        "远处的钟声敲过两遍，晒热的石面仍旧没有凉下来。"
+        "围观的人换了几次站姿，却没有一个人先离开。"
+        "周衡低头看完手里的名册，过了很久才抬手。"
+    )
+
+    result = inspect_opening(
+        text,
+        requested_mode="action",
+        chapter_number=1,
+    )
+    assert result["passed"] is False
+    assert any(item["code"] == "opening_mode_mismatch" for item in result["flags"])
+
+
 def test_object_opening_is_not_reclassified_by_a_later_action():
     text = "门缝里的光变了。苏长庚抬脚走近，伸手去碰那道裂痕。"
 

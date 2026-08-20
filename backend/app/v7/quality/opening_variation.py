@@ -248,6 +248,23 @@ def inspect_opening(
     sample = _opening_sample(text)
     requested = str(requested_mode or "").strip().lower()
     observed = classify_opening(sample)
+    # A short scene-setting lead followed immediately by a visible choice is
+    # still a usable action opening.  Real Provider prose exposed this case:
+    # a brief heat/stone detail was followed by the character raising a hand
+    # within the first few sentences.  Requiring the first sentence itself to
+    # contain an action made the fallback repair spend another Provider call
+    # and then reject an otherwise readable, fact-preserving chapter.  Keep
+    # this bounded to an initially unclassified opening and an action within
+    # the first 160 characters; static openings and later actions remain hard
+    # mismatches.
+    early_action = _ACTION_RE.search(sample[:220])
+    if (
+        requested == "action"
+        and observed == "unknown"
+        and early_action is not None
+        and early_action.start() <= 160
+    ):
+        observed = "action"
     recent = [str(mode) for mode in (recent_modes or []) if mode in OPENING_MODES]
     first_sentence = re.split(r"[。！？!?\n]", sample, maxsplit=1)[0]
     flags: list[dict[str, Any]] = []

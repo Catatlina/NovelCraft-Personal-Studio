@@ -2,13 +2,21 @@
 > 更新时间：2026-08-20
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-20 M7 最新复验快照（本地修复待部署）
+
+- `d28a09f` 已推送并部署；生产备份 `backups/pre-deploy-density-fix-20260820-150320.sql.gz` gzip 校验通过，迁移为 `nc_starlume_authoring (head)`，healthz 正常。
+- 全新空副本 `b3cc7b91-74c6-4dd6-a122-aa2a003eea7a` 启动前为 0 个活动章节、0 个 V7 状态；真实 DeepSeek 三章目标只完成到第1章：正文 3320 字、连续性 `continuous`、自动评审 91 分，但状态为 `needs_rewrite` / `v7_quality_gate_failed`。
+- 失败根因已缩小为开场门禁误判：真实首段先有短环境落笔，前 100 字内已经进入“抬手示意执事”的可见动作，旧规则仍要求首句命中动作；随后前缀修复 Provider 报 `AIGatewayError`，所以不能把修复失败伪装成通过。第2、3章未调用。
+- 本地已加入最小修复：只对首句 `unknown` 且前 160 字出现动作的短环境引子按 `action` 接受；真正静态开场、动作过晚、身体感受模板仍阻断。定向 `78 passed`；全量修复后待复跑。
+- 当前状态：三章真实 Provider **未通过**；20章仍**未开始**；披露人工确认、两位盲评、七道门禁完整发布闭环仍未验收。最终本地全量为 `1180 passed, 138 skipped, 1 xpassed, 2 warnings`，下一步是提交推送→生产部署→新建空副本单次复验。
+
 ## 2026-08-20 当前批次交接（M1–M6 本地可用，M7/M8 未验收）
 
 - 分支：`agent/publishing-v0.9.2`；本批代码与文档已提交为 `0ae3875` 并推送到 `origin`，生产已部署同一提交。
 - 已实现：`backend/app/api/v1/authoring.py`、`nc_starlume_authoring` 迁移、编辑器上下文/Provider角色面板、持久化 `EditorAiChat`、真实豆包 Gateway 适配、角色路由、章节码字事件、清空三章长跑登记/软删除、人工发布回执。
 - 本地和生产迁移均已从 `nc_v11_disclosure_payoff` 升级到 `nc_starlume_authoring (head)`；生产备份为 `backups/pre-deploy-authoring-20260820-143646.sql.gz`。没有执行生产正文清空，也没有启动 Provider 长跑。
 - 本地验证已完成：后端全量 `1177 passed, 138 skipped, 1 xpassed, 2 warnings`，辅助创作契约 `5 passed`；前端 `57 passed`、TypeScript 检查、生产构建通过；集成脚本已验证会话/current session/角色状态/长跑登记返回 `200`；豆包无密钥时 fail-closed。
-- 当前必须如实标记：M1–M6 为**可用/已接线**（代码、部署和基础路由范围）；M7 三章真实 Provider 和两位盲评为**未开始**；M8 披露人工确认、七道门禁、平台定稿/人工回执正式闭环仍未验收。生产 healthz 返回数据库/Redis/Worker 正常，新 authoring 路由未认证访问返回 401。
+- 当前必须如实标记：M1–M6 为**可用/已接线**（代码、部署和基础路由范围）；M7 三章真实 Provider 已执行但**未通过**，两位盲评尚未开始；M8 披露人工确认、七道门禁、平台定稿/人工回执正式闭环仍未验收。生产 healthz 返回数据库/Redis/Worker 正常，新 authoring 路由未认证访问返回 401。
 
 ### M7 一次性真实尝试与修复边界
 
