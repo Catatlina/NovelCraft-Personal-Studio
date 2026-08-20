@@ -24,6 +24,12 @@ _EXPLANATION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("mind_conclusion", r"(?:他|她|人物)(?:终于)?(?:明白|意识到|知道自己|心里清楚)"),
     ("denial_conclusion", r"(?:不是|并非)(?:梦|错觉|眼花|巧合)"),
     ("summary_conclusion", r"(?:现在|直到这时|这一刻)(?:他|她|人物)?(?:才)?(?:知道|明白|意识到).{0,18}(?:错|真相|原因)"),
+    # These are narrower than a general because/so rule.  They catch the
+    # narrator explaining a character's route or uncertainty in one neat
+    # sentence, which is the shape exposed by the Zhuque sample, without
+    # banning ordinary causal prose.
+    ("author_rationale", r"(?:因为|所以|因此|毕竟).{0,28}(?:总不会|只能|必然|显然|应该)"),
+    ("uncertainty_inventory", r"(?:他|她|人物|顾沉).{0,12}(?:不知道|不清楚|不确定).{0,42}(?:能不能|在什么地方|还有没有|怎么|是否)"),
 )
 _SIMILE_RE = re.compile(
     r"(?:好像|仿佛|如同|宛如|犹如|像)[^。！？!?\n，,]{0,18}"
@@ -32,7 +38,25 @@ _REPEATED_ACTION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("put_back_loop", r"(?:放回|放下|靠回|重新握起|重新拿起|收回).{0,80}(?:放回|放下|靠回|重新握起|重新拿起|收回)"),
 )
 
-GENERATION_STYLE_PROTOCOL_VERSION = "generation-style-protocol-v2"
+# Repeating an injured character's state once can be natural.  Repeating two
+# or more state groups in the same short scene is different: it restates the
+# same information with a new simile instead of showing a changed condition.
+# Keep these patterns broad enough to work across genres, but require multiple
+# independent groups before raising a generation retry signal.
+_STATE_ECHO_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("temperature_or_vitality", r"(?:沙地|地面|身体|体温|温度)[^。！？!?\n]{0,20}(?:抽走|流失|流干|漏出去|变冷|发凉|发冷|冰冷)"),
+    ("strength_or_control", r"(?:没有|没(?:有)?|连)[^。！？!?\n]{0,14}(?:力气|力量|睁眼|抬头|回答|站起来|动弹)"),
+    ("heartbeat_or_breath", r"(?:心跳|心脏|呼吸|喘气)[^。！？!?\n]{0,18}(?:慢|重|停|喘|顶回来|发慌|沉)"),
+    ("injury_or_cultivation", r"(?:丹田|经脉|伤口|指甲|手指)[^。！？!?\n]{0,18}(?:碎|断|消散|流|疼|痛|空|麻|发白|干)"),
+)
+_MOTION_RE = re.compile(
+    r"(?:往(?:前|里|下|上|西|那个方向)|走|挪|扶|喘(?:气)?|停(?:下来)?|继续|沿着|迈出|拨开|推开|爬|站起来|坐回)"
+)
+_SCENE_TURN_RE = re.compile(
+    r"(?:听见|听到|看见|看到|发现|有人|脚步|岔路|选择|拦住|追上|掉下|折断|亮起|出现|打开|推开|猫|影子|声音)"
+)
+
+GENERATION_STYLE_PROTOCOL_VERSION = "generation-style-protocol-v3"
 
 _GENERATION_PATHS: dict[str, dict[str, str]] = {
     "event_action_dialogue": {
@@ -87,10 +111,14 @@ def render_generation_style_protocol(path: str = "event_action_dialogue") -> str
         f"本轮写法：{selected['label']}。{selected['instruction']}\n"
         "硬基线：非对白不使用类比；旁白解释性总结为 0；把感觉直接写成物体实际的移动、声音、触感、位置或后果；"
         "不要替读者宣布人物已经得出的结论。\n"
+        "同一身体状态、任务提示、地点信息或规则结果已经写清后，不要换一种比喻再次解释；只有状态发生变化时才补写新增后果。"
+        "系统/规则提示只写首次出现的内容，后续只写新增字段、代价或人物行动。\n"
         "表达质地保持平、快、干：对白在有角色交锋的场景中约占三分之一，但不硬凑；"
         "心理解释为 0，身体动作和物件处理承担反应；允许拿错、找不到、被打断、答非所问和事情暂时没做完。\n"
         "每个自然段只承担一个现场落点：动作、对白、物件变化、人物反应或结果，"
         "不要求每段都完整解释因果；段落长短随现场变化，不要把所有段落写成同样长度。\n"
+        "移动、寻找或赶路最多连续两段没有新事件；每三段内必须出现路线选择、障碍、他人介入、线索变化或可见后果。"
+        "没有新事件就压缩成一段，不要把走、停、喘、看、继续拆成行程记录。\n"
         "只学习下面示例的信息落地方式，不复制词句：\n"
         "门栓先动了一下。苏长庚把手收回来，侧身挡住楼梯口。\n"
         "‘谁在里面？’\n"
@@ -105,6 +133,59 @@ def render_generation_style_protocol(path: str = "event_action_dialogue") -> str
 
 def _remove_dialogue(text: str) -> str:
     return _DIALOGUE_RE.sub(" ", str(text or ""))
+
+
+def _paragraphs(text: str) -> list[str]:
+    return [item.strip() for item in re.split(r"\n{2,}|\n", text) if item.strip()]
+
+
+def _state_echo_metrics(text: str) -> dict[str, Any]:
+    groups: list[dict[str, Any]] = []
+    repeated_occurrences = 0
+    for kind, pattern in _STATE_ECHO_PATTERNS:
+        matches = [match.group(0)[:80] for match in re.finditer(pattern, text)]
+        if len(matches) >= 2:
+            groups.append({"kind": kind, "count": len(matches), "evidence": matches[:3]})
+            repeated_occurrences += len(matches) - 1
+    return {
+        "groups": groups,
+        "group_count": len(groups),
+        "repeated_occurrences": repeated_occurrences,
+    }
+
+
+def _procedural_motion_metrics(text: str) -> dict[str, Any]:
+    paragraphs = _paragraphs(text)
+    compact = re.sub(r"\s+", "", text)
+    motion_hits = len(_MOTION_RE.findall(text))
+    turn_hits = len(_SCENE_TURN_RE.findall(text))
+    dialogue_count = len(_DIALOGUE_RE.findall(text))
+    first_turn_chars = len(compact)
+    match = _SCENE_TURN_RE.search(text)
+    if match:
+        first_turn_chars = len(re.sub(r"\s+", "", text[: match.start()]))
+    return {
+        "paragraph_count": len(paragraphs),
+        "motion_hits": motion_hits,
+        "turn_hits": turn_hits,
+        "dialogue_count": dialogue_count,
+        "first_turn_chars": first_turn_chars,
+    }
+
+
+def _subject_opening_metrics(text: str) -> dict[str, Any]:
+    paragraphs = _paragraphs(text)
+    subject_count = sum(
+        1
+        for paragraph in paragraphs
+        if re.sub(r"^[\s\"“”‘’「」『』（）(]+", "", paragraph).startswith(("他", "她"))
+    )
+    return {
+        "subject": "他/她",
+        "count": subject_count,
+        "paragraph_count": len(paragraphs),
+        "ratio": round(subject_count / len(paragraphs), 4) if paragraphs else 0.0,
+    }
 
 
 def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
@@ -165,6 +246,53 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
             "evidence": repeated_actions,
         })
 
+    state_echo = _state_echo_metrics(narrative)
+    # One repeated body state is allowed.  Two independent repeated groups
+    # indicate that the candidate is explaining the same condition instead of
+    # advancing it, especially in a scene that is already short and serial.
+    if (
+        state_echo["group_count"] >= 2
+        and state_echo["repeated_occurrences"] >= 3
+    ):
+        flags.append({
+            "code": "scene_state_echo",
+            "severity": "high",
+            "message": "同一身体状态、任务结果或规则信息被反复解释；保留一次，后续只写变化、代价或行动",
+            "evidence": state_echo,
+        })
+
+    procedural_motion = _procedural_motion_metrics(narrative)
+    motion_hits = int(procedural_motion["motion_hits"])
+    turn_hits = int(procedural_motion["turn_hits"])
+    if (
+        procedural_motion["paragraph_count"] >= 7
+        and motion_hits >= 8
+        and procedural_motion["dialogue_count"] <= 1
+        and motion_hits >= max(8, int(turn_hits * 1.4))
+        and procedural_motion["first_turn_chars"] > min(420, max(160, int(size * 0.40)))
+    ):
+        flags.append({
+            "code": "scene_procedural_motion",
+            "severity": "high",
+            "message": "移动/寻找段落像行程记录；压缩无事件移动，并提前落一个阻碍、线索、他人介入或选择代价",
+            "evidence": procedural_motion,
+        })
+
+    subject_opening = _subject_opening_metrics(narrative)
+    if (
+        subject_opening["paragraph_count"] >= 8
+        and subject_opening["count"] >= 5
+        and subject_opening["ratio"] >= 0.55
+        and motion_hits >= 8
+        and procedural_motion["dialogue_count"] <= 1
+    ):
+        flags.append({
+            "code": "scene_subject_opening",
+            "severity": "medium",
+            "message": "多个段落以同一主语起笔并连续记录动作；改从动作、物件、声音、环境后果或他人反应起笔",
+            "evidence": subject_opening,
+        })
+
     return {
         "schema_version": "generation-naturalness-v1",
         "passed": not flags,
@@ -172,5 +300,8 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
         "explanation_count": len(explanation_hits),
         "metaphor_count": len(similes),
         "repeated_action_count": len(repeated_actions),
+        "state_echo": state_echo,
+        "procedural_motion": procedural_motion,
+        "subject_opening": subject_opening,
         "flags": flags,
     }

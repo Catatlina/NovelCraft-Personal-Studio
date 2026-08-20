@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.31.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.32.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -3715,6 +3715,9 @@ class GenerationEngine:
             "scene_explanatory_narration",
             "scene_metaphor_density",
             "scene_repeated_action_loop",
+            "scene_state_echo",
+            "scene_procedural_motion",
+            "scene_subject_opening",
         })
 
     @staticmethod
@@ -3754,6 +3757,40 @@ class GenerationEngine:
                     if isinstance(item, dict) and item.get("kind")
                 })
             return {"kinds": kinds, "baseline": "new_choice_or_consequence"}
+        if code == "scene_state_echo":
+            if not isinstance(evidence, dict):
+                return None
+            groups = evidence.get("groups") or []
+            return {
+                "groups": [
+                    str(item.get("kind") or "")
+                    for item in groups[:5]
+                    if isinstance(item, dict) and item.get("kind")
+                ],
+                "repeated_occurrences": evidence.get("repeated_occurrences"),
+                "baseline": "state_delta_only",
+            }
+        if code == "scene_procedural_motion":
+            if not isinstance(evidence, dict):
+                return None
+            return {
+                "paragraph_count": evidence.get("paragraph_count"),
+                "motion_hits": evidence.get("motion_hits"),
+                "turn_hits": evidence.get("turn_hits"),
+                "dialogue_count": evidence.get("dialogue_count"),
+                "first_turn_chars": evidence.get("first_turn_chars"),
+                "baseline": "event_before_route_log",
+            }
+        if code == "scene_subject_opening":
+            if not isinstance(evidence, dict):
+                return None
+            return {
+                "subject": evidence.get("subject"),
+                "count": evidence.get("count"),
+                "paragraph_count": evidence.get("paragraph_count"),
+                "ratio": evidence.get("ratio"),
+                "baseline": "varied_paragraph_leads",
+            }
         if code == "structural_ai_smell":
             if not isinstance(evidence, dict):
                 return None
@@ -4539,6 +4576,9 @@ class GenerationEngine:
             "不要把感觉改写成形容性联想，也不要用重复拿起、放回、转身来填充犹豫。"
             "对话不承担完整说明任务：角色可以避答、打断、说错重点，信息通过说话目的和现场反应逐步露出。"
             "段落长短随压力变化，避免每段都完整走完‘现象→判断→解释→总结’，也不要为了制造人工痕迹加入无关闲笔。"
+            "同一身体状态、任务提示、地点信息或规则结果已经写清后，不要换一种表达再次解释；系统/规则只写新增变化。"
+            "移动、寻找或赶路最多连续两段没有新事件；第三段前必须出现阻碍、线索、他人介入、路线选择代价或可见后果，"
+            "否则压缩移动并收束，不要把走、停、喘、看、继续拆成行程记录。"
         )
         minimum, nominal_maximum = self._scene_length_bounds(scene_card, scene_index=scene_index)
         allowed_maximum = self._scene_allowed_max_chars(scene_card, scene_index=scene_index)
@@ -4769,6 +4809,9 @@ class GenerationEngine:
                         "repeated_tic",
                         "dash_density",
                         "ai_phrase",
+                        "scene_state_echo",
+                        "scene_procedural_motion",
+                        "scene_subject_opening",
                     }):
                         # A style repair still needs a complete Provider
                         # response.  The old compression branch saw the
@@ -4914,7 +4957,25 @@ class GenerationEngine:
                             + content_generation_contract(self.quality_profile)
                         )
                     elif style_only_retry:
-                        if "repeated_paragraph_opening" in previous_issue_codes:
+                        if "scene_state_echo" in previous_issue_codes:
+                            route = (
+                                "上一版重复解释同一身体状态、任务提示或规则结果；本次只保留第一次完整呈现，"
+                                "后续只写发生变化的症状、代价、物件后果或人物行动。系统/规则提示只保留新增字段，"
+                                "不得换一种比喻、换一种身体感受或再写一遍相同任务。"
+                            )
+                        elif "scene_procedural_motion" in previous_issue_codes:
+                            route = (
+                                "上一版像赶路记录；压缩没有事件的走、停、喘、看和继续，"
+                                "保留必要的路径信息，并在移动段前半段落下一个来自本场事实的阻碍、线索变化、"
+                                "他人介入或带代价的路线选择。没有新变化就收束，不得用环境和身体感受补长度。"
+                            )
+                        elif "scene_subject_opening" in previous_issue_codes:
+                            route = (
+                                "上一版多个段落都从同一主语起笔；重新组织段落落点，"
+                                "从正在发生的动作、手边物件、声音、环境后果、对白或他人反应起笔，"
+                                "主语自然放进句中，不能只把人名机械替换成‘他/她’。"
+                            )
+                        elif "repeated_paragraph_opening" in previous_issue_codes:
                             route = (
                                 "本轮专门重排段落起笔：上一版同一姓名占据过多段首；"
                                 "重写时禁止让该姓名出现在连续段首，也不要让它作为超过四分之一段落的前两字；"

@@ -450,6 +450,44 @@ def test_generation_naturalness_blocks_explanation_metaphor_and_action_loops():
     assert "scene_metaphor_density" in long_codes
 
 
+def test_generation_naturalness_blocks_state_echo_and_subject_motion_loop():
+    text = "\n\n".join([
+        "顾沉没有力气回答，沙地的温度从身体里抽走，心跳又慢又重。",
+        "顾沉连抬头的力气都没有，身体里的东西一点点流干，心跳慢得像要停下。",
+        "他扶着树干往里走，松针落在肩上，脚下的枯枝发出脆响。",
+        "他走了百步，停下来喘气，靠在老松上，手指扣进树皮。",
+        "天色暗下来，他数着心跳，继续往前走，每走几步就停一下。",
+        "他又扶着树干往前挪，腿一软，靠在树上喘了很久。",
+        "他正要继续，忽然听见身后有脚步，声音只响了一下。",
+        "他没有回头，屏住呼吸，等了十息，才松开树皮继续往前走。",
+        "岔路分成两条，他看了看天色，又看了看两条路，最后选了往下的一条。",
+    ])
+
+    report = inspect_generation_naturalness(text)
+    codes = {item["code"] for item in report["flags"]}
+
+    assert "scene_state_echo" in codes
+    assert "scene_subject_opening" in codes
+    assert report["state_echo"]["group_count"] >= 2
+
+
+def test_generation_naturalness_flags_route_log_without_early_turn():
+    text = "\n\n".join([
+        "他扶着树干往里走，松针落在肩上，脚下的枯枝发出脆响，泥水顺着鞋面往下流。",
+        "他走了百步，停下来喘气，靠在老松上，低头看自己的手，手背沾着一层湿泥。",
+        "天色暗得很快，他继续往前走，沿着土径一点点往下挪，树枝擦过他的衣摆。",
+        "他走几步就停下来喘一阵，扶着树干换个姿势，再继续往前，脚底陷进松软的土里。",
+        "他拨开灌木，绕过石头，沿着坡脚往低处走，脚底踩过湿土，鞋底越来越沉。",
+        "他停下来，抬头看天，又低头看脚下，继续沿着土径往下，手指在树皮上留下几道白痕。",
+        "直到听见身后有一声脚步，他才停住，回头看向林子。",
+        "他选了右边的岔路，扶着树枝往下走，枝条刮过衣摆。",
+    ])
+
+    codes = {item["code"] for item in inspect_generation_naturalness(text)["flags"]}
+
+    assert "scene_procedural_motion" in codes
+
+
 def test_generation_naturalness_does_not_treat_two_characters_turning_as_a_loop():
     text = (
         "赵小胖回头看了一眼。苏长庚背对着他，扫帚一下一下扫着。"
@@ -463,7 +501,7 @@ def test_generation_naturalness_does_not_treat_two_characters_turning_as_a_loop(
 def test_generation_protocol_uses_strict_baseline_and_selected_route():
     protocol = render_generation_style_protocol("object_consequence")
 
-    assert "generation-style-protocol-v2" in protocol
+    assert "generation-style-protocol-v3" in protocol
     assert "物件与后果推进" in protocol
     assert "非对白不使用类比" in protocol
     assert "仿佛" not in protocol
@@ -471,6 +509,8 @@ def test_generation_protocol_uses_strict_baseline_and_selected_route():
     assert "拿错、找不到、被打断" in protocol
     assert "不复制词句" in protocol
     assert "门栓先动了一下" in protocol
+    assert "同一身体状态" in protocol
+    assert "最多连续两段没有新事件" in protocol
 
 
 def test_generation_style_repairs_change_the_prose_path():
