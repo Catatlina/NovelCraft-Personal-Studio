@@ -127,17 +127,15 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
         })
 
     similes = [match.group(0)[:60] for match in _SIMILE_RE.finditer(narrative)]
-    # The current generation baseline deliberately starts at zero non-dialogue
-    # similes.  This is stricter than a general prose review because the real
-    # Provider sample repeatedly emitted image chains even after being told to
-    # keep them sparse.  A single image is therefore enough to trigger a
-    # generation-time independent candidate; it is never rewritten after the
-    # chapter is accepted.
-    if size >= 500 and len(similes) >= 1:
+    # Treat a repeated image chain as a generation risk, not every isolated
+    # comparison as a hard failure.  The previous zero-tolerance rule rejected
+    # concrete prose with one natural image and made an internal heuristic
+    # stricter than the external detector evidence justified.
+    if size >= 500 and len(similes) >= 2:
         flags.append({
             "code": "scene_metaphor_density",
             "severity": "medium",
-            "message": "非对白出现比喻；本轮基线为零比喻，改成可观察的动作、物件或结果",
+            "message": "非对白出现连续比喻链；改成可观察的动作、物件或结果",
             "evidence": {"count": len(similes), "examples": similes[:4], "narrative_chars": size},
         })
 

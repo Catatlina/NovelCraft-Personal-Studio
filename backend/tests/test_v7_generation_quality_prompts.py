@@ -429,7 +429,11 @@ def test_generation_naturalness_flags_one_non_dialogue_simile_at_scene_scale():
     text = "门把手先动了一下。苏长庚没有推门，先看向脚边的水痕。" + "他没有回答。" * 80
 
     report = inspect_generation_naturalness(text.replace("水痕", "像水一样的痕迹"))
-    assert any(item["code"] == "scene_metaphor_density" for item in report["flags"])
+    assert not any(item["code"] == "scene_metaphor_density" for item in report["flags"])
+
+    chained = text.replace("水痕", "像水一样的痕迹") + "地面像被细线划开。"
+    chained_report = inspect_generation_naturalness(chained)
+    assert any(item["code"] == "scene_metaphor_density" for item in chained_report["flags"])
 
 
 def test_scene_retry_feedback_does_not_replay_failed_prose_examples():
@@ -441,7 +445,7 @@ def test_scene_retry_feedback_does_not_replay_failed_prose_examples():
         },
     })
 
-    assert evidence == {"count": 8, "baseline": "non_dialogue_simile_zero"}
+    assert evidence == {"count": 8, "baseline": "non_dialogue_simile_chain_two_or_more"}
     assert "像取不尽似的" not in json.dumps(evidence, ensure_ascii=False)
 
 
