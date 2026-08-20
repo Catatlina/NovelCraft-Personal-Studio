@@ -10,6 +10,12 @@
 - 本地验证已完成：后端全量 `1177 passed, 138 skipped, 1 xpassed, 2 warnings`，辅助创作契约 `5 passed`；前端 `57 passed`、TypeScript 检查、生产构建通过；集成脚本已验证会话/current session/角色状态/长跑登记返回 `200`；豆包无密钥时 fail-closed。
 - 当前必须如实标记：M1–M6 为**可用/已接线**（代码、部署和基础路由范围）；M7 三章真实 Provider 和两位盲评为**未开始**；M8 披露人工确认、七道门禁、平台定稿/人工回执正式闭环仍未验收。生产 healthz 返回数据库/Redis/Worker 正常，新 authoring 路由未认证访问返回 401。
 
+### M7 一次性真实尝试与修复边界
+
+- 生产提交 `0ae3875` 上使用真实 DeepSeek、隔离副本 `11203278-a624-4c7c-9278-d3a304806be0`（启动前 `active_chapters=0`、`v7_states=0`）执行三章脚本；第 1 章未落正文，原作未修改。
+- 阻断证据：第 3 场生成期候选 1494 字，前面已接受 2128 字，章节生成上限 3192 字；在一次有界重试后仍命中 `scene_chapter_budget_overrun`。这不是平台发布门禁，也不是旧章节污染。
+- 本地已接线修复：场景 Prompt 现在同时展示“参考节拍范围”和当前生成期实际剩余章节额度，明确后者是硬边界；新增 Prompt 回归断言。修复需要先部署，再用同一空副本或新空副本复验一次，禁止盲目重复。
+
 ## 2026-08-20 Starlume AI 辅助创作转型与 GitHub 改名（当前结论）
 
 - **品牌与仓库已验收**：原主仓库已原地改名为 `Catatlina/starlume-ai-studio`，仓库 ID 仍为 `R_kgDOTT8enQ`；本地 `origin` 已更新为新 URL。精确名称 `Catatlina/starlume-ai` 属于另一套历史 Express/SQLite 项目（ID `R_kgDOTe5o9A`），未覆盖、未删除。

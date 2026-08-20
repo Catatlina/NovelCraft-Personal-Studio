@@ -7,6 +7,12 @@
 - 本地证据：后端全量 1177 passed、138 skipped、1 xpassed、2 warnings（辅助创作契约 5 passed）；前端 57 passed、TypeScript 检查和生产构建通过；会话/角色/三章登记 API 集成返回 200。
 - 本批已部署生产提交 `0ae3875`；备份为 `backups/pre-deploy-authoring-20260820-143646.sql.gz`，迁移 head 和公网 healthz 已验证。三章真实 Provider、两位独立盲评、披露人工确认、七道门禁和正式发布仍未验收；本批没有执行真实 Provider 长跑。
 
+## 2026-08-20 三章真实 Provider 一次性尝试（阻断，修复待部署）
+
+- 在生产提交 `0ae3875` 上使用真实 DeepSeek、空副本 `11203278-a624-4c7c-9278-d3a304806be0` 执行三章脚本；启动前 `active_chapters=0`、`v7_states=0`，第1章未落正文，原作未修改。
+- 第1章第3场在生成期阻断：已接受 2128 字 + 候选 1494 字 > 章节上限 3192 字；根因是 Prompt 没有显式呈现当前剩余章节额度。
+- 本地已修复为 Prompt 明示剩余额度硬边界，并新增回归测试；部署后只复验一次，失败即停。
+
 ## 2026-08-20 辅助创作转型契约与 GitHub 改名 [commit 3c376a0 已验收]
 
 - 主仓库从 `Catatlina/NovelCraft-Personal-Studio` 原地改名为 `Catatlina/starlume-ai-studio`，仓库 ID `R_kgDOTT8enQ` 保持不变；`Catatlina/starlume-ai` 是另一历史项目，未修改。

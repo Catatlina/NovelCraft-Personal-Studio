@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.24.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.25.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -4408,9 +4408,10 @@ class GenerationEngine:
             "缺少依据时用动作和现场结果呈现，不要用精确数字制造伪连续性。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
-            f"本场建议约写 {effective_target} 字，参考范围 {minimum}-{nominal_maximum} 字；"
-            "场景长度只是节拍参考，不是独立硬上限。只要整章不超过章节预算，"
-            "一个完整事件可以自然多写或少写；达到事件结果后立即收束，"
+            f"本场建议约写 {effective_target} 字，参考节拍范围 {minimum}-{nominal_maximum} 字；"
+            f"本次生成期本场可用章节剩余额度上限为 {maximum} 字，正文不得超过这个剩余额度；"
+            "这是章节预算的生成期硬边界，不是要求把本场写满。"
+            "如果完整事件在额度内已经完成，立即收束；优先删掉重复反应、背景解释和无关描写，"
             "不得为了凑章节字数补写日常、环境、回忆或重复反应。"
             f"\n\n{render_generation_style_protocol(generation_path)}"
             f"{retry_block}"

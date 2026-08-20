@@ -1272,8 +1272,9 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "关键异常、开门、封印松动、袭击、修炼变化或新能力必须先写可见前提/征兆" in prompt
     assert "碑文、幻象、梦境或他人话语里的数字/年代属于原说话者" in prompt
     assert "本场建议约写" in prompt
-    assert "场景长度只是节拍参考，不是独立硬上限" in prompt
-    assert "只要整章不超过章节预算" in prompt
+    assert "参考节拍范围" in prompt
+    assert "本次生成期本场可用章节剩余额度上限" in prompt
+    assert "这是章节预算的生成期硬边界" in prompt
 
 
 def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_plan():
@@ -1293,6 +1294,8 @@ def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_p
     )
 
     assert "本场建议约写 960 字" in prompt
+    assert "本次生成期本场可用章节剩余额度上限为 960 字" in prompt
+    assert "这是章节预算的生成期硬边界" in prompt
     assert "本场建议约写 1200 字" not in prompt
 
 
