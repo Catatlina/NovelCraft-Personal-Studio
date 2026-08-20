@@ -5,7 +5,7 @@
 - 新增持久化 AI 会话、确定性编辑器上下文、最小故事 Bible、GPT/DeepSeek/豆包角色路由、豆包真实适配器、章节级写作事件和人工发布回执；正文仍以 `contents` 为唯一真相源。
 - 新增迁移 `nc_starlume_authoring`，本地已升级到 head；新增五张控制面表，不删除原始正文。前端编辑器已显示上下文、Provider 状态并恢复会话。
 - 本地证据：后端全量 1177 passed、138 skipped、1 xpassed、2 warnings（辅助创作契约 5 passed）；前端 57 passed、TypeScript 检查和生产构建通过；会话/角色/三章登记 API 集成返回 200。
-- 三章真实 Provider、两位独立盲评、披露人工确认、七道门禁和正式发布仍未验收；本批生产部署和真实 Provider 调用尚未执行。
+- 本批已部署生产提交 `0ae3875`；备份为 `backups/pre-deploy-authoring-20260820-143646.sql.gz`，迁移 head 和公网 healthz 已验证。三章真实 Provider、两位独立盲评、披露人工确认、七道门禁和正式发布仍未验收；本批没有执行真实 Provider 长跑。
 
 ## 2026-08-20 辅助创作转型契约与 GitHub 改名 [commit 3c376a0 已验收]
 

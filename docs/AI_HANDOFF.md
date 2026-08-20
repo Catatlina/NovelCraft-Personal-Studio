@@ -4,11 +4,11 @@
 
 ## 2026-08-20 当前批次交接（M1–M6 本地可用，M7/M8 未验收）
 
-- 分支：`agent/publishing-v0.9.2`；本批代码与文档已提交为 `863eb50` 并推送到 `origin`，尚未部署生产。
+- 分支：`agent/publishing-v0.9.2`；本批代码与文档已提交为 `0ae3875` 并推送到 `origin`，生产已部署同一提交。
 - 已实现：`backend/app/api/v1/authoring.py`、`nc_starlume_authoring` 迁移、编辑器上下文/Provider角色面板、持久化 `EditorAiChat`、真实豆包 Gateway 适配、角色路由、章节码字事件、清空三章长跑登记/软删除、人工发布回执。
-- 本地迁移已从 `nc_v11_disclosure_payoff` 升级到 `nc_starlume_authoring (head)`；没有执行生产正文清空，也没有启动 Provider 长跑。
+- 本地和生产迁移均已从 `nc_v11_disclosure_payoff` 升级到 `nc_starlume_authoring (head)`；生产备份为 `backups/pre-deploy-authoring-20260820-143646.sql.gz`。没有执行生产正文清空，也没有启动 Provider 长跑。
 - 本地验证已完成：后端全量 `1177 passed, 138 skipped, 1 xpassed, 2 warnings`，辅助创作契约 `5 passed`；前端 `57 passed`、TypeScript 检查、生产构建通过；集成脚本已验证会话/current session/角色状态/长跑登记返回 `200`；豆包无密钥时 fail-closed。
-- 当前必须如实标记：M1–M6 为**已接线/可用**（代码级范围）；M7 三章真实 Provider 和两位盲评为**未开始**；M8 披露人工确认、七道门禁、平台定稿/人工回执正式闭环仍未验收。生产部署不属于本批已完成证据。
+- 当前必须如实标记：M1–M6 为**可用/已接线**（代码、部署和基础路由范围）；M7 三章真实 Provider 和两位盲评为**未开始**；M8 披露人工确认、七道门禁、平台定稿/人工回执正式闭环仍未验收。生产 healthz 返回数据库/Redis/Worker 正常，新 authoring 路由未认证访问返回 401。
 
 ## 2026-08-20 Starlume AI 辅助创作转型与 GitHub 改名（当前结论）
 
