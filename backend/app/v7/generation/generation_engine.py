@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.28.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.29.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -4728,10 +4728,14 @@ class GenerationEngine:
                     previous_handoffs=handoffs,
                     retry_feedback=feedback,
                     max_scene_chars=attempt_max_scene_chars,
-                    generation_path=select_generation_style_path(
-                        chapter_number,
-                        index,
-                        attempt,
+                    generation_path=(
+                        "plain_factual"
+                        if naturalness_retry
+                        else select_generation_style_path(
+                            chapter_number,
+                            index,
+                            attempt,
+                        )
                     ),
                 )
                 scene_system_prompt = (

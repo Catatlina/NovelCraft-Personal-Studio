@@ -28,6 +28,7 @@
 | 场景读者目标不作第二硬预算 | 已接线 | `scene_reader_budget_overrun` 改为 `scene_reader_budget_variance` 低优先级告警；章节总预算与后续场景最低表达空间保留硬门禁 |
 | 最后完整场景自然波动 | 已接线 | `SCENE_SERIAL_GENERATION_VERSION=2.27.0`；无后续场景时自然波动额度 480 字；3545 字边界回归通过；第1章生产实测通过，第2章暴露跨场景段首误报 |
 | 对白破折号生成期误报 | 已接线 | `SCENE_SERIAL_GENERATION_VERSION=2.28.0`；生成期只按去除完整对白后的叙述密度判断；定向/全量回归通过，待生产复验 |
+| 类比密度重试路径 | 已接线 | `SCENE_SERIAL_GENERATION_VERSION=2.29.0`；自然性重试统一切换 `plain_factual`，不放宽非对白类比门禁；待生产复验 |
 | 20章真实 Provider 长跑 | 未开始 | 三章前置尚未通过，不启动 |
 
 > 本节是当前批次覆盖；后文历史矩阵保留作为需求演进记录，若冲突以本节和最新交接快照为准。
