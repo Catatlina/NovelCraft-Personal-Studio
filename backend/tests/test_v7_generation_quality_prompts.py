@@ -351,12 +351,21 @@ def test_action_opening_allows_short_scene_lead_before_early_visible_action():
     assert result["observed_mode"] == "action"
 
 
+def test_action_opening_recognises_common_chinese_action_verbs():
+    text = "演武场上的尘土还没落定，周衡已经站到了石阶最高处。他手里捏着一卷竹简，在掌心拍了两下。"
+
+    result = inspect_opening(text, requested_mode="action", chapter_number=1)
+
+    assert result["passed"] is True
+    assert result["observed_mode"] == "action"
+
+
 def test_action_opening_does_not_accept_action_that_arrives_too_late():
     text = (
         "午后的日头正毒，外门广场的青石砖被晒得发烫。"
         "人群围在高台下，没人说话。"
         "风从山门方向吹来，卷起一层灰，落在每个人的鞋面上。"
-        "高台边的旗角被风吹得一下一下拍在木杆上。"
+        "高台边的旗角随风轻轻摆动，木杆发出细微的碰撞声。"
         "执事弟子站在台阶两侧，目光始终落在广场中央。"
         "有人低声咳了一下，很快又把声音压了回去。"
         "远处的钟声敲过两遍，晒热的石面仍旧没有凉下来。"

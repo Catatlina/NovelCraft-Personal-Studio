@@ -229,6 +229,15 @@ SENSITIVE_TERMS: tuple[tuple[str, str], ...] = (
     (r"赌博|赌钱|下注", "gambling"),
 )
 
+# Ordinary non-graphic conflict is part of fictional web-novel narration. It
+# is still recorded for review, but it should not make every xuanhuan scene
+# containing "杀人" fail before the author can inspect it. Political,
+# sexual, drug, gambling, self-harm and all other sensitive categories remain
+# hard blockers; projects can explicitly turn this allowance off.
+FICTIONAL_VIOLENCE_GENRES = frozenset({
+    "xuanhuan", "suspense", "science_fiction", "history", "game", "fengshen",
+})
+
 
 # ═════════════════════════════════════════════════════════════
 # 现实实体（仅都市题材检测）
@@ -297,18 +306,28 @@ def analyze_content_policy(
     genre = quality_profile.get("genre", "")
     is_urban = genre in {"urban", "都市", "city", "modern"}
     fictional_setting_required = bool(quality_profile.get("fictional_setting_required", False))
+    allow_fictional_violence = bool(
+        quality_profile.get("allow_fictional_violence", genre in FICTIONAL_VIOLENCE_GENRES)
+    )
 
     profanity_detail = _classify_profanity(text)
 
     # 检测敏感词
     sensitive_hits: list[dict[str, Any]] = []
+    allowed_fictional_violence_hits: list[dict[str, Any]] = []
+    blocking_sensitive_hits: list[dict[str, Any]] = []
     for pattern, code in SENSITIVE_TERMS:
         for match in re.finditer(pattern, text):
-            sensitive_hits.append({
+            hit = {
                 "match": match.group(),
                 "code": code,
                 "position": match.start(),
-            })
+            }
+            sensitive_hits.append(hit)
+            if code == "violence" and allow_fictional_violence:
+                allowed_fictional_violence_hits.append(hit)
+            else:
+                blocking_sensitive_hits.append(hit)
 
     # 检测现实实体（仅都市题材）
     real_world_entity_hits: list[dict[str, Any]] = []
@@ -322,19 +341,24 @@ def analyze_content_policy(
                     "count": count,
                 })
 
-    # 构建 failures 列表（只有敏感词会导致不通过，脏话都不阻塞）
+    # 构建 failures/warnings 列表（脏话和架空非露骨冲突只提示）
     failures: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
 
     # 敏感词 → 不通过
-    if sensitive_hits:
+    if blocking_sensitive_hits:
         failures.append({
             "code": "sensitive_content",
-            "message": f"检测到敏感内容 {len(sensitive_hits)} 处",
+            "message": f"检测到敏感内容 {len(blocking_sensitive_hits)} 处",
             "severity": "high",
         })
 
-    # 构建 warnings 列表（只有频率警告和现实实体警告）
-    warnings: list[dict[str, Any]] = []
+    if allowed_fictional_violence_hits:
+        warnings.append({
+            "code": "fictional_violence",
+            "message": f"架空题材包含非露骨冲突词 {len(allowed_fictional_violence_hits)} 处，仅记录供作者复核",
+            "severity": "low",
+        })
 
     # 频率警告（只提示，不阻塞）
     if profanity_detail["frequency_warning"]:
@@ -368,8 +392,10 @@ def analyze_content_policy(
     summary_parts = []
     if profanity_detail["total_info"] > 0:
         summary_parts.append(f"口语/脏话 {profanity_detail['total_info']} 处")
-    if sensitive_hits:
-        summary_parts.append(f"敏感内容 {len(sensitive_hits)} 处")
+    if blocking_sensitive_hits:
+        summary_parts.append(f"敏感内容 {len(blocking_sensitive_hits)} 处")
+    elif allowed_fictional_violence_hits:
+        summary_parts.append(f"架空冲突词 {len(allowed_fictional_violence_hits)} 处（仅提示）")
     if profanity_detail["frequency_warning"]:
         summary_parts.append("使用较多")
 
@@ -389,6 +415,9 @@ def analyze_content_policy(
         # 向后兼容字段
         "profanity_hits": profanity_hits,
         "sensitive_hits": sensitive_hits,
+        "blocking_sensitive_hits": blocking_sensitive_hits,
+        "allowed_fictional_violence_hits": allowed_fictional_violence_hits,
+        "allow_fictional_violence": allow_fictional_violence,
         "real_world_entity_hits": real_world_entity_hits,
         "failures": failures,
 
@@ -413,6 +442,9 @@ def content_generation_contract(quality_profile: dict[str, Any] | None = None) -
     genre = quality_profile.get("genre", "")
     is_urban = genre in {"urban", "都市", "city", "modern"}
     fictional_setting_required = bool(quality_profile.get("fictional_setting_required", False))
+    allow_fictional_violence = bool(
+        quality_profile.get("allow_fictional_violence", genre in FICTIONAL_VIOLENCE_GENRES)
+    )
 
     lines = [
         "【内容安全与合规要求】",
@@ -420,6 +452,9 @@ def content_generation_contract(quality_profile: dict[str, Any] | None = None) -
         "2. 角色对话中可以适当使用口语化表达和脏话，符合人物性格和场景",
         "3. 脏话使用应适度，符合人物身份和剧情需要",
     ]
+
+    if allow_fictional_violence:
+        lines.append("4. 架空题材允许为剧情服务的非露骨冲突和伤亡词，但不得描写现实违法操作、血腥细节或极端暴力；冲突必须符合世界观与人物因果")
 
     if is_urban and fictional_setting_required:
         lines.append("4. 都市题材采用完全架空的现代社会：所有人名、地名、公司、平台、品牌均为虚构，不得使用现实世界实体")

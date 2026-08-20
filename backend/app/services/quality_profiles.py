@@ -572,6 +572,12 @@ def select_quality_profile(
         # 爽文 profile allows ordinary real-world place names, while projects
         # that require a fully fictional setting can opt into the hard gate.
         "fictional_setting_required": bool(overrides.get("fictional_setting_required", False)),
+        "allow_fictional_violence": bool(
+            overrides.get(
+                "allow_fictional_violence",
+                genre_key in {"xuanhuan", "suspense", "science_fiction", "history", "game", "fengshen"},
+            )
+        ),
         # Live search is opt-in at the compiled project contract. Existing
         # books remain stable unless the user explicitly enables required
         # research; newly-created books set this field from NovelCreate.
@@ -748,6 +754,7 @@ def profile_from_context(context: dict[str, Any] | None) -> dict[str, Any]:
         "style_plugin",
         "writing_plugin",
         "fictional_setting_required",
+        "allow_fictional_violence",
         "web_research_mode",
     ):
         value = context.get(key)
@@ -977,6 +984,7 @@ def quality_profile_metadata(profile: dict[str, Any] | None) -> dict[str, Any]:
         "genre": profile.get("genre"),
         "subgenre": profile.get("subgenre"),
         "fictional_setting_required": bool(profile.get("fictional_setting_required", False)),
+        "allow_fictional_violence": bool(profile.get("allow_fictional_violence", False)),
         "web_research_mode": profile.get("web_research_mode", "off"),
         "style_plugin": profile.get("style_plugin", ""),
         "style_plugin_status": profile.get("style_plugin_status", "not_requested"),

@@ -171,6 +171,30 @@ def test_urban_project_can_require_a_fictional_setting():
     assert any(item["code"] == "real_world_entity" for item in report["failures"])
 
 
+def test_fictional_genre_allows_non_graphic_conflict_as_a_review_warning():
+    profile = select_quality_profile(genre="玄幻", subgenre="系统流")
+
+    report = analyze_content_policy("他曾经杀人，但没有留下任何血腥细节。", profile)
+
+    assert report["passed"] is True
+    assert report["allow_fictional_violence"] is True
+    assert report["blocking_sensitive_hits"] == []
+    assert report["allowed_fictional_violence_hits"][0]["match"] == "杀人"
+    assert any(item["code"] == "fictional_violence" for item in report["warnings"])
+
+
+def test_fictional_violence_can_be_explicitly_disabled():
+    profile = select_quality_profile(
+        genre="玄幻",
+        overrides={"allow_fictional_violence": False},
+    )
+
+    report = analyze_content_policy("他曾经杀人。", profile)
+
+    assert report["passed"] is False
+    assert report["blocking_sensitive_hits"][0]["code"] == "violence"
+
+
 def test_quality_gate_rejects_pov_and_content_policy_even_with_high_scores():
     result = evaluate_review({
         "overall_score": 95,
