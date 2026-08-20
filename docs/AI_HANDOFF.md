@@ -2,6 +2,14 @@
 > 更新时间：2026-08-20
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
+## 2026-08-20 当前批次交接（M1–M6 本地可用，M7/M8 未验收）
+
+- 本地分支：`agent/publishing-v0.9.2`；本批改动尚未 commit、push 或部署。
+- 已实现：`backend/app/api/v1/authoring.py`、`nc_starlume_authoring` 迁移、编辑器上下文/Provider角色面板、持久化 `EditorAiChat`、真实豆包 Gateway 适配、角色路由、章节码字事件、清空三章长跑登记/软删除、人工发布回执。
+- 本地迁移已从 `nc_v11_disclosure_payoff` 升级到 `nc_starlume_authoring (head)`；没有执行生产正文清空，也没有启动 Provider 长跑。
+- 本地验证已完成：后端全量 `1177 passed, 138 skipped, 1 xpassed, 2 warnings`，辅助创作契约 `5 passed`；前端 `57 passed`、TypeScript 检查、生产构建通过；集成脚本已验证会话/current session/角色状态/长跑登记返回 `200`；豆包无密钥时 fail-closed。
+- 当前必须如实标记：M1–M6 为**已接线/可用**（代码级范围）；M7 三章真实 Provider 和两位盲评为**未开始**；M8 披露人工确认、七道门禁、平台定稿/人工回执正式闭环仍未验收。生产部署不属于本批已完成证据。
+
 ## 2026-08-20 Starlume AI 辅助创作转型与 GitHub 改名（当前结论）
 
 - **品牌与仓库已验收**：原主仓库已原地改名为 `Catatlina/starlume-ai-studio`，仓库 ID 仍为 `R_kgDOTT8enQ`；本地 `origin` 已更新为新 URL。精确名称 `Catatlina/starlume-ai` 属于另一套历史 Express/SQLite 项目（ID `R_kgDOTe5o9A`），未覆盖、未删除。

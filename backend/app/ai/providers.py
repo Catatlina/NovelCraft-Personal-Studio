@@ -87,6 +87,45 @@ def call_openai(prompt: str, model: str = "gpt-4o", params: dict | None = None) 
     return json.loads(content), usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
 
+def call_doubao(prompt: str, model: str = "", params: dict | None = None) -> dict:
+    """Call Doubao/Volcengine Ark through its OpenAI-compatible API.
+
+    Ark model ids are endpoint ids, so an empty default is intentional: a real
+    route must provide ``DOUBAO_MODEL`` or a model value.  Missing credentials
+    never fall back to a local or fabricated response.
+    """
+    override_key, override_url, override_model = _request_overrides()
+    api_key = override_key or os.getenv("DOUBAO_API_KEY", "")
+    model = override_model or model or os.getenv("DOUBAO_MODEL", "")
+    if not api_key:
+        raise RuntimeError("DOUBAO_API_KEY not configured")
+    if not model:
+        raise RuntimeError("DOUBAO_MODEL not configured")
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "只输出合法JSON。"},
+            {"role": "user", "content": prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": (params or {}).get("temperature", 0.7),
+    }
+    req = urllib.request.Request(
+        override_url or os.getenv(
+            "DOUBAO_API_URL",
+            os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3") + "/chat/completions",
+        ),
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=PROVIDER_TIMEOUT) as r:
+        payload = json.loads(r.read())
+    content = payload["choices"][0]["message"]["content"]
+    usage = payload.get("usage", {})
+    return json.loads(content), usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+
+
 def call_gemini(prompt: str, model: str = "gemini-2.0-flash", params: dict | None = None) -> dict:
     """Call Gemini API."""
     override_key, override_url, override_model = _request_overrides()
@@ -117,6 +156,7 @@ PROVIDERS = {
     "claude": call_claude,
     "openai": call_openai,
     "gemini": call_gemini,
+    "doubao": call_doubao,
 }
 
 

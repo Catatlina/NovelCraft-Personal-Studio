@@ -60,14 +60,14 @@ def require_admin_reads(user: dict = Depends(get_current_user)) -> dict:
 
 
 class ProviderSettings(BaseModel):
-    provider: str = Field(pattern="^(deepseek|claude|openai|gemini)$")
+    provider: str = Field(pattern="^(deepseek|claude|openai|gemini|doubao)$")
     api_key: str = ""
     base_url: str = ""
     default_model: str = ""
 
 
 class ModelRouteUpdate(BaseModel):
-    provider: str = Field(pattern="^(deepseek|claude|openai|gemini)$")
+    provider: str = Field(pattern="^(deepseek|claude|openai|gemini|doubao)$")
     model: str
     params: dict = {}
     fallbacks: list[dict] = Field(default_factory=list, max_length=0)
@@ -96,6 +96,9 @@ def list_providers(user: dict = Depends(require_admin_reads)):
          "base_url": "https://api.anthropic.com", "default_model": "claude-sonnet-4-20250514"},
         {"name": "openai", "key_configured": bool(os.getenv("OPENAI_API_KEY","")),
          "base_url": "https://api.openai.com", "default_model": "gpt-4o"},
+        {"name": "doubao", "key_configured": bool(os.getenv("DOUBAO_API_KEY","")),
+         "base_url": os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+         "default_model": os.getenv("DOUBAO_MODEL", "")},
         {"name": "gemini", "key_configured": bool(os.getenv("GEMINI_API_KEY","")),
          "base_url": "https://generativelanguage.googleapis.com", "default_model": "gemini-2.0-flash"},
     ]
@@ -211,7 +214,7 @@ def list_settings(user: dict = Depends(require_admin_reads)):
 @router.put("/settings/{key}")
 def update_setting(key: str, payload: SettingUpdateRequest, user: dict = Depends(require_admin)) -> dict:
     """Update non-runtime metadata. Provider runtime configuration is env/BYOK only."""
-    runtime_keys = {f"{provider}_{suffix}" for provider in ("deepseek", "claude", "openai", "gemini")
+    runtime_keys = {f"{provider}_{suffix}" for provider in ("deepseek", "claude", "openai", "gemini", "doubao")
                     for suffix in ("api_key", "base_url", "model")}
     runtime_keys |= {"request_timeout_seconds", "default_monthly_budget_cny"}
     if key.lower() in runtime_keys:
@@ -239,7 +242,7 @@ def env_check(user: dict = Depends(require_admin)):
     db.close()
     db_settings = {r["key"]: r["value"] for r in rows}
     checks = []
-    for provider in ["deepseek", "claude", "openai", "gemini"]:
+    for provider in ["deepseek", "claude", "openai", "gemini", "doubao"]:
         env_key = os.getenv(f"{provider.upper()}_API_KEY", "")
         checks.append({
             "provider": provider,

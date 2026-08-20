@@ -4,6 +4,8 @@ import { RichEditor } from "./RichEditor";
 import { EditorAiChat } from "./EditorAiChat";
 import { PacingCurve } from "./PacingCurve";
 import { SceneBoard } from "./SceneBoard";
+import { EditorContextPanel } from "./EditorContextPanel";
+import { EditorRoleStatus } from "./EditorRoleStatus";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
 import { apiEnvelope, ApiError } from "../lib/api";
@@ -50,7 +52,7 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
-  saveChapter: (textOverride?: string) => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string, targetText?: string) => void;
+  saveChapter: (textOverride?: string) => void | Promise<boolean>; runEditorOp: (op: string, instruction?: string, targetText?: string) => Promise<{ text?: string } | null | undefined>;
   versions: Version[]; restoreVersion: (id: string) => void;
   offlineNotice?: string; offlineQueueCount?: number;
   offlineAiResults?: Array<{ id: string; text: string }>;
@@ -412,6 +414,8 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
 
         {/* RIGHT: AI editing conversation */}
         <div className="ed-aside" style={{ display: "flex", flexDirection: "column" }}>
+          <EditorContextPanel chapterId={chapter.id} />
+          <EditorRoleStatus projectId={projectId} />
           <div className="card-title" style={{ marginBottom: 12 }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
               <rect x="3" y="11" width="18" height="10" rx="2"/>
@@ -427,9 +431,9 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
             suggestions={(editorAiReview?.review?.issues || []).map(readableIssue).filter(Boolean)}
             onRequestEdit={(instruction, targetText) => {
               if (targetText) {
-                runEditorOp("rewrite", instruction, targetText);
+                return runEditorOp("rewrite", instruction, targetText);
               } else {
-                runEditorOp("rewrite_chapter", instruction);
+                return runEditorOp("rewrite_chapter", instruction);
               }
             }}
           />

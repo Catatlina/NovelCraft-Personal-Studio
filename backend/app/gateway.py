@@ -804,7 +804,7 @@ def _execute_provider_call(
                 raise
             record_success("deepseek")
         return output, prompt_tokens, completion_tokens, "deepseek", model_
-    if provider in ("claude", "openai", "gemini"):
+    if provider in ("claude", "openai", "gemini", "doubao"):
         output, prompt_tokens, completion_tokens, provider_name, model_name = _call_real_provider(
             provider, model or "", prompt_text, params
         )
@@ -831,7 +831,7 @@ def _complete_impl(
 ) -> dict[str, Any]:
     # Kept local so runtime introspection and diagnostics describe the providers
     # this execution path can actually route to.
-    supported_real_providers = ("deepseek", "claude", "openai", "gemini")
+    supported_real_providers = ("deepseek", "claude", "openai", "gemini", "doubao")
     if client_mutation_id:
         existing_db = connect()
         existing = existing_db.execute(
@@ -1268,6 +1268,7 @@ def _calculate_cost(provider: str, model: str, prompt_tokens: int, completion_to
         "anthropic": {"input": 21.0, "output": 105.0},
         "claude": {"input": 21.0, "output": 105.0},
         "gemini": {"input": 0.75, "output": 3.0},
+        "doubao": {"input": 1.0, "output": 2.0},
     }
     try:
         overrides = json.loads(os.getenv("AI_PRICE_CNY_PER_MILLION", "{}"))

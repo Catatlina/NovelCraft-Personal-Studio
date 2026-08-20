@@ -356,6 +356,7 @@ async def edit_chapter_v7(
     api_url: str = "",
     model: str = "",
     client_mutation_id: str | None = None,
+    role_key: str | None = None,
 ) -> dict[str, Any]:
     """Run one editor operation through V7 and return an auditable result."""
     source = _coerce_text(selection)
@@ -469,7 +470,7 @@ async def edit_chapter_v7(
                         prompt_name=compiled["prompt_name"],
                         prompt_version=compiled["prompt_version"],
                         client_mutation_id=mutation,
-                        task_type=EDITOR_ROUTE_TASKS[canonical],
+                        task_type=(f"authoring_{role_key}" if role_key else EDITOR_ROUTE_TASKS[canonical]),
                     )
                 except AIGatewayError as exc:
                     from .cost.cost_manager import BudgetExceededError

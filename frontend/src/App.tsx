@@ -205,13 +205,34 @@ export default function App() {
   const [historyError, setHistoryError] = useState("");
   const replayingOffline = useRef(false);
   const editorTextRef = useRef(editorText);
+  const writingEventTimerRef = useRef<number | null>(null);
+  const writingDeltaRef = useRef({ added: 0, removed: 0 });
   const updateEditorText = useCallback((nextText: string) => {
     // Keep the imperative save path in sync in the same turn as an editor
     // input. React state may commit after a fast Save click (or an automated
     // fill), so saveChapter must never rely only on the previous render.
+    const previousText = editorTextRef.current;
+    const contentId = chapter?.id;
+    const added = Math.max(0, nextText.length - previousText.length);
+    const removed = Math.max(0, previousText.length - nextText.length);
+    if (contentId && (added || removed)) {
+      writingDeltaRef.current = {
+        added: writingDeltaRef.current.added + added,
+        removed: writingDeltaRef.current.removed + removed,
+      };
+      if (writingEventTimerRef.current !== null) window.clearTimeout(writingEventTimerRef.current);
+      writingEventTimerRef.current = window.setTimeout(() => {
+        const delta = writingDeltaRef.current;
+        writingDeltaRef.current = { added: 0, removed: 0 };
+        void recordWritingEvent(contentId, "manual_input", {
+          chars_added: delta.added,
+          chars_removed: delta.removed,
+        });
+      }, 1400);
+    }
     editorTextRef.current = nextText;
     setEditorText(nextText);
-  }, []);
+  }, [chapter?.id]);
   // NC-LIVE-AUDIT: refs so the debounced live reviewer always reads fresh guards.
   const pendingAiEditRef = useRef(pendingAiEdit);
   const streamPreviewRef = useRef(streamPreview);
@@ -713,6 +734,10 @@ export default function App() {
       lastReviewTextRef.current = "";
       setLiveReviewError("");
       sendEditSignal(updated.id, prevText, nextText);
+      void recordWritingEvent(updated.id, "save", {
+        chars_added: Math.max(0, nextText.length - prevText.length),
+        chars_removed: Math.max(0, prevText.length - nextText.length),
+      });
       return true;
     } catch (caught) {
       if (caught instanceof ApiError && !isOfflineApiError(caught)) throw caught;
@@ -811,6 +836,24 @@ export default function App() {
     }
   }
 
+  async function recordWritingEvent(contentId: string, eventType: string, payload: Record<string, unknown> = {}) {
+    try {
+      await api(`/api/v1/authoring/writing-events`, {
+        method: "POST",
+        body: JSON.stringify({
+          content_id: contentId,
+          event_type: eventType,
+          chars_added: Number(payload.chars_added || 0),
+          chars_removed: Number(payload.chars_removed || 0),
+          client_event_id: crypto.randomUUID(),
+          payload: { source: "editor", ...payload },
+        }),
+      });
+    } catch {
+      // Ledger loss must not block the author's draft; no text is stored here.
+    }
+  }
+
   async function markLiked(text: string) {
     if (!project?.id || !text.trim()) return;
     try {
@@ -884,7 +927,7 @@ export default function App() {
   }
 
   async function runEditorOp(op: string, instructionOverride?: string, targetTextOverride?: string) {
-    if (!chapter) return;
+    if (!chapter) return null;
     const sourceText = editorTextRef.current;
     const selectedText = targetTextOverride !== undefined
       ? targetTextOverride
@@ -893,7 +936,7 @@ export default function App() {
       : selection || (op === "continue" ? sourceText : "");
     if (!selectedText.trim()) {
       setError(op === "continue" ? "当前章节没有可续写内容" : "请先在正文中选择需要处理的文字");
-      return;
+      return null;
     }
     setError("");
     setPendingAiEdit(null);
@@ -905,11 +948,12 @@ export default function App() {
       selection: selectedText,
       instruction: instructionOverride || (op === "rewrite_chapter" ? "整章重写，保留核心剧情，优化小说平台阅读体验" : "保持当前风格"),
       client_mutation_id: mutationId,
+      role_key: instructionOverride ? "scene_expander" : undefined,
     };
     if (!navigator.onLine) {
       await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
       setOfflineNotice("AI 操作已排队，联网后自动执行");
-      return;
+      return null;
     }
     setEditorAiLoading(true);
     setEditorAiOperation(op);
@@ -928,12 +972,12 @@ export default function App() {
           const normalizedText = normalizeParagraphBreaks(textValue(text));
           if (!normalizedText.trim()) {
             setError("AI 未返回可用正文，请重试");
-            return;
+            return null;
           }
           const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
           setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
           if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
-          return;
+          return { text: normalizedText };
         } catch (streamError) {
           setStreamPreview("");
           if (streamError instanceof ApiError && streamError.status === 404) {
@@ -941,10 +985,10 @@ export default function App() {
           } else if (streamError instanceof ApiError && isOfflineApiError(streamError)) {
             await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
             setOfflineNotice("网络不可用，AI 操作已进入出站队列");
-            return;
+            return null;
           } else {
             setError(streamError instanceof ApiError ? (streamError.message || "AI 操作失败") : (streamError instanceof Error ? streamError.message : "AI 操作失败，请重试"));
-            return;
+            return null;
           }
         }
       }
@@ -957,16 +1001,17 @@ export default function App() {
         const normalizedText = normalizeParagraphBreaks(textValue(output?.text));
         if (!normalizedText.trim()) {
           setError("AI 未返回可用正文，请重试");
-          return;
+          return null;
         }
         const nextText = buildAiEditPreview(sourceText, selectedText, normalizedText, op, Boolean(selection));
         setPendingAiEdit({ op, originalText: selectedText, proposedText: normalizedText, nextText });
         setEditorAiReview({ review: output.review ?? output.review_7dim, next: output.next_chapter_plan });
         if (run) api<AiCall[]>(`/api/v1/ai-calls?run_id=${run.id}`).then(setAiCalls);
+        return { text: normalizedText };
       } catch (caught) {
         if (!(caught instanceof ApiError) || !isOfflineApiError(caught)) {
           setError(caught instanceof ApiError ? (caught.message || "AI 操作失败") : (caught instanceof Error ? caught.message : "AI 操作失败，请重试"));
-          return;
+          return null;
         }
         await queueOfflineMutation(mutationId, "ai_operation", url, "POST", body);
         setOfflineNotice("网络不可用，AI 操作已进入出站队列");
@@ -975,6 +1020,7 @@ export default function App() {
       setEditorAiLoading(false);
       setEditorAiOperation("");
     }
+    return null;
   }
 
   async function queueOfflineMutation(
@@ -1101,6 +1147,7 @@ export default function App() {
         setOfflineQueueCount((await listMutations()).length);
       }
       setPendingAiEdit(null);
+      if (chapter?.id) void recordWritingEvent(chapter.id, "ai_accept", { operation: proposed.op });
       setLiveReviewError("");
       lastReviewTextRef.current = "";
       setEditorResetNonce(n => n + 1);
@@ -1112,6 +1159,7 @@ export default function App() {
   }
 
   function discardPendingAiEdit() {
+    if (chapter?.id) void recordWritingEvent(chapter.id, "ai_reject", { operation: pendingAiEdit?.op || "unknown" });
     setPendingAiEdit(null);
     setOfflineNotice("已放弃 AI 建议，原文保持不变");
   }
@@ -1131,6 +1179,7 @@ export default function App() {
   async function restoreVersion(versionId: string) {
     if (!chapter) return;
     const r = await api<Content>(`/api/v1/contents/${chapter.id}/versions/restore`, { method: "POST", body: JSON.stringify({ version_id: versionId }) });
+    void recordWritingEvent(chapter.id, "ai_revert", { version_id: versionId });
     setChapter(r); setEditorText(docToText(r.body)); loadVersions(r.id);
   }
 

@@ -1,0 +1,653 @@
+"""Starlume AI human-led authoring APIs.
+
+This router deliberately keeps deterministic product state separate from model
+output.  Sessions, context, Bible facts and writing events are durable
+records; an AI result is only considered provider-backed when the shared
+``ai_calls`` ledger can resolve the client mutation id.
+"""
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from app.core.authz import ensure_project_member, ok, require_member
+from app.core.security import get_current_user
+from app.db import connect, decode, encode, new_id
+
+
+router = APIRouter(prefix="/api/v1/authoring", tags=["authoring"])
+
+
+RoleKey = Literal[
+    "planner", "scene_expander", "dialogue_editor", "continuity_reviewer", "publication_editor"
+]
+ProviderName = Literal["openai", "deepseek", "doubao", "claude", "gemini"]
+WritingEventType = Literal[
+    "manual_input", "delete", "paste", "ai_accept", "ai_reject", "ai_revert", "active_window", "save"
+]
+
+
+class SessionCreateRequest(BaseModel):
+    content_id: str | None = None
+    novel_id: str | None = None
+    role_key: RoleKey = "scene_expander"
+    base_version_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionMessageRequest(BaseModel):
+    role: Literal["user", "assistant", "system", "tool"]
+    content: str = Field(min_length=1, max_length=24000)
+    message_kind: str = Field(default="chat", max_length=32)
+    provider: str = Field(default="", max_length=50)
+    model: str = Field(default="", max_length=120)
+    ai_call_id: str | None = None
+    candidate: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StoryBibleCreateRequest(BaseModel):
+    novel_id: str
+    kind: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=500)
+    body: str = Field(min_length=1, max_length=50000)
+    fact_type: Literal["hard", "soft"] = "hard"
+    source_chapter: int | None = Field(default=None, ge=1)
+    approved: bool = False
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class StoryBibleUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    body: str | None = Field(default=None, min_length=1, max_length=50000)
+    fact_type: Literal["hard", "soft"] | None = None
+    source_chapter: int | None = Field(default=None, ge=1)
+    meta: dict[str, Any] | None = None
+
+
+class ProviderRoleRequest(BaseModel):
+    role_key: RoleKey
+    provider: ProviderName
+    model: str = Field(min_length=1, max_length=120)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class WritingEventRequest(BaseModel):
+    content_id: str
+    event_type: WritingEventType
+    source: str = Field(default="editor", max_length=24)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_ms: int = Field(default=0, ge=0, le=86400000)
+    chars_added: int = Field(default=0, ge=0, le=1000000)
+    chars_removed: int = Field(default=0, ge=0, le=1000000)
+    client_event_id: str | None = Field(default=None, min_length=8, max_length=100)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CleanRunPrepareRequest(BaseModel):
+    novel_id: str
+    target_chapters: int = Field(default=3, ge=1, le=3)
+
+
+class CleanRunCleanRequest(BaseModel):
+    confirm_clean: bool = False
+
+
+class HumanReceiptRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=50)
+    publish_record_id: str | None = None
+    status: Literal["submitted", "accepted", "rejected", "unknown"] = "submitted"
+    external_url: str = Field(default="", max_length=2000)
+    external_id: str = Field(default="", max_length=300)
+    receipt_text: str = Field(default="", max_length=5000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def _content(db: Any, content_id: str, user: dict, *, write: bool = False) -> dict[str, Any]:
+    row = db.execute(
+        "SELECT id, project_id, parent_id, type, title, body, meta, updated_at "
+        "FROM contents WHERE id=%s AND is_deleted=FALSE",
+        (content_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="content not found")
+    item = dict(row)
+    require_member(db, str(item["project_id"]), user, write=write)
+    item["body"] = decode(item.get("body"), {})
+    item["meta"] = decode(item.get("meta"), {})
+    return item
+
+
+def _novel(db: Any, novel_id: str, user: dict, *, write: bool = False) -> dict[str, Any]:
+    item = _content(db, novel_id, user, write=write)
+    if item.get("type") != "novel":
+        raise HTTPException(status_code=400, detail="content is not a novel")
+    return item
+
+
+def _session(db: Any, session_id: str, user: dict, *, write: bool = False) -> dict[str, Any]:
+    row = db.execute(
+        """SELECT s.*, n.title AS novel_title, c.title AS content_title
+           FROM authoring_sessions s
+           LEFT JOIN contents n ON n.id=s.novel_id
+           LEFT JOIN contents c ON c.id=s.content_id
+           WHERE s.id=%s""",
+        (session_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="authoring session not found")
+    item = dict(row)
+    require_member(db, str(item["project_id"]), user, write=write)
+    item["metadata"] = decode(item.get("metadata"), {})
+    return item
+
+
+def _message_payload(row: dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    for key in ("candidate", "metadata"):
+        item[key] = decode(item.get(key), {})
+    return item
+
+
+def _provider_status(provider: str) -> dict[str, Any]:
+    env_key = f"{provider.upper()}_API_KEY"
+    configured = bool(os.getenv(env_key, "").strip())
+    implemented = provider in {"deepseek", "openai", "claude", "gemini", "doubao"}
+    return {
+        "provider": provider,
+        "implemented": implemented,
+        "key_configured": configured,
+        "status": "available" if implemented and configured else "needs_key" if implemented else "unsupported",
+        "env_key": env_key,
+    }
+
+
+@router.post("/sessions")
+def create_session(req: SessionCreateRequest, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        target = req.content_id or req.novel_id
+        if not target:
+            raise HTTPException(status_code=422, detail="content_id or novel_id is required")
+        item = _content(db, target, user, write=True)
+        novel_id = req.novel_id or (item["parent_id"] if item.get("type") == "chapter" else item["id"])
+        if not novel_id:
+            raise HTTPException(status_code=422, detail="novel scope is required")
+        _novel(db, str(novel_id), user, write=True)
+        session_id = new_id("authoring_session")
+        db.execute(
+            """INSERT INTO authoring_sessions
+               (id, project_id, novel_id, content_id, author_id, role_key, base_version_id, metadata)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (
+                session_id, item["project_id"], novel_id,
+                req.content_id, user["id"], req.role_key, req.base_version_id,
+                encode(req.metadata),
+            ),
+        )
+        db.commit()
+        session_status = "active"
+        return ok({
+            "id": session_id, "project_id": str(item["project_id"]), "novel_id": str(novel_id),
+            "content_id": req.content_id, "role_key": req.role_key, "status": session_status, "messages": [],
+        }, message="创作会话已建立")
+    finally:
+        db.close()
+
+
+@router.get("/sessions/current")
+def get_current_session(content_id: str, user: dict = Depends(get_current_user)):
+    """Restore the latest active editor session instead of creating duplicates."""
+    db = connect()
+    try:
+        item = _content(db, content_id, user)
+        row = db.execute(
+            """SELECT id FROM authoring_sessions
+               WHERE content_id=%s AND author_id=%s AND status='active'
+               ORDER BY updated_at DESC LIMIT 1""",
+            (content_id, user["id"]),
+        ).fetchone()
+        if not row:
+            return ok(None, message="当前章节暂无创作会话")
+        session = _session(db, str(row["id"]), user)
+        messages = db.execute(
+            "SELECT * FROM authoring_messages WHERE session_id=%s ORDER BY sequence_no",
+            (row["id"],),
+        ).fetchall()
+        session["messages"] = [_message_payload(dict(message)) for message in messages]
+        return ok(session, message="已恢复创作会话")
+    finally:
+        db.close()
+
+
+@router.get("/sessions/{session_id}")
+def get_session(session_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        session = _session(db, session_id, user)
+        rows = db.execute(
+            "SELECT * FROM authoring_messages WHERE session_id=%s ORDER BY sequence_no",
+            (session_id,),
+        ).fetchall()
+        session["messages"] = [_message_payload(dict(row)) for row in rows]
+        return ok(session, message="创作会话")
+    finally:
+        db.close()
+
+
+@router.post("/sessions/{session_id}/messages")
+def append_session_message(
+    session_id: str,
+    req: SessionMessageRequest,
+    user: dict = Depends(get_current_user),
+):
+    db = connect()
+    try:
+        session = _session(db, session_id, user, write=True)
+        if session["status"] != "active":
+            raise HTTPException(status_code=409, detail="authoring session is not active")
+        if req.role == "assistant":
+            mutation_id = str(req.metadata.get("client_mutation_id") or "").strip()
+            if mutation_id:
+                ledger = db.execute(
+                    """SELECT id, provider, model, output, status
+                       FROM ai_calls WHERE project_id=%s AND client_mutation_id=%s
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (session["project_id"], mutation_id),
+                ).fetchone()
+                if ledger:
+                    req.provider = str(ledger.get("provider") or req.provider)
+                    req.model = str(ledger.get("model") or req.model)
+                    req.ai_call_id = str(ledger.get("id") or req.ai_call_id or "") or None
+                    req.candidate = {
+                        **req.candidate,
+                        "provider_verified": ledger.get("status") == "succeeded",
+                        "ledger_status": ledger.get("status"),
+                        "ai_call_id": req.ai_call_id,
+                    }
+            else:
+                req.candidate = {**req.candidate, "provider_verified": False, "verification": "client_recorded"}
+        seq = db.execute(
+            "SELECT COALESCE(MAX(sequence_no), 0) + 1 AS next_sequence FROM authoring_messages WHERE session_id=%s",
+            (session_id,),
+        ).fetchone()["next_sequence"]
+        message_id = new_id("authoring_message")
+        db.execute(
+            """INSERT INTO authoring_messages
+               (id, session_id, sequence_no, role, message_kind, content, provider, model,
+                ai_call_id, candidate, metadata)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (
+                message_id, session_id, seq, req.role, req.message_kind, req.content,
+                req.provider or None, req.model or None, req.ai_call_id,
+                encode(req.candidate), encode(req.metadata),
+            ),
+        )
+        db.execute("UPDATE authoring_sessions SET updated_at=now() WHERE id=%s", (session_id,))
+        db.commit()
+        return ok({
+            "id": message_id, "session_id": session_id, "sequence_no": seq,
+            "role": req.role, "message_kind": req.message_kind, "content": req.content,
+            "provider": req.provider or None, "model": req.model or None,
+            "ai_call_id": req.ai_call_id, "candidate": req.candidate, "metadata": req.metadata,
+        }, message="会话消息已记录")
+    finally:
+        db.close()
+
+
+@router.post("/context/{content_id}")
+def get_editor_context(content_id: str, user: dict = Depends(get_current_user)):
+    """Return deterministic editor context; it never invents story facts."""
+    db = connect()
+    try:
+        chapter = _content(db, content_id, user)
+        novel_id = chapter["parent_id"] if chapter.get("type") == "chapter" else chapter["id"]
+        novel = _novel(db, str(novel_id), user)
+        chapters = [dict(row) for row in db.execute(
+            """SELECT id,title,body,meta,updated_at FROM contents
+               WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+               ORDER BY created_at ASC""",
+            (novel_id,),
+        ).fetchall()]
+        current_index = next((i for i, row in enumerate(chapters) if str(row["id"]) == str(content_id)), -1)
+        knowledge = [dict(row) for row in db.execute(
+            """SELECT id,kind,title,body,meta,fact_type,approved,source_chapter,updated_at
+               FROM knowledge_items WHERE project_id=%s AND (content_id=%s OR content_id IS NULL)
+               AND is_deleted=FALSE ORDER BY kind,title""",
+            (novel["project_id"], novel_id),
+        ).fetchall()]
+        for item in knowledge:
+            item["meta"] = decode(item.get("meta"), {})
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for item in knowledge:
+            groups.setdefault(str(item.get("kind") or "reference"), []).append(item)
+        def chapter_preview(row: dict[str, Any] | None) -> dict[str, Any] | None:
+            if not row:
+                return None
+            body = decode(row.get("body"), {})
+            return {
+                "id": str(row["id"]), "title": row.get("title"),
+                "seq": decode(row.get("meta"), {}).get("seq"),
+                "text": _text_from_body(body)[:1600],
+            }
+        current = chapters[current_index] if current_index >= 0 else chapter
+        return ok({
+            "source": "deterministic",
+            "novel": {"id": str(novel["id"]), "title": novel.get("title"), "meta": novel.get("meta", {})},
+            "chapter": chapter_preview(current),
+            "previous_chapter": chapter_preview(chapters[current_index - 1] if current_index > 0 else None),
+            "next_chapter": chapter_preview(chapters[current_index + 1] if current_index >= 0 and current_index + 1 < len(chapters) else None),
+            "knowledge": groups,
+            "characters": groups.get("character", []) + groups.get("characters", []),
+            "plot": groups.get("plot", []) + groups.get("outline", []) + groups.get("story_arc", []),
+            "worldview": groups.get("worldview", []) + groups.get("world_background", []),
+            "foreshadowing": groups.get("foreshadowing", []) + groups.get("foreshadowings", []),
+        }, message="编辑上下文")
+    finally:
+        db.close()
+
+
+def _text_from_body(body: Any) -> str:
+    if isinstance(body, str):
+        return body
+    if isinstance(body, dict):
+        content = body.get("content")
+        if isinstance(content, list):
+            return "\n\n".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
+        if isinstance(body.get("text"), str):
+            return body["text"]
+    return ""
+
+
+@router.get("/story-bible")
+def list_story_bible(novel_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        novel = _novel(db, novel_id, user)
+        rows = db.execute(
+            """SELECT id,kind,title,body,meta,fact_type,approved,source_chapter,created_at,updated_at
+               FROM knowledge_items WHERE project_id=%s AND (content_id=%s OR content_id IS NULL)
+               AND is_deleted=FALSE ORDER BY kind,title""",
+            (novel["project_id"], novel_id),
+        ).fetchall()
+        return ok([dict(row) for row in rows], message="故事 Bible")
+    finally:
+        db.close()
+
+
+@router.post("/story-bible")
+def create_story_bible(req: StoryBibleCreateRequest, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        novel = _novel(db, req.novel_id, user, write=True)
+        item_id = new_id("bible")
+        db.execute(
+            """INSERT INTO knowledge_items
+               (id,project_id,content_id,kind,title,body,meta,fact_type,source_chapter,approved,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (item_id, novel["project_id"], req.novel_id, req.kind, req.title, req.body,
+             encode(req.meta), req.fact_type, req.source_chapter, req.approved, user["id"]),
+        )
+        db.commit()
+        return ok({"id": item_id, "novel_id": req.novel_id, "kind": req.kind, "title": req.title,
+                   "body": req.body, "fact_type": req.fact_type, "approved": req.approved}, message="故事 Bible 条目已保存")
+    finally:
+        db.close()
+
+
+@router.put("/story-bible/{item_id}")
+def update_story_bible(item_id: str, req: StoryBibleUpdateRequest, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        row = db.execute("SELECT * FROM knowledge_items WHERE id=%s AND is_deleted=FALSE", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="story Bible item not found")
+        item = dict(row)
+        require_member(db, str(item["project_id"]), user, write=True)
+        updates: list[str] = []
+        values: list[Any] = []
+        for key, value in (("title", req.title), ("body", req.body), ("fact_type", req.fact_type), ("source_chapter", req.source_chapter)):
+            if value is not None:
+                updates.append(f"{key}=%s")
+                values.append(value)
+        if req.meta is not None:
+            updates.append("meta=%s")
+            values.append(encode(req.meta))
+        if not updates:
+            return ok({"id": item_id, "changed": False}, message="没有需要更新的内容")
+        values.append(item_id)
+        db.execute(f"UPDATE knowledge_items SET {', '.join(updates)}, updated_at=now() WHERE id=%s", tuple(values))
+        db.commit()
+        return ok({"id": item_id, "changed": True}, message="故事 Bible 条目已更新")
+    finally:
+        db.close()
+
+
+@router.post("/story-bible/{item_id}/confirm")
+def confirm_story_bible(item_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        row = db.execute("SELECT * FROM knowledge_items WHERE id=%s AND is_deleted=FALSE", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="story Bible item not found")
+        item = dict(row)
+        require_member(db, str(item["project_id"]), user, write=True)
+        db.execute("UPDATE knowledge_items SET approved=TRUE, updated_at=now() WHERE id=%s", (item_id,))
+        db.execute(
+            """INSERT INTO versions (id,entity_type,entity_id,label,snapshot,reason,author_id)
+               VALUES (%s,'knowledge_item',%s,'bible_confirm',%s,'human_confirmed',%s)""",
+            (new_id("ver"), item_id, encode({"kind": item.get("kind"), "title": item.get("title"), "body": item.get("body")}), user["id"]),
+        )
+        db.commit()
+        return ok({"id": item_id, "approved": True, "confirmed_by": user.get("email", "")}, message="故事 Bible 已人工确认")
+    finally:
+        db.close()
+
+
+@router.get("/story-bible/{item_id}/impact")
+def story_bible_impact(item_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        row = db.execute("SELECT * FROM knowledge_items WHERE id=%s AND is_deleted=FALSE", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="story Bible item not found")
+        item = dict(row)
+        require_member(db, str(item["project_id"]), user)
+        needle = str(item.get("title") or "")
+        novel_id = item.get("content_id")
+        chapters = db.execute(
+            "SELECT id,title,meta,body FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE ORDER BY created_at",
+            (novel_id,),
+        ).fetchall() if novel_id else []
+        affected = []
+        for chapter in chapters:
+            text = _text_from_body(decode(chapter.get("body"), {}))
+            if needle and (needle in text or needle in str(chapter.get("title") or "")):
+                affected.append({"id": str(chapter["id"]), "title": chapter.get("title"), "seq": decode(chapter.get("meta"), {}).get("seq")})
+        return ok({"item_id": item_id, "detector": "literal_reference_scan", "affected_chapters": affected,
+                   "affected_count": len(affected), "requires_human_review": True}, message="影响分析完成")
+    finally:
+        db.close()
+
+
+@router.get("/provider-roles")
+def list_provider_roles(project_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        ensure_project_member(db, project_id, user)
+        rows = db.execute(
+            "SELECT task_type,provider,model,params,is_active,updated_at FROM model_routes WHERE task_type LIKE %s ORDER BY task_type",
+            ("authoring_%",),
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["role_key"] = str(item["task_type"])[len("authoring_"):]
+            item["params"] = decode(item.get("params"), {})
+            item["provider_status"] = _provider_status(str(item["provider"]))
+            items.append(item)
+        return ok({"project_id": project_id, "roles": items}, message="AI 角色路由")
+    finally:
+        db.close()
+
+
+@router.put("/provider-roles")
+def update_provider_role(req: ProviderRoleRequest, project_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        ensure_project_member(db, project_id, user, {"owner", "editor"})
+        task_type = f"authoring_{req.role_key}"
+        db.execute(
+            """INSERT INTO model_routes (id,task_type,provider,model,params,fallback_json,is_active)
+               VALUES (%s,%s,%s,%s,%s,'[]'::jsonb,TRUE)
+               ON CONFLICT(task_type) DO UPDATE SET provider=EXCLUDED.provider,model=EXCLUDED.model,
+                 params=EXCLUDED.params,is_active=TRUE,updated_at=now()""",
+            (new_id("route"), task_type, req.provider, req.model, encode(req.params)),
+        )
+        db.commit()
+        return ok({"project_id": project_id, "role_key": req.role_key, "task_type": task_type,
+                   "provider": req.provider, "model": req.model, "provider_status": _provider_status(req.provider)}, message="AI 角色路由已保存")
+    finally:
+        db.close()
+
+
+@router.post("/writing-events")
+def record_writing_event(req: WritingEventRequest, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        item = _content(db, req.content_id, user, write=True)
+        event_id = new_id("writing_event")
+        db.execute(
+            """INSERT INTO writing_events
+               (id,project_id,novel_id,content_id,user_id,event_type,source,started_at,ended_at,
+                duration_ms,chars_added,chars_removed,payload,client_event_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (user_id,client_event_id) WHERE client_event_id IS NOT NULL DO NOTHING""",
+            (event_id, item["project_id"], item.get("parent_id") if item.get("type") == "chapter" else item["id"],
+             req.content_id, user["id"], req.event_type, req.source, req.started_at, req.ended_at,
+             req.duration_ms, req.chars_added, req.chars_removed, encode(req.payload), req.client_event_id),
+        )
+        db.commit()
+        return ok({"event_id": event_id, "content_id": req.content_id, "event_type": req.event_type}, message="码字记录已保存")
+    finally:
+        db.close()
+
+
+@router.get("/writing-events")
+def list_writing_events(content_id: str, user: dict = Depends(get_current_user), limit: int = 100):
+    db = connect()
+    try:
+        _content(db, content_id, user)
+        rows = db.execute(
+            "SELECT * FROM writing_events WHERE content_id=%s ORDER BY created_at DESC LIMIT %s",
+            (content_id, min(max(limit, 1), 500)),
+        ).fetchall()
+        return ok([dict(row) for row in rows], message="码字记录")
+    finally:
+        db.close()
+
+
+@router.post("/runs/clean-three-chapters/prepare")
+def prepare_clean_run(req: CleanRunPrepareRequest, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        novel = _novel(db, req.novel_id, user, write=True)
+        count = db.execute(
+            "SELECT COUNT(*) AS count FROM contents WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+            (req.novel_id,),
+        ).fetchone()["count"]
+        run_id = new_id("authoring_run")
+        db.execute(
+            """INSERT INTO authoring_runs
+               (id,project_id,novel_id,target_chapters,active_chapters_before,created_by)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (run_id, novel["project_id"], req.novel_id, req.target_chapters, count, user["id"]),
+        )
+        db.commit()
+        return ok({"run_id": run_id, "status": "planned", "active_chapters_before": count,
+                   "target_chapters": req.target_chapters, "requires_explicit_clean": True}, message="三章长跑已登记，等待清空历史")
+    finally:
+        db.close()
+
+
+@router.post("/runs/{run_id}/clean")
+def clean_run_history(run_id: str, req: CleanRunCleanRequest, user: dict = Depends(get_current_user)):
+    if not req.confirm_clean:
+        raise HTTPException(status_code=428, detail="必须明确 confirm_clean=true 才能清空历史章节")
+    db = connect()
+    try:
+        row = db.execute("SELECT * FROM authoring_runs WHERE id=%s", (run_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="authoring run not found")
+        run = dict(row)
+        ensure_project_member(db, str(run["project_id"]), user, {"owner", "editor"})
+        if run["status"] not in {"planned", "cleaned"}:
+            raise HTTPException(status_code=409, detail="authoring run is not cleanable in current state")
+        db.execute(
+            "UPDATE contents SET is_deleted=TRUE,updated_at=now() WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE",
+            (run["novel_id"],),
+        )
+        db.execute(
+            "UPDATE authoring_runs SET status='cleaned',active_chapters_after=0,updated_at=now() WHERE id=%s",
+            (run_id,),
+        )
+        db.commit()
+        return ok({"run_id": run_id, "status": "cleaned", "active_chapters_after": 0,
+                   "versions_retained": True, "provider_run_started": False}, message="历史章节已清空，版本记录保留")
+    finally:
+        db.close()
+
+
+@router.get("/runs/{run_id}")
+def get_authoring_run(run_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        row = db.execute("SELECT * FROM authoring_runs WHERE id=%s", (run_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="authoring run not found")
+        run = dict(row)
+        ensure_project_member(db, str(run["project_id"]), user)
+        run["provider_evidence"] = decode(run.get("provider_evidence"), {})
+        run["blind_reviews"] = decode(run.get("blind_reviews"), [])
+        return ok(run, message="三章长跑状态")
+    finally:
+        db.close()
+
+
+@router.post("/publication-variants/{variant_id}/human-receipt")
+def record_human_receipt(variant_id: str, req: HumanReceiptRequest, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        row = db.execute(
+            """SELECT v.id,v.novel_id,v.platform,n.project_id
+               FROM publication_variants v JOIN contents n ON n.id=v.novel_id
+               WHERE v.id=%s AND n.is_deleted=FALSE""",
+            (variant_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="publication variant not found")
+        variant = dict(row)
+        ensure_project_member(db, str(variant["project_id"]), user, {"owner", "editor"})
+        receipt_id = new_id("receipt")
+        db.execute(
+            """INSERT INTO publication_human_receipts
+               (id,variant_id,publish_record_id,platform,status,external_url,external_id,receipt_text,submitted_by,metadata)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (receipt_id, variant_id, req.publish_record_id, req.platform, req.status, req.external_url,
+             req.external_id, req.receipt_text, user["id"], encode(req.metadata)),
+        )
+        if req.status == "accepted":
+            db.execute(
+                "UPDATE publication_variants SET publication_status='published',published_at=now(),published_url=%s,updated_at=now() WHERE id=%s",
+                (req.external_url or None, variant_id),
+            )
+        db.commit()
+        return ok({"receipt_id": receipt_id, "variant_id": variant_id, "status": req.status,
+                   "publication_status": "published" if req.status == "accepted" else "unchanged"}, message="人工发布回执已记录")
+    finally:
+        db.close()

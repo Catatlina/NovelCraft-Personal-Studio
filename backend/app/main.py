@@ -51,6 +51,7 @@ from .api.v1.knowledge import router as knowledge_router
 from .api.v1.hotspots import router as hotspots_router
 from .api.v1.imitation import router as imitation_router
 from .api.v1.author_style import router as author_style_router
+from .api.v1.authoring import router as authoring_router
 from .api.v1.scenes import router as scenes_router
 from .api.v1.repairs import router as repairs_router
 from .api.v1.platform_connections import router as platform_connections_router
@@ -106,6 +107,7 @@ app.include_router(knowledge_router)
 app.include_router(hotspots_router)
 app.include_router(imitation_router)
 app.include_router(author_style_router)
+app.include_router(authoring_router)
 app.include_router(scenes_router)
 app.include_router(repairs_router)
 app.include_router(platform_connections_router)
@@ -1995,6 +1997,7 @@ def _run_v7_editor(
     instruction: str,
     request: Request,
     client_mutation_id: str | None,
+    role_key: str | None = None,
 ) -> dict[str, Any]:
     """Call the canonical V7 editor for a real chapter row.
 
@@ -2014,6 +2017,7 @@ def _run_v7_editor(
         api_url=request.headers.get("X-Api-Base-Url", ""),
         model=request.headers.get("X-Model", ""),
         client_mutation_id=client_mutation_id,
+        role_key=role_key,
     )
 
 
@@ -2279,6 +2283,7 @@ def ai_edit(
                     if payload.client_mutation_id
                     else None
                 ),
+                role_key=payload.role_key,
             )
         except Exception as exc:
             _raise_v7_editor_http_error(exc)
@@ -2366,6 +2371,7 @@ def ai_edit(
                         instruction=instruction,
                         request=request,
                         client_mutation_id=mutation_id,
+                        role_key=payload.role_key,
                     )
                 except Exception as exc:
                     _raise_v7_editor_http_error(exc)
@@ -2715,6 +2721,7 @@ def ai_edit_stream(
                     instruction=payload.instruction,
                     request=request,
                     client_mutation_id=payload.client_mutation_id,
+                    role_key=payload.role_key,
                 )
                 full_text = _ensure_editor_paragraphs(result.get("text") or "")
             except Exception as exc:

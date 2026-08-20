@@ -63,6 +63,7 @@ class AiEditRequest(BaseModel):
     selection: str = Field(min_length=1, max_length=24000)
     instruction: str = Field(default="", max_length=1000)
     client_mutation_id: str | None = Field(default=None, min_length=8, max_length=100)
+    role_key: str | None = Field(default=None, pattern="^(planner|scene_expander|dialogue_editor|continuity_reviewer|publication_editor)$")
 
 
 class VersionRestore(BaseModel):
@@ -74,7 +75,7 @@ class BudgetUpdate(BaseModel):
 
 
 class ModelRouteUpdate(BaseModel):
-    provider: str = Field(pattern="^(deepseek|claude|openai|gemini)$")
+    provider: str = Field(pattern="^(deepseek|claude|openai|gemini|doubao)$")
     model: str = Field(min_length=1, max_length=120)
     params: dict[str, Any] = Field(default_factory=dict)
 

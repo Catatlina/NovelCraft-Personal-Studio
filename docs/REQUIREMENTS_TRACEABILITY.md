@@ -1,5 +1,19 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-20 本批实现覆盖矩阵
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 编辑器持久化 AI 会话 | 可用 | `authoring_sessions`/`authoring_messages`、`EditorAiChat` 刷新恢复和真实候选记录 | 生产 Provider 多轮与浏览器正式入口 |
+| 当前章节剧情/人物/伏笔上下文 | 可用 | `POST /api/v1/authoring/context/{content_id}` 确定性聚合现有章节和 `knowledge_items` | 来源跳转、人工样本验收 |
+| 最小故事 Bible 确认与影响扫描 | 可用 | 复用 `knowledge_items`，确认写版本快照并返回字面引用影响 | 生产登录态确认流程 |
+| GPT/DeepSeek/豆包角色路由 | 已接线 | `authoring_{role_key}` 复用 `model_routes`；豆包走真实 Ark 适配器，缺密钥为 `needs_key` | 三模型真实 Key、同任务质量/成本 A/B |
+| 真实码字事件账本 | 已接线 | `writing_events`、幂等客户端事件、人工/AI采用/撤销/保存事件 | 章节贡献汇总、导出和浏览器验收 |
+| 平台人工发布回执 | 已接线 | `publication_human_receipts`；只有 accepted 才更新 published | 七道门禁、实际平台回执 |
+| 三章真实 Provider 长跑 | 未开始 | 仅完成 prepare/clean API 和本地 API 集成验证 | 清空副本、真实生成、两位盲评 |
+
+> 本节是当前批次覆盖；后文历史矩阵保留作为需求演进记录，若冲突以本节和最新交接快照为准。
+
 ## 2026-08-20 辅助创作转型需求矩阵
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
