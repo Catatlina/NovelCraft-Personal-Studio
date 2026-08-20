@@ -132,7 +132,10 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
     # on longer scenes: three images in 900-1300 characters is not the same
     # problem as six images in a 600-character opening.  Scale the threshold
     # with scene size while keeping a floor so short scenes do not overfire.
-    simile_limit = max(4, int(size / 220))
+    # At least five images are required, and a longer scene gets roughly one
+    # allowed image per 180 narrative characters before this becomes a retry
+    # signal.
+    simile_limit = max(5, int(size / 180))
     if size >= 500 and len(similes) >= simile_limit:
         flags.append({
             "code": "scene_metaphor_density",

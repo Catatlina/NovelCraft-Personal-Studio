@@ -441,6 +441,8 @@ def test_generation_naturalness_flags_one_non_dialogue_simile_at_scene_scale():
         "地面像被细线划开。"
         "墙角的灰像被手指拨过。"
         "灯影像一块布压在门上。"
+        "门后的声音像贴着砖缝走。"
+        "风像从门底钻进来。"
     )
     chained_report = inspect_generation_naturalness(chained)
     assert any(item["code"] == "scene_metaphor_density" for item in chained_report["flags"])
