@@ -1,5 +1,11 @@
 # Starlume AI — 真实进度
 
+## 2026-08-20 M7 `0d0f266` 生产三章复验结果与下一根因（本地修复待部署）
+
+- `0d0f266` 已部署后，新空副本 `501ff058-e378-440d-a23b-3cacea51d3fc` 启动前 `active_chapters=0`；真实 DeepSeek 第1章通过：3106 字、自动评审 92、V7 `v7_quality_gate_passed`、连续性 `continuous`。第2章真实调用后在第2场两次生成均命中 `repeated_paragraph_opening`，API返回500并停止；第3章未调用，副本不续跑。
+- 新根因：本次不是早期爽点、章节预算、跨场景交接或对白破折号问题，而是短场景候选自身 8 段以上、同一姓名段首至少4段且占比至少45%的生成期自然性门禁；两次通用风格重写未有效重排段首。该门禁仍保留，不把真实重复降级为通过。
+- 已本地接线最小修复：对 `repeated_paragraph_opening` 使用专用生成期重排指令，明确禁止连续同姓名段首和超过四分之一段首，要求从动作/物件/声音/环境后果/对白/他人反应起笔并保留事实；版本升级为 `SCENE_SERIAL_GENERATION_VERSION=2.31.0`。本地尚未全量回归、提交、部署或重新调用 Provider。
+
 ## 2026-08-20 M7 最新根因修复（本地已接线，待全量/提交/部署）
 
 - 生产 `78db748` 的全新空副本 `adb68f72-6532-460f-856a-eea8fb07e71a` 启动前为 `active_chapters=0`；真实 DeepSeek 第1章生成 3569 字、连续性 `continuous`、自动评审 90，但在正文完成后被 V7 `payoff_strength_insufficient` 阻断：前3章策略要求 `peak`，Provider 计划只给出 `high`。第2、3章未调用，源作品未修改。

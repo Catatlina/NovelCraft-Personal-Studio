@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.30.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.31.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -4914,7 +4914,15 @@ class GenerationEngine:
                             + content_generation_contract(self.quality_profile)
                         )
                     elif style_only_retry:
-                        if "scene_metaphor_density" in previous_issue_codes:
+                        if "repeated_paragraph_opening" in previous_issue_codes:
+                            route = (
+                                "本轮专门重排段落起笔：上一版同一姓名占据过多段首；"
+                                "重写时禁止让该姓名出现在连续段首，也不要让它作为超过四分之一段落的前两字；"
+                                "优先从正在发生的动作、手边物件、声音、环境后果、对白或他人反应起笔，"
+                                "姓名放进句子中自然带出。不能只把姓名替换成‘他/她’，不能删段或把多个段落合并，"
+                                "必须保持本场事实、因果和结果。"
+                            )
+                        elif "scene_metaphor_density" in previous_issue_codes:
                             route = (
                                 "本轮改用朴素现场推进：非对白中的‘像、好像、仿佛、如同、"
                                 "宛如、犹如’必须为0处；声音、光线、触感和情绪都直接写实际变化，"
