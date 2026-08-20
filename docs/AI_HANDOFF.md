@@ -1,6 +1,15 @@
 # Starlume AI 项目交接说明
-> 更新时间：2026-08-18
+> 更新时间：2026-08-20
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
+
+## 2026-08-20 Starlume AI 辅助创作转型与 GitHub 改名（当前结论）
+
+- **品牌与仓库已验收**：原主仓库已原地改名为 `Catatlina/starlume-ai-studio`，仓库 ID 仍为 `R_kgDOTT8enQ`；本地 `origin` 已更新为新 URL。精确名称 `Catatlina/starlume-ai` 属于另一套历史 Express/SQLite 项目（ID `R_kgDOTe5o9A`），未覆盖、未删除。
+- **产品方向已冻结**：Starlume AI 从默认“AI主生成”迁移为“人工提供创意与决策、多AI提供规划/扩写/对白/检查、所有AI结果先作为候选、人工确认后进入正史和正文”。复用现有编辑器、Gateway、V7、`contents`、版本和发布准备层；只按最小垂直切片新增能力。
+- **权威文档已验收**：`docs/Starlume-AI-开发文档/` 新增 10 份文档，覆盖 PRD、架构、开发路线、AI质量门禁、AI遵从、实施、交接、平台码字记录和产品决策；提交 `3c376a0` 已推送到 `agent/publishing-v0.9.2`。
+- **强制门禁已切换**：`AGENTS.md` 和 `scripts/ai_development_gate.sh` 已指向 Starlume AI 新规范；3 个确定性函数经职责核对加入精确白名单，没有放宽AST规则。`verify_ai_truthfulness.py`、`verify_delivery_claims.py`、强制门禁和 `git diff --check` 均通过。
+- **当前产品边界**：本批是品牌、需求和开发治理交付，没有实现新的创作圣经页面、多AI角色编排、持久化实时会话、码字账本或平台官方同步；没有部署生产，也没有运行真实Provider或三章验证。
+- **下一批唯一入口**：执行 M1“编辑器单角色真实会话”。先复用 `EditorAiChat`、现有 editor op、V7 editor service、Gateway、`ai_calls` 和版本预览，只在无法恢复多轮会话时新增最小会话持久化。M1验收前不并行开发三个模型角色。
 
 ## 2026-08-20 场景预算语义修正与最新三章真实 Provider 结果（当前结论）
 

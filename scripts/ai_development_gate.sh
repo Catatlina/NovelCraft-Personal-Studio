@@ -78,6 +78,10 @@ echo "== AST truthfulness gate: AI provenance + hard-coded capability claims =="
 python3 scripts/verify_ai_truthfulness.py
 
 echo
+echo "== Delivery claim evidence gate =="
+python3 scripts/verify_delivery_claims.py
+
+echo
 echo "== Git whitespace check =="
 git diff --check
 

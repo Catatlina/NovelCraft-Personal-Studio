@@ -1,4 +1,8 @@
-# NovelCraft Personal Studio — 全套开发文档索引（V2.1 定案版）
+# NovelCraft Personal Studio — 全套开发文档索引（历史资料）
+
+> Starlume AI 现行产品与开发文档入口是
+> `docs/Starlume-AI-开发文档/README.md`。本目录只用于历史设计、迁移和
+> 证据追溯，不再作为活动需求或开发顺序的权威来源。
 
 > 版本：v2.1 ｜ 日期：2026-07-10
 >
