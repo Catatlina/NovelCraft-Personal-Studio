@@ -132,11 +132,14 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
     # on longer scenes: three images in 900-1300 characters is not the same
     # problem as six images in a 600-character opening.  Scale the threshold
     # with scene size while keeping a floor so short scenes do not overfire.
-    # At least five images are required, and a longer scene gets roughly one
-    # allowed image per 180 narrative characters before this becomes a retry
-    # signal.
-    simile_limit = max(5, int(size / 180))
-    if size >= 500 and len(similes) >= simile_limit:
+    # At least six images are required, and a longer scene gets roughly one
+    # allowed image per 160 narrative characters before this becomes a retry
+    # signal. Six short, context-bound comparisons in a 900–1100 character
+    # scene are not by themselves an AI-writing defect; treating them as a
+    # hard retry signal made the real Provider fail on ordinary scene texture.
+    # Dense image chains remain blocked, especially in shorter scenes.
+    simile_limit = max(6, int(size / 160))
+    if size >= 500 and len(similes) > simile_limit:
         flags.append({
             "code": "scene_metaphor_density",
             "severity": "medium",

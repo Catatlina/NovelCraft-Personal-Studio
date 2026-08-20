@@ -443,9 +443,27 @@ def test_generation_naturalness_flags_one_non_dialogue_simile_at_scene_scale():
         "灯影像一块布压在门上。"
         "门后的声音像贴着砖缝走。"
         "风像从门底钻进来。"
+        "水痕像有人刚刚拖过一把湿伞。"
     )
     chained_report = inspect_generation_naturalness(chained)
     assert any(item["code"] == "scene_metaphor_density" for item in chained_report["flags"])
+
+
+def test_generation_naturalness_does_not_block_six_short_comparisons_in_a_normal_scene():
+    comparisons = "".join([
+        "地面像被水擦过。",
+        "墙角像落了一层灰。",
+        "灯影像贴在门上。",
+        "风像从缝里挤进来。",
+        "他的声音像压低了一格。",
+        "纸边像被火烫过。",
+    ])
+    text = comparisons + "门锁没有再响。" * 140
+
+    report = inspect_generation_naturalness(text)
+
+    assert report["narrative_chars"] >= 900
+    assert not any(item["code"] == "scene_metaphor_density" for item in report["flags"])
 
 
 def test_scene_retry_feedback_does_not_replay_failed_prose_examples():
