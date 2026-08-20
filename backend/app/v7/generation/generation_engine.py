@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.29.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.30.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -1148,6 +1148,129 @@ class SceneDirector:
         }
         return repaired
 
+    async def _repair_payoff_strength_before_prose(
+        self,
+        plan: dict[str, Any],
+        *,
+        chapter_number: int,
+        quality_profile: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Repair an underpowered payoff plan before paying for prose.
+
+        The previous flow only checked the early-chapter payoff floor after
+        the full chapter had been generated.  A provider could therefore
+        return a coherent but merely ``high`` plan for a profile requiring
+        ``peak`` and the run would waste a prose call before being rejected.
+        This bounded real-provider repair changes only the plan's payoff
+        contract and beat execution.  It never upgrades a label locally: the
+        repaired contract must still contain the visible result, feedback,
+        active choice and five-phase beat structure before prose begins.
+        """
+        profile = quality_profile if isinstance(quality_profile, dict) else {}
+        source_contract = plan.get("payoff_contract")
+        # A legacy/fixture plan without an explicit payoff contract is still
+        # allowed to reach the existing chapter-level contract gate.  The
+        # pre-generation repair is reserved for a real plan that declared a
+        # payoff but undershot the active floor; otherwise structural-plan
+        # tests and legacy plot briefs would unexpectedly spend a second AI
+        # call for fields they never attempted to provide.
+        if not isinstance(source_contract, dict) or not source_contract:
+            return dict(plan), {}
+        contract = build_payoff_contract(
+            source_contract,
+            chapter_number=chapter_number,
+            profile=profile,
+            recent_types=[],
+            chapter_function=plan,
+        )
+        validation = validate_payoff_contract(
+            contract,
+            profile=profile,
+            required=True,
+            chapter_function=plan,
+        )
+        plan = dict(plan)
+        plan["payoff_contract"] = contract
+        plan["payoff_validation"] = validation
+        if validation.get("strength_passed", True):
+            return plan, {}
+        if self.gateway is None:
+            raise AIGatewayError(
+                "payoff plan is below the generation floor and repair gateway is not configured"
+            )
+
+        repair_prompt = (
+            "下面是一个尚未进入正文生成的章节场景计划。它的爽点契约没有达到当前题材/平台的生成前最低档位。"
+            "请只输出 JSON，不要输出正文、解释或评价。\n\n"
+            "修复目标：把可见的事件兑现、人物主动选择、外部反馈和章末新压力写成同一条可执行动作链；"
+            "不是把 payoff_intensity 字段从 high 改成 peak。爆发必须在 beats 中有具体动作和结果，"
+            "反馈必须落到对手、组织、资源、规则或现场状态的可见变化，余波必须改变下一步选择。"
+            "只能使用当前计划已经提供的剧情事实、人物、地点、规则和物件，不得新增世界观、角色、能力、奖励或事件；"
+            "如果现有事实确实无法形成最低档位，返回 repairable=false，禁止硬填 peak。\n\n"
+            f"章节号：{chapter_number}\n"
+            f"当前最低爽点档位：{validation.get('minimum_intensity') or '未指定'}\n"
+            f"当前校验问题：{json.dumps(validation.get('strength_issues') or [], ensure_ascii=False)}\n"
+            "返回格式："
+            "{\"repairable\":true,\"payoff_contract\":{\"reader_promise\":\"...\","
+            "\"pressure\":\"...\",\"active_choice\":\"...\",\"payoff_type\":\"...\","
+            "\"visible_result\":\"...\",\"payoff_feedback\":\"...\",\"payoff_intensity\":\"peak\","
+            "\"payoff_arc\":[\"pressure\",\"build\",\"burst\",\"feedback\",\"aftershock\"],"
+            "\"cost\":\"...\",\"next_pressure\":\"...\"},"
+            "\"beats\":[...]}。beats 必须保留 4-6 个，保留原有节拍事实并补齐可见动作；每个 beat 必须包含原计划要求的 scene_card。\n\n"
+            f"当前爽点契约：{json.dumps(contract, ensure_ascii=False)}\n"
+            f"当前节拍：{json.dumps(plan.get('beats') or [], ensure_ascii=False)}\n"
+            f"当前章节目标/冲突/钩子：{json.dumps({key: plan.get(key) for key in ('scene_goal', 'conflict', 'hook', 'reader_promise')}, ensure_ascii=False)}"
+        )
+        repaired = await self.gateway.generate_json(
+            repair_prompt,
+            system_prompt=(
+                "你是严格的商业网文场景计划修复器，只输出合法 JSON。"
+                "不得用改标签冒充提升爽点，不得新增当前计划没有的剧情事实。"
+            ),
+            max_tokens=3600,
+            temperature=0.2,
+            prompt_name="v7.generation.payoff_plan.repair",
+            prompt_version="1.0.0",
+        )
+        usage = dict(repaired.get("usage") or {})
+        data = repaired.get("data")
+        if not isinstance(data, dict) or data.get("repairable") is False:
+            reason = str((data or {}).get("reason") or "Provider refused payoff repair") if isinstance(data, dict) else "invalid repair response"
+            raise AIGatewayError(f"payoff plan repair failed: {reason}")
+        repaired_contract = build_payoff_contract(
+            data.get("payoff_contract") or {},
+            chapter_number=chapter_number,
+            profile=profile,
+            recent_types=[],
+            chapter_function=plan,
+        )
+        repaired_beats = data.get("beats")
+        if not isinstance(repaired_beats, list):
+            raise AIGatewayError("payoff plan repair failed: beats are missing")
+        candidate = dict(plan)
+        candidate["payoff_contract"] = repaired_contract
+        candidate["beats"] = repaired_beats
+        self.validate_scene_plan_contract(candidate, target_word_count=int(plan.get("target_word_count") or 3000))
+        repaired_validation = validate_payoff_contract(
+            repaired_contract,
+            profile=profile,
+            required=True,
+            chapter_function=candidate,
+        )
+        if not repaired_validation.get("passed") or not repaired_validation.get("strength_passed"):
+            raise AIGatewayError(
+                "payoff plan repair failed: repaired contract still misses "
+                + ";".join(repaired_validation.get("missing") or repaired_validation.get("strength_issues") or ["required strength"])
+            )
+        candidate["payoff_validation"] = repaired_validation
+        candidate["generation_payoff_repair"] = {
+            "applied": True,
+            "source": "real_provider_pre_generation_repair",
+            "before": validation,
+            "after": repaired_validation,
+        }
+        return candidate, usage
+
     @staticmethod
     def _adopt_plot_brief(
         chapter_number: int,
@@ -1289,10 +1412,6 @@ class SceneDirector:
                     adopted,
                     target_word_count=target_word_count,
                 )
-                adopted["opening_plan"] = effective_opening_plan
-                adopted["readability_plan"] = readability_plan
-                adopted["writing_workflow"] = writing_workflow
-                return adopted
             except AIGatewayError:
                 # Plot assessment and scene planning are separate Provider
                 # contracts. If the assessment has usable story content but
@@ -1300,6 +1419,22 @@ class SceneDirector:
                 # rebuild a complete beat sheet instead of failing the whole
                 # chapter before the repair-capable planning path runs.
                 adopted = None
+            if adopted is not None:
+                adopted["opening_plan"] = effective_opening_plan
+                adopted["readability_plan"] = readability_plan
+                adopted["writing_workflow"] = writing_workflow
+                adopted, payoff_usage = await self._repair_payoff_strength_before_prose(
+                    adopted,
+                    chapter_number=chapter_number,
+                    quality_profile=quality_profile,
+                )
+                adopted_usage = dict(adopted.get("_usage") or {})
+                for key in ("tokens_input", "tokens_output"):
+                    adopted_usage[key] = int(adopted_usage.get(key) or 0) + int(payoff_usage.get(key) or 0)
+                adopted_usage["cost"] = float(adopted_usage.get("cost") or 0.0) + float(payoff_usage.get("cost") or 0.0)
+                adopted_usage["model"] = payoff_usage.get("model") or adopted_usage.get("model")
+                adopted["_usage"] = adopted_usage
+                return adopted
 
         brief_block = ""
         if plot_brief:
@@ -1320,6 +1455,18 @@ class SceneDirector:
             active_rules=(context.get("context_layers") or {}).get("active_rules") or [],
             opening_plan=effective_opening_plan,
             readability_plan=readability_plan,
+        )
+        payoff_policy = (quality_profile or {}).get("payoff_policy") or {}
+        early_payoff_limit = int(payoff_policy.get("early_chapters_need_payoff") or 0)
+        early_payoff_floor = str(
+            payoff_policy.get("early_min_payoff_intensity") or "medium"
+        )
+        payoff_generation_floor = (
+            f"【生成前爽点硬约束】本章属于前{early_payoff_limit}章，"
+            f"爽点契约和 beats 必须实际执行不低于 {early_payoff_floor} 档的可见兑现；"
+            "不能只把 payoff_intensity 字段改成高档，必须在爆发、反馈和余波中写出具体动作与后果。"
+            if early_payoff_limit and chapter_number <= early_payoff_limit
+            else ""
         )
 
         # 章节标题番茄化要求（最高优先级）
@@ -1417,6 +1564,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             f"{render_readability_plan(readability_plan)}\n\n"
             f"{render_writing_methodology_contract(writing_workflow)}\n\n"
             f"【网文质量策略】\n{quality_directive}\n\n"
+            f"{payoff_generation_floor}\n\n"
             f"{opening_block}\n\n"
             "请只输出 JSON，格式：\n"
             "{\n"
@@ -1493,7 +1641,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             max_tokens=4200,
             temperature=0.6,
             prompt_name="v7.generation.scene_plan",
-            prompt_version="1.7.0",
+            prompt_version="1.8.0",
         )
         plan = self._repair_generation_phase_labels(result["data"]) or result["data"]
         usage = dict(result.get("usage") or {})
@@ -1601,6 +1749,15 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
         plan["readability_plan"] = readability_plan
         plan["target_word_count"] = target_word_count
         self.validate_scene_plan_contract(plan, target_word_count=target_word_count)
+        plan, payoff_usage = await self._repair_payoff_strength_before_prose(
+            plan,
+            chapter_number=chapter_number,
+            quality_profile=quality_profile,
+        )
+        for key in ("tokens_input", "tokens_output"):
+            usage[key] = int(usage.get(key) or 0) + int(payoff_usage.get(key) or 0)
+        usage["cost"] = float(usage.get("cost") or 0.0) + float(payoff_usage.get("cost") or 0.0)
+        usage["model"] = payoff_usage.get("model") or usage.get("model")
         plan["_usage"] = usage
         return plan
 

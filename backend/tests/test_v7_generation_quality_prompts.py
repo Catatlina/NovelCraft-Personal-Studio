@@ -46,6 +46,7 @@ from app.v7.quality.prose_generation import (
     sanitise_style_card_for_prompt,
 )
 from app.v7.quality.readability_contract import build_readability_plan, render_readability_plan
+from app.services.quality_profiles import select_quality_profile
 
 
 def _complete_scene_card(index: int) -> dict:
@@ -884,6 +885,81 @@ def test_incomplete_plot_brief_falls_through_to_repair_capable_scene_planner():
 
     assert gateway.calls == 1
     assert result["chapter_title"] == "补上的余波"
+
+
+def test_generation_payoff_floor_is_repaired_before_prose():
+    phases = ["pressure", "build", "burst", "feedback", "aftershock"]
+    beats = [
+        {
+            "name": f"beat-{index}",
+            "content": "顾沉依据现场压力作出选择并留下具体结果",
+            "target_words": 600,
+            "payoff_phase": phase,
+            "scene_card": _complete_scene_card(index),
+        }
+        for index, phase in enumerate(phases)
+    ]
+    weak_contract = {
+        "reader_promise": "顾沉拿到第一次签到机会",
+        "pressure": "顾沉濒死且周衡仍在监视",
+        "active_choice": "顾沉接受绑定并前往后山",
+        "payoff_type": "system_reward",
+        "visible_result": "系统面板出现，伤势暂时稳定",
+        "payoff_feedback": "周衡派人盯梢，弟子停止嘲笑",
+        "payoff_intensity": "high",
+        "payoff_arc": phases,
+        "cost": "丹田无法恢复",
+        "next_pressure": "顾沉必须在倒计时结束前完成签到",
+    }
+    strong_contract = {**weak_contract, "payoff_intensity": "peak"}
+
+    class Gateway:
+        def __init__(self):
+            self.calls = []
+
+        async def generate_json(self, prompt, **_kwargs):
+            self.calls.append(prompt)
+            if len(self.calls) == 1:
+                return {
+                    "data": {
+                        "chapter_title": "废人也能签到",
+                        "chapter_type": "suspense",
+                        "scene_goal": "顾沉必须活着抵达后山",
+                        "conflict": "周衡的监视与濒死状态",
+                        "hook": "签到点出现新的规则",
+                        "payoff_contract": weak_contract,
+                        "beats": beats,
+                    },
+                    "usage": {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"},
+                }
+            return {
+                "data": {
+                    "repairable": True,
+                    "payoff_contract": strong_contract,
+                    "beats": [
+                        {**beat, "content": "顾沉主动承受代价，完成选择并迫使现场状态发生变化"}
+                        for beat in beats
+                    ],
+                },
+                "usage": {"tokens_input": 10, "tokens_output": 5, "cost": 0.01, "model": "test"},
+            }
+
+    gateway = Gateway()
+    result = asyncio.run(SceneDirector(None, gateway).plan_scene(
+        1,
+        {"rendered_context": ""},
+        target_word_count=3000,
+        quality_profile=select_quality_profile(
+            platform="番茄",
+            genre="玄幻",
+            subgenre="xuanhuan_system",
+        ),
+    ))
+
+    assert len(gateway.calls) == 2
+    assert result["payoff_contract"]["payoff_intensity"] == "peak"
+    assert result["generation_payoff_repair"]["source"] == "real_provider_pre_generation_repair"
+    assert "不是把 payoff_intensity 字段从 high 改成 peak" in gateway.calls[1]
 
 
 def test_scene_plan_uses_bounded_structural_repair_after_provider_repeats_missing_feedback():

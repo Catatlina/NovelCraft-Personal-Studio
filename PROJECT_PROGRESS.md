@@ -1,5 +1,12 @@
 # Starlume AI — 真实进度
 
+## 2026-08-20 M7 最新根因修复（本地已接线，待全量/提交/部署）
+
+- 生产 `78db748` 的全新空副本 `adb68f72-6532-460f-856a-eea8fb07e71a` 启动前为 `active_chapters=0`；真实 DeepSeek 第1章生成 3569 字、连续性 `continuous`、自动评审 90，但在正文完成后被 V7 `payoff_strength_insufficient` 阻断：前3章策略要求 `peak`，Provider 计划只给出 `high`。第2、3章未调用，源作品未修改。
+- 根因不是 Provider 调用失败，也不是字数/连续性问题，而是“早期爽点最低档位”只在正文生成后校验，弱计划已经消耗完整正文调用。该章计划还把 `payoff_intensity=high` 与系统绑定/任务出现混在一起，生成前没有要求把可见结果、主动选择、反馈和余波落实成峰值动作链。
+- 已本地前移为生成期修复：`SceneDirector` 在场景计划通过后、正文 Provider 调用前校验显式爽点契约；低于当前策略 floor 时，只调用一次真实 Provider 修复契约和 beats，禁止只改标签、禁止新增剧情事实；修复仍不达标则在正文前 fail-closed。计划 Prompt 同步明示前3章的实际执行要求，版本升级为 `SCENE_SERIAL_GENERATION_VERSION=2.30.0`。
+- 新增生成前峰值爽点回归；当前定向质量集合 `87 passed`。本地全量、提交、生产部署和新空副本三章受控复验尚未完成；不得把本地修复写成已上线或把最新三章写成通过。
+
 ## 2026-08-20 M7 最新真实 Provider 复验（已部署但未通过）
 
 - `26180a3` 生产复验的新空副本 `d41481ba-ec72-4d98-bd9a-eb9724a5f123` 第1章已通过：2811 字、自动评审 91、V7 质量门禁通过、连续性 `continuous`；第2章第1场因 `scene_metaphor_density` 阻断，第3章未启动。
