@@ -56,7 +56,7 @@ _SCENE_TURN_RE = re.compile(
     r"(?:听见|听到|看见|看到|发现|有人|脚步|岔路|选择|拦住|追上|掉下|折断|亮起|出现|打开|推开|猫|影子|声音)"
 )
 
-GENERATION_STYLE_PROTOCOL_VERSION = "generation-style-protocol-v3"
+GENERATION_STYLE_PROTOCOL_VERSION = "generation-style-protocol-v4"
 
 _GENERATION_PATHS: dict[str, dict[str, str]] = {
     "event_action_dialogue": {
@@ -117,6 +117,8 @@ def render_generation_style_protocol(path: str = "event_action_dialogue") -> str
         "心理解释为 0，身体动作和物件处理承担反应；允许拿错、找不到、被打断、答非所问和事情暂时没做完。\n"
         "每个自然段只承担一个现场落点：动作、对白、物件变化、人物反应或结果，"
         "不要求每段都完整解释因果；段落长短随现场变化，不要把所有段落写成同样长度。\n"
+        "本章只保留一条主压力；辅助人物互动必须在同一场内改变主线的风险、资源、关系、位置或线索，"
+        "不能为了放缓另开一段完整求助、闲聊或说明；没有主线变化就压缩成几句并直接触发下一步。\n"
         "移动、寻找或赶路最多连续两段没有新事件；每三段内必须出现路线选择、障碍、他人介入、线索变化或可见后果。"
         "没有新事件就压缩成一段，不要把走、停、喘、看、继续拆成行程记录。\n"
         "只学习下面示例的信息落地方式，不复制词句：\n"
@@ -154,12 +156,17 @@ def _state_echo_metrics(text: str) -> dict[str, Any]:
     }
 
 
-def _procedural_motion_metrics(text: str) -> dict[str, Any]:
+def _procedural_motion_metrics(
+    text: str,
+    *,
+    dialogue_count: int | None = None,
+) -> dict[str, Any]:
     paragraphs = _paragraphs(text)
     compact = re.sub(r"\s+", "", text)
     motion_hits = len(_MOTION_RE.findall(text))
     turn_hits = len(_SCENE_TURN_RE.findall(text))
-    dialogue_count = len(_DIALOGUE_RE.findall(text))
+    if dialogue_count is None:
+        dialogue_count = len(_DIALOGUE_RE.findall(text))
     first_turn_chars = len(compact)
     match = _SCENE_TURN_RE.search(text)
     if match:
@@ -261,7 +268,13 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
             "evidence": state_echo,
         })
 
-    procedural_motion = _procedural_motion_metrics(narrative)
+    # Dialogue is removed from ``narrative`` for prose-only checks, so count
+    # it from the original source. Otherwise every dialogue-heavy scene is
+    # incorrectly reported as silent route logging.
+    procedural_motion = _procedural_motion_metrics(
+        narrative,
+        dialogue_count=len(_DIALOGUE_RE.findall(source)),
+    )
     motion_hits = int(procedural_motion["motion_hits"])
     turn_hits = int(procedural_motion["turn_hits"])
     if (

@@ -471,6 +471,22 @@ def test_generation_naturalness_blocks_state_echo_and_subject_motion_loop():
     assert report["state_echo"]["group_count"] >= 2
 
 
+def test_generation_naturalness_counts_dialogue_before_prose_filtering():
+    text = "\n\n".join([
+        "他推开门，里面没有人。",
+        "“谁？”他压低声音。",
+        "门后传来回答：“别进来。”",
+        "他退了半步，手仍按着门把。",
+        "楼梯上落下一粒石子。",
+        "他没有回头，等着那声音再次出现。",
+        "风从门缝里钻出来，吹动了桌上的纸。",
+    ])
+
+    report = inspect_generation_naturalness(text)
+
+    assert report["procedural_motion"]["dialogue_count"] == 2
+
+
 def test_generation_naturalness_flags_route_log_without_early_turn():
     text = "\n\n".join([
         "他扶着树干往里走，松针落在肩上，脚下的枯枝发出脆响，泥水顺着鞋面往下流。",
@@ -501,7 +517,7 @@ def test_generation_naturalness_does_not_treat_two_characters_turning_as_a_loop(
 def test_generation_protocol_uses_strict_baseline_and_selected_route():
     protocol = render_generation_style_protocol("object_consequence")
 
-    assert "generation-style-protocol-v3" in protocol
+    assert "generation-style-protocol-v4" in protocol
     assert "物件与后果推进" in protocol
     assert "非对白不使用类比" in protocol
     assert "仿佛" not in protocol
@@ -756,6 +772,28 @@ def test_scene_plan_contract_rejects_empty_or_incomplete_provider_plan():
             {"chapter_title": "门后是什么", "chapter_type": "suspense", "beats": []},
             target_word_count=3000,
         )
+
+
+def test_scene_plan_rejects_a_slow_middle_interlude_for_long_chapters():
+    phases = ["pressure", "build", "burst", "feedback", "aftershock"]
+    plan = {
+        "chapter_title": "门后的声音",
+        "chapter_type": "normal",
+        "pacing": "开场迅速进入异常，中段通过求助放缓节奏，章末再拉高",
+        "beats": [
+            {
+                "name": f"beat-{i}",
+                "content": "推进主线并留下结果",
+                "target_words": 600,
+                "payoff_phase": phase,
+                "scene_card": _complete_scene_card(i),
+            }
+            for i, phase in enumerate(phases)
+        ],
+    }
+
+    with pytest.raises(AIGatewayError, match="pacing_interlude_without_mainline_turn"):
+        SceneDirector.validate_scene_plan_contract(plan, target_word_count=3000)
 
 
 def test_scene_plan_adds_executable_texture_when_provider_omits_optional_style_fields():
@@ -1848,13 +1886,13 @@ def test_reader_budget_overrun_is_not_a_second_hard_scene_gate():
     ) is False
 
 
-def test_final_scene_variance_never_starves_a_future_scene_or_exceeds_absolute_bound():
+def test_final_scene_variance_never_overrides_reader_chapter_budget():
     assert GenerationEngine._final_scene_budget_variance_allowed(
         projected_chars=3192 + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS,
         chapter_max_chars=3192,
         future_minimum_chars=0,
         future_target_chars=0,
-    ) is True
+    ) is False
     assert GenerationEngine._final_scene_budget_variance_allowed(
         projected_chars=3192 + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS + 1,
         chapter_max_chars=3192,
@@ -1869,13 +1907,13 @@ def test_final_scene_variance_never_starves_a_future_scene_or_exceeds_absolute_b
     ) is False
 
 
-def test_final_scene_variance_covers_a_complete_3500_char_chapter_without_future_scenes():
+def test_final_scene_variance_does_not_cover_a_complete_3500_char_chapter():
     assert GenerationEngine._final_scene_budget_variance_allowed(
         projected_chars=3545,
         chapter_max_chars=3192,
         future_minimum_chars=0,
         future_target_chars=0,
-    ) is True
+    ) is False
 
 
 def test_scene_truncation_retry_has_a_bounded_escalation():

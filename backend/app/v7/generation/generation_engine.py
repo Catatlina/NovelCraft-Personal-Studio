@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.32.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.33.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -1006,6 +1006,12 @@ class SceneDirector:
                 "scene plan contract invalid: missing payoff phases "
                 + ", ".join(missing_phases)
             )
+        if target_word_count >= 1800:
+            pacing_text = str(plan.get("pacing") or "")
+            if re.search(r"中段[^。！？!?]{0,20}(?:放缓|舒缓|缓冲|放松)", pacing_text):
+                raise AIGatewayError(
+                    "scene plan contract invalid: pacing_interlude_without_mainline_turn"
+                )
         chapter_type = str(plan.get("chapter_type") or "").strip().lower()
         if chapter_type not in {"normal", "aftermath", "relationship", "suspense"}:
             raise AIGatewayError(
@@ -1620,6 +1626,8 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
             "直接改写成主角自己的经历，必须保留文字的说话者和归属。"
             "重大袭击、对抗或爆发后的下一 beat，必须先写一个可见的即时后果（伤势、资源损失、环境变化、旁观者反应、"
             "敌我状态变化或短暂喘息）再进入长段解释/师徒对话；不能从战斗结果直接跳到讲设定。"
+            "正常章节的中段不得把放缓、舒缓、缓冲当作独立节奏目标；辅助人物求助、闲聊或知识展示必须直接改变主线的风险、资源、关系、位置或线索，"
+            "否则压缩为主线动作中的几句，不得占用一个完整节拍。"
             "chapter_type 必须从 normal、aftermath、relationship、suspense 中选择；"
             "输出必须紧凑：每个 beat 的 name/purpose/content/emotion 各不超过 80 字，"
             "causal_ledger 每列不超过 60 字，列表只写本章真正发生的 4-6 个事件；不要重复字段或附加解释。"
@@ -1664,6 +1672,7 @@ chapter_title 是本章最重要的门面，必须让读者一眼就想点进去
                 "每个 beat 必须写清人物此刻为什么行动；重返已有地点/物件时必须写触发信息、当前目标和主动决定，"
                 "不得用‘鬼使神差’、‘下意识’或‘不知为何’代替动机；重大冲突后先写即时后果或喘息，"
                 "再进入解释性对话，不能从结果直接跳到讲设定；"
+                "正常章节中段不得以放缓/缓冲为独立目标，辅助互动必须直接改变主线并在本场落到可见结果；"
                 "关键异常、开门、封印松动、袭击、修炼变化或新能力必须补充可见前提和因果连接；"
                 "碑文、幻象、梦境或他人话语中的数字/年代属于原说话者，不得改成主角自己的经历；"
                 "chapter_type 必须是 normal、aftermath、relationship、suspense 之一。\n"
@@ -3822,13 +3831,12 @@ class GenerationEngine:
         future_minimum_chars: int,
         future_target_chars: int,
     ) -> bool:
-        """Allow a bounded complete final scene without hiding budget drift."""
-        return (
-            future_minimum_chars == 0
-            and future_target_chars == 0
-            and projected_chars
-            <= chapter_max_chars + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS
-        )
+        """Keep the reader-facing chapter budget as the only hard ceiling."""
+        # A complete final scene is not an exemption from the chapter budget.
+        # The previous variance let a 3000-character chapter reach 3672
+        # characters and reported it as a warning, which directly conflicted
+        # with the reader-budget contract.
+        return False
 
     @staticmethod
     def _rebalance_future_scene_targets(
@@ -5487,10 +5495,11 @@ class GenerationEngine:
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
         minimum_chapter_chars = int(reader_budget["minimum_chars"])
         maximum_chapter_chars = int(reader_budget["maximum_chars"])
-        generation_hard_max_chars = maximum_chapter_chars + CHAPTER_NATURAL_LENGTH_TOLERANCE_CHARS
-        generation_absolute_max_chars = (
-            generation_hard_max_chars + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS
-        )
+        # Scene targets remain soft pacing allocations, but the reader-facing
+        # chapter budget is the hard generation ceiling. Do not accept a
+        # complete final scene merely because it fits an extra variance band.
+        generation_hard_max_chars = maximum_chapter_chars
+        generation_absolute_max_chars = maximum_chapter_chars
         # The canonical path is scene-serial, but this legacy token value is
         # still part of the returned provenance and repair contract.
         generation_max_tokens = max(
