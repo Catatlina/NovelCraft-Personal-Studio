@@ -1419,6 +1419,25 @@ def test_scene_serial_catches_repeated_name_opening_in_a_short_scene():
     assert any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
 
 
+def test_scene_serial_does_not_blame_one_handoff_paragraph_for_chapter_opening_ratio():
+    accepted = "\n\n".join(
+        ["顾沉把门缝压住，听见里面的脚步停了。" for _ in range(8)]
+    )
+    candidate = "\n\n".join([
+        "顾沉抬手示意身后的人停下。",
+        "雨水顺着窗框落进灰尘里。",
+        "赵宁把纸条折回袖口，没有解释。",
+        "门轴轻轻一响，屋里的灯灭了。",
+    ])
+
+    flags = GenerationEngine._scene_naturalness_flags(
+        candidate,
+        accepted_text=accepted,
+    )
+
+    assert not any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
+
+
 def test_prose_feature_card_uses_sample_statistics_without_verbatim_payload():
     card = build_prose_feature_card([
         {"text": "门锁先响了。雨水沿着窗框往下淌。她没有回答，只把纸条折回去。", "label": "positive"},

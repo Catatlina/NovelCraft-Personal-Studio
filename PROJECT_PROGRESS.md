@@ -2,10 +2,14 @@
 
 ## 2026-08-20 M7 最新真实 Provider 复验（已部署但未通过）
 
+- `61ea900` 已提交并推送；生产已部署且健康。全新副本 `b23be4ec-b27a-41f0-9f4c-1c061a079d19` 启动前 `active_chapters=0`，真实 DeepSeek 第1章已通过：2878 字、自动评审 89、V7 质量门禁通过、连续性 `continuous`；第2章在生成期阻断，第3章未启动。
+- 新根因：第2章第3场 `accepted=2465,candidate=872,future_min=0,chapter_max=3192`，长度超出 145 字仍处于最后场景 480 字自然波动内，但同时命中 `repeated_paragraph_opening`。生产日志显示这是“已接受场景链的主角段首比例”与短收束场景合并后触发的交叉误报，不能把一次自然交接段落当作场景本身重复。
+- 已完成本地最小修复：跨场景段首风险只有在当前候选自身也重复同一姓名段首（至少 3 段且占比不低于 45%）时才进入生成重试；候选自身的短场景重复检测仍保留。版本升级为 `SCENE_SERIAL_GENERATION_VERSION=2.27.0`，新增交接段落回归测试；先跑定向、全量，再部署并以新空副本做一次受控复验。
+
 - 最新生产提交为 `aadb354`，已完成 Docker 重建、迁移和健康检查；生产 Alembic 为 `nc_starlume_authoring (head)`，公网 healthz 返回 200，API/Worker/Beat/Frontend/数据库/Redis 均健康。原生产脏文件未清理。
 - 在全新副本 `0a1e6ea2-3634-4680-a3b7-7001a20d74a4` 上执行真实 DeepSeek 三章目标；启动前 `active_chapters=0`、历史章节已清空，原作未修改。第1章未落正文，第2/3章未启动。
 - 新阻断根因：第1章第3场已接受 2269 字，候选 1276 字，后续场景最低需求为 0，生成期章节上限为 3192 字；候选完整但超过章节总预算，有限重试后命中 `scene_chapter_budget_overrun`。这不是场景读者目标的第二硬门禁，而是最后场景的有界自然波动额度不足。
-- 已完成本地最小修复：将最后完整场景的自然波动额度从 192 调整为 480 字，仍要求无后续场景、正文完整、不得接近平台级上限；版本升级为 `SCENE_SERIAL_GENERATION_VERSION=2.26.0`，新增 3545 字边界回归测试。定向测试 `102 passed`，后端全量 `1185 passed, 138 skipped, 1 xpassed, 2 warnings`；待提交、部署和新空副本单次复验。
+- 已完成本地最小修复：将最后完整场景的自然波动额度从 192 调整为 480 字，仍要求无后续场景、正文完整、不得接近平台级上限；版本升级为 `SCENE_SERIAL_GENERATION_VERSION=2.27.0`，新增 3545 字边界和交接段落回归测试。定向测试 `108 passed`，后端全量 `1186 passed, 138 skipped, 1 xpassed, 2 warnings`；待提交、部署和新空副本单次复验。
 - 当前结论：三章真实 Provider **未通过**，20章真实 Provider **未开始**；本次失败后不续用副本、不重复盲跑。披露人工确认、两位盲评、七道门禁完整发布闭环仍未验收。
 
 - `d28a09f` 已提交、推送并部署；生产备份为 `backups/pre-deploy-density-fix-20260820-150320.sql.gz`（gzip 校验通过），Alembic 为 `nc_starlume_authoring (head)`，公网 healthz、容器和新 authoring 路由均正常。

@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.26.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.27.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -3725,16 +3725,24 @@ class GenerationEngine:
             for item in re.split(r"\n{2,}|\n", candidate)
             if item.strip()
         ]
+        candidate_openings: dict[str, int] = {}
+        for paragraph in paragraphs:
+            first = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", paragraph)
+            opening = first[:2]
+            if not opening or opening[:1] in "他她它我你":
+                continue
+            candidate_openings[opening] = candidate_openings.get(opening, 0) + 1
+        candidate_opening, candidate_opening_count = max(
+            candidate_openings.items(),
+            key=lambda item: item[1],
+            default=("", 0),
+        )
+        candidate_opening_ratio = (
+            candidate_opening_count / len(paragraphs) if paragraphs else 0.0
+        )
         if len(paragraphs) >= 8:
-            openings: dict[str, int] = {}
-            for paragraph in paragraphs:
-                first = re.sub(r"^[\s\"“”‘’「」『』（(]+", "", paragraph)
-                opening = first[:2]
-                if not opening or opening[:1] in "他她它我你":
-                    continue
-                openings[opening] = openings.get(opening, 0) + 1
-            opening, count = max(openings.items(), key=lambda item: item[1], default=("", 0))
-            ratio = count / len(paragraphs) if paragraphs else 0.0
+            opening, count = candidate_opening, candidate_opening_count
+            ratio = candidate_opening_ratio
             if count >= 4 and ratio >= 0.45 and not any(
                 item.get("code") == "repeated_paragraph_opening"
                 for item in flags
@@ -3770,8 +3778,20 @@ class GenerationEngine:
                 .get("repeated_paragraph_opening")
                 or {}
             )
+            # Do not blame a short scene merely for joining an already
+            # dominant chapter-level opening. The scene itself must repeat
+            # the same named opening before this cross-scene signal can cause
+            # a generation retry. This keeps serial continuity from turning
+            # one natural handoff paragraph into a false hard failure.
+            candidate_repeats_after_opening = (
+                candidate_opening
+                and candidate_opening == str(after_opening.get("opening") or "")
+                and candidate_opening_count >= 3
+                and candidate_opening_ratio >= 0.45
+            )
             if (
                 float(after_opening.get("ratio") or 0.0) >= 0.30
+                and candidate_repeats_after_opening
                 and (
                     str(after_opening.get("opening") or "")
                     != str(before_opening.get("opening") or "")
