@@ -4762,7 +4762,12 @@ class GenerationEngine:
                     ).get("opening_plan") or {}
                     opening_gate = inspect_opening(
                         candidate,
-                        requested_mode=opening_plan.get("mode"),
+                        # The scheduler is a writing hint, not a second
+                        # lexical classifier gate.  Requiring an exact mode
+                        # here rejected concrete openings that did not match
+                        # the narrow regex, even when the prose contract and
+                        # downstream review could evaluate them normally.
+                        requested_mode=None,
                         chapter_number=chapter_number,
                         recent_modes=opening_plan.get("forbidden_recent_modes") or [],
                     )
