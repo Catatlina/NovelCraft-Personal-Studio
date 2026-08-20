@@ -91,7 +91,11 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.23.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.24.0"
+# Keep the canonical writer loop intentionally small.  Candidate fan-out and
+# local prose surgery belong to explicit/manual tooling, not the production
+# chapter path; nested retries made the writer see too many competing rules.
+SCENE_SERIAL_MAX_ATTEMPTS = 2
 SCENE_HANDOFF_SCHEMA = "scene-handoff-v1"
 # Platform limits are not reader targets.  The active quality profile now
 # derives a reader-facing chapter budget before planning and prose generation.
@@ -4547,7 +4551,7 @@ class GenerationEngine:
                 card,
                 scene_index=index,
             )
-            for attempt in range(3):
+            for attempt in range(SCENE_SERIAL_MAX_ATTEMPTS):
                 attempt_warnings: list[dict[str, Any]] = []
                 provider = str(getattr(self.ai_gateway, "provider", "") or "").lower()
                 naturalness_retry = bool(
@@ -4729,53 +4733,20 @@ class GenerationEngine:
                             + third_person_generation_contract()
                             + content_generation_contract(self.quality_profile)
                         )
-                structured_plain = None
-                structured_plain_retry = bool(
-                    attempt == 1
-                    and previous_issue_codes.intersection({
-                        "scene_explanatory_narration",
-                        "scene_metaphor_density",
-                        "scene_repeated_action_loop",
-                        "structural_ai_smell",
-                        "repeated_paragraph_opening",
-                        "uniform_cadence",
-                        "repeated_tic",
-                        "dash_density",
-                        "ai_phrase",
-                    })
-                    and "scene_provider_truncated" not in previous_issue_codes
+                # One writer call per attempt.  The previous implementation
+                # could call a structured candidate, then a full rewrite, and
+                # then local Best-of-3 replacements in the same scene.  That
+                # inflated cost and made the final prose path hard to reason
+                # about without improving the real Provider result reliably.
+                result = await self.ai_gateway.generate(
+                    scene_prompt,
+                    system_prompt=scene_system_prompt,
+                    max_tokens=scene_token_limit,
+                    temperature=(0.38 if style_only_retry else 0.58) if attempt else 0.62,
+                    prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
+                    prompt_version=SCENE_SERIAL_GENERATION_VERSION,
+                    expand_on_truncation=False,
                 )
-                if structured_plain_retry:
-                    structured_plain = await self._generate_structured_plain_scene_candidate(
-                        chapter_number=chapter_number,
-                        scene_index=index,
-                        context=context,
-                        scene_card=card,
-                        previous_scene_tail=scene_texts[-1][-1200:] if scene_texts else (
-                            (context.get("context_layers") or {}).get("previous_tail") or ""
-                        ),
-                        current_state=current_state,
-                        previous_handoffs=handoffs,
-                        min_scene_chars=min_scene_chars,
-                        max_scene_chars=attempt_max_scene_chars,
-                    )
-                    add_call_usage(structured_plain.get("usage") or {})
-                if structured_plain and structured_plain.get("accepted"):
-                    result = structured_plain["provider_result"]
-                else:
-                    result = await self.ai_gateway.generate(
-                        scene_prompt,
-                        system_prompt=scene_system_prompt,
-                        max_tokens=scene_token_limit,
-                        # The previous high-temperature first pass made
-                        # DeepSeek reach for decorative image chains. Keep
-                        # the ordinary writer conservative and reserve the
-                        # structured plain path for a naturalness failure.
-                        temperature=(0.38 if style_only_retry else 0.58) if attempt else 0.62,
-                        prompt_name="v7.generation.scene" if attempt == 0 else "v7.generation.scene.repair",
-                        prompt_version=SCENE_SERIAL_GENERATION_VERSION,
-                        expand_on_truncation=False,
-                    )
                 add_call_usage(result)
                 truncated = bool(result.get("truncated")) or str(
                     result.get("finish_reason") or ""
@@ -4840,43 +4811,11 @@ class GenerationEngine:
                         accepted_text="\n\n".join(scene_texts),
                     ))
                 if not truncated and candidate:
+                    # Keep the critic as observable evidence only.  It no
+                    # longer starts a second nested generation tree inside a
+                    # scene; the single bounded rewrite above is the only
+                    # canonical repair path.
                     scene_critic = build_generation_critic_report(candidate, scene_metrics)
-                    issue_codes = {
-                        str(item.get("code") or "")
-                        for item in issues
-                        if isinstance(item, dict)
-                    }
-                    local_codes = self._local_segment_issue_codes(issues)
-                    if (
-                        attempt == 0
-                        and issue_codes
-                        and local_codes
-                        and issue_codes.issubset(local_codes)
-                    ):
-                        segment_selection = await self._generate_best_local_segment_candidate(
-                            chapter_number=chapter_number,
-                            scene_index=index,
-                            context=context,
-                            scene_card=card,
-                            source_text=candidate,
-                            metrics=scene_metrics,
-                            issues=issues,
-                        )
-                        add_call_usage(segment_selection.get("usage") or {})
-                        scene_candidate_selection = segment_selection
-                        if segment_selection.get("accepted"):
-                            candidate = str(segment_selection.get("text") or candidate).strip()
-                            scene_metrics = analyze_deai_patterns(candidate)
-                            scene_critic = build_generation_critic_report(candidate, scene_metrics)
-                            issues = [
-                                item
-                                for item in issues
-                                if str(item.get("code") or "") not in local_codes
-                            ]
-                            issues.extend(self._scene_naturalness_flags(
-                                candidate,
-                                accepted_text="\n\n".join(scene_texts),
-                            ))
                 candidate_word_count = chinese_word_count(candidate)
                 projected_chapter_chars = accepted_chars + candidate_word_count
                 # A truncated completion is an incomplete candidate, not an
@@ -5022,7 +4961,7 @@ class GenerationEngine:
                     for item in issues
                     if isinstance(item, dict)
                 }
-                if attempt < 2:
+                if attempt < SCENE_SERIAL_MAX_ATTEMPTS - 1:
                     feedback = "；".join(
                         str(item.get("message") or item.get("code"))
                         + (
