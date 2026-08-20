@@ -4512,13 +4512,11 @@ class GenerationEngine:
                     remaining_planned_budget = (
                         planning_max_chars - accepted_chars - future_target_chars
                     )
-            if target_word_count >= 1800 and remaining_planned_budget < minimum_scene_chars:
-                raise AIGatewayError(
-                    "scene serial reader budget exhausted before the next scene: "
-                    f"scene={index}, accepted_chars={accepted_chars}, "
-                    f"future_target_chars={future_target_chars}, "
-                    f"planning_max_chars={planning_max_chars}"
-                )
+            # The reader target is a planning signal, not another chapter
+            # ceiling.  A scene may consume more of that target when the
+            # chapter hard budget and future scenes' minimum expression space
+            # still remain available.  Only the chapter budget below can
+            # block generation.
             # Do not turn a beat's suggested size into a hard scene ceiling.
             # Use a generous Provider completion capacity for token budgeting;
             # the generated text is judged only against the chapter budget.
@@ -4866,13 +4864,13 @@ class GenerationEngine:
                         and accepted_chars + candidate_word_count + future_target_chars
                         > planning_max_chars
                     ):
-                        issues.append({
-                            "code": "scene_reader_budget_overrun",
-                            "severity": "high",
+                        attempt_warnings.append({
+                            "code": "scene_reader_budget_variance",
+                            "severity": "low",
                             "message": (
                                 f"本场候选及后续目标合计 "
                                 f"{accepted_chars + candidate_word_count + future_target_chars} 字，"
-                                f"超过读者章节预算 {planning_max_chars} 字；必须在生成期压缩本场"
+                                f"高于读者目标预算 {planning_max_chars} 字；章节总预算仍是唯一硬上限"
                             ),
                         })
                     if candidate_word_count < min_scene_chars:

@@ -1691,6 +1691,17 @@ def test_scene_length_soft_overflow_is_bounded_by_reader_pacing_contract():
     assert SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS == 64
 
 
+def test_reader_budget_overrun_is_not_a_second_hard_scene_gate():
+    # The chapter ceiling and future-scene minimums remain hard constraints;
+    # the reader target only guides planning and may be exceeded by one scene.
+    assert GenerationEngine._scene_exceeds_chapter_budget(
+        accepted_chars=674,
+        candidate_chars=2153,
+        future_minimum_chars=200,
+        chapter_max_chars=3192,
+    ) is False
+
+
 def test_final_scene_variance_never_starves_a_future_scene_or_exceeds_absolute_bound():
     assert GenerationEngine._final_scene_budget_variance_allowed(
         projected_chars=3192 + CHAPTER_FINAL_SCENE_NATURAL_VARIANCE_CHARS,
