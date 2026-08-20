@@ -4704,13 +4704,22 @@ class GenerationEngine:
                 )
                 if attempt and candidate:
                     if style_only_retry:
-                        route = (
-                            "本轮改用动作与对白推进：先让人物做事或说半句话，"
-                            "用现场阻碍改变动作，不用旁白解释。"
-                            if attempt == 1
-                            else "本轮改用物件与后果推进：只保留一个可观察异常，"
-                            "让人物试错或作出选择，不用比喻和总结句串联。"
-                        )
+                        if "scene_metaphor_density" in previous_issue_codes:
+                            route = (
+                                "本轮改用朴素现场推进：非对白中的‘像、好像、仿佛、如同、"
+                                "宛如、犹如’必须为0处；声音、光线、触感和情绪都直接写实际变化，"
+                                "不用任何联想替代现场。"
+                            )
+                        elif attempt == 1:
+                            route = (
+                                "本轮改用动作与对白推进：先让人物做事或说半句话，"
+                                "用现场阻碍改变动作，不用旁白解释。"
+                            )
+                        else:
+                            route = (
+                                "本轮改用物件与后果推进：只保留一个可观察异常，"
+                                "让人物试错或作出选择，不用比喻和总结句串联。"
+                            )
                         scene_system_prompt = (
                             "你是中文网文的生成期表达修复编辑。必须依据本场 scene_card、已确认状态和"
                             "上一场交接点，从头重新写出完整正文；不要复制上一版的句式、段首、动作顺序或段落结构，"
@@ -5015,9 +5024,22 @@ class GenerationEngine:
                         and item.get("code") == "scene_metaphor_density"
                         for item in issues
                     ):
+                        metaphor_issue = next(
+                            (
+                                item
+                                for item in issues
+                                if isinstance(item, dict)
+                                and item.get("code") == "scene_metaphor_density"
+                            ),
+                            {},
+                        )
+                        metaphor_evidence = metaphor_issue.get("evidence") or {}
+                        metaphor_count = metaphor_evidence.get("count") or "多处"
                         feedback += (
-                            "\n类比修复硬要求：完整重写本场时，非对白不保留形容性联想；"
-                            "全部改成可观察的颜色、位置、触感、声音、动作或后果，不用联想串联情绪。"
+                            f"\n类比修复硬要求：上一版非对白检测到 {metaphor_count} 处类比；"
+                            "本次完整重写必须为0处。非对白不得出现‘像、好像、仿佛、如同、宛如、犹如’，"
+                            "全部改成可观察的颜色、位置、触感、声音、动作或后果；"
+                            "生成前逐句检查，不要用同义联想替代类比。"
                         )
                     if any(
                         isinstance(item, dict)
