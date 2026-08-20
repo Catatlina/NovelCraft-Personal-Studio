@@ -4,7 +4,7 @@
 
 ## 2026-08-20 当前批次交接（M1–M6 本地可用，M7/M8 未验收）
 
-- 本地分支：`agent/publishing-v0.9.2`；本批改动尚未 commit、push 或部署。
+- 分支：`agent/publishing-v0.9.2`；本批代码与文档已提交为 `863eb50` 并推送到 `origin`，尚未部署生产。
 - 已实现：`backend/app/api/v1/authoring.py`、`nc_starlume_authoring` 迁移、编辑器上下文/Provider角色面板、持久化 `EditorAiChat`、真实豆包 Gateway 适配、角色路由、章节码字事件、清空三章长跑登记/软删除、人工发布回执。
 - 本地迁移已从 `nc_v11_disclosure_payoff` 升级到 `nc_starlume_authoring (head)`；没有执行生产正文清空，也没有启动 Provider 长跑。
 - 本地验证已完成：后端全量 `1177 passed, 138 skipped, 1 xpassed, 2 warnings`，辅助创作契约 `5 passed`；前端 `57 passed`、TypeScript 检查、生产构建通过；集成脚本已验证会话/current session/角色状态/长跑登记返回 `200`；豆包无密钥时 fail-closed。
