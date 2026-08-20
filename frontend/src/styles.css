@@ -2865,22 +2865,51 @@ body {
 /* Starlume authoring workspace: restrained ByteDance-style product chrome.
    The editor stays calm and readable; blue is reserved for action and state. */
 .editor-page .editor {
+  --editor-canvas: #ffffff;
+  --editor-rail: #fbfbfc;
+  --editor-ink: #252b3d;
+  --editor-muted: #737b8f;
+  --editor-line: #e5e8ef;
   border-color: #e8eaf0;
   border-radius: 14px;
   box-shadow: 0 12px 34px rgba(24, 31, 52, .07);
+  color: var(--editor-ink);
+  background: var(--editor-canvas);
 }
 .editor-page .ed-side,
 .editor-page .ed-aside {
-  background: #fbfbfc;
+  background: var(--editor-rail);
+  color: var(--editor-ink);
 }
 .editor-page .ed-main {
-  background: #fff;
+  background: var(--editor-canvas);
 }
 .editor-page .ed-main .ProseMirror {
   max-width: 760px;
   margin: 0 auto;
+  color: var(--editor-ink);
   font-size: 16px;
   line-height: 2;
+}
+.editor-page .ed-main .ProseMirror p,
+.editor-page .ed-main .ProseMirror h1,
+.editor-page .ed-main .ProseMirror h2,
+.editor-page .ed-main .ProseMirror h3,
+.editor-page .ed-main .ProseMirror li { color: var(--editor-ink); }
+.editor-page .outline-item { color: var(--editor-muted); }
+.editor-page .editor-rail-heading { display: flex; align-items: flex-start; gap: 8px; color: var(--editor-ink); }
+.editor-page .editor-rail-heading > div { display: flex; flex-direction: column; gap: 2px; }
+.editor-page .editor-rail-heading strong { font-size: 12px; }
+.editor-page .editor-rail-heading span { color: var(--editor-muted); font-size: 10px; font-weight: 400; line-height: 1.4; }
+.editor-page .editor-next-chapter-note { max-width: 260px; color: var(--editor-muted); font-size: 11px; line-height: 1.4; text-align: right; }
+[data-theme="dark"] .editor-page .editor {
+  --editor-canvas: #151827;
+  --editor-rail: #101320;
+  --editor-ink: #edf0f7;
+  --editor-muted: #9aa1b5;
+  --editor-line: #2b3045;
+  border-color: var(--editor-line);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .28);
 }
 .editor-context-panel {
   flex: 0 0 auto;
@@ -2910,6 +2939,7 @@ body {
 .editor-context-chapter { padding: 9px; background: #fff; border: 1px solid #e8eaf2; border-radius: 9px; }
 .editor-context-chapter > span { color: var(--brand-500); font-size: 10px; font-weight: 700; }
 .editor-context-chapter > strong { display: block; margin-top: 3px; overflow: hidden; color: #30364a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.editor-context-chapter-excerpt { display: -webkit-box; margin-top: 7px; overflow: hidden; color: #626a7c; font-size: 10px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .editor-context-neighbors { display: flex; flex-direction: column; align-items: flex-start; margin-top: 7px; color: #8b91a1; font-size: 10px; }
 .editor-context-group { border-top: 1px solid #e7e9f0; }
 .editor-context-group-title { width: 100%; min-height: 30px; padding: 0; color: #51586b; background: transparent; border: 0; font-size: 10px; font-weight: 650; }
@@ -2919,9 +2949,10 @@ body {
 .editor-context-item { padding: 6px 7px; background: #fff; border: 1px solid #eceef3; border-radius: 8px; }
 .editor-context-item strong { display: block; overflow: hidden; color: #3a4053; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .editor-context-item p { display: -webkit-box; margin-top: 3px; overflow: hidden; color: #7c8394; font-size: 10px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.editor-context-item small { display: inline-block; margin-top: 4px; color: #4b9b76; font-size: 9px; }
+.editor-context-item small { display: inline-block; max-width: 100%; margin-top: 4px; overflow: hidden; color: #4b9b76; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .editor-context-item small.pending { color: #c08b41; }
 .editor-context-more { color: #9aa1b3; font-size: 9px; }
+.editor-context-empty span { display: block; color: #7c8394; font-size: 10px; line-height: 1.55; }
 .editor-role-status { margin: 0 -2px 10px; padding: 8px 9px; background: #fff; border: 1px solid #e8eaf2; border-radius: 10px; }
 .editor-role-status-title { justify-content: flex-start; color: #666d80; font-size: 10px; font-weight: 650; }
 .editor-role-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }

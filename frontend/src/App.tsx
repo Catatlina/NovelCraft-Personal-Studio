@@ -181,16 +181,6 @@ export default function App() {
   const [pendingAiEdit, setPendingAiEdit] = useState<PendingAiEdit | null>(null);
   const [editorAiLoading, setEditorAiLoading] = useState(false);
   const [editorAiOperation, setEditorAiOperation] = useState("");
-  const [nextChapterLoading, setNextChapterLoading] = useState(false);
-  const nextChapterPollRef = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (nextChapterPollRef.current !== null) {
-        window.clearTimeout(nextChapterPollRef.current);
-        nextChapterPollRef.current = null;
-      }
-    };
-  }, [novel?.id]);
   // 应用 AI 建议后强制 RichEditor 用最新正文重建一次，确保编辑区立即显示新内容（修复受控同步竞态）。
   const [editorResetNonce, setEditorResetNonce] = useState(0);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
@@ -750,72 +740,6 @@ export default function App() {
     }
   }
 
-  async function generateNextChapter() {
-    if (!novel || !project || nextChapterLoading) return;
-    if (!navigator.onLine) {
-      setOfflineNotice("当前网络不可用，无法提交下一章生成任务");
-      return;
-    }
-    const novelId = novel.id;
-    const projectId = project.id;
-    const knownChapterIds = new Set(chapters.map(item => item.id));
-    setNextChapterLoading(true);
-    setError("");
-    try {
-      if (chapter && docToText(chapter.body) !== editorTextRef.current) {
-        const saved = await saveChapter();
-        if (!saved) {
-          setOfflineNotice("当前章节保存失败，已停止生成下一章；请先处理版本冲突");
-          setNextChapterLoading(false);
-          return;
-        }
-      }
-      await api<{ task_id: string }>("/api/v1/novels/" + novelId + "/continue", { method: "POST" });
-      setOfflineNotice("下一章已提交生成，完成后会自动加入章节目录");
-
-      let attempts = 0;
-      const poll = async () => {
-        attempts += 1;
-        try {
-          const items = await api<Content[]>(
-            "/api/v1/contents?project_id=" + encodeURIComponent(projectId) + "&parent_id=" + encodeURIComponent(novelId),
-          );
-          const chapterItems = (items || [])
-            .filter(item => item.type === "chapter")
-            .sort((a, b) => Number(a.meta?.seq || 0) - Number(b.meta?.seq || 0));
-          setChapters(chapterItems);
-          const created = chapterItems.find(item => !knownChapterIds.has(item.id));
-          if (created) {
-            setChapter(created);
-            setEditorText(docToText(created.body));
-            setSelection("");
-            setPendingAiEdit(null);
-            setEditorAiReview(null);
-            setEditorResetNonce(value => value + 1);
-            void loadVersions(created.id);
-            setNextChapterLoading(false);
-            setOfflineNotice("第" + String(created.meta?.seq || chapterItems.length) + "章《" + created.title + "》已生成，已自动打开");
-            nextChapterPollRef.current = null;
-            return;
-          }
-        } catch {
-          // The task continues on the worker; a transient refresh failure should not cancel it.
-        }
-        if (attempts >= 60) {
-          setNextChapterLoading(false);
-          setOfflineNotice("下一章任务仍在后台生成，稍后刷新章节目录即可查看");
-          nextChapterPollRef.current = null;
-          return;
-        }
-        nextChapterPollRef.current = window.setTimeout(() => { void poll(); }, 5000);
-      };
-      void poll();
-    } catch (caught) {
-      setNextChapterLoading(false);
-      setOfflineNotice(caught instanceof ApiError ? "下一章生成失败：" + caught.message : "下一章生成任务提交失败，请重试");
-    }
-  }
-
   // V3-P3-⑩：编辑器 diff 信号采集（fire-and-forget，绝不阻塞保存）
   async function sendEditSignal(chapterId: string, prevText: string, newText: string) {
     if (!project?.id) return;
@@ -1331,7 +1255,7 @@ export default function App() {
       {tab === "publish" && <PublishingPreparation projectId={project?.id} novelId={novel?.id} novelTitle={novel?.title} chapters={chapters} />}
       {tab === "editor" && <div className="editor-page page-enter">
           <React.Suspense fallback={<div className="panel">正在加载编辑器…</div>}>
-            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText: updateEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter: generateNextChapter, nextChapterLoading, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
+            <Editor {...{ chapter, chapters, selectChapter, editorText, setEditorText: updateEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, markLiked, projectId: project?.id, liveReviewing, liveReviewError, editorResetNonce, editorAiLoading, editorAiOperation, onRequestReview: () => { if (chapter?.id) void requestReview(chapter.id, editorTextRef.current, true); } }} />
           </React.Suspense>
       </div>}
       {tab === "settings" && <Settings projectId={project?.id || ""} novelId={novel?.id} />}

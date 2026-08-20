@@ -315,17 +315,130 @@ def get_editor_context(content_id: str, user: dict = Depends(get_current_user)):
             (novel_id,),
         ).fetchall()]
         current_index = next((i for i, row in enumerate(chapters) if str(row["id"]) == str(content_id)), -1)
+        # Context must be scoped to the selected novel.  Including NULL
+        # content_id rows here pulled project-wide/imported world entries into
+        # every editor, which made a clean novel look populated with unrelated
+        # worldbuilding while leaving its actual V7 state invisible.
         knowledge = [dict(row) for row in db.execute(
-            """SELECT id,kind,title,body,meta,fact_type,approved,source_chapter,updated_at
-               FROM knowledge_items WHERE project_id=%s AND (content_id=%s OR content_id IS NULL)
+            """SELECT id,project_id,content_id,kind,title,body,meta,fact_type,approved,source_chapter,updated_at
+               FROM knowledge_items WHERE project_id=%s AND content_id=%s
                AND is_deleted=FALSE ORDER BY kind,title""",
             (novel["project_id"], novel_id),
         ).fetchall()]
         for item in knowledge:
             item["meta"] = decode(item.get("meta"), {})
+        # Only explicit novel-bound Bible entries belong in the editor.  NULL
+        # content_id is project/import scope and is intentionally available to
+        # the knowledge browser, not silently merged into a chapter workspace.
         groups: dict[str, list[dict[str, Any]]] = {}
         for item in knowledge:
             groups.setdefault(str(item.get("kind") or "reference"), []).append(item)
+
+        def context_item(*, item_id: str, title: str, body: str, approved: bool, source: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+            return {
+                "id": item_id,
+                "title": title.strip() or "未命名条目",
+                "body": body.strip(),
+                "approved": approved,
+                "source": source,
+                "meta": meta or {},
+            }
+
+        # V7 memory is the chapter-aware context produced from the actual
+        # manuscript.  The previous UI only read static Bible rows, so after a
+        # chapter was written it still showed 0 characters / 0 plot / 0
+        # foreshadowings.  Surface the current novel's active states as
+        # deterministic evidence, never as AI-invented prose.
+        state_rows = [dict(row) for row in db.execute(
+            """SELECT id,state_type,state_key,state_value,confidence,is_pending_review,source,updated_at
+               FROM v7_story_states
+               WHERE novel_id=%s AND is_active=TRUE
+                 AND state_type IN ('character','plot','world')
+               ORDER BY updated_at DESC, state_key
+               LIMIT 160""",
+            (novel_id,),
+        ).fetchall()]
+        state_groups: dict[str, list[dict[str, Any]]] = {"character": [], "plot": [], "world": [], "foreshadowing": []}
+        for row in state_rows:
+            value = decode(row.get("state_value"), {})
+            value = value if isinstance(value, dict) else {"summary": str(value)}
+            category = str(value.get("category") or "")
+            state_type = str(row.get("state_type") or "")
+            if state_type == "plot" and row.get("state_key") == "plot_tree_status":
+                continue
+            group = "foreshadowing" if state_type == "plot" and category == "foreshadowing" else state_type
+            if group not in state_groups:
+                continue
+            state_key = str(row.get("state_key") or "")
+            title = state_key.replace(".", " · ")
+            summary = str(value.get("summary") or value.get("detail") or state_key)
+            detail = str(value.get("detail") or "")
+            body = summary if not detail or detail == summary else f"{summary}。{detail}"
+            state_groups[group].append(context_item(
+                item_id=f"v7-state:{row['id']}",
+                title=title,
+                body=body,
+                approved=not bool(row.get("is_pending_review")),
+                source=f"V7 {row.get('source') or 'story state'}",
+                meta={"confidence": row.get("confidence"), "category": category, "updated_at": row.get("updated_at")},
+            ))
+
+        plot_threads = [dict(row) for row in db.execute(
+            """SELECT id,name,status,progress,importance,last_chapter_seq
+               FROM plot_threads
+               WHERE novel_id=%s AND is_deleted=FALSE
+               ORDER BY importance DESC NULLS LAST, updated_at DESC
+               LIMIT 40""",
+            (novel_id,),
+        ).fetchall()]
+        thread_items = [context_item(
+            item_id=f"plot-thread:{row['id']}",
+            title=str(row.get("name") or "未命名故事线"),
+            body=str(row.get("progress") or "故事线已建立，当前进度待补充"),
+            approved=True,
+            source="故事线",
+            meta={"status": row.get("status"), "last_chapter_seq": row.get("last_chapter_seq")},
+        ) for row in plot_threads]
+
+        foreshadowing_rows = [dict(row) for row in db.execute(
+            """SELECT f.id,f.content,f.status,f.planned_resolve_chapter,f.expected_payoff_window,
+                      f.reader_awareness,c.seq AS planted_chapter
+               FROM foreshadowings f
+               JOIN contents c ON c.id=f.chapter_id
+               WHERE c.parent_id=%s
+               ORDER BY c.seq DESC, f.created_at DESC
+               LIMIT 40""",
+            (novel_id,),
+        ).fetchall()]
+        foreshadowing_items = [context_item(
+            item_id=f"foreshadowing:{row['id']}",
+            title=str(row.get("content") or "未命名伏笔"),
+            body=(f"第{row.get('planted_chapter') or '-'}章埋下 · 状态：{row.get('status') or '未标记'}"
+                  + (f" · 计划第{row['planned_resolve_chapter']}章回收" if row.get("planned_resolve_chapter") else "")),
+            approved=True,
+            source="伏笔账本",
+            meta={"status": row.get("status"), "reader_awareness": row.get("reader_awareness"), "expected_payoff_window": row.get("expected_payoff_window")},
+        ) for row in foreshadowing_rows]
+
+        # Current chapter V7 evidence goes first, followed by human-authored
+        # Bible material.  Dedupe exact title/body pairs so the sidebar remains
+        # useful instead of becoming a dump of parallel records.
+        def merge_items(*lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            merged: list[dict[str, Any]] = []
+            seen: set[tuple[str, str]] = set()
+            for items in lists:
+                for item in items:
+                    key = (str(item.get("title") or ""), str(item.get("body") or ""))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+            return merged
+
+        groups["character"] = merge_items(state_groups["character"], groups.get("character", []), groups.get("characters", []))
+        groups["plot"] = merge_items(thread_items, state_groups["plot"], groups.get("plot", []), groups.get("outline", []), groups.get("story_arc", []))
+        groups["worldview"] = merge_items(state_groups["world"], groups.get("worldview", []), groups.get("world_background", []))
+        groups["foreshadowing"] = merge_items(foreshadowing_items, state_groups["foreshadowing"], groups.get("foreshadowing", []), groups.get("foreshadowings", []))
         def chapter_preview(row: dict[str, Any] | None) -> dict[str, Any] | None:
             if not row:
                 return None
@@ -343,10 +456,10 @@ def get_editor_context(content_id: str, user: dict = Depends(get_current_user)):
             "previous_chapter": chapter_preview(chapters[current_index - 1] if current_index > 0 else None),
             "next_chapter": chapter_preview(chapters[current_index + 1] if current_index >= 0 and current_index + 1 < len(chapters) else None),
             "knowledge": groups,
-            "characters": groups.get("character", []) + groups.get("characters", []),
-            "plot": groups.get("plot", []) + groups.get("outline", []) + groups.get("story_arc", []),
-            "worldview": groups.get("worldview", []) + groups.get("world_background", []),
-            "foreshadowing": groups.get("foreshadowing", []) + groups.get("foreshadowings", []),
+            "characters": groups["character"],
+            "plot": groups["plot"],
+            "worldview": groups["worldview"],
+            "foreshadowing": groups["foreshadowing"],
         }, message="编辑上下文")
     finally:
         db.close()

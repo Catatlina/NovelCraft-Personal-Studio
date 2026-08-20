@@ -162,10 +162,10 @@ export function EditorAiChat({ chapterId, selection, busy = false, suggestions =
   }
 
   return (
-    <section className="editor-ai-chat" aria-label="AI 修改会话">
+    <section className="editor-ai-chat" aria-label="AI 共创助手">
       <div className="editor-ai-chat-context">
         <div>
-          <span className="editor-ai-chat-kicker">修改范围</span>
+          <span className="editor-ai-chat-kicker">协作范围</span>
           <strong>{target ? `已选文字 · ${target.length} 字` : "整章正文"}</strong>
         </div>
         <span className="editor-ai-chat-status">{busy ? "生成中" : sessionLoading ? "恢复中" : sessionError ? "记录异常" : "可对话"}</span>
@@ -174,7 +174,7 @@ export function EditorAiChat({ chapterId, selection, busy = false, suggestions =
       {sessionError ? <div className="editor-ai-chat-error" role="alert">{sessionError}</div> : null}
 
       <div className="editor-ai-chat-messages" role="log" aria-live="polite">
-        {!messages.length && !busy ? <p className="editor-ai-chat-empty">这里会保留本章的真实 AI 会话。先告诉 AI 你想推进哪一处。</p> : null}
+        {!messages.length && !busy ? <p className="editor-ai-chat-empty">这里保留本章的真实 AI 会话。你可以先讨论创意、人物、节奏和连续性，再决定是否生成候选。</p> : null}
         {messages.map(message => (
           <div key={message.id} className={`editor-ai-chat-message ${message.role}`}>
             <span className="editor-ai-chat-avatar" aria-hidden="true">
@@ -213,17 +213,17 @@ export function EditorAiChat({ chapterId, selection, busy = false, suggestions =
               submit();
             }
           }}
-          placeholder={target ? "例如：把这段写得更紧、更爽，保留事实和人物关系" : "例如：加强本章冲突和章末钩子，保留现有剧情"}
+          placeholder={target ? "例如：保留事实，把这段冲突写得更紧，先给我一个候选" : "例如：本章结尾顾沉要做什么选择？请先给出两种推进方案"}
           aria-label="输入修改意见"
           maxLength={1000}
           disabled={busy}
           rows={3}
         />
         <div className="editor-ai-chat-compose-footer">
-          <small>Enter 发送 · Shift+Enter 换行</small>
+          <small>Enter 发送 · Shift+Enter 换行 · 候选需人工确认</small>
           <button type="button" className="btn-primary" onClick={submit} disabled={busy || !input.trim()}>
             {busy ? <Loader2 size={14} className="nc-animate-pulse" /> : <Send size={14} />}
-            生成修改
+            生成候选
           </button>
         </div>
       </div>

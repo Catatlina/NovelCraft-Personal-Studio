@@ -50,7 +50,7 @@ describe("编辑器 AI 修改会话", () => {
     fireEvent.click(screen.getByRole("button", { name: "章末缺少可见的下一步压力" }));
     const input = screen.getByRole("textbox", { name: "输入修改意见" });
     expect((input as HTMLTextAreaElement).value).toContain("请根据这条审阅意见修改");
-    fireEvent.click(screen.getByRole("button", { name: "生成修改" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成候选" }));
 
     await waitFor(() => expect(onRequestEdit).toHaveBeenCalledWith(
       "请根据这条审阅意见修改：章末缺少可见的下一步压力",

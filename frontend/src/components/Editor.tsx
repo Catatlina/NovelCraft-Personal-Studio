@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X, ChevronLeft, ChevronRight, Sparkles, Repeat } from "lucide-react";
+import { Check, FilePenLine, Save, RotateCcw, Wand2, Bot, RefreshCcw, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { RichEditor } from "./RichEditor";
 import { EditorAiChat } from "./EditorAiChat";
 import { PacingCurve } from "./PacingCurve";
@@ -8,7 +8,6 @@ import { EditorContextPanel } from "./EditorContextPanel";
 import { EditorRoleStatus } from "./EditorRoleStatus";
 import { Pagination } from "./ui";
 import { usePagination } from "../hooks/usePagination";
-import { apiEnvelope, ApiError } from "../lib/api";
 import "../styles/novel-prose.css";
 
 type Content = { id: string; title: string; body: { content?: { text?: string }[] }; meta: Record<string, unknown>; parent_id?: string | null };
@@ -48,7 +47,7 @@ const EDITOR_OPERATION_LABELS: Record<string, string> = {
   deai: "去 AI 味",
 };
 
-export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, liveReviewError, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation, onGenerateNextChapter, nextChapterLoading }: {
+export function Editor({ chapter, chapters, selectChapter, editorText, setEditorText, selection, setSelection, saveChapter, runEditorOp, versions, restoreVersion, offlineNotice, offlineQueueCount, offlineAiResults, applyOfflineAiResult, streamPreview, liveReviewing, liveReviewError, onRequestReview, editorAiReview, pendingAiEdit, applyPendingAiEdit, discardPendingAiEdit, deaiResult, deaiLoading, markLiked, projectId, editorResetNonce, editorAiLoading, editorAiOperation }: {
   chapter: Content | null; chapters: Content[]; selectChapter: (id: string) => void;
   editorText: string; setEditorText: (t: string) => void;
   selection: string; setSelection: (s: string) => void;
@@ -71,8 +70,6 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   editorResetNonce?: number;
   editorAiLoading?: boolean;
   editorAiOperation?: string;
-  onGenerateNextChapter?: () => void | Promise<void>;
-  nextChapterLoading?: boolean;
   onRequestReview?: () => void;
 }) {
   const conflict = versions.find(version => version.label === "offline_conflict" && version.reason === "offline_conflict");
@@ -92,12 +89,6 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
   const [isFocusMode, setFocusMode] = useState(false);
 
   // ── 章节重写状态 ──
-  const [rewriteDialogOpen, setRewriteDialogOpen] = useState(false);
-  const [rewriteInstructions, setRewriteInstructions] = useState("");
-  const [rewriteLoading, setRewriteLoading] = useState(false);
-  const [rewriteTaskId, setRewriteTaskId] = useState("");
-  const [rewriteError, setRewriteError] = useState("");
-
   // ── Keyboard shortcut: Escape to exit fullscreen ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -203,22 +194,10 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-sm btn-ghost" disabled={editorAiLoading} onClick={() => runEditorOp("continue")} style={{ gap: 4 }}>
-            <Bot size={13} />续写
+            <Bot size={13} />续写候选
           </button>
           <button className="btn-sm btn-ghost" disabled={editorAiLoading || !selection.trim()} onClick={() => runEditorOp("polish")} style={{ gap: 4 }}>
-            <Wand2 size={13} />润色
-          </button>
-          <button
-            className="btn-sm btn-ghost"
-            disabled={editorAiLoading || rewriteLoading || !chapter}
-            onClick={() => {
-              setRewriteInstructions("");
-              setRewriteError("");
-              setRewriteDialogOpen(true);
-            }}
-            style={{ gap: 4 }}
-          >
-            <Repeat size={13} />重新生成
+            <Wand2 size={13} />选区润色
           </button>
           <button onClick={() => void saveChapter(readVisibleEditorText())} disabled={!chapter || editorAiLoading} className="btn-sm btn-primary" style={{ gap: 4 }}>
             <Save size={14} />保存
@@ -398,16 +377,9 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
               >
                 下一章<ChevronRight size={15} />
               </button>
-              <button
-                type="button"
-                className="btn-sm btn-primary editor-generate-next"
-                disabled={!!nextChapter || !!nextChapterLoading || chapterNavigationBusy || editorAiLoading || !onGenerateNextChapter}
-                title={nextChapter ? "下一章已经生成，直接点击“下一章”打开" : "保存当前章节并生成下一章"}
-                onClick={() => void onGenerateNextChapter?.()}
-              >
-                <Sparkles size={14} />
-                {nextChapterLoading ? "生成中…" : nextChapter ? "下一章已存在" : "生成下一章"}
-              </button>
+              <span className="editor-next-chapter-note">
+                {nextChapter ? "下一章已建立，可继续编辑" : "下一章由你决定，先在 AI 共创助手里讨论"}
+              </span>
             </div>
           </nav>
         </div>
@@ -416,12 +388,15 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         <div className="ed-aside" style={{ display: "flex", flexDirection: "column" }}>
           <EditorContextPanel chapterId={chapter.id} />
           <EditorRoleStatus projectId={projectId} />
-          <div className="card-title" style={{ marginBottom: 12 }}>
+          <div className="editor-rail-heading" style={{ marginBottom: 12 }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
               <rect x="3" y="11" width="18" height="10" rx="2"/>
               <circle cx="12" cy="5" r="2"/>
             </svg>
-            AI 修改会话
+            <div>
+              <strong>AI 共创助手</strong>
+              <span>先讨论，再生成候选；正文由你确认</span>
+            </div>
           </div>
 
           <EditorAiChat
@@ -614,111 +589,6 @@ export function Editor({ chapter, chapters, selectChapter, editorText, setEditor
         </div>
       )}
 
-      {/* ── 重新生成对话框 ── */}
-      {rewriteDialogOpen && (
-        <div role="dialog" aria-modal="true" className="modal-backdrop" style={{ zIndex: 300 }}>
-          <div className="card" style={{ maxWidth: 500, margin: "15vh auto", padding: 20 }}>
-            <h3 style={{ marginBottom: 12 }}>重新生成章节</h3>
-            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
-              将使用 V7 引擎重新生成本章节。可以输入修改意见（可选），生成后会自动替换原内容。
-            </p>
-            <textarea
-              className="form-input"
-              placeholder="输入修改意见（可选），例如：加强冲突、调整节奏、增加细节..."
-              value={rewriteInstructions}
-              onChange={(e) => setRewriteInstructions(e.target.value)}
-              rows={4}
-              style={{ width: "100%", resize: "vertical", marginBottom: 12 }}
-              disabled={rewriteLoading}
-            />
-            {rewriteError && (
-              <p style={{ color: "var(--danger)", fontSize: 12, marginBottom: 12 }}>{rewriteError}</p>
-            )}
-            {rewriteLoading && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
-                <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite" }} />
-                正在重新生成章节，请稍候...
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button type="button" onClick={() => { if (!rewriteLoading) setRewriteDialogOpen(false); }} disabled={rewriteLoading}>
-                取消
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={async () => {
-                  if (!chapter || rewriteLoading) return;
-                  setRewriteLoading(true);
-                  setRewriteError("");
-                  try {
-                    const data = await apiEnvelope<{ task_id: string }>(
-                      `/api/v1/chapters/${chapter.id}/rewrite`,
-                      {
-                        method: "POST",
-                        body: JSON.stringify({
-                          instructions: rewriteInstructions,
-                          mode: "full",
-                        }),
-                      }
-                    );
-                    setRewriteTaskId(data.data?.task_id || "");
-                    // 开始轮询状态
-                    const pollStatus = async () => {
-                      try {
-                        const statusData = await apiEnvelope<{ status: string; message?: string }>(
-                          `/api/v1/chapters/${chapter.id}/regeneration`
-                        );
-                        const status = statusData.data?.status;
-                        if (status === "completed" || status === "pending_review") {
-                          setRewriteLoading(false);
-                          setRewriteDialogOpen(false);
-                          // 刷新页面以加载新内容
-                          window.location.reload();
-                          return;
-                        }
-                        if (status === "failed") {
-                          setRewriteLoading(false);
-                          setRewriteError(statusData.data?.message || "重写失败");
-                          return;
-                        }
-                        // 继续轮询
-                        setTimeout(pollStatus, 3000);
-                      } catch (err) {
-                        setRewriteLoading(false);
-                        if (err instanceof ApiError) {
-                          setRewriteError(err.message || "状态查询失败");
-                        } else {
-                          setRewriteError(err instanceof Error ? err.message : "状态查询失败");
-                        }
-                      }
-                    };
-                    setTimeout(pollStatus, 2000);
-                  } catch (err) {
-                    setRewriteLoading(false);
-                    if (err instanceof ApiError) {
-                      if (err.status === 401) {
-                        setRewriteError("登录状态已过期，请刷新页面重新登录");
-                      } else if (err.status === 403) {
-                        setRewriteError("没有权限操作此章节");
-                      } else if (err.status === 404) {
-                        setRewriteError("章节不存在");
-                      } else {
-                        setRewriteError(err.message || "重写失败");
-                      }
-                    } else {
-                      setRewriteError(err instanceof Error ? err.message : "重写失败");
-                    }
-                  }
-                }}
-                disabled={rewriteLoading}
-              >
-                {rewriteLoading ? "生成中..." : "开始生成"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
