@@ -1190,7 +1190,10 @@ def test_generation_uses_serial_scene_handoffs_and_skips_full_chapter_rewrite():
     assert result["scene_serial"]["generation_mode"] == "scene_serial"
     assert result["generation_quality"]["scene_serial"]["handoff_count"] == 4
     assert engine.deai_pipeline.calls == []
-    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] == 245
+    # Scene targets are pacing hints.  The Provider receives completion
+    # headroom rather than a token ceiling derived from the old hard scene
+    # budget.
+    assert engine.ai_gateway.call_kwargs[0]["max_tokens"] > 245
 
 
 def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract():
@@ -1256,7 +1259,9 @@ def test_scene_serial_moves_opening_pacing_constraints_into_generation_contract(
     assert "重大袭击、对抗或爆发结束后" in prompt
     assert "关键异常、开门、封印松动、袭击、修炼变化或新能力必须先写可见前提/征兆" in prompt
     assert "碑文、幻象、梦境或他人话语里的数字/年代属于原说话者" in prompt
-    assert "生成期计划控制在 189-546 字，最多允许自然波动到 680 字" in prompt
+    assert "本场建议约写" in prompt
+    assert "场景长度只是节拍参考，不是独立硬上限" in prompt
+    assert "只要整章不超过章节预算" in prompt
 
 
 def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_plan():
@@ -1275,8 +1280,8 @@ def test_scene_prompt_uses_effective_budget_when_reader_budget_is_smaller_than_p
         max_scene_chars=960,
     )
 
-    assert "本场约写 960 字" in prompt
-    assert "本场约写 1200 字" not in prompt
+    assert "本场建议约写 960 字" in prompt
+    assert "本场建议约写 1200 字" not in prompt
 
 
 def test_scene_card_preserves_trigger_and_causal_link_from_plan():

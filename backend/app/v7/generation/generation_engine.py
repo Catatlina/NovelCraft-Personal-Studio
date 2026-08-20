@@ -4408,10 +4408,10 @@ class GenerationEngine:
             "缺少依据时用动作和现场结果呈现，不要用精确数字制造伪连续性。"
             "本场结束时留下明确的动作、发现、选择或压力，给下一场一个能直接接住的落点；"
             "不要为了达到字数重复冲突。\n"
-            f"本场约写 {effective_target} 字，生成期计划控制在 {minimum}-{maximum} 字，"
-            f"最多允许自然波动到 {allowed_maximum} 字；超过这个上限就是不合格。"
-            "达到事件结果后立即收束；如果已经完成目标，"
-            "不得继续补写日常、环境、回忆或重复反应来凑字数。"
+            f"本场建议约写 {effective_target} 字，参考范围 {minimum}-{nominal_maximum} 字；"
+            "场景长度只是节拍参考，不是独立硬上限。只要整章不超过章节预算，"
+            "一个完整事件可以自然多写或少写；达到事件结果后立即收束，"
+            "不得为了凑章节字数补写日常、环境、回忆或重复反应。"
             f"\n\n{render_generation_style_protocol(generation_path)}"
             f"{retry_block}"
         )
@@ -4443,13 +4443,9 @@ class GenerationEngine:
         scene_outputs: list[dict[str, Any]] = []
         handoffs: list[dict[str, Any]] = []
         usage = {"tokens_input": 0, "tokens_output": 0, "cost": 0.0, "model": None}
-        # Reserve the planned size of all future scenes.  The old scheduler
-        # reserved only their minimum length, allowing the first scenes to
-        # consume the reader target and leaving the climax with no room.
-        # Reserve scene targets against the reader budget itself. The larger
-        # chapter envelope is only for a complete final-scene variance; it
-        # must not let an early scene consume space readers expect to be used
-        # by the remaining beats.
+        # The chapter budget is the only hard reader-facing limit. Future beat
+        # targets guide allocation, but a scene may naturally take more or
+        # less space; the scheduler reallocates slack after a complete scene.
         planning_max_chars = min(
             chapter_max_chars,
             int(chapter_reader_max_chars or chapter_max_chars),
@@ -4522,15 +4518,14 @@ class GenerationEngine:
                     f"future_target_chars={future_target_chars}, "
                     f"planning_max_chars={planning_max_chars}"
                 )
-            scene_max_chars = min(
-                (
-                    self._scene_allowed_max_chars(card, scene_index=index)
-                    if target_word_count >= 1800
-                    else nominal_max_scene_chars
-                ),
-                remaining_scene_budget,
-                remaining_planned_budget if target_word_count >= 1800 else remaining_scene_budget,
+            # Do not turn a beat's suggested size into a hard scene ceiling.
+            # Use a generous Provider completion capacity for token budgeting;
+            # the generated text is judged only against the chapter budget.
+            soft_provider_capacity = max(
+                nominal_max_scene_chars,
+                int(self._scene_allowed_max_chars(card, scene_index=index) * 1.35),
             )
+            scene_max_chars = min(remaining_scene_budget, soft_provider_capacity)
             feedback = ""
             accepted_scene = ""
             scene_metrics: dict[str, Any] = {}
@@ -4865,38 +4860,23 @@ class GenerationEngine:
                             "severity": "high",
                             "message": f"场景只有 {candidate_word_count} 字，至少需要 {min_scene_chars} 字",
                         })
-                    scene_soft_max_chars = (
-                        pacing_max_scene_chars + SCENE_NATURAL_LENGTH_SOFT_OVERFLOW_CHARS
-                    )
-                    if (
-                        candidate_word_count > pacing_max_scene_chars
-                        and candidate_word_count <= scene_soft_max_chars
-                    ):
+                    if candidate_word_count > pacing_max_scene_chars:
                         attempt_warnings.append({
                             "code": "scene_natural_length_variance",
                             "severity": "low",
                             "message": (
-                                f"场景有 {candidate_word_count} 字，略高于节拍建议上限 "
-                                f"{pacing_max_scene_chars} 字，但仍在自然波动范围内"
+                                f"场景有 {candidate_word_count} 字，高于节拍建议 "
+                                f"{pacing_max_scene_chars} 字；章节预算仍是唯一硬限制"
                             ),
                             "word_count": candidate_word_count,
                             "max_scene_chars": pacing_max_scene_chars,
                         })
-                    if candidate_word_count > scene_soft_max_chars:
-                        issues.append({
-                            "code": "scene_overlong",
-                            "severity": "high",
-                            "message": (
-                                f"场景有 {candidate_word_count} 字，超过 beat 目标上限 "
-                                f"{scene_soft_max_chars} 字（建议上限 {pacing_max_scene_chars} 字）；"
-                                "必须在生成期收束本场"
-                            ),
-                            "word_count": candidate_word_count,
-                            "max_scene_chars": scene_soft_max_chars,
-                        })
                 if (
-                    len(issues) == 1
-                    and issues[0].get("code") == "scene_reader_budget_overrun"
+                    any(
+                        isinstance(item, dict)
+                        and item.get("code") == "scene_reader_budget_overrun"
+                        for item in issues
+                    )
                     and not truncated
                 ):
                     excess = (
@@ -4910,7 +4890,11 @@ class GenerationEngine:
                         future_start=index,
                         excess_chars=excess,
                     ):
-                        issues = []
+                        issues = [
+                            item
+                            for item in issues
+                            if item.get("code") != "scene_reader_budget_overrun"
+                        ]
                 budget_issue_codes = {
                     "scene_chapter_budget_overrun",
                     "scene_reader_budget_overrun",
