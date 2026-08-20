@@ -1438,6 +1438,17 @@ def test_scene_serial_does_not_blame_one_handoff_paragraph_for_chapter_opening_r
     assert not any(flag["code"] == "repeated_paragraph_opening" for flag in flags)
 
 
+def test_scene_serial_does_not_retry_dash_density_that_only_occurs_in_dialogue():
+    candidate = "\n\n".join([
+        "“你——先别动。”他把手按在门锁上。",
+        "门后没有回应，灰尘从门缝里落下来。",
+    ])
+
+    flags = GenerationEngine._scene_naturalness_flags(candidate)
+
+    assert not any(flag["code"] == "dash_density" for flag in flags)
+
+
 def test_prose_feature_card_uses_sample_statistics_without_verbatim_payload():
     card = build_prose_feature_card([
         {"text": "门锁先响了。雨水沿着窗框往下淌。她没有回答，只把纸条折回去。", "label": "positive"},

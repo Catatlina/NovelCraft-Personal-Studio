@@ -91,7 +91,7 @@ from ..integration.quality import CHAPTER_MIRROR_HARD_GATE, PAYOFF_VARIETY_HARD_
 logger = logging.getLogger(__name__)
 
 CHAPTER_STATE_TYPE = "chapter"
-SCENE_SERIAL_GENERATION_VERSION = "2.27.0"
+SCENE_SERIAL_GENERATION_VERSION = "2.28.0"
 # Keep the canonical writer loop intentionally small.  Candidate fan-out and
 # local prose surgery belong to explicit/manual tooling, not the production
 # chapter path; nested retries made the writer see too many competing rules.
@@ -3708,6 +3708,21 @@ class GenerationEngine:
                 and flag.get("code") in retry_codes
                 and str(flag.get("severity") or "").lower() in {"medium", "high"}
             ):
+                if flag.get("code") == "dash_density":
+                    # deai_metrics is intentionally chapter-wide and counts
+                    # dialogue punctuation too. Generation should only retry
+                    # when the narrative itself is dash-heavy; a quoted
+                    # interruption is a valid local voice choice.
+                    narrative = _remove_dialogue(candidate)
+                    narrative_compact = re.sub(r"\s+", "", narrative)
+                    narrative_dash_count = len(re.findall(r"——|--|—", narrative))
+                    narrative_density = (
+                        narrative_dash_count / len(narrative_compact) * 1000
+                        if narrative_compact
+                        else 0.0
+                    )
+                    if narrative_density <= 5:
+                        continue
                 flags.append(flag)
         for flag in generation_naturalness.get("flags") or []:
             if (
