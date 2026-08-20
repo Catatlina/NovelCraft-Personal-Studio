@@ -4703,7 +4703,18 @@ class GenerationEngine:
                     + content_generation_contract(self.quality_profile)
                 )
                 if attempt and candidate:
-                    if style_only_retry:
+                    if "scene_metaphor_density" in previous_issue_codes:
+                        scene_system_prompt = (
+                            "你是中文网文的生成期字面现场编辑。必须依据本场 scene_card、已确认状态和"
+                            "上一场交接点，从头重写出完整正文；保留事件、人物、因果和本场结果，"
+                            "同时删除重复动作、重复环境和解释性总结；不能从上一版末尾续写，不能照抄句式。"
+                            "本次非对白中的‘像、好像、仿佛、如同、宛如、犹如’必须为0处，"
+                            "声音、光线、触感和情绪全部直接写实际变化；如果本场也超出章节剩余预算，"
+                            "优先删掉重复反应和无关描写，但不能删掉目标、阻碍、选择或结果。只输出正文。"
+                            + third_person_generation_contract()
+                            + content_generation_contract(self.quality_profile)
+                        )
+                    elif style_only_retry:
                         if "scene_metaphor_density" in previous_issue_codes:
                             route = (
                                 "本轮改用朴素现场推进：非对白中的‘像、好像、仿佛、如同、"
