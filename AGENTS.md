@@ -1,4 +1,4 @@
-# NovelCraft Agent Operating Contract
+# Starlume AI Agent Operating Contract
 
 This file is mandatory for every AI agent, coding agent, automation tool, and
 human developer working in this repository.
@@ -9,9 +9,9 @@ pushing, you must read and follow:
 1. `docs/AI_HANDOFF.md`
 2. `docs/REQUIREMENTS_TRACEABILITY.md`
 3. `docs/KNOWN_ISSUES.md`
-4. `docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md`
+4. `docs/Starlume-AI-开发文档/05-AI遵从与开发真实性规范.md`
 5. `PROJECT_PROGRESS.md`
-6. The active task document, currently `docs/NovelCraft-开发文档/37-新增需求任务分解-20260713.md`
+6. The active task document, currently `docs/Starlume-AI-开发文档/03-开发路径与里程碑.md`
 7. The latest audit report provided by the user, if any
 
 If work stops before the active objective is accepted, update
@@ -28,7 +28,13 @@ bash scripts/ai_development_gate.sh
 Rules that override any optimistic wording in other docs:
 
 - Never claim "complete", "fully fused", "usable", "accepted", or "all done"
-  unless the evidence gates in document 23 are satisfied.
+  unless the evidence gates in the Starlume AI document 05 are satisfied.
+- Reuse the current editor, Gateway, V7 control plane, persistence and publishing
+  path before adding a new module. Implement the smallest vertical slice that
+  produces the requested user result; do not build the target architecture all
+  at once.
+- AI output is always a candidate until a human explicitly applies or confirms
+  it. The canonical chapter body remains in `contents`.
 - Code existence, route existence, import success, a skeleton function, or a
   deprecated module is not completion.
 - AI features must use a real provider path and must not return mock, fallback,

@@ -4,13 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "== NovelCraft AI development gate =="
+echo "== Starlume AI development gate =="
 
 required_files=(
   "AGENTS.md"
   "PROJECT_PROGRESS.md"
-  "docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md"
-  "docs/NovelCraft-开发文档/37-新增需求任务分解-20260713.md"
+  "docs/Starlume-AI-开发文档/README.md"
+  "docs/Starlume-AI-开发文档/03-开发路径与里程碑.md"
+  "docs/Starlume-AI-开发文档/05-AI遵从与开发真实性规范.md"
 )
 
 for file in "${required_files[@]}"; do
@@ -24,12 +25,12 @@ echo "Required governance files exist."
 
 echo
 echo "== Mandatory reading markers =="
-rg -n "开发前必读|AI_EXECUTION_CONTRACT|反撒谎扫描|标准交付汇报格式" \
-  "docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md" \
-  "docs/NovelCraft-开发文档/README-文档索引.md" \
-  "docs/NovelCraft-开发文档/37-新增需求任务分解-20260713.md" \
-  "PROJECT_PROGRESS.md" >/tmp/novelcraft_gate_markers.txt
-cat /tmp/novelcraft_gate_markers.txt
+rg -n "每次工作前必须读取|STARLUME_AI_EXECUTION_CONTRACT|禁止的假完成|交付报告格式" \
+  "docs/Starlume-AI-开发文档/05-AI遵从与开发真实性规范.md" \
+  "docs/Starlume-AI-开发文档/README.md" \
+  "docs/Starlume-AI-开发文档/03-开发路径与里程碑.md" \
+  "PROJECT_PROGRESS.md" >/tmp/starlume_gate_markers.txt
+cat /tmp/starlume_gate_markers.txt
 
 echo
 echo "== Suspicion scan: fabricated AI output or swallowed failures =="
@@ -39,11 +40,11 @@ rg -n "mock (output|content|result)|fake (output|content|result)|placeholder (ou
   --glob '!backend/app/prompts/upstream/**' \
   --glob '!**/*.test.*' \
   --glob '!**/tests/**' \
-  > /tmp/novelcraft_gate_suspicion_1.txt
+  > /tmp/starlume_gate_suspicion_1.txt
 status1=$?
 set -e
 if [[ $status1 -eq 0 ]]; then
-  cat /tmp/novelcraft_gate_suspicion_1.txt
+  cat /tmp/starlume_gate_suspicion_1.txt
   echo "GATE_WARNING: Suspicion scan produced matches. Each match must be fixed or explicitly justified before claiming completion." >&2
 else
   echo "No matches."
@@ -57,11 +58,11 @@ rg -n "震惊！|背后的真相|你不知道的|# \\{topic\\}|Estimated beats|W
   --glob '!backend/app/prompts/upstream/**' \
   --glob '!**/*.test.*' \
   --glob '!**/tests/**' \
-  > /tmp/novelcraft_gate_suspicion_2.txt
+  > /tmp/starlume_gate_suspicion_2.txt
 status2=$?
 set -e
 if [[ $status2 -eq 0 ]]; then
-  cat /tmp/novelcraft_gate_suspicion_2.txt
+  cat /tmp/starlume_gate_suspicion_2.txt
   echo "GATE_WARNING: Fabrication/template scan produced matches. Fix or justify before claiming completion." >&2
 else
   echo "No matches."

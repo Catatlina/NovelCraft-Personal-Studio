@@ -28,7 +28,7 @@
 ## 给下一位 AI 的直接指令
 
 ```text
-你正在接手 Starlume AI（原 NovelCraft Personal Studio）的未完成开发。
+你正在接手 Starlume AI 的未完成开发。
 
 唯一工作目录：
 /Users/genius/Documents/Codex/2026-07-23/https-github-com-tradecatlabs-vibe-coding/work/NovelCraft-Personal-Studio
@@ -37,7 +37,9 @@
 1. 完整读取 AGENTS.md、docs/AI_HANDOFF.md、
    docs/REQUIREMENTS_TRACEABILITY.md、docs/KNOWN_ISSUES.md、
    docs/ACCEPTANCE_CRITERIA.md、docs/AI_CONTINUITY.md、
-   docs/NovelCraft-开发文档/23-AI开发边界与交付真实性规范.md、
+   docs/Starlume-AI-开发文档/README.md、
+   docs/Starlume-AI-开发文档/03-开发路径与里程碑.md、
+   docs/Starlume-AI-开发文档/05-AI遵从与开发真实性规范.md、
    PROJECT_PROGRESS.md。
 2. 执行 git status、git branch --show-current、
    git log --oneline --decorate -12、git diff --check。
@@ -47,6 +49,7 @@
 
 开发规则：
 - 使用 Vibe Coding 的任务契约、分批实现、证据门禁逻辑。
+- 优先复用现有编辑器、Gateway、V7、持久化和发布准备能力；只做当前闭环所需的最小新增。
 - 不制作新 Demo，不恢复非小说入口，不删除旧数据。
 - 不使用 Mock、固定 JSON、定时器或 Toast 冒充成功。
 - AI 失败必须失败；AI 编辑必须预览后由用户应用。

@@ -5,11 +5,11 @@
 
 ## 项目概述
 
-Starlume AI（原 NovelCraft Personal Studio）是小说优先的个人创作工作台。当前产品主线覆盖小说首页、创作向导、扫榜选书、书库、创作进度、章节编辑、审阅与一致性、小说设置。AI 创作必须走真实 Provider；失败必须明确失败，AI 编辑必须先预览再由用户应用。
+Starlume AI 是人工主导、多 AI 协作、全过程可追溯的中文长篇小说创作工作台。当前代码已具备小说首页、创作向导、扫榜选书、书库、创作进度、章节编辑、审阅与一致性、发布准备和小说设置；产品正在按最小垂直切片从“AI 主生成”迁移为“人工创意 + AI 辅助扩写/建议 + 人工改写确认”。AI 创作必须走真实 Provider；失败必须明确失败，AI 编辑必须先预览再由用户应用。
 
 历史自媒体、发布、协作等模块不再出现在当前产品 UI，但其旧数据、数据库迁移和仍被小说主线复用的后端源码暂不删除。
 
-- **仓库**: [Catatlina/NovelCraft-Personal-Studio](https://github.com/Catatlina/NovelCraft-Personal-Studio)
+- **仓库**: [Catatlina/starlume-ai-studio](https://github.com/Catatlina/starlume-ai-studio)
 - **技术栈**: FastAPI + PostgreSQL + Celery + Redis + React + TypeScript + Vite
 - **AI Provider**: 当前本地真实验收以 DeepSeek 为准；Claude / OpenAI / Gemini 保留 BYOK/环境变量配置入口，未配置对应 key 时不纳入本轮阻塞。业务运行时不使用 mock，不做伪降级，Provider 失败必须明确报错。
 
@@ -82,26 +82,7 @@ docker-compose.yml
 
 ## 开发文档
 
-详细开发文档位于 `docs/NovelCraft-开发文档/`：
-- 01-项目全局分析报告.md
-- 02-架构评审报告.md
-- 03-开发路线图.md
-- 04-MVP方案.md
-- 05-技术实施方案.md
-- 06-开发任务清单.md
-- 07-工程协作规范.md
-- 08-需求规格说明书PRD.md
-- 09-数据库设计文档.md
-- 10-API接口规范.md
-- 11-Prompt工程规范.md
-- 12-设计系统规范.md
-- 13-测试计划与用例.md
-- 14-部署与运维手册.md
-- 15-开发环境搭建指南.md
-- 16-编码规范.md
-- 17-安全设计文档.md
-- 18-架构决策记录ADR.md
-- 19-开源项目融合基线.md
+现行需求、架构、开发路线、AI 门禁、AI 遵从、实施和交接文档位于 [`docs/Starlume-AI-开发文档/`](docs/Starlume-AI-开发文档/README.md)。`docs/NovelCraft-开发文档/` 只保留历史设计和迁移证据，不再作为新产品需求入口。
 
 ## AI 配置系统
 
@@ -120,6 +101,8 @@ docker-compose.yml
 | `NOVELCRAFT_CREDENTIALS_KEY` | 平台连接凭据 Fernet 加密密钥 | 环境变量；生产必填 |
 | `CLAUDE_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | 各 Provider API Key | 环境变量 |
 | `AI_PRICE_CNY_PER_MILLION` | 各 Provider 输入/输出每百万 token 单价 JSON | 环境变量 |
+
+`NOVELCRAFT_*`、`novelcraft` 数据库名和旧事件名是历史兼容标识。对外产品名已经统一为 Starlume AI；这些技术标识只能在有迁移、回滚和部署验证的独立批次中修改。
 
 **配置优先级**：当前请求的 BYOK Header > 服务环境变量。数据库 `settings` 表中的历史 Provider 值不再作为运行时密钥来源。
 **API Key 安全**：前端 BYOK 字段为密码输入框且不落库；生产/定时任务密钥由部署环境注入，不通过管理 API 返回。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NovelCraft truthfulness gate.
+"""Starlume AI truthfulness gate.
 
 This is intentionally AST-based instead of a broad grep:
 - AI-looking functions must either call the real gateway/provider path or be
@@ -137,6 +137,7 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/v7/director/story_director.py:review_input": "deterministic review payload assembly",
     "backend/app/v7/integration/quality.py:evaluate_review": "deterministic application quality gate over model-provided scores",
     "backend/app/services/quality_risks.py:evaluate_editor_review_gate": "deterministic editor quality gate over model-provided review evidence",
+    "backend/app/services/quality_risks.py:_is_advisory_review_observation": "deterministic severity normalization over existing review text; it neither calls AI nor creates review output",
     "backend/app/v7/quality/deai_metrics.py:analyze_deai_patterns": "deterministic naturalness metrics; it never generates or rewrites prose",
     "backend/app/v7/quality/report_distillation.py:analyze_report_metrics": "deterministic report-style paragraph and sentence statistics; it never generates or rewrites prose",
     "backend/app/v7/integration/v6_bridge.py:persist_review_hold_v7_draft": "database persistence of a provider-review hold; it retains an already generated draft and never generates prose",
@@ -163,6 +164,8 @@ ALLOWLIST: dict[str, str] = {
     "backend/app/v7/api/quality.py:_get_ai_dim_score": "nested helper to extract dimension score by name from AI smell result list, pure list lookup no AI calls",
     "backend/app/v7/generation/generation_engine.py:plan_scene": "scene planning delegates to self.gateway.generate_json",
     "backend/app/v7/generation/generation_engine.py:validate_scene_plan_contract": "deterministic shape/phase/word-budget validation of a provider-produced scene plan; it never generates prose",
+    "backend/app/v7/generation/generation_engine.py:_ensure_prose_texture_plan": "deterministic prompt-constraint completion from chapter shape; it schedules existing rules and never generates prose",
+    "backend/app/v7/generation/generation_engine.py:_segment_candidate_score": "deterministic comparison of internal risk metrics; explicitly not an external detector or AI judgement",
     "backend/app/v7/generation/generation_engine.py:generate": "the V7 gateway's direct real-provider HTTP boundary",
     "backend/app/v7/generation/generation_engine.py:generate_chapter": "generation orchestration delegates to gateway-backed scene, writing and humanize stages",
     "backend/app/v7/quality/opening_variation.py:select_opening_plan": "deterministic opening-mode scheduler; it selects a prompt constraint and never generates prose",
