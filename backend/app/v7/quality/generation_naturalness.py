@@ -127,16 +127,23 @@ def inspect_generation_naturalness(text: Any) -> dict[str, Any]:
         })
 
     similes = [match.group(0)[:60] for match in _SIMILE_RE.finditer(narrative)]
-    # Treat a repeated image chain as a generation risk, not every isolated
-    # comparison as a hard failure.  The previous zero-tolerance rule rejected
-    # concrete prose with one natural image and made an internal heuristic
-    # stricter than the external detector evidence justified.
-    if size >= 500 and len(similes) >= 2:
+    # Treat genuinely dense image chains as a generation risk, not every pair
+    # of natural comparisons as a hard failure.  A fixed threshold overfires
+    # on longer scenes: three images in 900-1300 characters is not the same
+    # problem as six images in a 600-character opening.  Scale the threshold
+    # with scene size while keeping a floor so short scenes do not overfire.
+    simile_limit = max(4, int(size / 220))
+    if size >= 500 and len(similes) >= simile_limit:
         flags.append({
             "code": "scene_metaphor_density",
             "severity": "medium",
-            "message": "非对白出现连续比喻链；改成可观察的动作、物件或结果",
-            "evidence": {"count": len(similes), "examples": similes[:4], "narrative_chars": size},
+            "message": "非对白比喻密度过高；改成可观察的动作、物件或结果",
+            "evidence": {
+                "count": len(similes),
+                "limit": simile_limit,
+                "examples": similes[:4],
+                "narrative_chars": size,
+            },
         })
 
     repeated_actions: list[dict[str, str]] = []

@@ -390,7 +390,13 @@ def test_generation_naturalness_blocks_explanation_metaphor_and_action_loops():
     assert "scene_metaphor_density" not in codes  # short snippets do not overfire
     assert "scene_repeated_action_loop" in codes
 
-    long_text = text + "具体动作落在门锁、灰尘和台阶上。" * 40
+    long_text = text + (
+        "具体动作落在门锁、灰尘和台阶上。"
+        "墙上的影子像被水冲散。"
+        "灯芯像被风压低。"
+        "门缝里的声音像贴着地面爬行。"
+        "灰尘像细沙一样落回砖缝。"
+    ) * 40
     long_report = inspect_generation_naturalness(long_text)
     long_codes = {item["code"] for item in long_report["flags"]}
     assert "scene_metaphor_density" in long_codes
@@ -431,7 +437,11 @@ def test_generation_naturalness_flags_one_non_dialogue_simile_at_scene_scale():
     report = inspect_generation_naturalness(text.replace("水痕", "像水一样的痕迹"))
     assert not any(item["code"] == "scene_metaphor_density" for item in report["flags"])
 
-    chained = text.replace("水痕", "像水一样的痕迹") + "地面像被细线划开。"
+    chained = text.replace("水痕", "像水一样的痕迹") + (
+        "地面像被细线划开。"
+        "墙角的灰像被手指拨过。"
+        "灯影像一块布压在门上。"
+    )
     chained_report = inspect_generation_naturalness(chained)
     assert any(item["code"] == "scene_metaphor_density" for item in chained_report["flags"])
 
@@ -445,7 +455,7 @@ def test_scene_retry_feedback_does_not_replay_failed_prose_examples():
         },
     })
 
-    assert evidence == {"count": 8, "baseline": "non_dialogue_simile_chain_two_or_more"}
+    assert evidence == {"count": 8, "baseline": "non_dialogue_simile_density"}
     assert "像取不尽似的" not in json.dumps(evidence, ensure_ascii=False)
 
 

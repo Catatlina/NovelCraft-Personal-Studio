@@ -3573,7 +3573,7 @@ class GenerationEngine:
                 "count": int(evidence.get("count") or 0)
                 if isinstance(evidence, dict)
                 else None,
-                "baseline": "non_dialogue_simile_chain_two_or_more",
+                "baseline": "non_dialogue_simile_density",
             }
         if code == "scene_explanatory_narration":
             kinds = []
