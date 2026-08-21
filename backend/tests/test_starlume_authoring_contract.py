@@ -94,12 +94,13 @@ def test_chapter_skeleton_prompt_has_a_real_length_budget():
 
     name, version, _model, template = next(item for item in PROMPT_SEEDS if item[0] == "authoring.chapter_skeleton")
     assert name == "authoring.chapter_skeleton"
-    assert version == "1.2.0"
+    assert version == "1.3.0"
     assert "不能写成几百字摘要" in template
     assert "7 个小节" in template
-    assert "不足 700 字时继续补充" in template
+    assert "7 个小节合计至少 700 个可见字" in template
     assert "作者先行，读者可跟随" in template
     assert "reader_experience_plan" in template
+    assert "每个小节至少 100 字" in template
 
 
 def test_chapter_skeleton_protocol_rejects_a_flat_scene_summary():
