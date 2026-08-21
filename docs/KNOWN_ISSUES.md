@@ -2,10 +2,10 @@
 
 ## 2026-08-21 KI-066 `lengdu` 方法融合后的骨架协议尚未完成真实样本验收
 
-- 状态：**本地已接线，尚未提交、推送、部署；真实 Provider 样本未开始**。
+- 状态：**已部署，真实 Provider 样本未开始**。
 - 根因边界：`lengdu` 是 PolyForm Noncommercial 许可的 Codex Skill，不是 Starlume 的运行时组件；本项目不能直接复制其代码/提示词。当前采用清洁室实现，复用现有章节骨架入口，加入作者意图优先、角色受限选择、信息改变行动/关系/代价、读者体验目标和原稿隔离。
 - 代码：`authoring.chapter_skeleton` Prompt `1.2.0`；场景节点要求触发、行动、选择、冲突、代价、结果和可见变化；`_validate_chapter_skeleton_protocol` 对结构缺失、占位词、重复结果 fail-closed；前端展示读者体验目标、场景链、人物变化、伏笔和待确认事实。
-- 已验证：章节骨架契约 `8 passed`，前端 `npm run build` 通过；融合相关集成测试因本机 PostgreSQL 未启动而在注册阶段返回 `503`，不能记为全量通过。
+- 已验证：章节骨架契约 `8 passed`，前端 `58 passed`、`npm run build`、真实性/交付声明/强制开发门禁通过；生产提交 `1a150ff`，备份 `backups/pre-deploy-1a150ff-20260821-111052.sql.gz` gzip 校验通过，迁移 `nc_starlume_authoring (head)`，线上 Prompt `1.2.0`，healthz 和未认证路由检查正常。融合相关集成测试因本机 PostgreSQL 未启动而在注册阶段返回 `503`，不能记为全量通过。
 - 未闭合：提交/推送/生产部署、新 Prompt 真实 Provider 单章骨架、人工可写性、多样本朱雀检测、三章/20章长跑、AI披露人工确认和正式发布闭环。不能把他人“10篇9篇”经验写成 Starlume 达标证据。
 
 ## 2026-08-20 KI-062 朱雀报告暴露生成期状态回声与移动流水账
