@@ -1,14 +1,15 @@
 # Starlume AI — 真实进度
 
-## 2026-08-21 `lengdu` 方法清洁室融合（`1a150ff` 已部署，真实样本未开始）
+## 2026-08-21 `lengdu` 方法清洁室融合（`a0695ce` 已部署，单章真实骨架已验证）
 
 - 复用现有章节骨架入口，不新增正文长跑或整章重写流程；Prompt `authoring.chapter_skeleton` 从 `1.1.0` 升级为 `1.2.0`。
 - 生成协议新增作者意图/硬事实优先、角色受限选择、信息必须产生行动或代价变化、避免单向答案通道和伪造人味细节；Writer 不接收朱雀/AIGC分数。
 - Provider 结构新增 `reader_experience_plan`，场景节点要求 `trigger → action → choice → conflict → cost → outcome → visible_change`；后端确定性协议门禁缺字段、占位词、重复结果直接失败，正文不写入。
 - 编辑器骨架工作区展示读者体验目标、场景链、人物变化、伏笔动作和待人工确认事实，作者仍可独立修改保存骨架，正文真相源不变。
 - 本地证据：章节骨架契约 `8 passed`，前端 `58 passed`、`npm run build`、真实性/交付声明/强制开发门禁通过；融合/骨架集成测试因本机 PostgreSQL 未启动而注册返回 `503`，不能标记全量通过。
-- 生产证据：`1a150ff` 已提交、推送、部署；备份 `backups/pre-deploy-1a150ff-20260821-111052.sql.gz` gzip 校验通过，292M；迁移 `nc_starlume_authoring (head)`，线上 Prompt `1.2.0`，healthz、容器和未认证 authoring 路由检查正常。
-- 当前状态：代码**已部署**；真实 Provider 单章、朱雀样本、三章/20章长跑、AI披露人工确认和正式发布闭环均未开始/未验收。
+- 生产证据：`a0695ce` 已提交、推送、部署；备份 `backups/pre-deploy-a0695ce-20260821-112435.sql.gz` gzip 校验通过，292M；迁移 `nc_starlume_authoring (head)`，线上 Prompt `1.4.0`，healthz、容器和未认证 authoring 路由检查正常。
+- 单章真实 Provider：HTTP 200，`deepseek-chat`、`provider_verified=true`，骨架856可见字、6个场景、读者计划5字段，版本 `899f2b41-9dc9-4a46-a626-232edfade4e9`；正文哈希前后相同。
+- 当前状态：章节骨架单章真实链路**可用**；多样本人工可写性、正文质量、朱雀样本、三章/20章长跑、AI披露人工确认和正式发布闭环仍未开始/未验收。
 
 ## 2026-08-21 扫榜书名自动应用修复（`9ffcd96` 已部署）
 
