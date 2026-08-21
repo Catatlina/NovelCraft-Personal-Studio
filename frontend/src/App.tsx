@@ -194,6 +194,7 @@ export default function App() {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const replayingOffline = useRef(false);
+  const autoConfirmingRankingRun = useRef(new Set<string>());
   const editorTextRef = useRef(editorText);
   const writingEventTimerRef = useRef<number | null>(null);
   const writingDeltaRef = useRef({ added: 0, removed: 0 });
@@ -577,6 +578,29 @@ export default function App() {
 
   async function refreshRun(runId: string) {
     const r = await api<Run>(`/api/v1/runs/${runId}`);
+    const rankingTitle = String(r.context?.suggested_title || "").trim();
+    const hasSelectedTitle = Boolean(String(r.context?.selected_title || "").trim());
+    const rankingTitleWaiting = r.status === "waiting_human"
+      && r.current_node_key === "human_confirm_title"
+      && r.context?.source_type === "ranking_topic"
+      && rankingTitle
+      && !hasSelectedTitle;
+    if (rankingTitleWaiting && !autoConfirmingRankingRun.current.has(runId)) {
+      autoConfirmingRankingRun.current.add(runId);
+      try {
+        await api(`/api/v1/runs/${runId}/nodes/n2/confirm`, {
+          method: "POST",
+          body: JSON.stringify({ selected_title: rankingTitle }),
+        });
+        // Refresh immediately so the page never leaves a ranking-created book
+        // visually parked at the ordinary human title gate.
+        return await refreshRun(runId);
+      } catch (caught) {
+        setError(caught instanceof Error ? `扫榜书名自动应用失败：${caught.message}` : "扫榜书名自动应用失败");
+      } finally {
+        autoConfirmingRankingRun.current.delete(runId);
+      }
+    }
     setRun(r);
     localStorage.setItem(`nc_current_run:${r.project_id}`, r.id);
     const n = await api<Content>(`/api/v1/contents/${r.novel_id}`);

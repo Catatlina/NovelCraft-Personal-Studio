@@ -309,6 +309,10 @@ export function Progress({
   const human = nodes.find(node => HUMAN_NODE_KEYS.has(node.node_key));
   const titles = Array.isArray(run?.context?.title_candidates) ? run?.context?.title_candidates as string[] : [];
   const selectedTitle = String(run?.context?.selected_title || human?.output?.selected_title || "");
+  const rankingAutoTitle = human?.status === "waiting_human"
+    && run?.context?.source_type === "ranking_topic"
+    && Boolean(String(run?.context?.suggested_title || "").trim())
+    && !selectedTitle.trim();
   const [selectedNodeKey, setSelectedNodeKey] = useState("");
   const [customTitle, setCustomTitle] = useState("");
   const [titleFeedback, setTitleFeedback] = useState("");
@@ -562,11 +566,24 @@ export function Progress({
         </div>
         <div className="progress-fact">
           <span>当前步骤</span>
-          <strong>{activeNode?.title || (human?.status === "waiting_human" ? "确认书名" : "—")}</strong>
+          <strong>{rankingAutoTitle ? "自动应用扫榜书名" : (activeNode?.title || (human?.status === "waiting_human" ? "确认书名" : "—"))}</strong>
         </div>
       </section>
 
-      {human?.status === "waiting_human" && (
+      {rankingAutoTitle && (
+        <section className="title-gate starlume-card">
+          <div className="title-gate-heading">
+            <span><CheckCircle2 size={20} /></span>
+            <div>
+              <p className="eyebrow">扫榜书名</p>
+              <h3>已自动应用《{String(run?.context?.suggested_title || "").trim()}》</h3>
+              <p>该书名来自扫榜选题，创作流程会自动继续，不再停在普通书名确认门。</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {human?.status === "waiting_human" && !rankingAutoTitle && (
         <section className="title-gate starlume-card">
           <div className="title-gate-heading">
             <span><Sparkles size={20} /></span>

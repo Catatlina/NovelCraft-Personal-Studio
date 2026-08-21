@@ -593,6 +593,16 @@
 - `7c06fe3` 已部署到 `https://novel.xyjin.xyz`；部署前备份、Alembic 迁移、Prompt seed、容器健康检查均有记录。
 - 生产 smoke 15/15 通过，生产浏览器走查 4/4 通过；这证明部署和主要用户入口可用，不证明生产长篇生成质量。
 - 仍未闭合：生产真实 20 章双轨、两位人工盲评和最终生成质量目标；不得把 smoke 结果写成质量验收。
+
+# KI-066：扫榜题名自动应用修复待生产复核（2026-08-21）
+
+- 状态：**已接线**，本地验证通过，生产部署与现有等待态复核尚未完成。
+- 根因：扫榜建书没有传 `auto_confirm_title=True`；自动确认分支又可能选择 `plan_idea` 的第一个候选，导致扫榜题名没有成为最终题名并停在普通人工确认门。
+- 修复文件：`backend/app/api/v1/ranking.py`、`backend/app/workers/tasks.py`、`frontend/src/App.tsx`、`frontend/src/components/Progress.tsx`；普通灵感流程仍保留人工确认。
+- 本地证据：后端目标回归 `29 passed, 1 warning`；前端 Progress `9 passed`；`npm run build` 通过。
+- 生产复核要求：部署后确认 run `d7147027-10aa-41c5-9ca7-e3caabfe6071` 从 `waiting_human/human_confirm_title` 自动推进，且 `contents.title` 与 `context.suggested_title` 一致；不得仅凭页面文字宣称完成。
+- 不相关边界：本项不代表朱雀95/5/0、三章/20章 Provider 长跑、AI披露人工确认或正式发布闭环已完成。
+
 # KI-065：章节骨架模式技术链可用，质量与浏览器验收仍已接线（2026-08-21）
 
 - 现状：编辑器已切换为作者主导的700–1000字章节骨架工作区；整章自动续写不再是默认入口。

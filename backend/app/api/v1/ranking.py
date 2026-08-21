@@ -1106,6 +1106,7 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             run_id = create_run(topic["project_id"], novel_id, request.headers.get("X-Api-Key", ""),
                                 request.headers.get("X-Api-Base-Url", ""), request.headers.get("X-Model", ""),
                                 selected_title=topic["title"],
+                                auto_confirm_title=True,
                                 idempotency_key=f"ranking-topic:{topic_id}:book-plan:v1")
             status_db = connect()
             status_db.execute("UPDATE topic_candidates SET status='generating' WHERE id=%s", (topic_id,))
@@ -1142,6 +1143,7 @@ def generate_book(topic_id: str, payload: CreateBookRequest, request: Request,
             run_id = create_run(topic["project_id"], novel_id, request.headers.get("X-Api-Key", ""),
                                 request.headers.get("X-Api-Base-Url", ""), request.headers.get("X-Model", ""),
                                 selected_title=topic["title"],
+                                auto_confirm_title=True,
                                 idempotency_key=f"ranking-topic:{topic_id}:book-plan:v1")
             status_db = connect()
             status_db.execute("UPDATE topic_candidates SET status='generating' WHERE id=%s", (topic_id,))

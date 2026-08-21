@@ -140,6 +140,34 @@ describe("创作进度门禁", () => {
     await waitFor(() => expect(confirm).toHaveBeenCalledWith("星潮未眠"));
   });
 
+  it("扫榜生成的书名不显示人工确认门", () => {
+    render(
+      <Progress
+        run={{
+          id: "ranking-run-1",
+          status: "waiting_human",
+          current_node_key: "human_confirm_title",
+          context: { source_type: "ranking_topic", suggested_title: "我,神级外卖员,开局送万界订单" },
+          nodes: [{
+            node_key: "human_confirm_title",
+            kind: "human",
+            agent: null,
+            title: "选定书名",
+            status: "waiting_human",
+          }],
+        }}
+        novel={null}
+        onConfirm={vi.fn()}
+        onRegenerateTitles={vi.fn()}
+        onNewRun={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("自动应用扫榜书名")).toBeTruthy();
+    expect(screen.getByText(/不再停在普通书名确认门/)).toBeTruthy();
+    expect(screen.queryByText("选择小说书名")).toBeNull();
+  });
+
   it("失败节点显示失败原因与重试按钮，且重试打到正确端点", async () => {
     const { apiRaw } = await import("../lib/api");
     render(

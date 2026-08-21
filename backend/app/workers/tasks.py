@@ -1438,11 +1438,9 @@ def execute_bootstrap(self, run_id: str, start_key: str = "plan_idea",
             run_context = run["context"] if isinstance(run["context"], dict) else {}
             if (run_context.get("auto_confirm_title") or run_context.get("title_locked")) and node_key == "human_confirm_title":
                 title_candidates = run_context.get("title_candidates") or []
-                selected_title = (
-                    str(run_context.get("selected_title") or "").strip()
-                    if run_context.get("title_locked")
-                    else (str(title_candidates[0]).strip() if title_candidates else "")
-                )
+                selected_title = str(run_context.get("selected_title") or "").strip()
+                if not selected_title and not run_context.get("title_locked"):
+                    selected_title = str(title_candidates[0]).strip() if title_candidates else ""
                 if not selected_title:
                     conn.execute(
                         """UPDATE run_nodes
@@ -2189,6 +2187,11 @@ def create_run(project_id: str, novel_id: str,
     context = {"novel_id": novel_id, "idea": meta.get("idea", ""), "suggested_title": "", **meta}
     if selected_title:
         context["suggested_title"] = selected_title
+        # Ranking-originated titles are already the product's selected title.
+        # Keep the value explicit so the unattended human-node branch does not
+        # replace it with the first title candidate returned by plan_idea.
+        if auto_confirm_title:
+            context["selected_title"] = selected_title
     if auto_confirm_title:
         context["auto_confirm_title"] = True
 

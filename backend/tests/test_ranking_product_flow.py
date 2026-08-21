@@ -137,6 +137,7 @@ def test_create_run_with_selected_title_still_runs_full_planning(monkeypatch):
     db = _RunDb()
     dispatched = []
     monkeypatch.setattr(tasks, "connect", lambda: db)
+    monkeypatch.setattr(tasks, "stash_byok_key", lambda _api_key: "test-byok-ref")
     monkeypatch.setattr(tasks.execute_bootstrap, "delay", lambda *args: dispatched.append(args))
 
     run_id = tasks.create_run(
@@ -153,7 +154,7 @@ def test_create_run_with_selected_title_still_runs_full_planning(monkeypatch):
     # Plaintext BYOK secrets must never enter the broker payload.
     assert dispatched == [(run_id, "plan_idea", "", "https://provider.example/v1", "model-id")]
 
-    # A ranking title is only a suggestion. It must not fabricate planning
+    # A non-auto-selected title is only a suggestion. It must not fabricate planning
     # success, bypass creative-bible decomposition, or confirm itself.
     # creative-bible decomposition module.
     skip_updates = [params for sql, params in db.statements

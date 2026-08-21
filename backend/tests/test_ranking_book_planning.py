@@ -70,6 +70,29 @@ class _BookDb:
         pass
 
 
+class _RunDb:
+    def __init__(self):
+        self.statements = []
+        self.committed = False
+        self.closed = False
+
+    def execute(self, sql, params=()):
+        self.statements.append((" ".join(sql.split()), params))
+        return self
+
+    def fetchone(self):
+        return {
+            "id": "novel-id",
+            "meta": {"idea": "榜单原创题材", "genre": "玄幻", "style": "商业网文"},
+        }
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
 def _content_insert(db: _BookDb):
     return next((params for sql, params in db.statements if sql.startswith("INSERT INTO contents")), None)
 
@@ -176,7 +199,31 @@ def test_auto_start_false_then_true_creates_exactly_one_run(monkeypatch):
     assert third["data"]["status"] == "already_created"
     assert len(calls) == 1
     assert calls[0][1]["selected_title"] == "雾城修理铺"
+    assert calls[0][1]["auto_confirm_title"] is True
     assert sum(sql.startswith("INSERT INTO contents") for sql, _ in db.statements) == 1
+
+
+def test_auto_confirm_run_keeps_ranking_title_in_run_context(monkeypatch):
+    from app.workers import tasks
+
+    db = _RunDb()
+    dispatched = []
+    monkeypatch.setattr(tasks, "connect", lambda: db)
+    monkeypatch.setattr(tasks.execute_bootstrap, "delay", lambda *args: dispatched.append(args))
+
+    run_id = tasks.create_run(
+        "project-id",
+        "novel-id",
+        selected_title="扫榜生成书名",
+        auto_confirm_title=True,
+    )
+
+    run_insert = next(params for sql, params in db.statements if sql.startswith("INSERT INTO workflow_runs"))
+    context = json.loads(run_insert[6])
+    assert context["suggested_title"] == "扫榜生成书名"
+    assert context["selected_title"] == "扫榜生成书名"
+    assert context["auto_confirm_title"] is True
+    assert dispatched and dispatched[0][0] == run_id
 
 
 def test_existing_topic_and_run_are_idempotent(monkeypatch):

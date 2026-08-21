@@ -1,5 +1,15 @@
 # Starlume AI 小说主线需求追踪矩阵
 
+## 2026-08-21 扫榜书名策略修正（本地已验证，待部署）
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| 扫榜选题书名自动进入创作 | 已接线 | `ranking.py` 传 `auto_confirm_title=True`；`tasks.py` 保存并优先使用 `selected_title`；`App.tsx` 为历史扫榜等待态自动调用 n2 确认；Progress 明确展示自动应用 | 提交、推送、生产部署及现有 run 页面复核 |
+| 普通灵感/手动建书仍需人工选名 | 已接线 | `bootstrap_novel` 继续传 `auto_confirm_title=False`；Progress 普通 human gate 未改变 | 生产登录态回归 |
+| 扫榜书名不能被 `plan_idea` 首个候选覆盖 | 已接线 | `test_auto_confirm_run_keeps_ranking_title_in_run_context` 与 `29` 项后端目标回归 | 生产真实工作流事件证据 |
+
+> 历史需求 `NOV-W-002` 的“AI 策划后人工确认书名”仍适用于普通灵感流程；扫榜自动模式是明确例外，遵循既有 MVP 规则“扫榜自动模式可跳过普通确认”。
+
 ## 2026-08-20 朱雀报告驱动的生成期质量修复矩阵（`9e49213`）
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
