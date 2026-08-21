@@ -1,12 +1,13 @@
 # Starlume AI — 真实进度
 
-## 2026-08-21 扫榜书名自动应用修复（本地已验证，待部署）
+## 2026-08-21 扫榜书名自动应用修复（`9ffcd96` 已部署）
 
 - 现象：扫榜选题已经有生成书名，进度页仍进入 `human_confirm_title`，用户需要再次选择；生产当前等待态 run `d7147027-10aa-41c5-9ca7-e3caabfe6071` 的 `source_type=ranking_topic` 已确认属于该问题。
 - 根因：扫榜接口未传 `auto_confirm_title=True`；工作节点在自动确认分支中又优先使用 `plan_idea` 首个候选；历史等待态没有自动修复入口。
 - 修复：扫榜两个建书入口传入自动确认标记；`create_run()` 显式保存 `selected_title`；Bootstrap 优先使用显式扫榜题名；前端刷新时对旧扫榜等待态调用现有 n2 确认 API 自动推进。普通灵感流程仍然保留人工选名。
-- 本地证据：后端扫榜/工作流/契约回归 `29 passed, 1 warning`；前端 Progress 回归 `9 passed`；前端生产构建通过。包含真实 Celery/Redis 的完整 V2 集成组因本机 Redis 未启动而未标记全绿。
-- 状态边界：当前为“已接线”，尚未写成“已部署”；三章/20章真实 Provider 验收和发布闭环仍不受本修复影响。
+- 本地证据：后端扫榜/工作流/契约回归 `29 passed, 1 warning`；前端全量 `58 passed`，Progress `9 passed`；前端生产构建、Python 编译、AI真实性、交付声明和 diff 检查通过。包含真实 Celery/Redis 的完整 V2 集成组因本机 Redis 未启动而未标记全绿。
+- 生产证据：`9ffcd96` 已推送并部署；备份 `backups/pre-deploy-9ffcd96-20260821-095552.sql.gz` gzip 校验通过（约289M），公网 healthz、迁移和全部正式容器正常。现有 run `d7147027-10aa-41c5-9ca7-e3caabfe6071` 已由正式确认路径自动应用扫榜书名，`human_confirm_title=succeeded`，当前进入 `generate_story_arc`。
+- 状态边界：扫榜书名自动应用为“可用”；三章/20章真实 Provider 验收和发布闭环仍不受本修复影响。
 
 ## 2026-08-20 朱雀报告驱动的生成期修复（`9e49213` 已部署）
 

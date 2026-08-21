@@ -2,7 +2,7 @@
 > 更新时间：2026-08-21
 > 交接目标：让下一位 AI 从当前真实状态继续完成小说主线和 V7.0 Alpha 开发，不重做 Demo、不丢失已有实现、不把未验收能力写成完成。
 
-## 2026-08-21 扫榜书名自动应用修复（本地已验证，待部署）
+## 2026-08-21 扫榜书名自动应用修复（`9ffcd96` 已部署）
 
 用户反馈：扫榜选题已经生成了书名，但创作进度仍停在“选择小说书名”，要求扫榜书名直接进入创作，不再重复人工确认。
 
@@ -12,7 +12,9 @@
 - 修复：扫榜建书的两个入口均显式传 `auto_confirm_title=True`；`create_run()` 将扫榜题名写入 `context.selected_title`；工作节点优先使用显式题名；编辑器进度刷新遇到旧的扫榜等待态时，按同一确认 API 自动应用 `context.suggested_title` 并刷新状态；普通灵感/人工建书仍保留人工选名。
 - 前端：旧等待态显示“自动应用扫榜书名”，不再展示“选择小说书名”卡片；普通流程的人工确认界面不变。
 - 本地证据：后端扫榜/工作流/契约回归 `29 passed, 1 warning`；前端 `Progress.test.tsx` `9 passed`；`npm run build` 通过。目标工作流全量组额外被本机 Redis 未启动阻断，未把该环境问题写成业务通过。
-- 交付边界：本节记录的是代码已接线与本地验证，提交、推送和生产部署完成后再补生产 commit、healthz 和现有运行修复证据；不等于三章/20章 Provider 长跑或朱雀95/5/0验收。
+- 生产证据：`9ffcd96` 已推送并部署；部署前备份 `backups/pre-deploy-9ffcd96-20260821-095552.sql.gz`，gzip 校验通过，约289M。迁移容器成功，API/Worker/Beat/Frontend/PostgreSQL/Redis 正常，公网 healthz 返回 database/redis/worker 均正常。
+- 现有运行修复证据：run `d7147027-10aa-41c5-9ca7-e3caabfe6071` 原为 `waiting_human/human_confirm_title`，生产按正式 `confirm_human` 路径自动应用《我,神级外卖员,开局送万界订单》；数据库确认 `human_confirm_title=succeeded`、`contents.title` 与 `context.selected_title` 一致，随后进入 `generate_story_arc`。没有再显示普通“选择小说书名”阻断。
+- 交付边界：本项扫榜题名自动应用已达到生产可用；不等于三章/20章 Provider 长跑或朱雀95/5/0验收。
 
 ## 2026-08-20 朱雀报告驱动的生成期修复（已部署，未做新外部复验）
 
