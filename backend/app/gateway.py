@@ -379,6 +379,15 @@ class _ScenePlanOutput(_LenientOutput):
     scenes: list[dict[str, Any]] = Field(min_length=1)
 
 
+class _ReaderExperiencePlan(_LenientOutput):
+    """Writing targets for an ordinary reader; not a detector or audit score."""
+    opening_anchor: str = Field(min_length=1)
+    reader_discovery: str = Field(min_length=1)
+    interest_change: str = Field(min_length=1)
+    aftertaste: str = Field(min_length=1)
+    continuation_question: str = Field(min_length=1)
+
+
 class _ChapterSkeletonOutput(_LenientOutput):
     """Author-led writing artifact: a chapter blueprint, never final prose."""
     title: str = Field(min_length=1)
@@ -393,6 +402,7 @@ class _ChapterSkeletonOutput(_LenientOutput):
     continuity_warnings: list[str] = Field(default_factory=list)
     next_hook: str = Field(min_length=1)
     skeleton_text: str = Field(min_length=1)
+    reader_experience_plan: _ReaderExperiencePlan
 
 
 class _LenientChapterBody(_LenientOutput):

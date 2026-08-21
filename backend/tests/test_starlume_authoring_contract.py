@@ -67,9 +67,9 @@ def test_chapter_skeleton_is_structured_and_not_final_prose():
         "current_state": "主角被堵在旧仓库",
         "main_conflict": "取证和暴露身份只能选一个",
         "scenes": [
-            {"title": "入口", "purpose": "建立压力", "action": "试探", "conflict": "被监视", "outcome": "发现暗门", "characters": ["主角"]},
-            {"title": "暗门", "purpose": "推进线索", "action": "取证", "conflict": "证据不完整", "outcome": "留下代价", "characters": ["主角"]},
-            {"title": "反咬", "purpose": "形成结果", "action": "选择", "conflict": "身份将暴露", "outcome": "反派先一步认出他", "characters": ["主角", "反派"]},
+            {"title": "入口", "purpose": "建立压力", "trigger": "门外传来脚步", "action": "试探", "choice": "先取证还是先躲藏", "conflict": "被监视", "cost": "暴露退路", "outcome": "发现暗门", "visible_change": "出口从一个变成两个", "characters": ["主角"]},
+            {"title": "暗门", "purpose": "推进线索", "trigger": "暗门后的灯亮起", "action": "取证", "choice": "拿走账本还是保留伪装", "conflict": "证据不完整", "cost": "留下指纹", "outcome": "留下代价", "visible_change": "反派得到主角来过的证据", "characters": ["主角"]},
+            {"title": "反咬", "purpose": "形成结果", "trigger": "反派翻到最后一页", "action": "选择", "choice": "抢回账本或救下同伴", "conflict": "身份将暴露", "cost": "失去最后一页", "outcome": "反派先一步认出他", "visible_change": "对手从猜测进入确认", "characters": ["主角", "反派"]},
         ],
         "character_moves": ["主角从试探转为主动承担风险"],
         "mainline_progress": "取得账本并暴露下一层对手",
@@ -77,6 +77,13 @@ def test_chapter_skeleton_is_structured_and_not_final_prose():
         "foreshadowing": ["账本缺少最后一页"],
         "continuity_warnings": [],
         "next_hook": "反派用最后一页反过来设局",
+        "reader_experience_plan": {
+            "opening_anchor": "旧仓库门外的脚步逼近",
+            "reader_discovery": "账本不是唯一证据，反派已经追到现场",
+            "interest_change": "读者从想看主角取证转为担心身份暴露",
+            "aftertaste": "主角拿到账本却失去最后一页",
+            "continuation_question": "反派会如何利用最后一页设局",
+        },
         "skeleton_text": skeleton_text,
     })
     assert output["skeleton_text"] == skeleton_text
@@ -87,7 +94,30 @@ def test_chapter_skeleton_prompt_has_a_real_length_budget():
 
     name, version, _model, template = next(item for item in PROMPT_SEEDS if item[0] == "authoring.chapter_skeleton")
     assert name == "authoring.chapter_skeleton"
-    assert version == "1.1.0"
+    assert version == "1.2.0"
     assert "不能写成几百字摘要" in template
     assert "7 个小节" in template
     assert "不足 700 字时继续补充" in template
+    assert "作者先行，读者可跟随" in template
+    assert "reader_experience_plan" in template
+
+
+def test_chapter_skeleton_protocol_rejects_a_flat_scene_summary():
+    from app.api.v1.authoring import _validate_chapter_skeleton_protocol
+
+    issues = _validate_chapter_skeleton_protocol({
+        "chapter_goal": "拿到证据",
+        "main_conflict": "取证会暴露身份",
+        "payoff": "拿到证据",
+        "next_hook": "对手追来",
+        "scenes": [
+            {"title": "场景", "outcome": "继续调查", "characters": ["主角"]},
+            {"title": "场景", "outcome": "继续调查", "characters": ["主角"]},
+            {"title": "场景", "outcome": "继续调查", "characters": ["主角"]},
+        ],
+        "reader_experience_plan": {"opening_anchor": "开门"},
+        "skeleton_text": "待补充。" * 200,
+    })
+    assert "scene_1.choice is empty" in issues
+    assert "reader_experience_plan.continuation_question is empty" in issues
+    assert "skeleton_text contains a placeholder" in issues

@@ -2124,18 +2124,26 @@ $plan_output
 输出 JSON: {"scenes":[{"title":"场景名","beat":"转折","goal":"目标","setting":"环境","pov":"视角人物"}]}"""),
 
     # ═══ Starlume author-led chapter workspace ═══
-    ("authoring.chapter_skeleton", "1.1.0", "deepseek",
+    ("authoring.chapter_skeleton", "1.2.0", "deepseek",
      """你是 Starlume AI 的章节策划助手，不是代写作家。
 你的任务是根据作者意图和已确认故事资料，生成一份供作者人工润色和写正文的「章节骨架」。
+
+【创作协议：作者先行，读者可跟随】
+1. 作者意图是本章方向，已确认的人物、世界观、主线和上一章结果是硬事实；不要为了让情节顺滑擅自补设定。
+2. 先安排人物在当前压力下不得不做的选择，再安排信息出现。人物按自己的目标、误解、关系和代价行动，不替所有人说出正确答案。
+3. 每个新增信息必须至少改变一项：行动、关系、资源、位置、判断或代价。没有改变的说明性信息删除或放入待人工确认。
+4. 不能把“到场—介绍旧物—揭示身份—追查—听真相”写成单向答案通道；允许误解、遗漏、打断、失败和暂不解释。
+5. 不用随机口语、错字、无意义动作或“人味细节”装饰文本；细节必须来自人物、地点、关系或当前动作。
+6. 读者体验目标只用于帮助作者落笔，不是检测分数，也不能声称已通过任何外部检测器。不要在输出中提及朱雀、AIGC、检测规避或“像真人”。
 
 【绝对边界】
 1. 只输出章节规划，不写成可直接发布的小说正文；不要连续写成环境描写、完整对白或文学化段落。
 2. skeleton_text 是本任务的硬长度门禁：必须实际输出 700-1000 个中文字符（不计空白），不能写成几百字摘要，不能用“略”“同上”“见上文”或省略号代替。目标是约 850 字，不是“850 字以内”。
-3. 本章只设置一个主压力；每个场景必须改变局势、资源、关系、地点或信息中的至少一项。
+3. 本章只设置一个主压力；每个场景必须有触发、受限选择、代价、阻力和可见变化，且改变局势、资源、关系、地点或信息中的至少一项。
 4. 人物只能使用已提供的人物资料；资料没有的人物标记为“待人工确认”，不得擅自补完整人设。
 5. 世界观只能使用已确认事实；新规则、新能力、新地点必须放入 continuity_warnings，标记“待人工确认”。
 6. 不替作者决定最终措辞，不输出“他感到……这意味着……”式作者总结。
-7. 章末必须给出可见结果和下一章压力，不能只停在抽象悬念。
+7. 章末必须给出可见结果、余波和下一章压力，不能只停在抽象悬念，也不要把本章所有问题逐项总结完。
 
 【作者本章意图】
 $author_intent
@@ -2164,6 +2172,15 @@ $worldview
 【当前目标字数】
 $target_chars 字左右（只约束 skeleton_text，不约束未来正文篇幅）
 
+【读者体验目标】
+请额外返回 reader_experience_plan，包含：
+- opening_anchor：开头读者先抓住的具体人物/动作/现场事实；
+- reader_discovery：读者在本章中逐步发现的关键变化；
+- interest_change：本章让读者的期待或判断如何改变；
+- aftertaste：章末留下的具体余波，不是主题总结；
+- continuation_question：读者自然想带到下一章的一个问题。
+这些字段是作者的写作靶点，不是审计报告，不要写“读者会觉得精彩”等空话。
+
 【skeleton_text 的写法与长度分配】
 请把 skeleton_text 写成作者可以直接照着扩写的工作稿，而不是一句话梗概。建议使用以下 7 个小节，并在返回 JSON 前自行检查可见字数：
 1. 开场状态与本章目标：约 90-120 字；
@@ -2180,13 +2197,14 @@ $target_chars 字左右（只约束 skeleton_text，不约束未来正文篇幅�
 - chapter_goal：本章必须完成的事情
 - current_state：开场时主角和局势
 - main_conflict：本章唯一主压力、代价和选择
-- scenes：3-6 个场景节点，每项至少包含 title、purpose、action、conflict、outcome、characters
+- scenes：3-6 个场景节点，每项至少包含 title、purpose、trigger、action、choice、conflict、cost、outcome、visible_change、characters
 - character_moves：本章人物关系或人物状态的变化
 - mainline_progress：主线推进了什么
 - payoff：本章给读者的可见结果或情绪兑现
 - foreshadowing：本章埋入、推进或回收的伏笔
 - continuity_warnings：需要作者确认的事实风险；没有则返回空数组
 - next_hook：下一章可承接的具体压力
+- reader_experience_plan：包含 opening_anchor、reader_discovery、interest_change、aftertaste、continuation_question
 - skeleton_text：把以上内容串成 700-1000 字的可写骨架，仍然是规划语言，不是成稿正文
 
 只输出合法 JSON，不要 Markdown 代码块，不要解释。"""),
@@ -2621,7 +2639,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',
     "scene.direct":            '{"scenes":[{"title":"场景一","beat":"起势","goal":"交代处境","setting":"夜雨客栈","pov":"主角"},{"title":"场景二","beat":"转折","goal":"遭遇变故","setting":"客栈后院","pov":"主角"},{"title":"场景三","beat":"落幕","goal":"埋下新线索","setting":"黎明山路","pov":"主角"}]}（scenes 至少 3 个，beat 取 起势/发展/转折/高潮/落幕）',
-    "chapter_skeleton":       '{"title":"本章工作标题","chapter_goal":"本章必须完成的事情","current_state":"开场状态","main_conflict":"唯一主压力、代价和选择","scenes":[{"title":"场景一","purpose":"场景作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景二","purpose":"推进作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景三","purpose":"收束作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]}],"character_moves":["人物变化"],"mainline_progress":"主线推进","payoff":"本章兑现","foreshadowing":["伏笔"],"continuity_warnings":[],"next_hook":"下一章压力","skeleton_text":"此处必须实际填写700-1000个中文字符的章节骨架，不能填提示语、摘要或省略号"}',
+    "chapter_skeleton":       '{"title":"本章工作标题","chapter_goal":"本章必须完成的事情","current_state":"开场状态","main_conflict":"唯一主压力、代价和选择","scenes":[{"title":"场景一","purpose":"场景作用","trigger":"触发","action":"关键行动","choice":"受限选择","conflict":"阻力","cost":"付出的代价","outcome":"可见结果","visible_change":"局势发生的可见变化","characters":["主角"]},{"title":"场景二","purpose":"推进作用","trigger":"触发","action":"关键行动","choice":"受限选择","conflict":"阻力","cost":"付出的代价","outcome":"可见结果","visible_change":"局势发生的可见变化","characters":["主角"]},{"title":"场景三","purpose":"收束作用","trigger":"触发","action":"关键行动","choice":"受限选择","conflict":"阻力","cost":"付出的代价","outcome":"可见结果","visible_change":"局势发生的可见变化","characters":["主角"]}],"character_moves":["人物变化"],"mainline_progress":"主线推进","payoff":"本章兑现","foreshadowing":["伏笔"],"continuity_warnings":[],"next_hook":"下一章压力","reader_experience_plan":{"opening_anchor":"具体开场抓手","reader_discovery":"逐步发现的变化","interest_change":"期待或判断的变化","aftertaste":"章末余波","continuation_question":"下一章问题"},"skeleton_text":"此处必须实际填写700-1000个中文字符的章节骨架，不能填提示语、摘要或省略号"}',
     "write_chapter_draft":    '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}}（body 至少 6 段，每段为完整叙事段落）',
     "write_self_review":      '{"overall":"总体评价","strengths":["优点1","优点2"],"weaknesses":["缺点1"],"suggestions":["建议1"],"self_score":80}',
     "write_polish":           '{"polished":{"title":"章名","body":["段落一","段落二","段落三","段落四","段落五","段落六"]},"changes_summary":"修改摘要"}（body 段落数与原文相当，至少 4 段）',

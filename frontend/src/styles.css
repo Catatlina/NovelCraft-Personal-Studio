@@ -2982,6 +2982,22 @@ body {
 .chapter-skeleton-fact { padding: 6px 7px; background: #f8f9fc; border-radius: 7px; }
 .chapter-skeleton-fact small { color: #7d87a1; font-size: 9px; }
 .chapter-skeleton-fact p { margin-top: 2px; color: #4f586e; font-size: 10px; line-height: 1.45; }
+.chapter-skeleton-subtitle { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: #59698d; font-size: 10px; font-weight: 700; }
+.chapter-skeleton-subtitle small { color: #9aa3b7; font-size: 9px; font-weight: 500; }
+.chapter-skeleton-reader-plan, .chapter-skeleton-scenes, .chapter-skeleton-supporting-facts { margin-top: 9px; padding: 8px; background: #f8f9fc; border: 1px solid #e9edf6; border-radius: 8px; }
+.chapter-skeleton-reader-item { padding: 4px 0; border-top: 1px solid #e9edf6; }
+.chapter-skeleton-reader-item:first-of-type { border-top: 0; }
+.chapter-skeleton-reader-item small, .chapter-skeleton-supporting-facts small { color: #7d87a1; font-size: 9px; }
+.chapter-skeleton-reader-item p, .chapter-skeleton-supporting-facts p { margin-top: 2px; color: #4f586e; font-size: 10px; line-height: 1.45; }
+.chapter-skeleton-scene { margin-top: 7px; padding: 7px; background: #fff; border: 1px solid #e5e9f2; border-radius: 7px; }
+.chapter-skeleton-scene-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; color: #30364a; font-size: 10px; }
+.chapter-skeleton-scene-head span { color: #8a92a4; font-size: 9px; }
+.chapter-skeleton-scene > p { margin: 3px 0 5px; color: #7d87a1; font-size: 9px; }
+.chapter-skeleton-scene-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 7px; }
+.chapter-skeleton-scene-grid span { color: #4f586e; font-size: 9px; line-height: 1.4; }
+.chapter-skeleton-scene-grid b { display: block; color: #9aa3b7; font-size: 8px; font-weight: 600; }
+.chapter-skeleton-supporting-facts > div + div { margin-top: 5px; padding-top: 5px; border-top: 1px solid #e9edf6; }
+.chapter-skeleton-supporting-facts .warning p { color: #b97625; }
 .chapter-skeleton-save { display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center; margin-top: 8px; }
 .chapter-skeleton-footnote, .chapter-skeleton-empty { margin: 7px 0 0; color: #8a92a4; font-size: 9px; line-height: 1.5; }
 [data-theme="dark"] .editor-author-led-badge { color: #b9c5ff; background: #242d55; border-color: #364375; }
@@ -2995,6 +3011,16 @@ body {
 [data-theme="dark"] .chapter-skeleton-meta, [data-theme="dark"] .chapter-skeleton-fact p { color: #edf0f7; }
 [data-theme="dark"] .chapter-skeleton-fact { background: #20263a; }
 [data-theme="dark"] .chapter-skeleton-fact small { color: #a8b0c6; }
+[data-theme="dark"] .chapter-skeleton-subtitle { color: #c1caff; }
+[data-theme="dark"] .chapter-skeleton-subtitle small, [data-theme="dark"] .chapter-skeleton-reader-item small, [data-theme="dark"] .chapter-skeleton-supporting-facts small { color: #a8b0c6; }
+[data-theme="dark"] .chapter-skeleton-reader-plan, [data-theme="dark"] .chapter-skeleton-scenes, [data-theme="dark"] .chapter-skeleton-supporting-facts { background: #20263a; border-color: #303852; }
+[data-theme="dark"] .chapter-skeleton-reader-item { border-color: #303852; }
+[data-theme="dark"] .chapter-skeleton-reader-item p, [data-theme="dark"] .chapter-skeleton-supporting-facts p { color: #d6dbea; }
+[data-theme="dark"] .chapter-skeleton-scene { background: #171b2c; border-color: #37405b; }
+[data-theme="dark"] .chapter-skeleton-scene-head { color: #edf0f7; }
+[data-theme="dark"] .chapter-skeleton-scene > p, [data-theme="dark"] .chapter-skeleton-scene-grid span { color: #a8b0c6; }
+[data-theme="dark"] .chapter-skeleton-scene-grid b { color: #7f8aa8; }
+[data-theme="dark"] .chapter-skeleton-supporting-facts > div + div { border-color: #303852; }
 .editor-role-chips span.pending { color: #a47b39; background: #fff7e8; }
 .editor-ai-chat-error { margin: 7px 9px 0; padding: 6px 7px; color: #bd5a66; background: #fff2f3; border: 1px solid #f5d8db; border-radius: 7px; font-size: 10px; line-height: 1.45; }
 .editor-ai-chat-empty { padding: 8px 2px; color: #9aa1b3; font-size: 10px; line-height: 1.6; }

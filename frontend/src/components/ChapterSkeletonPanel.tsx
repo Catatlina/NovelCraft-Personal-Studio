@@ -5,10 +5,22 @@ import { api } from "../lib/api";
 type SkeletonScene = {
   title?: string;
   purpose?: string;
+  trigger?: string;
   action?: string;
+  choice?: string;
   conflict?: string;
+  cost?: string;
   outcome?: string;
+  visible_change?: string;
   characters?: string[];
+};
+
+type ReaderExperiencePlan = {
+  opening_anchor?: string;
+  reader_discovery?: string;
+  interest_change?: string;
+  aftertaste?: string;
+  continuation_question?: string;
 };
 
 type ChapterSkeleton = {
@@ -23,6 +35,7 @@ type ChapterSkeleton = {
   foreshadowing?: string[];
   continuity_warnings?: string[];
   next_hook?: string;
+  reader_experience_plan?: ReaderExperiencePlan;
   skeleton_text?: string;
 };
 
@@ -146,6 +159,40 @@ export function ChapterSkeletonPanel({ chapterId }: { chapterId: string }) {
                   <div key={label} className="chapter-skeleton-fact"><small>{label}</small><p>{String(value || "待补充")}</p></div>
                 ))}
               </div>
+              {draft.reader_experience_plan ? (
+                <div className="chapter-skeleton-reader-plan">
+                  <div className="chapter-skeleton-subtitle">读者体验目标 <small>写作靶点，不是检测分数</small></div>
+                  {[["开场抓手", draft.reader_experience_plan.opening_anchor], ["读者发现", draft.reader_experience_plan.reader_discovery], ["期待变化", draft.reader_experience_plan.interest_change], ["章末余波", draft.reader_experience_plan.aftertaste], ["带入下一章的问题", draft.reader_experience_plan.continuation_question]].map(([label, value]) => (
+                    <div key={label} className="chapter-skeleton-reader-item"><small>{label}</small><p>{String(value || "待补充")}</p></div>
+                  ))}
+                </div>
+              ) : null}
+              {draft.scenes?.length ? (
+                <div className="chapter-skeleton-scenes">
+                  <div className="chapter-skeleton-subtitle">场景链 <small>触发 → 选择 → 代价 → 可见变化</small></div>
+                  {draft.scenes.map((scene, index) => (
+                    <div key={`${scene.title || "scene"}-${index}`} className="chapter-skeleton-scene">
+                      <div className="chapter-skeleton-scene-head"><strong>{index + 1}. {scene.title || "未命名场景"}</strong><span>{scene.characters?.join("、") || "人物待确认"}</span></div>
+                      <p>{scene.purpose || ""}</p>
+                      <div className="chapter-skeleton-scene-grid">
+                        <span><b>触发</b>{scene.trigger || "待补充"}</span>
+                        <span><b>行动</b>{scene.action || "待补充"}</span>
+                        <span><b>选择</b>{scene.choice || "待补充"}</span>
+                        <span><b>代价</b>{scene.cost || "待补充"}</span>
+                        <span><b>结果</b>{scene.outcome || "待补充"}</span>
+                        <span><b>变化</b>{scene.visible_change || "待补充"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {(draft.character_moves?.length || draft.foreshadowing?.length || draft.continuity_warnings?.length) ? (
+                <div className="chapter-skeleton-supporting-facts">
+                  {draft.character_moves?.length ? <div><small>人物变化</small><p>{draft.character_moves.join("；")}</p></div> : null}
+                  {draft.foreshadowing?.length ? <div><small>伏笔动作</small><p>{draft.foreshadowing.join("；")}</p></div> : null}
+                  {draft.continuity_warnings?.length ? <div className="warning"><small>待人工确认</small><p>{draft.continuity_warnings.join("；")}</p></div> : null}
+                </div>
+              ) : null}
               <label className="chapter-skeleton-field">
                 <span>可写骨架（可人工修改）</span>
                 <textarea value={text} onChange={event => setDraft(current => current ? { ...current, skeleton_text: event.target.value } : current)} rows={12} />

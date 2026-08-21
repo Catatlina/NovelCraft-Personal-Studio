@@ -1,5 +1,14 @@
 # Starlume AI — 真实进度
 
+## 2026-08-21 `lengdu` 方法清洁室融合（本地已接线，待提交部署）
+
+- 复用现有章节骨架入口，不新增正文长跑或整章重写流程；Prompt `authoring.chapter_skeleton` 从 `1.1.0` 升级为 `1.2.0`。
+- 生成协议新增作者意图/硬事实优先、角色受限选择、信息必须产生行动或代价变化、避免单向答案通道和伪造人味细节；Writer 不接收朱雀/AIGC分数。
+- Provider 结构新增 `reader_experience_plan`，场景节点要求 `trigger → action → choice → conflict → cost → outcome → visible_change`；后端确定性协议门禁缺字段、占位词、重复结果直接失败，正文不写入。
+- 编辑器骨架工作区展示读者体验目标、场景链、人物变化、伏笔动作和待人工确认事实，作者仍可独立修改保存骨架，正文真相源不变。
+- 本地证据：章节骨架契约 `8 passed`，前端 `npm run build` 通过；融合/骨架集成测试因本机 PostgreSQL 未启动而注册返回 `503`，不能标记全量通过。
+- 当前状态：代码**已接线**，尚未 commit/push/deploy；真实 Provider 单章、朱雀样本、三章/20章长跑、AI披露人工确认和正式发布闭环均未开始/未验收。
+
 ## 2026-08-21 扫榜书名自动应用修复（`9ffcd96` 已部署）
 
 - 现象：扫榜选题已经有生成书名，进度页仍进入 `human_confirm_title`，用户需要再次选择；生产当前等待态 run `d7147027-10aa-41c5-9ca7-e3caabfe6071` 的 `source_type=ranking_topic` 已确认属于该问题。

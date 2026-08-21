@@ -496,6 +496,58 @@ def _skeleton_char_count(text: str) -> int:
     return len(re.sub(r"\s+", "", str(text or "")))
 
 
+SKELETON_AUTHORING_PROTOCOL = "reader-grounded-author-led-v0.1"
+_SCENE_PROTOCOL_FIELDS = ("title", "purpose", "trigger", "action", "choice", "conflict", "cost", "outcome", "visible_change", "characters")
+_READER_EXPERIENCE_FIELDS = ("opening_anchor", "reader_discovery", "interest_change", "aftertaste", "continuation_question")
+
+
+def _validate_chapter_skeleton_protocol(output: dict[str, Any]) -> list[str]:
+    """Deterministic generation gate for the author-led skeleton protocol.
+
+    This is deliberately not an AI detector and does not score prose.  It only
+    prevents a Provider response from being persisted when the writing plan is
+    missing the causal choices and reader-facing targets the author needs.
+    """
+    issues: list[str] = []
+    scenes = output.get("scenes")
+    if not isinstance(scenes, list) or not 3 <= len(scenes) <= 6:
+        issues.append("scenes must contain 3-6 scene nodes")
+    else:
+        outcomes: list[str] = []
+        for index, scene in enumerate(scenes, start=1):
+            if not isinstance(scene, dict):
+                issues.append(f"scene_{index} is not an object")
+                continue
+            for field in _SCENE_PROTOCOL_FIELDS:
+                value = scene.get(field)
+                if field == "characters":
+                    if not isinstance(value, list) or not any(str(item).strip() for item in value):
+                        issues.append(f"scene_{index}.{field} is empty")
+                elif not str(value or "").strip():
+                    issues.append(f"scene_{index}.{field} is empty")
+            outcome = str(scene.get("outcome") or "").strip()
+            if outcome:
+                outcomes.append(outcome)
+        if len(set(outcomes)) < 2:
+            issues.append("scene outcomes must contain visible change, not repeated placeholders")
+
+    plan = output.get("reader_experience_plan")
+    if not isinstance(plan, dict):
+        issues.append("reader_experience_plan is missing")
+    else:
+        for field in _READER_EXPERIENCE_FIELDS:
+            if not str(plan.get(field) or "").strip():
+                issues.append(f"reader_experience_plan.{field} is empty")
+
+    skeleton_text = str(output.get("skeleton_text") or "")
+    if re.search(r"(?:^|[\s，。；：、])(?:待补充|略|同上|见上文|省略号)(?=$|[\s，。；：、])", skeleton_text):
+        issues.append("skeleton_text contains a placeholder")
+    for field in ("chapter_goal", "main_conflict", "payoff", "next_hook"):
+        if not str(output.get(field) or "").strip():
+            issues.append(f"{field} is empty")
+    return issues
+
+
 def _context_lines(items: list[dict[str, Any]], limit: int = 40) -> str:
     lines = []
     for item in items[:limit]:
@@ -652,6 +704,14 @@ def generate_chapter_skeleton(
             status_code=502,
             detail=f"Provider returned skeleton_text with {char_count} visible characters; expected 700-1000. No draft was changed.",
         )
+    protocol_issues = _validate_chapter_skeleton_protocol(output)
+    if protocol_issues:
+        raise HTTPException(
+            status_code=502,
+            detail=("Provider returned a skeleton that failed the author-led reader-grounded protocol: "
+                    + "; ".join(protocol_issues[:8])
+                    + ". No draft was changed."),
+        )
 
     db = connect()
     try:
@@ -670,6 +730,7 @@ def generate_chapter_skeleton(
         snapshot = {
             "artifact_type": "chapter_skeleton",
             "status": "ai_generated",
+            "authoring_protocol": SKELETON_AUTHORING_PROTOCOL,
             "target_chars": req.target_chars,
             "char_count": char_count,
             "author_intent": req.author_intent,
@@ -717,6 +778,7 @@ def save_chapter_skeleton(
         snapshot = {
             "artifact_type": "chapter_skeleton",
             "status": "human_edited",
+            "authoring_protocol": SKELETON_AUTHORING_PROTOCOL,
             "char_count": char_count,
             "base_version_id": req.base_version_id,
             "skeleton": nested,
