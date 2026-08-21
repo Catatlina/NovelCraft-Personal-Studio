@@ -379,6 +379,22 @@ class _ScenePlanOutput(_LenientOutput):
     scenes: list[dict[str, Any]] = Field(min_length=1)
 
 
+class _ChapterSkeletonOutput(_LenientOutput):
+    """Author-led writing artifact: a chapter blueprint, never final prose."""
+    title: str = Field(min_length=1)
+    chapter_goal: str = Field(min_length=1)
+    current_state: str = Field(min_length=1)
+    main_conflict: str = Field(min_length=1)
+    scenes: list[dict[str, Any]] = Field(min_length=3, max_length=6)
+    character_moves: list[str] = Field(default_factory=list)
+    mainline_progress: str = Field(min_length=1)
+    payoff: str = Field(min_length=1)
+    foreshadowing: list[str] = Field(default_factory=list)
+    continuity_warnings: list[str] = Field(default_factory=list)
+    next_hook: str = Field(min_length=1)
+    skeleton_text: str = Field(min_length=1)
+
+
 class _LenientChapterBody(_LenientOutput):
     title: str = Field(min_length=2)
     body: list[str] = Field(min_length=4)
@@ -652,6 +668,7 @@ BOOTSTRAP_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "deai_rewrite": _DeaiRewriteOutput,
     "style_imitation": _StyleImitationOutput,
     "scene_direct": _ScenePlanOutput,
+    "chapter_skeleton": _ChapterSkeletonOutput,
 }
 
 

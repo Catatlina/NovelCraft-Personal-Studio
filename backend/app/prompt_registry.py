@@ -2123,6 +2123,63 @@ $plan_output
 
 输出 JSON: {"scenes":[{"title":"场景名","beat":"转折","goal":"目标","setting":"环境","pov":"视角人物"}]}"""),
 
+    # ═══ Starlume author-led chapter workspace ═══
+    ("authoring.chapter_skeleton", "1.0.0", "deepseek",
+     """你是 Starlume AI 的章节策划助手，不是代写作家。
+你的任务是根据作者意图和已确认故事资料，生成一份供作者人工润色和写正文的「章节骨架」。
+
+【绝对边界】
+1. 只输出章节规划，不写成可直接发布的小说正文；不要连续写成环境描写、完整对白或文学化段落。
+2. skeleton_text 必须是 700-1000 个中文字符（不计空白），使用清晰的小标题和可执行的叙事节点。
+3. 本章只设置一个主压力；每个场景必须改变局势、资源、关系、地点或信息中的至少一项。
+4. 人物只能使用已提供的人物资料；资料没有的人物标记为“待人工确认”，不得擅自补完整人设。
+5. 世界观只能使用已确认事实；新规则、新能力、新地点必须放入 continuity_warnings，标记“待人工确认”。
+6. 不替作者决定最终措辞，不输出“他感到……这意味着……”式作者总结。
+7. 章末必须给出可见结果和下一章压力，不能只停在抽象悬念。
+
+【作者本章意图】
+$author_intent
+
+【章节】
+第 $chapter_seq 章：$chapter_title
+
+【上一章结尾】
+$previous_chapter_tail
+
+【当前章节已有草稿（如为空代表尚未动笔）】
+$chapter_text
+
+【已确认人物】
+$characters
+
+【主线与故事线】
+$plot
+
+【待回收伏笔】
+$foreshadowing
+
+【已确认世界观】
+$worldview
+
+【当前目标字数】
+$target_chars 字左右（只约束 skeleton_text，不约束未来正文篇幅）
+
+请返回以下 JSON 字段：
+- title：本章工作标题
+- chapter_goal：本章必须完成的事情
+- current_state：开场时主角和局势
+- main_conflict：本章唯一主压力、代价和选择
+- scenes：3-6 个场景节点，每项至少包含 title、purpose、action、conflict、outcome、characters
+- character_moves：本章人物关系或人物状态的变化
+- mainline_progress：主线推进了什么
+- payoff：本章给读者的可见结果或情绪兑现
+- foreshadowing：本章埋入、推进或回收的伏笔
+- continuity_warnings：需要作者确认的事实风险；没有则返回空数组
+- next_hook：下一章可承接的具体压力
+- skeleton_text：把以上内容串成 700-1000 字的可写骨架，仍然是规划语言，不是成稿正文
+
+只输出合法 JSON，不要 Markdown 代码块，不要解释。"""),
+
     # ═══ V3 Story Arc（§4，单层实体化，不做阶段/场景层） ═══
     ("bootstrap.generate_story_arc", "1.0.0", "deepseek",
      """你是剧情架构师。请为《$selected_title》规划本书的「故事弧（Story Arc）」列表——每条弧是一条贯穿全书的叙事线索（如"第一次创业""父子和解""复仇布局"）。
@@ -2553,6 +2610,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',
     "scene.direct":            '{"scenes":[{"title":"场景一","beat":"起势","goal":"交代处境","setting":"夜雨客栈","pov":"主角"},{"title":"场景二","beat":"转折","goal":"遭遇变故","setting":"客栈后院","pov":"主角"},{"title":"场景三","beat":"落幕","goal":"埋下新线索","setting":"黎明山路","pov":"主角"}]}（scenes 至少 3 个，beat 取 起势/发展/转折/高潮/落幕）',
+    "chapter_skeleton":       '{"title":"本章工作标题","chapter_goal":"本章必须完成的事情","current_state":"开场状态","main_conflict":"唯一主压力、代价和选择","scenes":[{"title":"场景一","purpose":"场景作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景二","purpose":"推进作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景三","purpose":"收束作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]}],"character_moves":["人物变化"],"mainline_progress":"主线推进","payoff":"本章兑现","foreshadowing":["伏笔"],"continuity_warnings":[],"next_hook":"下一章压力","skeleton_text":"700-1000字的章节骨架，不是正文"}',
     "write_chapter_draft":    '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}}（body 至少 6 段，每段为完整叙事段落）',
     "write_self_review":      '{"overall":"总体评价","strengths":["优点1","优点2"],"weaknesses":["缺点1"],"suggestions":["建议1"],"self_score":80}',
     "write_polish":           '{"polished":{"title":"章名","body":["段落一","段落二","段落三","段落四","段落五","段落六"]},"changes_summary":"修改摘要"}（body 段落数与原文相当，至少 4 段）',

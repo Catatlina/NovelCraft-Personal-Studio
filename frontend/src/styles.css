@@ -2902,6 +2902,7 @@ body {
 .editor-page .editor-rail-heading strong { font-size: 12px; }
 .editor-page .editor-rail-heading span { color: var(--editor-muted); font-size: 10px; font-weight: 400; line-height: 1.4; }
 .editor-page .editor-next-chapter-note { max-width: 260px; color: var(--editor-muted); font-size: 11px; line-height: 1.4; text-align: right; }
+.editor-author-led-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: #3d5fd1; background: #eef2ff; border: 1px solid #dce4ff; border-radius: 7px; font-size: 11px; font-weight: 650; }
 [data-theme="dark"] .editor-page .editor {
   --editor-canvas: #151827;
   --editor-rail: #101320;
@@ -2958,6 +2959,42 @@ body {
 .editor-role-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .editor-role-chips span { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 3px 5px; overflow: hidden; color: #7c8394; background: #f5f6f9; border-radius: 999px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .editor-role-chips span.ready { color: #37825f; background: #edf8f1; }
+.chapter-skeleton-panel { flex: 0 0 auto; margin: -4px -2px 12px; color: #30364a; background: #fff; border: 1px solid #dfe5f5; border-radius: 12px; box-shadow: 0 5px 16px rgba(41, 59, 112, .06); }
+.chapter-skeleton-header { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 10px 11px; color: #30364a; background: transparent; border: 0; text-align: left; cursor: pointer; }
+.chapter-skeleton-title { display: inline-flex; align-items: center; gap: 7px; color: #4967d7; }
+.chapter-skeleton-title > span { display: flex; flex-direction: column; gap: 1px; }
+.chapter-skeleton-title strong { color: #30364a; font-size: 12px; }
+.chapter-skeleton-title small { color: #7d87a1; font-size: 9px; font-weight: 500; }
+.chapter-skeleton-body { padding: 0 10px 10px; border-top: 1px solid #edf0f7; }
+.chapter-skeleton-boundary { display: flex; align-items: center; gap: 5px; margin: 9px 0; padding: 7px 8px; color: #59698d; background: #f5f7ff; border-radius: 7px; font-size: 10px; line-height: 1.4; }
+.chapter-skeleton-field { display: block; margin-top: 8px; }
+.chapter-skeleton-field > span { display: block; margin-bottom: 4px; color: #596174; font-size: 10px; font-weight: 650; }
+.chapter-skeleton-field textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px; resize: vertical; color: #30364a; background: #fbfcff; border: 1px solid #dfe4ef; border-radius: 7px; outline: none; font: inherit; font-size: 11px; line-height: 1.6; }
+.chapter-skeleton-field textarea:focus { border-color: #7189ea; box-shadow: 0 0 0 2px rgba(113, 137, 234, .12); }
+.chapter-skeleton-generate { display: inline-flex; width: 100%; justify-content: center; align-items: center; gap: 5px; margin-top: 8px; padding: 7px 9px; font-size: 11px; }
+.chapter-skeleton-error { margin-top: 8px; padding: 7px 8px; color: #b84d5d; background: #fff1f2; border-radius: 7px; font-size: 10px; line-height: 1.45; }
+.chapter-skeleton-notice { display: flex; align-items: center; gap: 5px; margin-top: 8px; color: #398160; font-size: 10px; line-height: 1.4; }
+.chapter-skeleton-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; color: #30364a; font-size: 11px; }
+.chapter-skeleton-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-skeleton-meta span { flex: 0 0 auto; color: #b97625; font-size: 9px; }
+.chapter-skeleton-meta span.ok { color: #398160; }
+.chapter-skeleton-facts { display: grid; gap: 5px; margin-top: 8px; }
+.chapter-skeleton-fact { padding: 6px 7px; background: #f8f9fc; border-radius: 7px; }
+.chapter-skeleton-fact small { color: #7d87a1; font-size: 9px; }
+.chapter-skeleton-fact p { margin-top: 2px; color: #4f586e; font-size: 10px; line-height: 1.45; }
+.chapter-skeleton-save { display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center; margin-top: 8px; }
+.chapter-skeleton-footnote, .chapter-skeleton-empty { margin: 7px 0 0; color: #8a92a4; font-size: 9px; line-height: 1.5; }
+[data-theme="dark"] .editor-author-led-badge { color: #b9c5ff; background: #242d55; border-color: #364375; }
+[data-theme="dark"] .chapter-skeleton-panel { color: #edf0f7; background: #171b2c; border-color: #303852; box-shadow: none; }
+[data-theme="dark"] .chapter-skeleton-header { color: #edf0f7; }
+[data-theme="dark"] .chapter-skeleton-title strong { color: #edf0f7; }
+[data-theme="dark"] .chapter-skeleton-title small, [data-theme="dark"] .chapter-skeleton-field > span, [data-theme="dark"] .chapter-skeleton-footnote, [data-theme="dark"] .chapter-skeleton-empty { color: #a8b0c6; }
+[data-theme="dark"] .chapter-skeleton-body { border-color: #303852; }
+[data-theme="dark"] .chapter-skeleton-boundary { color: #c1caff; background: #252d50; }
+[data-theme="dark"] .chapter-skeleton-field textarea { color: #edf0f7; background: #101320; border-color: #37405b; }
+[data-theme="dark"] .chapter-skeleton-meta, [data-theme="dark"] .chapter-skeleton-fact p { color: #edf0f7; }
+[data-theme="dark"] .chapter-skeleton-fact { background: #20263a; }
+[data-theme="dark"] .chapter-skeleton-fact small { color: #a8b0c6; }
 .editor-role-chips span.pending { color: #a47b39; background: #fff7e8; }
 .editor-ai-chat-error { margin: 7px 9px 0; padding: 6px 7px; color: #bd5a66; background: #fff2f3; border: 1px solid #f5d8db; border-radius: 7px; font-size: 10px; line-height: 1.45; }
 .editor-ai-chat-empty { padding: 8px 2px; color: #9aa1b3; font-size: 10px; line-height: 1.6; }

@@ -2,7 +2,7 @@ import React, { useCallback, useState, useRef, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Bold, Italic, Heading, List, Undo, Redo, Wand2, Sparkles, Bot, RefreshCcw } from "lucide-react";
+import { Bold, Italic, Heading, List, Undo, Redo, Wand2, Sparkles } from "lucide-react";
 
 type Props = {
   value: string;
@@ -135,7 +135,6 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
         <button type="button" aria-label="项目符号列表" title="项目符号列表" disabled={aiBusy} onClick={() => editor.chain().focus().toggleBulletList().run()}><List size={14} /></button>
         <button type="button" aria-label="撤销" title="撤销" disabled={aiBusy} onClick={() => editor.chain().focus().undo().run()}><Undo size={14} /></button>
         <button type="button" aria-label="重做" title="重做" disabled={aiBusy} onClick={() => editor.chain().focus().redo().run()}><Redo size={14} /></button>
-        <button disabled={aiBusy} onClick={() => onAiOp?.("rewrite_chapter")} title="整章候选"><RefreshCcw size={14} />整章候选</button>
       </div>
 
       {/* Editor area */}
@@ -157,7 +156,6 @@ export function RichEditor({ value, onChange, onSelection, selection, onAiOp, ai
         }}>
           <button disabled={aiBusy} onClick={() => onAiOp?.("polish")} style={{ fontSize: 12 }}><Wand2 size={12} /> 润色</button>
           <button disabled={aiBusy} onClick={() => onAiOp?.("rewrite")} style={{ fontSize: 12 }}><Sparkles size={12} /> 改写</button>
-          <button disabled={aiBusy} onClick={() => onAiOp?.("continue")} style={{ fontSize: 12 }}><Bot size={12} /> 续写</button>
         </div>
       )}
     </div>

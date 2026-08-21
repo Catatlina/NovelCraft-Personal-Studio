@@ -242,6 +242,7 @@ def init_db() -> None:
         "summarize_chapter", "summarize_volume", "summarize_book",
         "gen_next_chapter", "extract_entities", "extract_foreshadowing", "expand_outline",
         "extract_timeline", "extract_arcs",
+        "chapter_skeleton",
         "gen_short_titles", "gen_short_story", "review_short",
         "gen_video_script", "fetch_hotspots", "gen_daily_brief",
         "hm_daily_brief", "hm_title_variants", "hm_material_suggestions",

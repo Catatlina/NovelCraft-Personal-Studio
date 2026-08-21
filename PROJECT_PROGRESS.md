@@ -1070,3 +1070,12 @@
 - 创作向导采用左侧步骤轨道 + 右侧表单/预览；书库、进度、扫榜、设置统一为深色墨蓝控制台面板并保留原功能链路。
 - 验证：`npm run lint`、`npm run build`、`npm test -- --run`（49/49）、`e2e/pages-smoke.spec.ts`（1/1）通过；登录态浏览器已逐页检查首页、创作向导、书库、进度、扫榜和设置。
 - 状态：**本地可用，未提交/未推送/未部署**。发布后还需做生产截图级验收。
+# 2026-08-21 作者主导章节骨架工作区（本地已接线，待部署）
+
+- 产品主流程已按人工主导定位切换：AI不再作为编辑器默认的整章写作者，改为生成单章700–1000字的章节骨架；正文继续由作者在中间编辑区人工完成。
+- 后端新增真实 Provider 接口：`POST /api/v1/authoring/chapters/{chapter_id}/skeleton`、`GET /api/v1/authoring/chapters/{chapter_id}/skeletons`、`POST /api/v1/authoring/chapters/{chapter_id}/skeletons/save`。
+- 骨架包含本章目标、主压力、3–6个场景节点、人物变化、主线推进、爽点/结果、伏笔、连续性警告和下一章钩子；骨架独立写入 `versions(entity_type=chapter_skeleton)`，不会覆盖正文。
+- 编辑器新增“章节骨架”工作区：作者先输入本章灵感，生成后可人工修改并保存；顶部整章续写入口和正文工具栏整章候选入口已移除，保留选区润色/改写候选。
+- 上下文仍只读取当前作品的已确认 Bible、V7 状态、故事线和伏笔；世界观侧栏按标题去重，避免重复导入条目污染工作区。
+- 验证：后端作者工作区/契约/注入测试 `30 passed`；前端 `57 passed`；`npm run build` 通过；Python compile、`git diff --check` 通过。首轮前端测试误用了 Jest 参数 `--runInBand`，随后用 Vitest 正确命令重跑通过。
+- 当前边界：本轮尚未用生产真实 Provider 生成骨架样本，尚未 commit/push/deploy；不宣称 Provider 质量、朱雀 95/5/0 或三章/20章长跑验收。

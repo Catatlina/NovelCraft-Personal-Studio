@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 type Role = { role_key: string; provider: string; model: string; provider_status?: { status?: string } };
 const LABELS: Record<string, string> = {
   planner: "大纲规划",
+  chapter_skeleton: "章节骨架",
   scene_expander: "场景扩写",
   dialogue_editor: "对白编辑",
   continuity_reviewer: "连续性审阅",

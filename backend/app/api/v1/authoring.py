@@ -8,6 +8,8 @@ records; an AI result is only considered provider-backed when the shared
 from __future__ import annotations
 
 import os
+import json
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -23,7 +25,7 @@ router = APIRouter(prefix="/api/v1/authoring", tags=["authoring"])
 
 
 RoleKey = Literal[
-    "planner", "scene_expander", "dialogue_editor", "continuity_reviewer", "publication_editor"
+    "planner", "chapter_skeleton", "scene_expander", "dialogue_editor", "continuity_reviewer", "publication_editor"
 ]
 ProviderName = Literal["openai", "deepseek", "doubao", "claude", "gemini"]
 WritingEventType = Literal[
@@ -96,6 +98,18 @@ class CleanRunPrepareRequest(BaseModel):
 
 class CleanRunCleanRequest(BaseModel):
     confirm_clean: bool = False
+
+
+class ChapterSkeletonRequest(BaseModel):
+    """Author intent for one chapter blueprint; it never contains final prose."""
+    author_intent: str = Field(default="", max_length=6000)
+    target_chars: int = Field(default=850, ge=700, le=1000)
+    client_mutation_id: str | None = Field(default=None, min_length=8, max_length=120)
+
+
+class ChapterSkeletonSaveRequest(BaseModel):
+    skeleton: dict[str, Any]
+    base_version_id: str | None = None
 
 
 class HumanReceiptRequest(BaseModel):
@@ -423,12 +437,12 @@ def get_editor_context(content_id: str, user: dict = Depends(get_current_user)):
         # Current chapter V7 evidence goes first, followed by human-authored
         # Bible material.  Dedupe exact title/body pairs so the sidebar remains
         # useful instead of becoming a dump of parallel records.
-        def merge_items(*lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def merge_items(*lists: list[dict[str, Any]], dedupe_title: bool = False) -> list[dict[str, Any]]:
             merged: list[dict[str, Any]] = []
             seen: set[tuple[str, str]] = set()
             for items in lists:
                 for item in items:
-                    key = (str(item.get("title") or ""), str(item.get("body") or ""))
+                    key = (str(item.get("title") or ""), "") if dedupe_title else (str(item.get("title") or ""), str(item.get("body") or ""))
                     if key in seen:
                         continue
                     seen.add(key)
@@ -437,7 +451,7 @@ def get_editor_context(content_id: str, user: dict = Depends(get_current_user)):
 
         groups["character"] = merge_items(state_groups["character"], groups.get("character", []), groups.get("characters", []))
         groups["plot"] = merge_items(thread_items, state_groups["plot"], groups.get("plot", []), groups.get("outline", []), groups.get("story_arc", []))
-        groups["worldview"] = merge_items(state_groups["world"], groups.get("worldview", []), groups.get("world_background", []))
+        groups["worldview"] = merge_items(state_groups["world"], groups.get("worldview", []), groups.get("world_background", []), dedupe_title=True)
         groups["foreshadowing"] = merge_items(foreshadowing_items, state_groups["foreshadowing"], groups.get("foreshadowing", []), groups.get("foreshadowings", []))
         def chapter_preview(row: dict[str, Any] | None) -> dict[str, Any] | None:
             if not row:
@@ -475,6 +489,251 @@ def _text_from_body(body: Any) -> str:
         if isinstance(body.get("text"), str):
             return body["text"]
     return ""
+
+
+def _skeleton_char_count(text: str) -> int:
+    """Count visible Chinese characters, excluding layout whitespace."""
+    return len(re.sub(r"\s+", "", str(text or "")))
+
+
+def _context_lines(items: list[dict[str, Any]], limit: int = 40) -> str:
+    lines = []
+    for item in items[:limit]:
+        title = str(item.get("title") or item.get("name") or "未命名条目").strip()
+        body = str(item.get("body") or item.get("summary") or item.get("progress") or item.get("content") or item.get("status") or "").strip()
+        if title or body:
+            lines.append(f"- {title}：{body[:700]}")
+    return "\n".join(lines) or "（暂无已确认资料）"
+
+
+def _chapter_skeleton_context(db: Any, chapter: dict[str, Any], novel: dict[str, Any]) -> dict[str, str]:
+    """Build bounded, deterministic context for the skeleton prompt."""
+    chapters = [dict(row) for row in db.execute(
+        """SELECT id,title,body,meta FROM contents
+           WHERE parent_id=%s AND type='chapter' AND is_deleted=FALSE
+           ORDER BY created_at ASC""",
+        (novel["id"],),
+    ).fetchall()]
+    index = next((i for i, row in enumerate(chapters) if str(row["id"]) == str(chapter["id"])), -1)
+    chapter_meta = chapter.get("meta") if isinstance(chapter.get("meta"), dict) else {}
+    chapter_seq = int(chapter_meta.get("seq") or (index + 1 if index >= 0 else 1))
+    previous_tail = "（第一章，无上一章）"
+    if index > 0:
+        previous = decode(chapters[index - 1].get("body"), {})
+        previous_text = _text_from_body(previous)
+        previous_tail = previous_text[-1800:] or "（上一章暂无正文）"
+
+    knowledge = [dict(row) for row in db.execute(
+        """SELECT kind,title,body,meta,fact_type,approved FROM knowledge_items
+           WHERE project_id=%s AND content_id=%s AND is_deleted=FALSE
+           ORDER BY approved DESC, kind, title LIMIT 100""",
+        (novel["project_id"], novel["id"]),
+    ).fetchall()]
+    for item in knowledge:
+        item["meta"] = decode(item.get("meta"), {})
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in knowledge:
+        grouped.setdefault(str(item.get("kind") or "reference"), []).append(item)
+
+    plot = [dict(row) for row in db.execute(
+        """SELECT name,status,progress,importance,last_chapter_seq FROM plot_threads
+           WHERE novel_id=%s AND is_deleted=FALSE
+           ORDER BY importance DESC NULLS LAST, updated_at DESC LIMIT 30""",
+        (novel["id"],),
+    ).fetchall()]
+    foreshadowing = [dict(row) for row in db.execute(
+        """SELECT f.content,f.status,f.planned_resolve_chapter,f.reader_awareness,c.seq AS planted_chapter
+           FROM foreshadowings f JOIN contents c ON c.id=f.chapter_id
+           WHERE c.parent_id=%s
+           ORDER BY c.seq DESC, f.created_at DESC LIMIT 30""",
+        (novel["id"],),
+    ).fetchall()]
+    state_rows = [dict(row) for row in db.execute(
+        """SELECT state_type,state_key,state_value,confidence,is_pending_review,source
+           FROM v7_story_states WHERE novel_id=%s AND is_active=TRUE
+           ORDER BY updated_at DESC, state_key LIMIT 100""",
+        (novel["id"],),
+    ).fetchall()]
+    state_items: list[dict[str, Any]] = []
+    for row in state_rows:
+        value = decode(row.get("state_value"), {})
+        value = value if isinstance(value, dict) else {"summary": str(value)}
+        state_items.append({
+            "title": str(row.get("state_key") or "未命名状态"),
+            "body": str(value.get("summary") or value.get("detail") or ""),
+        })
+
+    def as_json(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))[:9000]
+
+    worldview = grouped.get("worldview", []) + grouped.get("world_background", []) + grouped.get("world", [])
+    characters = grouped.get("character", []) + grouped.get("characters", [])
+    plot_items = grouped.get("plot", []) + grouped.get("outline", []) + grouped.get("story_arc", [])
+    return {
+        "chapter_seq": str(chapter_seq),
+        "chapter_title": str(chapter.get("title") or "未命名章节"),
+        "chapter_text": _text_from_body(chapter.get("body"))[-5000:] or "（尚未动笔）",
+        "previous_chapter_tail": previous_tail,
+        "characters": _context_lines(characters + [item for item in state_items if "character" in item["title"]]),
+        "plot": _context_lines(plot_items + plot + [item for item in state_items if "plot" in item["title"]]),
+        "foreshadowing": _context_lines(foreshadowing + grouped.get("foreshadowing", [])),
+        "worldview": _context_lines(worldview + [item for item in state_items if "world" in item["title"]]),
+        "novel_meta": as_json(novel.get("meta") or {}),
+    }
+
+
+def _skeleton_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    snapshot = decode(row.get("snapshot"), {})
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    return {
+        "id": str(row.get("id")),
+        "version_no": int(row.get("version_no") or 1),
+        "label": row.get("label"),
+        "reason": row.get("reason"),
+        "created_at": row.get("created_at"),
+        **snapshot,
+    }
+
+
+@router.get("/chapters/{chapter_id}/skeletons")
+def list_chapter_skeletons(chapter_id: str, user: dict = Depends(get_current_user)):
+    db = connect()
+    try:
+        _content(db, chapter_id, user)
+        rows = db.execute(
+            """SELECT id,version_no,label,reason,snapshot,created_at FROM versions
+               WHERE entity_type='chapter_skeleton' AND entity_id=%s
+               ORDER BY created_at DESC LIMIT 30""",
+            (chapter_id,),
+        ).fetchall()
+        return ok([_skeleton_snapshot(dict(row)) for row in rows], message="章节骨架版本")
+    finally:
+        db.close()
+
+
+@router.post("/chapters/{chapter_id}/skeleton")
+def generate_chapter_skeleton(
+    chapter_id: str,
+    req: ChapterSkeletonRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Generate one provider-backed 700-1000 character blueprint, not prose."""
+    db = connect()
+    try:
+        chapter = _content(db, chapter_id, user, write=True)
+        novel_id = chapter.get("parent_id") if chapter.get("type") == "chapter" else chapter["id"]
+        novel = _novel(db, str(novel_id), user)
+        context = _chapter_skeleton_context(db, chapter, novel)
+    finally:
+        db.close()
+
+    from app.gateway import complete
+
+    mutation_id = req.client_mutation_id or new_id("skeleton")
+    output = complete(
+        run_id=None,
+        node_key="chapter_skeleton",
+        project_id=str(novel["project_id"]),
+        user_id=str(user["id"]),
+        task_type="chapter_skeleton",
+        prompt_name="authoring.chapter_skeleton",
+        client_mutation_id=mutation_id,
+        variables={
+            **context,
+            "author_intent": req.author_intent or "（作者暂未补充意图，请严格依据已有资料提出一个最小推进方案）",
+            "target_chars": req.target_chars,
+        },
+    )
+    skeleton_text = str(output.get("skeleton_text") or "").strip()
+    char_count = _skeleton_char_count(skeleton_text)
+    if not 700 <= char_count <= 1000:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Provider returned skeleton_text with {char_count} visible characters; expected 700-1000. No draft was changed.",
+        )
+
+    db = connect()
+    try:
+        ledger = db.execute(
+            """SELECT id,provider,model,status FROM ai_calls
+               WHERE project_id=%s AND client_mutation_id=%s
+               ORDER BY created_at DESC LIMIT 1""",
+            (novel["project_id"], mutation_id),
+        ).fetchone()
+        version_no = db.execute(
+            """SELECT COALESCE(MAX(version_no),0)+1 AS next_version FROM versions
+               WHERE entity_type='chapter_skeleton' AND entity_id=%s""",
+            (chapter_id,),
+        ).fetchone()["next_version"]
+        version_id = new_id("ver")
+        snapshot = {
+            "artifact_type": "chapter_skeleton",
+            "status": "ai_generated",
+            "target_chars": req.target_chars,
+            "char_count": char_count,
+            "author_intent": req.author_intent,
+            "skeleton": {key: value for key, value in output.items() if key != "_meta"},
+            "provider_verified": bool(ledger and ledger.get("status") == "succeeded"),
+            "provider": ledger.get("provider") if ledger else None,
+            "model": ledger.get("model") if ledger else None,
+            "ai_call_id": str(ledger.get("id")) if ledger and ledger.get("id") else None,
+        }
+        db.execute(
+            """INSERT INTO versions
+               (id,entity_type,entity_id,version_no,label,snapshot,reason,author_id)
+               VALUES (%s,'chapter_skeleton',%s,%s,'ai_skeleton',%s,'ai_generated',%s)""",
+            (version_id, chapter_id, version_no, encode(snapshot), user["id"]),
+        )
+        db.commit()
+        return ok({"version": _skeleton_snapshot({"id": version_id, "version_no": version_no, "label": "ai_skeleton", "reason": "ai_generated", "snapshot": snapshot}),
+                   "provider_verified": snapshot["provider_verified"], "char_count": char_count}, message="章节骨架已生成，正文未修改")
+    finally:
+        db.close()
+
+
+@router.post("/chapters/{chapter_id}/skeletons/save")
+def save_chapter_skeleton(
+    chapter_id: str,
+    req: ChapterSkeletonSaveRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Save the author's edited blueprint as a separate version."""
+    db = connect()
+    try:
+        _content(db, chapter_id, user, write=True)
+        skeleton = dict(req.skeleton or {})
+        nested = skeleton.get("skeleton") if isinstance(skeleton.get("skeleton"), dict) else skeleton
+        text = str(nested.get("skeleton_text") or "").strip()
+        char_count = _skeleton_char_count(text)
+        if not 700 <= char_count <= 1000:
+            raise HTTPException(status_code=422, detail=f"章节骨架需保持700-1000字，当前为{char_count}字")
+        version_no = db.execute(
+            """SELECT COALESCE(MAX(version_no),0)+1 AS next_version FROM versions
+               WHERE entity_type='chapter_skeleton' AND entity_id=%s""",
+            (chapter_id,),
+        ).fetchone()["next_version"]
+        version_id = new_id("ver")
+        snapshot = {
+            "artifact_type": "chapter_skeleton",
+            "status": "human_edited",
+            "char_count": char_count,
+            "base_version_id": req.base_version_id,
+            "skeleton": nested,
+            "provider_verified": False,
+            "human_confirmed": True,
+        }
+        db.execute(
+            """INSERT INTO versions
+               (id,entity_type,entity_id,version_no,label,snapshot,reason,author_id)
+               VALUES (%s,'chapter_skeleton',%s,%s,'skeleton_human_edit',%s,'human_edit',%s)""",
+            (version_id, chapter_id, version_no, encode(snapshot), user["id"]),
+        )
+        db.commit()
+        return ok({"version": _skeleton_snapshot({"id": version_id, "version_no": version_no, "label": "skeleton_human_edit", "reason": "human_edit", "snapshot": snapshot}),
+                   "char_count": char_count, "human_confirmed": True}, message="人工修改后的章节骨架已保存，正文仍未修改")
+    finally:
+        db.close()
 
 
 @router.get("/story-bible")

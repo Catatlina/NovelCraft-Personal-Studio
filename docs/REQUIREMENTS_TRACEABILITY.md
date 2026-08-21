@@ -459,3 +459,13 @@
 |---|---|---|---|
 | 当前提交生产部署 | 可用 | `7851b7f`；Docker 应用容器重建；迁移 head；公网 healthz 200 | 生产 20 章质量长跑 |
 | 生产用户入口 | 可用 | 生产 smoke 15/15；生产 Playwright 走查 4/4 | 真实 Provider 生成质量和人工盲评 |
+# 2026-08-21 作者主导章节骨架补充矩阵
+
+| 需求 | 状态 | 当前证据 | 未闭合门禁 |
+|---|---|---|---|
+| AI生成700–1000字章节骨架 | 已接线 | `authoring.chapter_skeleton`、`chapter_skeleton`契约、`POST /authoring/chapters/{id}/skeleton`；服务端硬校验可见字数700–1000 | 生产真实 Provider 样本 |
+| 骨架不覆盖正文 | 已接线 | 独立 `versions(entity_type=chapter_skeleton)`；接口返回“正文未修改”；前端无整章默认入口 | 生产浏览器回归 |
+| 人工修改并保存骨架 | 已接线 | `skeletons/save` 另存 `skeleton_human_edit`；前端保存按钮和范围提示 | 真实账号操作验收 |
+| 编辑器体现人工主导 | 已接线 | `ChapterSkeletonPanel.tsx`、顶部“AI辅助创作·人工成稿”、移除整章候选按钮 | 生产视觉验收 |
+| 人物/剧情/伏笔/世界观作为生成上下文 | 已接线 | 当前小说 Bible、V7 state、plot threads、foreshadowings 查询；世界观标题去重 | 真实作品资料完整度验收 |
+| 章节骨架质量与读者可写性 | 未开始 | 只有结构契约与本地测试 | 生产 Provider 样本 + 人工评审 |

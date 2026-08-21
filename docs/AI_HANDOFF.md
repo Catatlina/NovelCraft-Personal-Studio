@@ -929,3 +929,18 @@ bash scripts/ai_development_gate.sh
 - 生产容器 API/worker/beat/frontend/PostgreSQL/Redis 均运行正常，公网 healthz 200；生产 `prod_smoke.py` 15 项全部通过，生产浏览器走查 4/4 通过。
 - 首次 seed 因容器内 import path 未设置而失败，随后以 `PYTHONPATH=/app` 重试成功；这条运维纠偏保留在交接记录中。
 - 当前生产状态：部署链**可用**；真实生产 20 章长跑、人工盲评和生成质量目标仍未验收。
+# 2026-08-21 作者主导章节骨架模式
+
+本轮将编辑器产品边界进一步收紧为“AI辅助创作”，不再把整章自动生成当作作者入口。主流程是：作者输入本章灵感 → 真实 Provider 输出700–1000字章节骨架 → 作者修改骨架 → 作者人工完成正文 → AI对话提供局部建议、连续性查询和问题提醒。
+
+新增代码入口：
+
+- `backend/app/api/v1/authoring.py`：章节骨架生成、版本列表、人工修改保存。
+- `backend/app/gateway.py`：`chapter_skeleton`结构化输出契约。
+- `backend/app/prompt_registry.py`：`authoring.chapter_skeleton`提示词，要求单一主压力、3–6场景、事实边界和下一章钩子。
+- `frontend/src/components/ChapterSkeletonPanel.tsx`：灵感输入、骨架显示/编辑/保存；正文不自动变更。
+- `frontend/src/components/Editor.tsx`、`RichEditor.tsx`：编辑器主入口改为人工成稿，移除整章续写入口。
+
+骨架版本复用现有 `versions` 表，使用 `entity_type=chapter_skeleton`；AI版本记录 `ai_call_id/provider/model`，人工修改另存为 `skeleton_human_edit`。生成结果不进入 `contents.body`，因此不会污染原稿，也不触发章节长跑状态机。
+
+本地验证已完成：后端相关测试30条通过、前端57条通过、构建/compile/diff check通过。尚未完成生产真实 Provider 骨架样本、生产浏览器登录态验收和部署；这些完成前不得把“骨架生成质量”标记为已验收。
