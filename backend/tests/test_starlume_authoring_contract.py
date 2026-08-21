@@ -80,3 +80,14 @@ def test_chapter_skeleton_is_structured_and_not_final_prose():
         "skeleton_text": skeleton_text,
     })
     assert output["skeleton_text"] == skeleton_text
+
+
+def test_chapter_skeleton_prompt_has_a_real_length_budget():
+    from app.prompt_registry import PROMPT_SEEDS
+
+    name, version, _model, template = next(item for item in PROMPT_SEEDS if item[0] == "authoring.chapter_skeleton")
+    assert name == "authoring.chapter_skeleton"
+    assert version == "1.1.0"
+    assert "不能写成几百字摘要" in template
+    assert "7 个小节" in template
+    assert "不足 700 字时继续补充" in template

@@ -2124,13 +2124,13 @@ $plan_output
 输出 JSON: {"scenes":[{"title":"场景名","beat":"转折","goal":"目标","setting":"环境","pov":"视角人物"}]}"""),
 
     # ═══ Starlume author-led chapter workspace ═══
-    ("authoring.chapter_skeleton", "1.0.0", "deepseek",
+    ("authoring.chapter_skeleton", "1.1.0", "deepseek",
      """你是 Starlume AI 的章节策划助手，不是代写作家。
 你的任务是根据作者意图和已确认故事资料，生成一份供作者人工润色和写正文的「章节骨架」。
 
 【绝对边界】
 1. 只输出章节规划，不写成可直接发布的小说正文；不要连续写成环境描写、完整对白或文学化段落。
-2. skeleton_text 必须是 700-1000 个中文字符（不计空白），使用清晰的小标题和可执行的叙事节点。
+2. skeleton_text 是本任务的硬长度门禁：必须实际输出 700-1000 个中文字符（不计空白），不能写成几百字摘要，不能用“略”“同上”“见上文”或省略号代替。目标是约 850 字，不是“850 字以内”。
 3. 本章只设置一个主压力；每个场景必须改变局势、资源、关系、地点或信息中的至少一项。
 4. 人物只能使用已提供的人物资料；资料没有的人物标记为“待人工确认”，不得擅自补完整人设。
 5. 世界观只能使用已确认事实；新规则、新能力、新地点必须放入 continuity_warnings，标记“待人工确认”。
@@ -2163,6 +2163,17 @@ $worldview
 
 【当前目标字数】
 $target_chars 字左右（只约束 skeleton_text，不约束未来正文篇幅）
+
+【skeleton_text 的写法与长度分配】
+请把 skeleton_text 写成作者可以直接照着扩写的工作稿，而不是一句话梗概。建议使用以下 7 个小节，并在返回 JSON 前自行检查可见字数：
+1. 开场状态与本章目标：约 90-120 字；
+2. 场景一“起压”：约 120-150 字，写清人物动作、阻力和结果；
+3. 场景二“选择”：约 120-150 字，写清主角面对的选择、代价和局势变化；
+4. 场景三“升级”：约 120-150 字，写清对手/环境如何反应以及新的可见信息；
+5. 场景四“兑现”：约 120-150 字，写清本章给读者的具体结果；
+6. 人物、主线与伏笔：约 100-130 字，写明谁改变、哪条线推进、什么事实待确认；
+7. 章尾钩子与人工执行清单：约 80-110 字，写清下一章压力和作者落笔时必须补出的细节。
+各小节必须包含具体行动、结果、人物选择或可验证线索；不足 700 字时继续补充这些可执行节点，不要用空泛形容词凑字数。只要 skeleton_text 未达到 700 个可见字数，任务就算失败。
 
 请返回以下 JSON 字段：
 - title：本章工作标题
@@ -2610,7 +2621,7 @@ OUTPUT_CONTRACTS: dict[str, str] = {
     "blueprint_chapter_outline": '{"chapter_outlines":[{"volume":1,"seq":1,"title":"第一章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"开篇吸引","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":2,"title":"第二章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"爽点释放","chapter_goal":"章目标","reader_expectation":"读者期待"},{"volume":1,"seq":3,"title":"第三章 章名","outline":"梗概","beats":["节拍1"],"foreshadow_plant":[],"foreshadow_reap":[],"function_type":"伏笔埋设","chapter_goal":"章目标","reader_expectation":"读者期待"}]}（chapter_outlines 至少 3 章，每章必含 function_type/chapter_goal/reader_expectation）',
     "blueprint_scene_beat":   '{"scene_beats":[{"scene":1,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":2,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"结果","emotional_shift":"情绪变化"},{"scene":3,"pov":"视角","location":"地点","goal":"目标","conflict":"冲突","outcome":"意外","emotional_shift":"情绪变化"}]}（scene_beats 至少 3 个）',
     "scene.direct":            '{"scenes":[{"title":"场景一","beat":"起势","goal":"交代处境","setting":"夜雨客栈","pov":"主角"},{"title":"场景二","beat":"转折","goal":"遭遇变故","setting":"客栈后院","pov":"主角"},{"title":"场景三","beat":"落幕","goal":"埋下新线索","setting":"黎明山路","pov":"主角"}]}（scenes 至少 3 个，beat 取 起势/发展/转折/高潮/落幕）',
-    "chapter_skeleton":       '{"title":"本章工作标题","chapter_goal":"本章必须完成的事情","current_state":"开场状态","main_conflict":"唯一主压力、代价和选择","scenes":[{"title":"场景一","purpose":"场景作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景二","purpose":"推进作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景三","purpose":"收束作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]}],"character_moves":["人物变化"],"mainline_progress":"主线推进","payoff":"本章兑现","foreshadowing":["伏笔"],"continuity_warnings":[],"next_hook":"下一章压力","skeleton_text":"700-1000字的章节骨架，不是正文"}',
+    "chapter_skeleton":       '{"title":"本章工作标题","chapter_goal":"本章必须完成的事情","current_state":"开场状态","main_conflict":"唯一主压力、代价和选择","scenes":[{"title":"场景一","purpose":"场景作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景二","purpose":"推进作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]},{"title":"场景三","purpose":"收束作用","action":"关键行动","conflict":"阻力","outcome":"可见结果","characters":["主角"]}],"character_moves":["人物变化"],"mainline_progress":"主线推进","payoff":"本章兑现","foreshadowing":["伏笔"],"continuity_warnings":[],"next_hook":"下一章压力","skeleton_text":"此处必须实际填写700-1000个中文字符的章节骨架，不能填提示语、摘要或省略号"}',
     "write_chapter_draft":    '{"chapter":{"title":"第一章 标题","body":["段落一","段落二","段落三","段落四","段落五","段落六"]}}（body 至少 6 段，每段为完整叙事段落）',
     "write_self_review":      '{"overall":"总体评价","strengths":["优点1","优点2"],"weaknesses":["缺点1"],"suggestions":["建议1"],"self_score":80}',
     "write_polish":           '{"polished":{"title":"章名","body":["段落一","段落二","段落三","段落四","段落五","段落六"]},"changes_summary":"修改摘要"}（body 段落数与原文相当，至少 4 段）',
