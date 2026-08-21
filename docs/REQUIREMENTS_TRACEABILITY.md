@@ -463,9 +463,19 @@
 
 | 需求 | 状态 | 当前证据 | 未闭合门禁 |
 |---|---|---|---|
-| AI生成700–1000字章节骨架 | 已接线 | `authoring.chapter_skeleton`、`chapter_skeleton`契约、`POST /authoring/chapters/{id}/skeleton`；服务端硬校验可见字数700–1000 | 生产真实 Provider 样本 |
+| AI生成700–1000字章节骨架 | 可用 | 生产真实 DeepSeek 样本813可见字；Prompt `authoring.chapter_skeleton 1.1.0`；服务端硬校验可见字数700–1000 | 多样本可读性、连续性和作者评审 |
 | 骨架不覆盖正文 | 已接线 | 独立 `versions(entity_type=chapter_skeleton)`；接口返回“正文未修改”；前端无整章默认入口 | 生产浏览器回归 |
 | 人工修改并保存骨架 | 已接线 | `skeletons/save` 另存 `skeleton_human_edit`；前端保存按钮和范围提示 | 真实账号操作验收 |
 | 编辑器体现人工主导 | 已接线 | `ChapterSkeletonPanel.tsx`、顶部“AI辅助创作·人工成稿”、移除整章候选按钮 | 生产视觉验收 |
 | 人物/剧情/伏笔/世界观作为生成上下文 | 已接线 | 当前小说 Bible、V7 state、plot threads、foreshadowings 查询；世界观标题去重 | 真实作品资料完整度验收 |
-| 章节骨架质量与读者可写性 | 未开始 | 只有结构契约与本地测试 | 生产 Provider 样本 + 人工评审 |
+| 章节骨架质量与读者可写性 | 已接线 | 生产单样本813字已持久化；单样本只证明技术链，不证明质量 | 多样本 Provider + 作者人工评审 |
+
+### 2026-08-21 章节骨架生产验证补充
+
+| 项目 | 证据 | 结论 |
+|---|---|---|
+| 部署 | `0c95ae6`；healthz `code=0`；生产 Prompt `1.1.0` | 技术链可用 |
+| 首轮失败根因 | 422 为请求头错误；修正后 Provider 返回466字并被502硬门禁拒绝 | 未伪造成功，已修复提示词预算 |
+| 修复后真实样本 | DeepSeek `deepseek-chat`，813可见字，`provider_verified=true`，版本 `f01cd7df-6dad-4a42-9d2f-770a127f85eb` | 单样本可用 |
+| 正文保护 | 正文 md5 `790ae86e56200e2291496ffae4a761cf`，长度16602，前后不变 | 生成与正文隔离 |
+| 尚未闭合 | 浏览器登录态视觉验收、骨架质量多样本/人工评审、朱雀与20章长跑 | 不能宣称质量验收 |

@@ -1079,3 +1079,12 @@
 - 上下文仍只读取当前作品的已确认 Bible、V7 状态、故事线和伏笔；世界观侧栏按标题去重，避免重复导入条目污染工作区。
 - 验证：后端作者工作区/契约/注入测试 `30 passed`；前端 `57 passed`；`npm run build` 通过；Python compile、`git diff --check` 通过。首轮前端测试误用了 Jest 参数 `--runInBand`，随后用 Vitest 正确命令重跑通过。
 - 当前边界：本轮尚未用生产真实 Provider 生成骨架样本，尚未 commit/push/deploy；不宣称 Provider 质量、朱雀 95/5/0 或三章/20章长跑验收。
+
+## 2026-08-21 作者主导章节骨架最新状态
+
+- `0c95ae6` 已推送并部署到 `https://starlume.xyjin.xyz`；生产 healthz 为 `code=0`，数据库/Redis/Worker 正常；Prompt `authoring.chapter_skeleton` 已为 `1.1.0`。
+- 首个真实 Provider 样本暴露了明确根因：Prompt 没有长度预算，DeepSeek 输出466可见字；服务端正确返回502且不写版本。已改为7个小节的可执行长度预算并部署。
+- 修复后真实 Provider 样本：DeepSeek `deepseek-chat` 返回813可见字，独立骨架版本 `f01cd7df-6dad-4a42-9d2f-770a127f85eb`，`provider_verified=true`。
+- 正文保护已核验：正文摘要 `790ae86e56200e2291496ffae4a761cf`、长度16602，生成前后不变；骨架版本独立保存，未覆盖正文。
+- 本地回归：后端定向 `114 passed`；前端 `57 passed`；构建、compile、diff check、truthfulness、delivery claims 通过。
+- 当前口径：骨架生成技术链**可用**；骨架质量多样本/人工评审、生产浏览器登录态验收、朱雀 95/5/0、三章/20章长跑、AI披露与正式发布闭环仍未验收。

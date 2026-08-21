@@ -944,3 +944,14 @@ bash scripts/ai_development_gate.sh
 骨架版本复用现有 `versions` 表，使用 `entity_type=chapter_skeleton`；AI版本记录 `ai_call_id/provider/model`，人工修改另存为 `skeleton_human_edit`。生成结果不进入 `contents.body`，因此不会污染原稿，也不触发章节长跑状态机。
 
 本地验证已完成：后端相关测试30条通过、前端57条通过、构建/compile/diff check通过。尚未完成生产真实 Provider 骨架样本、生产浏览器登录态验收和部署；这些完成前不得把“骨架生成质量”标记为已验收。
+
+## 2026-08-21 作者主导章节骨架模式最新交接
+
+- 代码提交 `0c95ae6` 已推送并部署到 `https://starlume.xyjin.xyz`；生产 API/Worker/Beat 重建完成，公网 healthz 返回 `code=0`，数据库、Redis、Worker 均为正常状态。
+- 生产 Prompt 已从 `authoring.chapter_skeleton 1.0.0` 升级到 `1.1.0`。根因是首个真实 Provider 结果只有 466 个可见字：原 Prompt 约束了“规划语言”，但没有给出可执行的长度预算；生产路由没有 `max_tokens` 截断配置。
+- 首次请求的 HTTP 422 是验证脚本漏传 `Content-Type: application/json`，未进入 Provider；修正请求头后，Provider 真实返回 466 字，服务端按硬门禁返回 502，未写入骨架版本、未修改正文。
+- 修复内容：Prompt 增加 7 个小节和逐段字数预算，明确 `skeleton_text` 必须实际达到 700–1000 个可见字，禁止摘要/省略号凑数；新增 Prompt 契约回归测试。
+- 修复后的生产真实 Provider 样本已完成：DeepSeek `deepseek-chat` 返回 813 个可见字，账本状态 `succeeded`，骨架版本 `f01cd7df-6dad-4a42-9d2f-770a127f85eb`，`provider_verified=true`。本地等待端超时，但服务端已完成持久化，数据库证据完整。
+- 原正文前后摘要一致：`md5(body::text)=790ae86e56200e2291496ffae4a761cf`、长度 `16602`、正文更新时间未变化；章节骨架版本从 0 增加到 1，证明生成没有覆盖正文。
+- 本地定向后端回归为 `114 passed`，前端为 `57 passed`，构建、Python compile、diff check、truthfulness、delivery claims 均通过。
+- 口径：章节骨架技术链已**可用**，真实 Provider 只有单样本，尚不能宣称骨架的可读性/连续性、朱雀 95/5/0、三章或20章质量验收；生产登录态浏览器视觉验收仍未闭合。
